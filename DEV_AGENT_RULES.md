@@ -1,170 +1,309 @@
-# DEV_AGENT_RULES — 365 WeCom Archive
+DEV_AGENT_RULES — 365 WeCom Archive
 
-> Binding rules for every AI agent and human contributor on this project.
-> Deviation requires explicit sign-off from Haisu.
+Binding rules for every AI agent and human contributor on this project.
+Deviation requires explicit approval from Haisu.
 
----
+⸻
 
-## 1. Core Workflow: Devplan → Develop → QA
+1. Core Philosophy
 
-```
-Issue created (Linear / GitHub)
-  │
-  ▼
-[Devplan] — ChatGPT writes a short plan (approach, files, risks)
-  │         Haisu reviews and approves before any code is written
-  ▼
-[Develop] — Claude Code / Codex / Cline implements exactly what the plan says
-  │          One issue = one branch = one focused PR
-  ▼
-[QA]      — Claude Code or Codex verifies the change against acceptance criteria
-              Haisu performs final human review before merge
-```
+This project is developed by an AI software team.
 
-**Rules:**
-- No agent may skip the Devplan step.
-- No agent may implement anything not covered in the approved Devplan.
-- QA must be documented (see Section 7) before a PR is opened for human review.
+The human (Haisu) is the Product Owner, not the primary programmer.
 
----
+The objective is predictable delivery, high code quality, and repeatable AI collaboration, not maximum coding speed.
 
-## 2. Branch and PR Rules
+⸻
 
-| Rule | Detail |
-|------|--------|
-| One issue = one branch | Never mix unrelated changes |
-| Branch naming | `feat/<issue-id>-short-slug`, `fix/<issue-id>-short-slug`, `docs/<issue-id>-short-slug` |
-| PR title | `[<issue-id>] <imperative verb> <what>` — e.g. `[RND-73] Add agent working rules` |
-| PR size | Aim for < 400 lines diff. Split larger changes into sequential issues. |
-| Draft PRs | Open as Draft until QA is complete |
+2. Standard Workflow
 
----
+Every Linear Issue follows exactly the same lifecycle.
 
-## 3. Role Definitions
+Linear Issue
+        │
+        ▼
+ChatGPT
+(Devplan)
+        │
+        ▼
+Haisu
+(Approve)
+        │
+        ▼
+Claude Code / Codex
+(Develop)
+        │
+        ▼
+Claude Code / Codex
+(QA)
+        │
+        ▼
+ChatGPT
+(Review)
+        │
+        ▼
+Haisu
+(Merge)
 
-### ChatGPT — PM / Architect / Reviewer
-- Owns the Devplan for every issue.
-- Writes acceptance criteria and QA checklist.
-- Reviews PR before Haisu merges.
-- Does **not** write implementation code.
+No implementation may begin before Devplan approval.
 
-### Claude Code — Primary implementer
-- Reads the approved Devplan before touching any file.
-- Implements only what is in scope.
-- Writes the QA summary after implementation (see Section 7).
-- Runs tests and linting before opening a PR.
+No PR may be merged before ChatGPT review.
 
-### Codex — Secondary implementer / code search
-- Used when Claude Code is unavailable or for parallel subtasks.
-- Same scope discipline as Claude Code.
-- Must not open PRs without a QA summary.
+⸻
 
-### Cline — IDE-embedded agent
-- Used for short, targeted edits within an approved Devplan.
-- Must not create new files outside the plan.
-- Defers architecture decisions to ChatGPT.
+3. AI Conversation Strategy
 
-### Haisu — Human owner
-- Approves Devplans before implementation starts.
-- Performs final review and merges PRs.
-- The only person who can override these rules.
-- Does not write implementation code except for emergency hotfixes.
+To prevent context pollution:
 
----
+One Linear Issue = One Git Branch = One AI Conversation = One Pull Request
 
-## 4. Secrets and Sensitive Data
+Rules:
 
-### Never commit:
-- API keys, tokens, passwords, connection strings
-- `.env` files (`.env`, `.env.local`, `.env.production`, etc.)
-- Private keys (`*.pem`, `*.key`, `*.p12`, `*.pfx`)
-- Service account JSON files (`*-service-account.json`, `credentials.json`)
-- WeCom Corp Secret or App Secret values
-- Any real user data, chat content, or media from production
+* Start a new AI conversation for every new Linear issue.
+* Continue using the same conversation until the issue is completed.
+* Never reuse an old AI conversation for another issue.
+* ChatGPT is the only long-lived planning conversation across the whole project.
 
-### Required setup:
-- All secrets go in `.env` (gitignored).
-- Use `.env.example` with placeholder values to document required variables.
-- Code reads secrets from environment variables only — never hardcoded.
+⸻
 
-### If a secret is accidentally committed:
-1. Do not amend/force-push without Haisu's explicit approval.
-2. Notify Haisu immediately.
-3. Rotate the secret before doing anything else.
+4. Agent Responsibilities
 
----
+ChatGPT
 
-## 5. Commit Format
+Role:
 
-```
-<type>(<scope>): <imperative description>
+PM / Architect / Reviewer
 
-[optional body — what and why, not how]
+Responsibilities:
 
-[optional footer — issue ref, breaking change]
-```
+* Sprint planning
+* Architecture
+* Devplan
+* Acceptance Criteria
+* Prompt generation
+* PR Review
+* QA review
+* Decide next issue
 
-**Types:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`
+Never:
 
-**Examples:**
-```
-feat(archive): add WeCom message ingestion endpoint
-fix(auth): handle expired token refresh correctly
-docs(agents): add DEV_AGENT_RULES and AGENTS.md
-chore(deps): pin wecom-sdk to 1.2.3
-```
+* Implement production code
+* Modify repository directly
 
-**Rules:**
-- Subject line ≤ 72 characters, imperative mood, no trailing period.
-- Reference the issue: `Refs RND-73` or `Closes RND-73` in the footer.
-- No "WIP" commits on `main`. Squash before merge if needed.
+⸻
 
----
+Claude Code
 
-## 6. What Must Never Be Committed
+Role:
 
-In addition to secrets (Section 4):
+Principal Software Engineer
 
-- Auto-generated files that belong in `.gitignore` (build artifacts, caches, `__pycache__/`, `.venv/`, etc.)
-- Large binary files > 5 MB (use cloud storage instead)
-- Commented-out code blocks left as "just in case"
-- Debugging print statements / `console.log` not behind a debug flag
-- Incomplete features without a feature flag
-- Direct database dumps or exports
+Responsibilities:
 
----
+* Large implementations
+* New modules
+* Architecture scaffolding
+* Refactoring
+* Deployment changes
 
-## 7. QA Summary Format
+Preferred work:
 
-Every PR description must include a QA block:
+* Cross-module work
+* Infrastructure
+* SDK integration
+* Large code changes
 
-```markdown
-## QA Summary
+⸻
 
-**Files changed:** list each file and what changed
-**Acceptance criteria checked:**
-- [ ] criterion 1 — pass / fail / n/a
-- [ ] criterion 2 — pass / fail / n/a
-**Tests run:** `<command>` — result
-**Linting:** `<command>` — result
-**No secrets committed:** confirmed
-**git status clean (only intentional changes):** confirmed
-```
+Codex
 
-If any criterion fails, the PR stays in Draft until fixed.
+Role:
 
----
+Senior Software Engineer
 
-## 8. Out of Scope for AI Agents (Without Explicit Haisu Approval)
+Responsibilities:
 
-- Changing CI/CD pipeline configuration
-- Modifying `.gitignore` to un-ignore secret files
-- Force-pushing to `main`
-- Dropping or truncating database tables
-- Sending messages or notifications to external systems (Slack, email, WeCom)
-- Merging PRs
-- Creating or deleting GitHub branches other than the agent's own working branch
+* Implement one Linear issue
+* Unit tests
+* Documentation updates
+* Git inspection
+* Diff analysis
+* Bug fixes
 
----
+Preferred work:
 
-_Last updated: 2026-06-26 — RND-73_
+* One issue
+* One branch
+* One PR
+
+⸻
+
+Cline
+
+Role:
+
+Research Engineer
+
+Responsibilities:
+
+* Read SDK documentation
+* Understand unfamiliar code
+* Investigate bugs
+* Explain third-party libraries
+* Small targeted edits
+
+Never:
+
+* Drive architecture
+* Implement large features independently
+
+⸻
+
+Haisu
+
+Role:
+
+Product Owner
+
+Responsibilities:
+
+* Product decisions
+* Devplan approval
+* Final PR approval
+* Merge
+* Release
+
+⸻
+
+5. Default Agent Selection
+
+Unless explicitly overridden:
+
+Task	Agent
+Architecture	ChatGPT → Claude Code
+New Feature	Claude Code
+Single Linear Issue	Codex
+SDK Research	Cline
+Bug Investigation	Cline
+PR Review	ChatGPT
+Final Merge	Haisu
+
+⸻
+
+6. Branch & PR Rules
+
+One issue.
+
+One branch.
+
+One pull request.
+
+Recommended naming:
+
+feat/<issue>-short-name
+fix/<issue>-short-name
+docs/<issue>-short-name
+
+PR title:
+
+[RND-74] Add project baseline
+
+Keep PRs focused.
+
+Target:
+
+* <400 changed lines whenever practical.
+* No unrelated refactoring.
+
+⸻
+
+7. Secrets
+
+Never commit:
+
+* .env
+* API Keys
+* Corp Secrets
+* OAuth Secrets
+* Private Keys
+* Production chat records
+* Production media
+* Database dumps
+
+Always use:
+
+.env.example
+
+to document required configuration.
+
+⸻
+
+8. Commit Rules
+
+type(scope): description
+
+Examples:
+
+feat(sync): implement cursor persistence
+docs(agent): update workflow
+fix(auth): validate oauth callback
+
+Reference the Linear issue.
+
+⸻
+
+9. QA Rules
+
+Every implementation must include:
+
+* Files changed
+* Acceptance criteria checklist
+* Commands executed
+* Test results
+* Lint results (if applicable)
+* Secret verification
+* Git status verification
+
+No QA.
+
+No Merge.
+
+⸻
+
+10. Out of Scope
+
+Without explicit approval from Haisu, no AI agent may:
+
+* Force push
+* Merge PRs
+* Modify CI/CD
+* Delete database tables
+* Remove Git history
+* Change deployment targets
+* Introduce new frameworks
+* Commit secrets
+* Expand issue scope
+
+⸻
+
+11. Decision Priority
+
+When instructions conflict:
+
+Haisu
+    ↓
+ChatGPT Devplan
+    ↓
+Linear Issue
+    ↓
+DEV_AGENT_RULES
+    ↓
+Agent Preference
+
+Never make assumptions when the scope is unclear.
+
+Pause and ask.
+
+⸻
+
+Last updated: 2026-06-26
