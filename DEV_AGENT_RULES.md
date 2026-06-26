@@ -1,4 +1,4 @@
-# DEV_AGENT_RULES v2 - 365 WeCom Archive
+# DEV_AGENT_RULES v3 - 365 WeCom Archive
 
 Binding working rules for every AI agent and human contributor on this project.
 Deviation requires explicit approval from Haisu.
@@ -11,52 +11,49 @@ This project uses AI agents as scoped contributors, not autonomous owners.
 
 Core rules:
 
-- One Linear Issue = One Git Branch = One AI Conversation = One Pull Request.
+- One Linear Issue = One Implementation Conversation.
 - Every implementation starts from an approved issue scope.
+- Development is performed directly on the main branch by default.
+- Feature branches are optional and should only be used for high-risk work or when Haisu explicitly requests them.
 - Every agent must preserve project safety, traceability, and reviewability.
 - The smallest correct change is preferred over broad refactors.
-- The original implementing agent owns review fixes within the same issue.
-- Haisu is Product Owner and final merge authority.
+- The original implementing agent owns implementation fixes within the same issue.
+- Haisu is Product Owner and final scope authority.
 
-The default unit of work is the Linear issue. Do not mix multiple issues into one branch, one conversation, or one PR.
+The default unit of work is the Linear issue. Do not mix multiple issues into one implementation conversation or one commit.
 
 ---
 
 ## Standard Workflow
 
 ```
-Linear issue
+Linear Issue
   |
   v
-Planning conversation
+Planning (ChatGPT)
   |
   v
-Approved implementation scope
+Implementation (Claude Code or Codex)
   |
   v
-One branch
+Codex QA
   |
   v
-Implementation
+Commit
   |
   v
-QA and review fixes
-  |
-  v
-One pull request
-  |
-  v
-Haisu final review and merge decision
+Push origin/main
 ```
 
 Workflow rules:
 
 - Start from a Linear issue before implementation.
 - Keep the AI conversation tied to the issue being worked.
-- Create one focused branch for the issue.
-- Open one PR for the issue.
-- Keep review fixes in the same branch and PR.
-- Use the original implementing agent for review fixes unless Haisu explicitly redirects the work.
+- Plan in ChatGPT when scope, architecture, or sequencing needs clarification.
+- Implement on main by default.
+- Use Claude Code as the primary implementation agent unless Haisu assigns Codex.
+- Run Codex QA before committing.
+- Use the original implementing agent for implementation fixes unless Haisu explicitly redirects the work.
 - Do not expand scope during implementation without explicit approval.
 
 ---
@@ -71,10 +68,10 @@ Rules:
 - Claude Code, Codex, and Cline conversations should be issue-scoped and short-lived.
 - Do not continue feature implementation across multiple unrelated agent conversations.
 - If a new issue starts, start a new implementation conversation.
-- If review comments arrive for an issue, return to the original implementing agent conversation when practical.
+- If QA findings arrive for an issue, return to the original implementing agent conversation when practical.
 - Do not use separate AI conversations to create hidden side scopes.
 
-The goal is to preserve traceability: one issue, one branch, one implementation thread, one PR.
+The goal is to preserve traceability: one issue, one implementation conversation, one focused implementation.
 
 ---
 
@@ -90,7 +87,7 @@ Responsibilities:
 - Help shape Linear issue scope before implementation.
 - Clarify acceptance criteria and trade-offs.
 - Identify risks, dependencies, and sequencing.
-- Review plans and PR summaries when useful.
+- Review plans and implementation summaries when useful.
 - Avoid writing large implementation patches directly unless Haisu explicitly asks.
 
 ChatGPT is the planning memory across the project, not the default code implementer.
@@ -102,32 +99,34 @@ Primary role: main implementation agent.
 Responsibilities:
 
 - Implement approved Linear issue scope.
-- Work on one branch per issue.
+- Work directly on main by default.
+- Do not create branches unless Haisu explicitly requests them.
 - Keep changes focused and reviewable.
 - Run relevant tests, linting, and formatting checks.
-- Handle review fixes for its own implementation.
-- Document QA results before PR review.
+- Handle implementation fixes for its own work.
+- Document QA results before commit.
 
 Claude Code should not expand product scope or architecture direction without approval.
 
 ### Codex
 
-Primary role: implementation, debugging, repository inspection, and focused engineering support.
+Primary role: primary code reviewer, repository inspection, QA, and focused engineering support.
 
 Responsibilities:
 
+- Review implementation before commit.
 - Implement approved issue scope when assigned.
 - Inspect the repo before changing files.
 - Keep edits limited to the requested files and behavior.
 - Run requested verification commands.
-- Handle review fixes for its own implementation.
+- Handle implementation fixes for its own work.
 - Report files changed, tests run, risks, and remaining gaps.
 
 Codex must not commit, push, or modify unrelated files unless Haisu explicitly asks.
 
 ### Cline
 
-Primary role: research, debugging, local inspection, and small targeted edits.
+Primary role: debugging, environment research, local inspection, and small targeted edits.
 
 Responsibilities:
 
@@ -141,18 +140,18 @@ Cline is primarily a research/debug agent, not the owner of large feature delive
 
 ### Haisu
 
-Primary role: Product Owner, scope authority, and final merge authority.
+Primary role: Product Owner and final scope authority.
 
 Responsibilities:
 
 - Own product direction and issue priority.
 - Approve scope changes.
 - Decide which agent should handle each task.
-- Review final PR behavior and risks.
-- Approve merges.
+- Review final implementation behavior and risks.
+- Approve commits and pushes when needed.
 - Override these rules when needed.
 
-Haisu is the only final merge authority.
+Haisu is the final product owner and scope authority.
 
 ---
 
@@ -162,46 +161,51 @@ Haisu is the only final merge authority.
 |---|---|---|
 | Project planning | ChatGPT | Long-lived planning context across the project |
 | Product or architecture framing | ChatGPT | Use before implementation when scope is unclear |
-| Main feature implementation | Claude Code | One issue, one branch, one PR |
+| Main feature implementation | Claude Code | Work directly on main by default |
 | Focused code implementation | Codex | Best for scoped repo edits and verification |
-| Review fixes | Original implementing agent | Keep fixes in the same issue branch and PR |
+| QA and code review | Codex | Primary reviewer before commit |
+| Implementation fixes | Original implementing agent | Keep fixes in the same issue conversation |
 | Bug investigation | Cline or Codex | Cline for research/debug; Codex when code changes are likely |
 | Large feature implementation | Claude Code or Codex | Cline should not lead this work |
-| Final merge decision | Haisu | Haisu is final authority |
+| Final scope decision | Haisu | Haisu is final authority |
 
 ---
 
-## Branch and PR Rules
+## Git Workflow
+
+Default workflow:
+
+```
+Linear Issue
+  |
+  v
+Implement on main
+  |
+  v
+Codex QA
+  |
+  v
+Commit
+  |
+  v
+Push origin/main
+```
 
 Rules:
 
-- One Linear Issue = One Git Branch = One AI Conversation = One Pull Request.
-- Branch names should include the issue id and a short slug.
-- PR titles should include the issue id.
-- Do not mix unrelated issues in one PR.
-- Keep PRs small enough to review.
-- Open draft PRs when work is incomplete or QA is pending.
-- Keep review fixes inside the same PR.
-- Do not create extra branches for review fixes unless Haisu explicitly asks.
+- Development happens directly on main by default.
+- Keep each implementation tied to one Linear issue.
+- Run Codex QA before committing.
+- Do not push `origin/main` unless Haisu explicitly asks.
+- Do not create feature branches unless the work qualifies below or Haisu explicitly requests it.
 
-Recommended branch patterns:
+Feature branches should only be used for:
 
-- `feat/<issue-id>-short-slug`
-- `fix/<issue-id>-short-slug`
-- `docs/<issue-id>-short-slug`
-- `chore/<issue-id>-short-slug`
-
-Recommended PR title pattern:
-
-```
-[<issue-id>] <imperative verb> <what changed>
-```
-
-Example:
-
-```
-[RND-73] Clean up agent working rules
-```
+- Destructive database migrations.
+- Deployment changes.
+- Authentication/security work.
+- Major refactors.
+- When explicitly requested by Haisu.
 
 ---
 
@@ -266,15 +270,15 @@ Rules:
 
 - Use imperative mood.
 - Keep the subject line concise.
-- Reference the Linear issue in the commit or PR.
-- Do not create WIP commits on the main branch.
-- Do not squash, amend, or force-push without explicit approval.
+- Reference the Linear issue in the commit when practical.
+- Do not create WIP commits.
+- Do not include unrelated changes in a commit.
 
 ---
 
 ## QA Rules
 
-Every PR should include a QA summary.
+Every implementation should include a QA summary before commit.
 
 QA summary should cover:
 
@@ -284,7 +288,7 @@ QA summary should cover:
 - Linting or formatting checks run.
 - Manual verification performed.
 - Known risks or gaps.
-- Confirmation that no secrets were committed.
+- Confirmation that no secrets were introduced.
 - Confirmation that only intentional files changed.
 
 Suggested QA block:
@@ -307,11 +311,11 @@ Manual verification:
 Risks or gaps:
 - <risk or none>
 
-No secrets committed: confirmed
+No secrets introduced: confirmed
 Only intentional files changed: confirmed
 ```
 
-If QA fails, keep the PR in draft or block merge until fixed.
+If QA fails, do not commit until the issue is fixed or Haisu explicitly accepts the risk.
 
 ---
 
@@ -320,8 +324,7 @@ If QA fails, keep the PR in draft or block merge until fixed.
 AI agents must not do the following without explicit Haisu approval:
 
 - Commit changes.
-- Push branches.
-- Merge PRs.
+- Push `origin/main`.
 - Force-push.
 - Rewrite git history.
 - Modify CI/CD configuration.
@@ -353,4 +356,4 @@ If the correct action is unclear, stop and ask Haisu before changing files.
 
 ---
 
-_Last updated: 2026-06-26 - RND-73_
+_Last updated: 2026-06-27 - RND-73_
