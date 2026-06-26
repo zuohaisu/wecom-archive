@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Backend dependencies
+backend/vendor/
+.DS_Store
