@@ -1,10 +1,10 @@
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db.models import ArchiveMessage
+from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.db.session import get_db
 
 app = FastAPI(title="365 WeCom Archive")
@@ -21,6 +21,29 @@ class MessageOut(BaseModel):
     msgtime: Optional[int]
     content_text: Optional[str]
     decrypt_status: str
+
+    model_config = {"from_attributes": True}
+
+
+class RecipientOut(BaseModel):
+    receiver_userid: str
+    receiver_type: Optional[str]
+
+    model_config = {"from_attributes": True}
+
+
+class MessageDetailOut(BaseModel):
+    msgid: str
+    seq: int
+    msgtype: Optional[str]
+    action: Optional[str]
+    sender: Optional[str]
+    roomid: Optional[str]
+    msgtime: Optional[int]
+    content_text: Optional[str]
+    decrypt_status: str
+    decrypted_payload: Optional[dict]
+    recipients: list[RecipientOut]
 
     model_config = {"from_attributes": True}
 
@@ -49,3 +72,30 @@ def get_messages(
     if roomid:
         query = query.filter(ArchiveMessage.roomid == roomid)
     return query.order_by(ArchiveMessage.msgtime.desc()).limit(limit).all()
+
+
+@app.get("/api/messages/{msgid}", response_model=MessageDetailOut)
+def get_message(msgid: str, db: Session = Depends(get_db)):
+    msg = db.query(ArchiveMessage).filter(ArchiveMessage.msgid == msgid).first()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    recipients = (
+        db.query(ArchiveMessageRecipient)
+        .filter(ArchiveMessageRecipient.message_id == msg.id)
+        .all()
+    )
+
+    return MessageDetailOut(
+        msgid=msg.msgid,
+        seq=msg.seq,
+        msgtype=msg.msgtype,
+        action=None,
+        sender=msg.sender,
+        roomid=msg.roomid,
+        msgtime=msg.msgtime,
+        content_text=msg.content_text,
+        decrypt_status=msg.decrypt_status,
+        decrypted_payload=msg.decrypted_payload,
+        recipients=[RecipientOut.model_validate(r) for r in recipients],
+    )
