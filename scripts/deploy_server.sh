@@ -16,14 +16,12 @@
 #
 # ── Server (sudo) Prerequisites ────────────────────────────────────────────
 #   The runtime user (e.g. wecomarchive) must be able to run
-#       sudo systemctl restart wecom-archive-365
-#       sudo systemctl status  wecom-archive-365
+#       sudo systemctl restart wecom-archive-365.service
 #   without a password prompt.  Add a sudoers drop-in file:
 #
 #       /etc/sudoers.d/wecomarchive
 #       ─────────────────────────────
-#       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365
-#       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl status  wecom-archive-365
+#       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service
 #
 # ── First-Time Server Setup ────────────────────────────────────────────────
 #   1. Install git, python3, python3-venv, pip, and curl.
@@ -41,7 +39,7 @@
 #              pip install -r requirements.txt
 #          '
 #   5. Install the systemd service unit (not included in this repo — out of scope).
-#   6. Ensure the runtime user has passwordless sudo for `systemctl restart|status wecom-archive-365`
+#   6. Ensure the runtime user has passwordless sudo for `systemctl restart wecom-archive-365.service`
 #      as described in the sudoers section above.
 #   7. Verify the deployment manually once:
 #          sudo -u wecomarchive bash scripts/deploy_server.sh
@@ -100,7 +98,14 @@ python -m compileall app scripts
 # ── 5. Restart systemd service ─────────────────────────────────────────────
 echo "[4/5] Restarting systemd service ($SERVICE) …"
 sudo systemctl restart "$SERVICE"
-sudo systemctl status "$SERVICE" --no-pager
+if ! systemctl is-active "$SERVICE" >/dev/null 2>&1; then
+    echo "ERROR: Service $SERVICE is not active after restart." >&2
+    exit 1
+fi
+if ! curl -fsS "$INTERNAL_HEALTH" >/dev/null 2>&1; then
+    echo "ERROR: Health check failed immediately after restart ($INTERNAL_HEALTH)." >&2
+    exit 1
+fi
 
 # ── 6. Verify health endpoints ─────────────────────────────────────────────
 echo "[5/5] Verifying health …"
