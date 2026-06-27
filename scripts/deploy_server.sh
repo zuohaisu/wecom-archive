@@ -58,7 +58,7 @@
 set -euo pipefail
 
 DEPLOY_DIR="/srv/apps/wecom-archive-365/current"
-SERVICE="wecom-archive-365"
+SERVICE="wecom-archive-365.service"
 INTERNAL_HEALTH="http://127.0.0.1:8035/health"
 PUBLIC_HEALTH="https://qwhhcd.crowntime.cn/health"
 
