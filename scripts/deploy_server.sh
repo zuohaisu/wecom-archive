@@ -102,25 +102,7 @@ if ! systemctl is-active "$SERVICE" >/dev/null 2>&1; then
     echo "ERROR: Service $SERVICE is not active after restart." >&2
     exit 1
 fi
-for i in {1..10}; do
 
-    if curl -fsS "$INTERNAL_HEALTH" >/dev/null 2>&1; then
-
-        break
-
-    fi
-
-    if [ "$i" -eq 10 ]; then
-
-        echo "ERROR: Health check failed after 10 attempts ($INTERNAL_HEALTH)." >&2
-
-        exit 1
-
-    fi
-
-    sleep 1
-
-done
 
 # ── 6. Verify health endpoints ─────────────────────────────────────────────
 echo "[5/5] Verifying health …"
