@@ -97,7 +97,7 @@ python -m compileall app scripts
 
 # ── 5. Restart systemd service ─────────────────────────────────────────────
 echo "[4/5] Restarting systemd service ($SERVICE) …"
-sudo systemctl restart "$SERVICE"
+sudo /usr/bin/systemctl restart "$SERVICE"
 if ! systemctl is-active "$SERVICE" >/dev/null 2>&1; then
     echo "ERROR: Service $SERVICE is not active after restart." >&2
     exit 1
