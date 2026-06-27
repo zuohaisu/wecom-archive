@@ -47,7 +47,6 @@ class MessageDetailOut(BaseModel):
     msgtime: Optional[int]
     content_text: Optional[str]
     decrypt_status: str
-    decrypted_payload: Optional[dict]
     recipients: list[RecipientOut]
 
     model_config = {"from_attributes": True}
@@ -464,6 +463,5 @@ def get_message(msgid: str, db: Session = Depends(get_db)):
         msgtime=msg.msgtime,
         content_text=msg.content_text,
         decrypt_status=msg.decrypt_status,
-        decrypted_payload=msg.decrypted_payload,
         recipients=[RecipientOut.model_validate(r) for r in recipients],
     )

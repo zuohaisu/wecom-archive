@@ -2,8 +2,8 @@
 Minimal ctypes wrapper for the WeCom Conversation Archive C SDK.
 
 Covers NewSdk, Init, DestroySdk, GetChatData, NewSlice, FreeSlice,
-GetSliceLen, and GetContentFromSlice.
-Does not implement decryption or media download.
+GetSliceLen, GetContentFromSlice, and DecryptData.
+Does not implement media download.
 """
 
 import ctypes
@@ -118,3 +118,36 @@ def get_slice_len(lib: ctypes.CDLL, slice_ptr: ctypes.c_void_p) -> int:
 def get_content_from_slice(lib: ctypes.CDLL, slice_ptr: ctypes.c_void_p):
     """Return raw bytes from the slice. Caller must not log or print this directly."""
     return lib.GetContentFromSlice(slice_ptr)
+
+
+def configure_sdk_decrypt_data(lib: ctypes.CDLL) -> None:
+    """Set ctypes signatures for DecryptData.
+
+    Deployed SDK signature (no SDK handle):
+        int DecryptData(const char* encrypt_key,
+                        const char* encrypt_msg, Slice_t* msg);
+    """
+    lib.DecryptData.argtypes = [
+        ctypes.c_char_p,    # encrypt_key
+        ctypes.c_char_p,    # encrypt_msg
+        ctypes.c_void_p,    # output: Slice_t*
+    ]
+    lib.DecryptData.restype = ctypes.c_int
+
+
+def decrypt_data(
+    lib: ctypes.CDLL,
+    encrypt_key: str,
+    encrypt_msg: str,
+    slice_ptr: ctypes.c_void_p,
+) -> int:
+    """Call DecryptData. Writes decrypted JSON into slice_ptr. Returns 0 on success.
+
+    The deployed C SDK does NOT take an SDK handle — only encrypt_key,
+    encrypt_msg, and an output Slice_t pointer.
+    """
+    return lib.DecryptData(
+        encrypt_key.encode("utf-8"),
+        encrypt_msg.encode("utf-8"),
+        slice_ptr,
+    )
