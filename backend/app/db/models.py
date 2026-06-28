@@ -8,12 +8,128 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.base import Base
+
+
+class Tenant(Base):
+    """Top-level tenant entity. One row per company in future SaaS; one default row for MVP."""
+
+    __tablename__ = "tenants"
+    __table_args__ = (
+        UniqueConstraint("slug", name="uq_tenants_slug"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    name = Column(String(255), nullable=False)
+    slug = Column(String(128), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class TenantWecomConfig(Base):
+    """Per-tenant WeCom app credentials. One row per tenant for MVP.
+
+    app_secret: Phase 1 stores plaintext (internal deployment only).
+    Phase 3 must encrypt at rest using Fernet or Vault/KMS.
+    Do NOT log app_secret — it is a permanent credential.
+    """
+
+    __tablename__ = "tenant_wecom_configs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_tenant_wecom_configs_tenant"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36),
+        ForeignKey("tenants.id"),
+        nullable=False,
+    )
+    corp_id = Column(String(64), nullable=False)
+    agent_id = Column(String(64), nullable=False)
+    app_secret = Column(Text, nullable=False)
+    callback_domain = Column(String(255), nullable=False, default="")
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class AdminUser(Base):
+    """WeCom employees who have authenticated via OAuth. Created on first login."""
+
+    __tablename__ = "admin_users"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "wecom_user_id", name="uq_admin_users_tenant_wecom"
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    wecom_user_id = Column(String(64), nullable=False)
+    name = Column(Text, nullable=True)
+    avatar_url = Column(Text, nullable=True)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class AdminSession(Base):
+    """Active admin login sessions. session_id (cookie value) is the PK.
+
+    is_revoked: set on logout or forced expiry.
+    expires_at: hard TTL enforced server-side on every request.
+    Phase 2 (RND-110) implements get_current_user() dependency that reads this table.
+    """
+
+    __tablename__ = "admin_sessions"
+    __table_args__ = (
+        Index("ix_admin_sessions_expires_at", "expires_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    admin_user_id = Column(
+        String(36), ForeignKey("admin_users.id"), nullable=False, index=True
+    )
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    wecom_user_id = Column(String(64), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    is_revoked = Column(Boolean, nullable=False, default=False)
 
 
 class KeyVersion(Base):
@@ -35,10 +151,16 @@ class SyncState(Base):
     """Persists the last synced seq per corp so restarts resume safely."""
 
     __tablename__ = "sync_states"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "corp_id", name="uq_sync_states_tenant_corp_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    corp_id = Column(String(64), unique=True, nullable=False)
+    corp_id = Column(String(64), nullable=False)
     last_seq = Column(BigInteger, nullable=False, default=0)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=True, index=True
+    )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -64,6 +186,9 @@ class ArchiveMessage(Base):
 
     __tablename__ = "archive_messages"
     __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "msgid", name="uq_archive_messages_tenant_msgid"
+        ),
         Index("ix_archive_messages_msgtime_msgtype", "msgtime", "msgtype"),
         Index(
             "ix_archive_messages_decrypted_payload_gin",
@@ -78,7 +203,7 @@ class ArchiveMessage(Base):
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    msgid = Column(String(64), unique=True, nullable=False)
+    msgid = Column(String(64), nullable=False)
     seq = Column(BigInteger, nullable=False, index=True)
 
     # --- Encrypted envelope ---
@@ -100,6 +225,9 @@ class ArchiveMessage(Base):
     tolist = Column(JSONB, nullable=True)
     sdkfileid = Column(Text, nullable=True)
 
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=True, index=True
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -122,6 +250,9 @@ class ArchiveMessageRecipient(Base):
     )
     receiver_userid = Column(String(64), nullable=False, index=True)
     receiver_type = Column(String(32), nullable=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=True, index=True
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -157,10 +288,18 @@ class Contact(Base):
     """Lightweight registry of WeCom user identities seen in the archive."""
 
     __tablename__ = "contacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "wecom_userid", name="uq_contacts_tenant_wecom_userid"
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    wecom_userid = Column(String(64), unique=True, nullable=False)
+    wecom_userid = Column(String(64), nullable=False)
     name = Column(Text, nullable=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=True, index=True
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

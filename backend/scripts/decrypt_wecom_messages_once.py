@@ -196,7 +196,12 @@ def _normalise_fields(
     }
 
 
-def _upsert_recipients(session: Session, message_id: int, tolist: list) -> None:
+def _upsert_recipients(
+    session: Session,
+    message_id: int,
+    tolist: list,
+    tenant_id: "str | None" = None,
+) -> None:
     """Insert ArchiveMessageRecipient rows for each entry in tolist."""
     existing = {
         r.receiver_userid
@@ -211,6 +216,7 @@ def _upsert_recipients(session: Session, message_id: int, tolist: list) -> None:
                     message_id=message_id,
                     receiver_userid=recipient,
                     receiver_type="user",
+                    tenant_id=tenant_id,
                 )
             )
 
@@ -381,10 +387,10 @@ def main() -> None:
             record.content_text = normalised["content_text"]
             record.decrypt_status = "success"
 
-            # Upsert recipient rows
+            # Upsert recipient rows — inherit tenant_id from the parent message
             tolist = normalised["tolist"] or []
             try:
-                _upsert_recipients(session, record.id, tolist)
+                _upsert_recipients(session, record.id, tolist, record.tenant_id)
             except Exception:
                 # Non-fatal: recipients are auxiliary; message is still decrypted
                 pass

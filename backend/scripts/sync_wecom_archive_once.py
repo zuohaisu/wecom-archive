@@ -6,7 +6,7 @@ Loads environment, initialises the WeCom Finance SDK, reads the current seq
 cursor from the database, calls GetChatData, persists encrypted archive records
 into PostgreSQL, and advances the cursor after a successful commit.
 
-Idempotent — re-running never creates duplicate rows (keyed on msgid).
+Idempotent — re-running never creates duplicate rows (keyed on (tenant_id, msgid)).
 
 Usage (from backend/):
     python scripts/sync_wecom_archive_once.py
@@ -43,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.db.models import ArchiveMessage, SyncState
+from app.db.models import ArchiveMessage, SyncState, TenantWecomConfig
 from app.sdk import wecom_sdk
 
 
@@ -72,15 +72,55 @@ def _optional_int_env(name: str, default: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Tenant resolution
+# ---------------------------------------------------------------------------
+
+
+def _require_tenant_id(session: Session, corp_id: str) -> str:
+    """Return the active tenant_id for *corp_id*, or exit 1.
+
+    Exits non-zero if the tenant_wecom_configs table is absent (migration 0002
+    not applied), no active row matches the corp, or any DB error occurs.  Sync
+    must never proceed without a valid tenant — caller must not handle SystemExit.
+    """
+    try:
+        row = (
+            session.query(TenantWecomConfig)
+            .filter(
+                TenantWecomConfig.corp_id == corp_id,
+                TenantWecomConfig.is_active == True,  # noqa: E712
+            )
+            .first()
+        )
+    except Exception as exc:
+        print(
+            f"[FAIL] Tenant resolution DB error ({type(exc).__name__}). "
+            "Run alembic upgrade head and bootstrap_default_tenant.py first.",
+            flush=True,
+        )
+        sys.exit(1)
+
+    if row is None:
+        print(
+            "[FAIL] No active tenant found for this corp. "
+            "Run bootstrap_default_tenant.py after migration 0002.",
+            flush=True,
+        )
+        sys.exit(1)
+
+    return row.tenant_id
+
+
+# ---------------------------------------------------------------------------
 # Sync state
 # ---------------------------------------------------------------------------
 
 
-def _read_seq(session: Session, corp_id: str) -> int:
-    """Return the last synced seq for *corp_id*, or 0 if no row exists."""
+def _read_seq(session: Session, corp_id: str, tenant_id: str) -> int:
+    """Return the last synced seq for *(tenant_id, corp_id)*, or 0 if absent."""
     row = (
         session.query(SyncState)
-        .filter(SyncState.corp_id == corp_id)
+        .filter(SyncState.corp_id == corp_id, SyncState.tenant_id == tenant_id)
         .with_for_update(skip_locked=True)
         .first()
     )
@@ -89,15 +129,15 @@ def _read_seq(session: Session, corp_id: str) -> int:
     return row.last_seq
 
 
-def _upsert_seq(session: Session, corp_id: str, new_seq: int) -> None:
-    """Create or update the sync state row for *corp_id* to *new_seq*."""
+def _upsert_seq(session: Session, corp_id: str, new_seq: int, tenant_id: str) -> None:
+    """Create or update the sync state row for *(tenant_id, corp_id)* to *new_seq*."""
     row = (
         session.query(SyncState)
-        .filter(SyncState.corp_id == corp_id)
+        .filter(SyncState.corp_id == corp_id, SyncState.tenant_id == tenant_id)
         .first()
     )
     if row is None:
-        session.add(SyncState(corp_id=corp_id, last_seq=new_seq))
+        session.add(SyncState(corp_id=corp_id, last_seq=new_seq, tenant_id=tenant_id))
     else:
         row.last_seq = new_seq
 
@@ -115,7 +155,16 @@ def main() -> None:
     secret = _require_env("WECOM_ARCHIVE_SECRET")
     limit = _optional_int_env("WECOM_CHAT_LIMIT", 500)
 
-    # --- 2. Initialise WeCom SDK ---
+    # --- 2. Resolve tenant and read seq cursor (before SDK init) ---
+    # Fail fast: exit non-zero if no active tenant config exists for this corp.
+    # This prevents any archive writes with tenant_id=None.
+    engine = create_engine(database_url)
+
+    with Session(engine) as session:
+        tenant_id: str = _require_tenant_id(session, corp_id)
+        prev_seq: int = _read_seq(session, corp_id, tenant_id)
+
+    # --- 3. Initialise WeCom SDK ---
     try:
         lib = wecom_sdk.load_sdk(lib_path)
     except FileNotFoundError as exc:
@@ -150,13 +199,6 @@ def main() -> None:
         except Exception:
             pass
         sys.exit(1)
-
-    # --- 3. Read current seq cursor ---
-    engine = create_engine(database_url)
-    prev_seq: int = 0
-
-    with Session(engine) as session:
-        prev_seq = _read_seq(session, corp_id)
 
     # --- 4. Call GetChatData ---
     slice_ptr = wecom_sdk.new_slice(lib)
@@ -197,10 +239,13 @@ def main() -> None:
             if seq_val > max_seq:
                 max_seq = seq_val
 
-            # Idempotency check
+            # Idempotency check scoped to (tenant_id, msgid) per the unique constraint
             existing = (
                 session.query(ArchiveMessage)
-                .filter(ArchiveMessage.msgid == msgid)
+                .filter(
+                    ArchiveMessage.msgid == msgid,
+                    ArchiveMessage.tenant_id == tenant_id,
+                )
                 .first()
             )
             if existing:
@@ -217,6 +262,7 @@ def main() -> None:
                 encrypt_chat_msg=rec.get("encrypt_chat_msg", ""),
                 # Decryption state — not yet attempted
                 decrypt_status="pending",
+                tenant_id=tenant_id,
             )
             session.add(msg)
             inserted += 1
@@ -228,7 +274,7 @@ def main() -> None:
             # --- 6. Update seq cursor after successful commit ---
             new_seq = max_seq + 1
             with Session(engine) as update_session:
-                _upsert_seq(update_session, corp_id, new_seq)
+                _upsert_seq(update_session, corp_id, new_seq, tenant_id)
                 update_session.commit()
         else:
             new_seq = prev_seq

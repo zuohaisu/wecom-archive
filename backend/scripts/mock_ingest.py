@@ -35,10 +35,13 @@ import sys
 # Allow running from backend/ without installing the package.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import create_engine, or_
+from sqlalchemy import create_engine, or_, text
 from sqlalchemy.orm import Session
 
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient, Contact
+
+# Well-known default tenant UUID — must match bootstrap_default_tenant.py.
+DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001"
 
 # ---------------------------------------------------------------------------
 # Mock data — fake user IDs and fake content only
@@ -376,6 +379,28 @@ MOCK_MESSAGES = [
 # ---------------------------------------------------------------------------
 
 
+def _ensure_default_tenant(session: Session) -> None:
+    """Upsert the default tenant row so FK constraints are satisfied.
+
+    Safe no-op if the migration hasn't been applied (tenants table absent)
+    or if the row already exists.
+    """
+    try:
+        session.execute(
+            text(
+                """
+                INSERT INTO tenants (id, name, slug, is_active, created_at, updated_at)
+                VALUES (:id, 'Default', 'default', true, NOW(), NOW())
+                ON CONFLICT (id) DO NOTHING
+                """
+            ),
+            {"id": DEFAULT_TENANT_ID},
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+
+
 def _upsert_contacts(session: Session) -> dict[str, str]:
     """Insert mock contacts that do not already exist. Returns {wecom_userid: status}."""
     results: dict[str, str] = {}
@@ -383,14 +408,19 @@ def _upsert_contacts(session: Session) -> dict[str, str]:
     for wecom_userid, name in MOCK_CONTACTS.items():
         existing = (
             session.query(Contact)
-            .filter(Contact.wecom_userid == wecom_userid)
+            .filter(
+                Contact.wecom_userid == wecom_userid,
+                Contact.tenant_id == DEFAULT_TENANT_ID,
+            )
             .first()
         )
         if existing:
             results[wecom_userid] = "skipped (already exists)"
             continue
 
-        session.add(Contact(wecom_userid=wecom_userid, name=name))
+        session.add(
+            Contact(wecom_userid=wecom_userid, name=name, tenant_id=DEFAULT_TENANT_ID)
+        )
         results[wecom_userid] = "inserted"
 
     session.commit()
@@ -404,7 +434,10 @@ def _upsert_messages(session: Session) -> dict[str, str]:
     for data in MOCK_MESSAGES:
         existing = (
             session.query(ArchiveMessage)
-            .filter(ArchiveMessage.msgid == data["msgid"])
+            .filter(
+                ArchiveMessage.msgid == data["msgid"],
+                ArchiveMessage.tenant_id == DEFAULT_TENANT_ID,
+            )
             .first()
         )
         if existing:
@@ -438,6 +471,7 @@ def _upsert_messages(session: Session) -> dict[str, str]:
             msgtime=data["msgtime"],
             tolist=data["tolist"],
             sdkfileid=None,
+            tenant_id=DEFAULT_TENANT_ID,
         )
         session.add(msg)
         session.flush()  # populate msg.id before inserting recipients
@@ -448,6 +482,7 @@ def _upsert_messages(session: Session) -> dict[str, str]:
                     message_id=msg.id,
                     receiver_userid=recipient,
                     receiver_type="user",
+                    tenant_id=DEFAULT_TENANT_ID,
                 )
             )
 
@@ -519,6 +554,9 @@ def main() -> None:
     engine = create_engine(database_url)
 
     with Session(engine) as session:
+        # Ensure default tenant row exists before FK-constrained inserts.
+        _ensure_default_tenant(session)
+
         # --- Contacts ---
         print("[INFO] Inserting mock contacts …")
         contact_results = _upsert_contacts(session)

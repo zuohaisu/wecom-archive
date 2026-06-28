@@ -1,16 +1,24 @@
 # Data Model — 365 WeCom Archive
 
-PostgreSQL schema for storing WeCom conversation archive messages.
-Related issue: RND-75.
+PostgreSQL schema for storing WeCom conversation archive messages and tenant
+management infrastructure for future SaaS use.
+
+Related issues: RND-75 (initial schema), RND-111 (tenant foundation).
 
 ---
 
 ## Overview
 
-Six tables cover the full lifecycle from encrypted pull to searchable archive:
+Ten tables cover the full lifecycle from encrypted pull to searchable archive,
+plus the tenant-aware foundation required for RND-110 (employee login) and
+future multi-tenant SaaS operation:
 
 | Table | Purpose |
 |---|---|
+| `tenants` | Top-level tenant entity; one default row for MVP |
+| `tenant_wecom_configs` | Per-tenant WeCom app credentials |
+| `admin_users` | WeCom employees who have authenticated |
+| `admin_sessions` | Active login sessions (used by RND-110) |
 | `key_versions` | Registry mapping WeCom `publickey_ver` to a private key path or alias |
 | `sync_states` | Cursor tracking — last successfully synced `seq` per corp |
 | `archive_messages` | Core message store — encrypted envelope + decrypted payload |
@@ -20,7 +28,96 @@ Six tables cover the full lifecycle from encrypted pull to searchable archive:
 
 ---
 
-## Tables
+## Tenant Foundation Tables
+
+### `tenants`
+
+Top-level tenant entity. MVP: one default row with
+`id = 00000000-0000-0000-0000-000000000001` and `slug = 'default'`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | varchar(36) PK | UUID string |
+| `name` | varchar(255) | Display name (e.g. "Acme Corp") |
+| `slug` | varchar(128) | URL-safe identifier; unique |
+| `is_active` | boolean | Soft-disable a tenant |
+| `created_at` | timestamptz | auto-set on insert |
+| `updated_at` | timestamptz | auto-updated on write |
+
+Indexes: unique on `slug`.
+
+---
+
+### `tenant_wecom_configs`
+
+One row per tenant. Stores WeCom app credentials used for archive sync and
+(Phase 2) OAuth login.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | varchar(36) PK | UUID string |
+| `tenant_id` | varchar(36) FK → `tenants.id` | unique (1:1 with tenant for MVP) |
+| `corp_id` | varchar(64) | WeCom CorpID |
+| `agent_id` | varchar(64) | WeCom Agent ID (self-built app) |
+| `app_secret` | text | Phase 1: plaintext (internal only). Phase 3: encrypt at rest. **Do not log.** |
+| `callback_domain` | varchar(255) | OAuth trusted domain registered in WeCom Admin |
+| `is_active` | boolean | |
+| `created_at` | timestamptz | auto-set on insert |
+| `updated_at` | timestamptz | auto-updated on write |
+
+Populated by `scripts/bootstrap_default_tenant.py` from `WECOM_CORP_ID`,
+`WECOM_AGENT_ID`, `WECOM_OAUTH_SECRET`, `ADMIN_DOMAIN` env vars.
+
+---
+
+### `admin_users`
+
+WeCom employees who have completed OAuth login. Created or updated on each
+successful authentication. Not pre-populated — records are created at login time.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | varchar(36) PK | UUID string |
+| `tenant_id` | varchar(36) FK → `tenants.id` | |
+| `wecom_user_id` | varchar(64) | WeCom UserId returned by getuserinfo API |
+| `name` | text | Display name from WeCom (nullable until resolved) |
+| `avatar_url` | text | nullable |
+| `last_login_at` | timestamptz | nullable; updated on each login |
+| `created_at` | timestamptz | auto-set on insert |
+| `updated_at` | timestamptz | auto-updated on write |
+
+Indexes: unique on `(tenant_id, wecom_user_id)`.
+
+---
+
+### `admin_sessions`
+
+Active login sessions. The `id` is the session UUID stored as a cookie value.
+Phase 2 (RND-110) implements the `get_current_user` FastAPI dependency that
+validates rows in this table on every protected request.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | varchar(36) PK | Session UUID; value stored in `session_id` cookie |
+| `admin_user_id` | varchar(36) FK → `admin_users.id` | |
+| `tenant_id` | varchar(36) FK → `tenants.id` | authorization scope — all admin queries filter by this |
+| `wecom_user_id` | varchar(64) | duplicated for audit trail / fast logging |
+| `created_at` | timestamptz | auto-set on insert |
+| `expires_at` | timestamptz | hard TTL; session is invalid after this |
+| `is_revoked` | boolean | set on logout |
+
+Indexes: B-tree on `expires_at` (used by session validation and cleanup queries).
+
+Cleanup: `DELETE FROM admin_sessions WHERE expires_at < NOW() - INTERVAL '1 day'`
+(scheduled cleanup, not yet automated).
+
+---
+
+## Archive Tables
+
+All four archive tables gained a `tenant_id` column in migration 0002.
+Existing rows are backfilled with the default tenant ID by
+`bootstrap_default_tenant.py`, which also enforces `NOT NULL`.
 
 ### `key_versions`
 
@@ -46,8 +143,9 @@ One row per corp. Tracks the highest `seq` value that was successfully pulled an
 | Column | Type | Notes |
 |---|---|---|
 | `id` | integer PK | auto-increment |
-| `corp_id` | varchar(64) | unique; WeCom corp ID |
+| `corp_id` | varchar(64) | WeCom corp ID; unique within tenant (`UNIQUE(tenant_id, corp_id)` as of migration 0002) |
 | `last_seq` | bigint | last successfully processed sequence number |
+| `tenant_id` | varchar(36) FK → `tenants.id` | NOT NULL after bootstrap |
 | `updated_at` | timestamptz | auto-updated on write |
 
 ---
@@ -61,7 +159,7 @@ Primary message store. Each row is one WeCom conversation archive message. Colum
 | Column | Type | Notes |
 |---|---|---|
 | `id` | bigint PK | auto-increment |
-| `msgid` | varchar(64) | unique; WeCom stable message ID |
+| `msgid` | varchar(64) | WeCom stable message ID; unique within tenant (`UNIQUE(tenant_id, msgid)` as of migration 0002) |
 | `seq` | bigint | WeCom pull sequence number; indexed for cursor-based sync |
 | `publickey_ver` | integer | identifies which RSA key was used to encrypt this message |
 | `raw_encrypted_payload` | jsonb | the full encrypted SDK record as received (see note below) |
@@ -86,18 +184,16 @@ Primary message store. Each row is one WeCom conversation archive message. Colum
 | `msgtime` | bigint | WeCom message timestamp in milliseconds since epoch |
 | `tolist` | jsonb | array of recipient WeCom user IDs (canonical source) |
 | `sdkfileid` | text | WeCom SDK file ID for media messages; null for text |
+| `tenant_id` | varchar(36) FK → `tenants.id` | NOT NULL after bootstrap |
 | `created_at` | timestamptz | row insert time |
 
 Indexes:
-- Unique on `msgid`
+- Unique on `(tenant_id, msgid)` — tenant-scoped deduplication
 - B-tree on `seq` — sync cursor pagination
-- B-tree on `msgtype` — filter by type
-- B-tree on `sender` — filter by sender
-- B-tree on `roomid` — filter by room
-- B-tree on `msgtime` — time-range queries and sort
-- Composite B-tree on `(msgtime, msgtype)` — combined admin queries
-- GIN on `decrypted_payload` — JSONB containment and key-path queries
-- GIN on `to_tsvector('simple', coalesce(content_text, ''))` — full-text keyword search
+- B-tree on `msgtype`, `sender`, `roomid`, `msgtime`, `tenant_id`
+- Composite B-tree on `(msgtime, msgtype)`
+- GIN on `decrypted_payload` — JSONB containment
+- GIN on `to_tsvector('simple', coalesce(content_text, ''))` — full-text search
 
 ---
 
@@ -105,25 +201,23 @@ Indexes:
 
 Per-receiver lookup rows derived from `archive_messages.tolist`. One row is inserted per recipient when the parent `archive_messages` row is written.
 
-This table exists because a JSONB `@>` containment query on `tolist` requires a full GIN scan of the entire table, while a B-tree index on `receiver_userid` in this table supports efficient equality lookup. For a small archive this matters less; for millions of messages it becomes critical.
-
 | Column | Type | Notes |
 |---|---|---|
 | `id` | integer PK | auto-increment |
 | `message_id` | bigint FK → `archive_messages.id` | the parent message |
 | `receiver_userid` | varchar(64) | one recipient WeCom user ID |
 | `receiver_type` | varchar(32) | optional; e.g. `user` or `chatroom` if determinable |
+| `tenant_id` | varchar(36) FK → `tenants.id` | NOT NULL after bootstrap; matches parent row |
 | `created_at` | timestamptz | auto-set on insert |
 
 Indexes:
-- B-tree on `message_id` — join back to the parent message
-- B-tree on `receiver_userid` — the primary lookup: "find messages received by user X"
+- B-tree on `message_id`, `receiver_userid`, `tenant_id`
 
 ---
 
 ### `media_files`
 
-Tracks the download and storage state for each media attachment. One row per `sdkfileid`. Media download is handled by a separate worker (not in Phase 1 scope).
+Tracks the download and storage state for each media attachment. One row per `sdkfileid`. Media download is handled by a separate worker (not in Phase 1 scope). Tenant-scoped via join to parent `archive_messages`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -151,12 +245,26 @@ Lightweight cache of WeCom user identities encountered in the archive. Populated
 | Column | Type | Notes |
 |---|---|---|
 | `id` | integer PK | auto-increment |
-| `wecom_userid` | varchar(64) | unique; WeCom user ID |
+| `wecom_userid` | varchar(64) | WeCom user ID; unique within tenant (`UNIQUE(tenant_id, wecom_userid)` as of migration 0002) |
 | `name` | text | display name; null if not yet resolved |
+| `tenant_id` | varchar(36) FK → `tenants.id` | NOT NULL after bootstrap |
 | `created_at` | timestamptz | row insert time |
 | `updated_at` | timestamptz | last update |
 
-Indexes: unique on `wecom_userid`.
+Indexes: unique on `(tenant_id, wecom_userid)` — tenant-scoped deduplication.
+
+---
+
+## Derived API Objects (not persisted)
+
+The following are computed at query time from the archive tables and are **not**
+stored as persistent tables. They become tenant-scoped automatically once the
+source queries include `WHERE archive_messages.tenant_id = <tenant_id>`.
+
+| Object | Derived from |
+|---|---|
+| `monitored_accounts` | `sender`/`receiver_userid` LIKE `'staff_%'` |
+| `conversations` | Aggregated from `archive_messages` + `archive_message_recipients` |
 
 ---
 
@@ -165,22 +273,47 @@ Indexes: unique on `wecom_userid`.
 Managed with Alembic. Config: `backend/alembic.ini`. Run from `backend/`.
 
 ```bash
-# Generate SQL for review (offline, no DB required)
+# Apply all migrations
 cd backend
-alembic upgrade head --sql
-
-# Apply to a live database
 alembic upgrade head
+
+# Generate SQL for review (offline, no DB required)
+alembic upgrade head --sql
 
 # Roll back
 alembic downgrade base
 ```
 
-The initial migration is `backend/alembic/versions/0001_initial_schema.py`.
+Migrations:
+- `backend/alembic/versions/0001_initial_schema.py` — initial archive schema
+- `backend/alembic/versions/0002_tenant_foundation.py` — tenant tables + tenant_id columns
+
+After applying migration 0002, run the bootstrap script to create the default
+tenant and backfill existing rows:
+
+```bash
+cd backend
+python scripts/bootstrap_default_tenant.py
+```
+
+Required env vars for bootstrap: `DATABASE_URL`, `WECOM_CORP_ID`, `WECOM_AGENT_ID`,
+`WECOM_OAUTH_SECRET`. Optional: `ADMIN_DOMAIN`.
 
 ---
 
 ## Design Notes
+
+### Tenant scoping — Phase 1 (single tenant)
+
+All admin queries will add `WHERE tenant_id = <session_tenant_id>` in Phase 2
+(RND-110). For the current MVP, there is one default tenant and the current
+admin console display queries work without tenant filtering. After RND-110
+ships, the `get_current_user()` FastAPI dependency will provide `tenant_id`
+from the session cookie, and all admin queries will be scoped to it.
+
+Cross-tenant data access prevention is enforced entirely server-side. The
+`tenant_id` in the session is the sole authorization scope; it is never
+accepted as a user-supplied API parameter.
 
 ### Receiver lookup: why `archive_message_recipients` alongside `tolist`
 
@@ -194,7 +327,7 @@ The initial migration is `backend/alembic/versions/0001_initial_schema.py`.
 
 `content_text` is a plain-text column populated by the sync layer with the human-readable body of the message (e.g. `text.content` for text messages, filenames for file messages). A GIN index using `to_tsvector('simple', coalesce(content_text, ''))` enables PostgreSQL `@@` full-text search queries.
 
-The `simple` dictionary is used deliberately — it applies no language-specific stemming, which is appropriate for mixed Chinese/English WeCom content. A `pg_tsvector`-aware Chinese text search configuration can be substituted later without a schema change (only the index rebuild and query change).
+The `simple` dictionary is used deliberately — it applies no language-specific stemming, which is appropriate for mixed Chinese/English WeCom content.
 
 ### Raw encrypted payload: `raw_encrypted_payload` vs split fields
 
@@ -203,8 +336,6 @@ The WeCom SDK returns an encrypted envelope JSON object containing both `encrypt
 - `raw_encrypted_payload` (JSONB) — the complete envelope as received, for audit and replay
 - `encrypt_random_key` (TEXT) — split out for direct access by the decryption routine
 - `encrypt_chat_msg` (TEXT) — split out for direct access by the decryption routine
-
-Splitting avoids a JSONB key-access on every decryption call. Retaining the full envelope ensures nothing is silently lost if the SDK adds envelope fields in a future version.
 
 ### Nullable `decrypted_payload` and `decrypt_status`
 
@@ -216,16 +347,14 @@ Splitting avoids a JSONB key-access on every decryption call. Retaining the full
 | `success` | Decryption succeeded | populated |
 | `failed` | Decryption failed (wrong key, corrupt data) | null |
 
-Rows with `decrypt_status = 'failed'` are kept rather than discarded so they can be retried after a key correction. The encrypted fields (`encrypt_random_key`, `encrypt_chat_msg`, `raw_encrypted_payload`) remain available for retry. Application code must not treat a null `decrypted_payload` as an error without also checking `decrypt_status`.
-
 ### Key rotation support
 
-`publickey_ver` is stored on every message row. `key_versions` maps each version to a key path. To handle a new key: insert a row into `key_versions`, set `is_active = true` for the new row, and update `WECOM_PUBLIC_KEY_VERSION` in the environment. Older messages retain their original `publickey_ver` and can be re-decrypted using the key registered for that version.
+`publickey_ver` is stored on every message row. `key_versions` maps each version to a key path. To handle a new key: insert a row into `key_versions`, set `is_active = true` for the new row, and update `WECOM_PUBLIC_KEY_VERSION` in the environment.
 
-### `updated_at` auto-update behaviour
+### `app_secret` plaintext storage (Phase 1)
 
-`updated_at` columns are set at insert time via `server_default=NOW()`. At the ORM layer, `onupdate=func.now()` causes SQLAlchemy to set the column on ORM-driven updates. Raw SQL `UPDATE` statements bypass this mechanism — application code should include an explicit `updated_at = NOW()` clause when writing raw SQL.
+`tenant_wecom_configs.app_secret` stores `WECOM_OAUTH_SECRET` in plaintext in Phase 1. This is acceptable for an internal single-tenant deployment. Phase 3 must encrypt at rest using Fernet (symmetric) or a Vault/KMS integration before storing, and must not log the value.
 
 ---
 
-_Last updated: 2026-06-26 — RND-75_
+_Last updated: 2026-06-28 — RND-111_
