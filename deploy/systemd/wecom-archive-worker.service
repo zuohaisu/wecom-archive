@@ -1,0 +1,28 @@
+[Unit]
+Description=WeCom Archive Worker — sync + decrypt (one shot)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wecomarchive
+WorkingDirectory=/srv/apps/wecom-archive-365/current/backend
+EnvironmentFile=/srv/apps/wecom-archive-365/current/backend/.env
+ExecStart=/srv/apps/wecom-archive-365/current/backend/.venv/bin/python scripts/run_archive_worker_once.py
+
+# Security hardening (safe subset — must not break access to any of:
+# backend directory, .env, SQLite/database path, private key path,
+# SDK library path, shared lock path)
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/apps/wecom-archive-365
+ReadOnlyPaths=/usr /etc
+
+# Do NOT use PrivateTmp=true — the shared lock path lives on the real
+# filesystem and must be visible to both timer-triggered and
+# event-triggered workers.
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target
