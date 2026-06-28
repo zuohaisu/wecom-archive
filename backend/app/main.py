@@ -10,9 +10,11 @@ from sqlalchemy.orm import Session
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.db.session import get_db
 from app.routers.conversations import router as conversations_router
+from app.routers.wecom_events import router as wecom_events_router
 
 app = FastAPI(title="365 WeCom Archive")
 app.include_router(conversations_router)
+app.include_router(wecom_events_router)
 
 _MAX_LIMIT = 100
 
