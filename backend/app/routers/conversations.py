@@ -1,6 +1,10 @@
 """
 Conversation aggregation APIs for the 365 WeCom Archive review console.
 
+All routes are protected by get_current_user (RND-110).
+All archive queries are scoped by session tenant_id.
+tenant_id is NEVER accepted from user-supplied request params.
+
 Aggregates raw archive_messages + archive_message_recipients into
 first-class Conversation objects so the frontend never has to infer
 conversations from raw messages.
@@ -16,14 +20,15 @@ Monitored-account detection:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.db.models import ArchiveMessage, ArchiveMessageRecipient, Contact
+from app.auth import get_current_user
+from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
 from app.db.session import get_db
 
 router = APIRouter()
@@ -44,9 +49,12 @@ def _direct_conv_id(uid_a: str, uid_b: str) -> str:
     return f"direct__{a}___{b}"
 
 
-def _load_display_names(db: Session) -> dict[str, str]:
-    """Return {wecom_userid: display_name} from the contacts table."""
-    return {c.wecom_userid: (c.name or c.wecom_userid) for c in db.query(Contact).all()}
+def _load_display_names(db: Session, tenant_id: str) -> dict[str, str]:
+    """Return {wecom_userid: display_name} from the contacts table, scoped to tenant."""
+    return {
+        c.wecom_userid: (c.name or c.wecom_userid)
+        for c in db.query(Contact).filter(Contact.tenant_id == tenant_id).all()
+    }
 
 
 def _load_recipients_map(db: Session, msg_ids: list[int]) -> dict[int, list[str]]:
@@ -63,57 +71,78 @@ def _load_recipients_map(db: Session, msg_ids: list[int]) -> dict[int, list[str]
     return result
 
 
-def _fetch_messages_for_entity(db: Session, entity_id: str) -> list:
+def _fetch_messages_for_entity(
+    db: Session, entity_id: str, tenant_id: str
+) -> list:
     """
-    Return all messages that belong to conversations involving entity_id.
+    Return all messages that belong to conversations involving entity_id,
+    scoped to the given tenant.
 
     Strategy:
-    - Find message IDs where entity_id is sender or recipient.
+    - Find message IDs where entity_id is sender or recipient within the tenant.
     - From those, collect group roomids and expand to ALL messages in those rooms
       (for full group context even when entity isn't listed as recipient on every row).
     - Direct messages are included as-is (every direct message directly involves the entity).
     """
-    # Message IDs where entity appears as sender
     sender_ids: set[int] = {
         row[0]
         for row in db.query(ArchiveMessage.id)
-        .filter(ArchiveMessage.sender == entity_id)
+        .filter(
+            ArchiveMessage.sender == entity_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
         .all()
     }
-    # Message IDs where entity appears as recipient
     recipient_ids: set[int] = {
         row[0]
         for row in db.query(ArchiveMessageRecipient.message_id)
-        .filter(ArchiveMessageRecipient.receiver_userid == entity_id)
+        .filter(
+            ArchiveMessageRecipient.receiver_userid == entity_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
         .all()
     }
     seed_ids = sender_ids | recipient_ids
     if not seed_ids:
         return []
 
-    # Load seed messages to identify group rooms
-    seed_msgs = db.query(ArchiveMessage).filter(ArchiveMessage.id.in_(seed_ids)).all()
+    seed_msgs = (
+        db.query(ArchiveMessage)
+        .filter(
+            ArchiveMessage.id.in_(seed_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
     group_rooms = {m.roomid for m in seed_msgs if m.roomid}
 
-    # Build full message set
     final_ids: set[int] = set()
 
     if group_rooms:
         for row in (
             db.query(ArchiveMessage.id)
-            .filter(ArchiveMessage.roomid.in_(group_rooms))
+            .filter(
+                ArchiveMessage.roomid.in_(group_rooms),
+                ArchiveMessage.tenant_id == tenant_id,
+            )
             .all()
         ):
             final_ids.add(row[0])
 
-    # Direct messages are already fully described by seed
     direct_ids = {m.id for m in seed_msgs if not m.roomid}
     final_ids.update(direct_ids)
 
     if not final_ids:
         return []
 
-    return db.query(ArchiveMessage).filter(ArchiveMessage.id.in_(final_ids)).all()
+    return (
+        db.query(ArchiveMessage)
+        .filter(
+            ArchiveMessage.id.in_(final_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
 
 
 def _build_conversation_list(
@@ -143,7 +172,6 @@ def _build_conversation_list(
             if staff_set and contact_set:
                 conv_id = _direct_conv_id(sorted(staff_set)[0], sorted(contact_set)[0])
             else:
-                # Fallback: two non-staff or two staff talking directly
                 parts = sorted(all_parties)
                 if len(parts) >= 2:
                     conv_id = f"direct__{parts[0]}___{parts[1]}"
@@ -245,27 +273,37 @@ class TimelineMessageOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Routes — all protected by get_current_user
 # ---------------------------------------------------------------------------
 
 
 @router.get("/api/monitored-accounts", response_model=list[MonitoredAccountOut])
-def get_monitored_accounts(db: Session = Depends(get_db)):
-    """Return all monitored accounts inferred from archive data (sender/recipient IDs starting with 'staff_')."""
+def get_monitored_accounts(
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
+    """Return all monitored accounts inferred from tenant archive data."""
+    _, tenant_id = auth
     sender_rows = (
         db.query(ArchiveMessage.sender)
-        .filter(ArchiveMessage.sender.like("staff_%"))
+        .filter(
+            ArchiveMessage.sender.like("staff_%"),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
         .distinct()
         .all()
     )
     recipient_rows = (
         db.query(ArchiveMessageRecipient.receiver_userid)
-        .filter(ArchiveMessageRecipient.receiver_userid.like("staff_%"))
+        .filter(
+            ArchiveMessageRecipient.receiver_userid.like("staff_%"),
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
         .distinct()
         .all()
     )
     staff_ids = {row[0] for row in sender_rows + recipient_rows if row[0]}
-    display_names = _load_display_names(db)
+    display_names = _load_display_names(db, tenant_id)
     return [
         MonitoredAccountOut(
             monitored_account_id=sid,
@@ -276,25 +314,33 @@ def get_monitored_accounts(db: Session = Depends(get_db)):
 
 
 @router.get("/api/contacts", response_model=list[ContactOut])
-def get_contacts(db: Session = Depends(get_db)):
-    """Return all contacts (non-staff participants) observed in the archive dataset."""
+def get_contacts(
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
+    """Return all contacts (non-staff participants) observed in the tenant archive."""
+    _, tenant_id = auth
     sender_rows = (
         db.query(ArchiveMessage.sender)
         .filter(
             ArchiveMessage.sender.isnot(None),
             ~ArchiveMessage.sender.like("staff_%"),
+            ArchiveMessage.tenant_id == tenant_id,
         )
         .distinct()
         .all()
     )
     recipient_rows = (
         db.query(ArchiveMessageRecipient.receiver_userid)
-        .filter(~ArchiveMessageRecipient.receiver_userid.like("staff_%"))
+        .filter(
+            ~ArchiveMessageRecipient.receiver_userid.like("staff_%"),
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
         .distinct()
         .all()
     )
     contact_ids = {row[0] for row in sender_rows + recipient_rows if row[0]}
-    display_names = _load_display_names(db)
+    display_names = _load_display_names(db, tenant_id)
     return [
         ContactOut(
             contact_id=cid,
@@ -310,12 +356,14 @@ def get_conversations(
     staff_id: Optional[str] = Query(None, description="Required when mode=staff"),
     contact_id: Optional[str] = Query(None, description="Required when mode=contact"),
     db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
-    """
-    Return conversations for a monitored account (mode=staff) or contact (mode=contact).
+    """Return conversations for a monitored account (mode=staff) or contact (mode=contact).
 
     Sorted by last activity descending.
     """
+    _, tenant_id = auth
+
     if mode == "staff":
         if not staff_id:
             raise HTTPException(status_code=400, detail="staff_id is required when mode=staff")
@@ -329,12 +377,12 @@ def get_conversations(
     else:
         raise HTTPException(status_code=400, detail="mode must be 'staff' or 'contact'")
 
-    messages = _fetch_messages_for_entity(db, entity_id)
+    messages = _fetch_messages_for_entity(db, entity_id, tenant_id)
     if not messages:
         return []
 
     recipients_map = _load_recipients_map(db, [m.id for m in messages])
-    display_names = _load_display_names(db)
+    display_names = _load_display_names(db, tenant_id)
     return _build_conversation_list(messages, recipients_map, display_names)
 
 
@@ -342,14 +390,20 @@ def get_conversations(
     "/api/conversations/{conversation_id}/messages",
     response_model=list[TimelineMessageOut],
 )
-def get_conversation_messages(conversation_id: str, db: Session = Depends(get_db)):
+def get_conversation_messages(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
     """
-    Return the ordered message timeline for a conversation.
+    Return the ordered message timeline for a conversation, scoped to the session tenant.
 
     conversation_id formats:
       Group:  <roomid>                          e.g. "after_sales_group_001"
       Direct: "direct__<uid_a>___<uid_b>"       e.g. "direct__contact_zhangsan___staff_yingzi"
     """
+    _, tenant_id = auth
+
     if conversation_id.startswith("direct__"):
         rest = conversation_id[len("direct__"):]
         parts = rest.split("___", 1)
@@ -367,6 +421,7 @@ def get_conversation_messages(conversation_id: str, db: Session = Depends(get_db
                 ArchiveMessage.sender == uid_a,
                 ArchiveMessageRecipient.receiver_userid == uid_b,
                 or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+                ArchiveMessage.tenant_id == tenant_id,
             )
             .all()
         )
@@ -380,6 +435,7 @@ def get_conversation_messages(conversation_id: str, db: Session = Depends(get_db
                 ArchiveMessage.sender == uid_b,
                 ArchiveMessageRecipient.receiver_userid == uid_a,
                 or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+                ArchiveMessage.tenant_id == tenant_id,
             )
             .all()
         )
@@ -392,7 +448,10 @@ def get_conversation_messages(conversation_id: str, db: Session = Depends(get_db
     else:
         messages = (
             db.query(ArchiveMessage)
-            .filter(ArchiveMessage.roomid == conversation_id)
+            .filter(
+                ArchiveMessage.roomid == conversation_id,
+                ArchiveMessage.tenant_id == tenant_id,
+            )
             .all()
         )
 

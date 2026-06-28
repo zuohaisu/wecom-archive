@@ -15,7 +15,7 @@ Related issues: RND-87 (this doc), RND-75 (data model and migration).
 - Stores messages (text, attachments, metadata) in a company-controlled database and media store.
 - Exposes a search and review interface to authorized 365 administrators.
 
-It is **not** a public-facing product. Access is restricted to a fixed list of WeCom user IDs defined in `ADMIN_WECOM_USERIDS`.
+It is **not** a public-facing product. Access is restricted to employees authenticated via WeCom OAuth (self-built app, `snsapi_base` scope). Any active internal employee can log in; there is no separate allow-list.
 
 ---
 
@@ -118,24 +118,34 @@ Two separate credential domains:
 - Configured via: `WECOM_CORP_ID`, `WECOM_ARCHIVE_SECRET`, `WECOM_PRIVATE_KEY_PATH`, `WECOM_PUBLIC_KEY_VERSION`.
 - Never exposed to the browser. Lives only on the server.
 
-### 4.2 Admin Login (human-to-system)
+### 4.2 Admin Login (human-to-system) — RND-110
 
-- WeCom OAuth 2.0 code flow initiated from the browser.
-- Env vars: `WECOM_AGENT_ID`, `WECOM_OAUTH_SECRET`, `WECOM_REDIRECT_URI`.
-- Callback handler validates the user's WeCom user ID against `ADMIN_WECOM_USERIDS`.
-- A server-side session is created on success; access is denied otherwise.
-- No password authentication. No separate user accounts.
+- WeCom self-built app OAuth 2.0 (`snsapi_base` scope, silent authorization).
+- Env vars: `WECOM_CORP_ID`, `WECOM_AGENT_ID`, `WECOM_OAUTH_SECRET`, `ADMIN_DOMAIN`.
+- Any active WeCom internal employee (status=1, enable=1) may log in.
+- The backend resolves `tenant_id` from the `TenantWecomConfig` row matching `corp_id`.
+- A server-side session (`admin_sessions` table) is created; HTTP-only cookie (`session_id`), 8-hour TTL, SameSite=Lax.
+- All archive API and HTML admin routes scope every DB query by `session.tenant_id`.
+- CSRF protection: random single-use state token with 5-minute TTL.
+- No password authentication. No separate user accounts. No allow-list file.
 
 ```
-Browser → GET /auth/wecom/login
-        → redirect to WeCom OAuth authorize URL
-        → user approves in WeCom
-        → GET /auth/wecom/callback?code=...
-        → backend exchanges code for user identity
-        → check user ID in ADMIN_WECOM_USERIDS
-        → create session cookie
-        → redirect to admin dashboard
+Desktop browser → GET /admin/login (login page with WeCom QR button)
+        → GET /api/auth/wecom/login
+        → redirect to open.weixin.qq.com/connect/oauth2/authorize
+        → user scans QR / approves in WeCom
+        → GET /api/auth/wecom/callback?code=...&state=...
+        → validate state (single-use CSRF check)
+        → GET /cgi-bin/gettoken → access_token (cached ≤7000s)
+        → GET /cgi-bin/user/getuserinfo → UserId
+        → GET /cgi-bin/user/get → verify active employee
+        → resolve tenant_id from TenantWecomConfig by corp_id
+        → upsert admin_users, create admin_sessions row
+        → set session_id cookie (HttpOnly, SameSite=Lax)
+        → redirect to /admin/conversations
 ```
+
+`/api/wecom/archive/events` is a WeCom server-to-server callback and is explicitly **not** protected by session auth.
 
 ---
 
@@ -226,10 +236,9 @@ Defined fully in `.env.example`. Summarized here for architectural reference:
 | `WECOM_ARCHIVE_SECRET` | Archive API access credential |
 | `WECOM_PRIVATE_KEY_PATH` | Path to RSA private key for message decryption |
 | `WECOM_PUBLIC_KEY_VERSION` | Key version for WeCom encryption |
-| `WECOM_AGENT_ID` | WeCom app agent for OAuth |
-| `WECOM_OAUTH_SECRET` | OAuth secret for admin login |
-| `WECOM_REDIRECT_URI` | OAuth callback URL |
-| `ADMIN_WECOM_USERIDS` | Comma-separated list of allowed admin user IDs |
+| `WECOM_AGENT_ID` | WeCom self-built app agent ID for OAuth login |
+| `WECOM_OAUTH_SECRET` | App secret for OAuth (separate from archive secret) |
+| `ADMIN_DOMAIN` | Domain registered as WeCom OAuth trusted domain; used to construct callback URL |
 | `STORAGE_BACKEND` | `local` \| `oss` \| `s3` |
 | `STORAGE_LOCAL_PATH` | Root path for local media files |
 | `OSS_*` | Alibaba Cloud OSS credentials and endpoint |
@@ -240,4 +249,4 @@ No real values are stored in this document or in the repository.
 
 ---
 
-_Last updated: 2026-06-26 — RND-87_
+_Last updated: 2026-06-29 — RND-87, RND-110_

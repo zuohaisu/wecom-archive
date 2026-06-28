@@ -1,18 +1,21 @@
 import html as _html
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
-from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db.models import ArchiveMessage, ArchiveMessageRecipient
+from app.auth import SESSION_COOKIE, get_current_user
+from app.db.models import AdminSession, ArchiveMessage, ArchiveMessageRecipient
 from app.db.session import get_db
+from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
 from app.routers.wecom_events import router as wecom_events_router
 
 app = FastAPI(title="365 WeCom Archive")
+app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(wecom_events_router)
 
@@ -94,6 +97,28 @@ def _badge(status: str) -> str:
     return f'<span class="{cls}">{_e(status)}</span>'
 
 
+def _resolve_session_tenant_id(request: Request, db: Session) -> Optional[str]:
+    """
+    Return tenant_id for the authenticated session, or None if unauthenticated.
+    Used by HTML routes that redirect to /admin/login instead of returning 401.
+    tenant_id is the authoritative scope for all subsequent archive queries.
+    """
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if not session_id:
+        return None
+    now = datetime.now(timezone.utc)
+    session = (
+        db.query(AdminSession)
+        .filter(
+            AdminSession.id == session_id,
+            AdminSession.expires_at > now,
+            AdminSession.is_revoked.is_(False),
+        )
+        .first()
+    )
+    return session.tenant_id if session is not None else None
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -101,12 +126,17 @@ def health():
 
 @app.get("/admin/messages", response_class=HTMLResponse)
 def admin_messages(
+    request: Request,
     sender: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=_MAX_LIMIT),
     db: Session = Depends(get_db),
 ):
-    query = db.query(ArchiveMessage)
+    tenant_id = _resolve_session_tenant_id(request, db)
+    if tenant_id is None:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    query = db.query(ArchiveMessage).filter(ArchiveMessage.tenant_id == tenant_id)
     if sender:
         query = query.filter(ArchiveMessage.sender == sender)
     if q:
@@ -160,8 +190,19 @@ def admin_messages(
 
 
 @app.get("/admin/messages/{msgid}", response_class=HTMLResponse)
-def admin_message_detail(msgid: str, db: Session = Depends(get_db)):
-    msg = db.query(ArchiveMessage).filter(ArchiveMessage.msgid == msgid).first()
+def admin_message_detail(
+    msgid: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    tenant_id = _resolve_session_tenant_id(request, db)
+    if tenant_id is None:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    msg = db.query(ArchiveMessage).filter(
+        ArchiveMessage.msgid == msgid,
+        ArchiveMessage.tenant_id == tenant_id,
+    ).first()
     if msg is None:
         body = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -220,6 +261,9 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .top-bar h1{font-size:.95rem;font-weight:600;letter-spacing:.01em}
 .top-bar a{color:#8ca0b3;font-size:.82rem;text-decoration:none}
 .top-bar a:hover{color:#fff}
+.top-bar-user{margin-left:auto;font-size:.8rem;color:#8ca0b3;display:flex;align-items:center;gap:.75rem}
+.btn-logout{background:transparent;border:1px solid #3a4a5a;color:#8ca0b3;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem}
+.btn-logout:hover{border-color:#8ca0b3;color:#fff}
 .layout{display:flex;flex:1;overflow:hidden}
 .col{display:flex;flex-direction:column;overflow:hidden;background:#fff;border-right:1px solid #e8e8e8}
 .col-left{width:220px;flex-shrink:0}
@@ -266,7 +310,11 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 <body>
 <div class="top-bar">
   <h1>Conversation Review Console</h1>
-  <span style="margin-left:auto"><a href="/admin/messages">Messages ↗</a></span>
+  <div class="top-bar-user">
+    <span id="current-user"></span>
+    <a href="/admin/messages">Messages ↗</a>
+    <button class="btn-logout" onclick="doLogout()">Logout</button>
+  </div>
 </div>
 <div class="layout">
   <div class="col col-left">
@@ -297,6 +345,22 @@ function fmtTime(ms){
   return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+' '+pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+' UTC';
 }
 function pad(n){return String(n).padStart(2,'0');}
+function handleUnauth(r){
+  if(r.status===401){window.location.href='/admin/login';return true;}
+  return false;
+}
+function loadCurrentUser(){
+  fetch('/api/auth/me').then(function(r){return r.json();}).then(function(d){
+    if(!d.authenticated){window.location.href='/admin/login';return;}
+    var el=document.getElementById('current-user');
+    if(el)el.textContent=d.display_name||d.wecom_user_id||'';
+  }).catch(function(){});
+}
+function doLogout(){
+  fetch('/api/auth/logout',{method:'POST'}).then(function(){
+    window.location.href='/admin/login';
+  }).catch(function(){window.location.href='/admin/login';});
+}
 function setMode(m){
   mode=m; selEntityId=null; selConvId=null;
   document.getElementById('tab-staff').classList.toggle('active',m==='staff');
@@ -311,7 +375,7 @@ function setMode(m){
 function loadEntityList(){
   var url=mode==='staff'?'/api/monitored-accounts':'/api/contacts';
   document.getElementById('entity-body').innerHTML='<div class="loading">Loading…</div>';
-  fetch(url).then(function(r){return r.json();}).then(renderEntityList)
+  fetch(url).then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(items){if(items)renderEntityList(items);})
     .catch(function(){document.getElementById('entity-body').innerHTML='<div class="error-msg">Failed to load entities</div>';});
 }
 function renderEntityList(items){
@@ -348,7 +412,7 @@ function loadConversations(entityId){
     ?'/api/conversations?mode=staff&staff_id='+encodeURIComponent(entityId)
     :'/api/conversations?mode=contact&contact_id='+encodeURIComponent(entityId);
   document.getElementById('conv-body').innerHTML='<div class="loading">Loading…</div>';
-  fetch(url).then(function(r){return r.json();}).then(renderConvList)
+  fetch(url).then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(convs){if(convs)renderConvList(convs);})
     .catch(function(){document.getElementById('conv-body').innerHTML='<div class="error-msg">Failed to load conversations</div>';});
 }
 function renderConvList(convs){
@@ -383,8 +447,8 @@ function loadTimeline(convId){
   var url='/api/conversations/'+encodeURIComponent(convId)+'/messages';
   document.getElementById('timeline-body').innerHTML='<div class="loading">Loading…</div>';
   fetch(url)
-    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
-    .then(renderTimeline)
+    .then(function(r){if(handleUnauth(r))return null;if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(msgs){if(msgs)renderTimeline(msgs);})
     .catch(function(e){document.getElementById('timeline-body').innerHTML='<div class="error-msg">Failed to load: '+esc(e.message)+'</div>';});
 }
 function renderTimeline(msgs){
@@ -409,6 +473,7 @@ function renderTimeline(msgs){
   body.innerHTML=html;
   body.scrollTop=body.scrollHeight;
 }
+loadCurrentUser();
 setMode('staff');
 </script>
 </body>
@@ -417,8 +482,10 @@ setMode('staff');
 
 
 @app.get("/admin/conversations", response_class=HTMLResponse)
-def admin_conversations():
-    """Three-column conversation review console (RND-97)."""
+def admin_conversations(request: Request, db: Session = Depends(get_db)):
+    """Three-column conversation review console. Requires valid session."""
+    if _resolve_session_tenant_id(request, db) is None:
+        return RedirectResponse("/admin/login", status_code=302)
     return HTMLResponse(content=_REVIEW_CONSOLE_HTML)
 
 
@@ -430,8 +497,10 @@ def get_messages(
     roomid: Optional[str] = Query(None, description="Exact room ID; omit for 1:1 messages"),
     limit: int = Query(20, ge=1, le=_MAX_LIMIT, description="Max rows to return (1–100)"),
     db: Session = Depends(get_db),
+    auth: Tuple = Depends(get_current_user),
 ):
-    query = db.query(ArchiveMessage)
+    _, tenant_id = auth
+    query = db.query(ArchiveMessage).filter(ArchiveMessage.tenant_id == tenant_id)
     if sender:
         query = query.filter(ArchiveMessage.sender == sender)
     if q:
@@ -444,11 +513,20 @@ def get_messages(
 
 
 @app.get("/api/messages/{msgid}", response_model=MessageDetailOut)
-def get_message(msgid: str, db: Session = Depends(get_db)):
-    msg = db.query(ArchiveMessage).filter(ArchiveMessage.msgid == msgid).first()
+def get_message(
+    msgid: str,
+    db: Session = Depends(get_db),
+    auth: Tuple = Depends(get_current_user),
+):
+    _, tenant_id = auth
+    msg = db.query(ArchiveMessage).filter(
+        ArchiveMessage.msgid == msgid,
+        ArchiveMessage.tenant_id == tenant_id,
+    ).first()
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")
 
+    # Recipients safe to load by message PK: parent was already tenant-verified above.
     recipients = (
         db.query(ArchiveMessageRecipient)
         .filter(ArchiveMessageRecipient.message_id == msg.id)
