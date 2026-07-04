@@ -27,6 +27,7 @@ Full working rules are in [DEV_AGENT_RULES.md](../DEV_AGENT_RULES.md).
 - Write QA checklist items in the issue or PR description.
 - Review the final PR before Haisu merges.
 
+
 **Handoff to Claude Code / Codex:**
 - Post the approved Devplan in the issue or PR comment.
 
