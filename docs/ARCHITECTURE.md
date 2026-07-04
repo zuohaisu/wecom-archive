@@ -118,19 +118,27 @@ Two separate credential domains:
 - Configured via: `WECOM_CORP_ID`, `WECOM_ARCHIVE_SECRET`, `WECOM_PRIVATE_KEY_PATH`, `WECOM_PUBLIC_KEY_VERSION`.
 - Never exposed to the browser. Lives only on the server.
 
-### 4.2 Admin Login (human-to-system) — RND-110
+### 4.2 Admin Login (human-to-system) — RND-110 + RND-112
+
+Auth mode is controlled by the `AUTH_MODE` environment variable:
+
+| `AUTH_MODE` | Behavior |
+|---|---|
+| `wecom` (default) | WeCom OAuth employee login (RND-110) |
+| `password` | Temporary username/password fallback (RND-112) |
+
+Both modes share the same session model (`admin_sessions` table), the same cookie (`session_id`), and the same tenant-scoped query model. Switching mode does not require a schema change.
+
+#### WeCom OAuth mode (`AUTH_MODE=wecom`)
 
 - WeCom self-built app OAuth 2.0 (`snsapi_base` scope, silent authorization).
 - Env vars: `WECOM_CORP_ID`, `WECOM_AGENT_ID`, `WECOM_OAUTH_SECRET`, `ADMIN_DOMAIN`.
 - Any active WeCom internal employee (status=1, enable=1) may log in.
 - The backend resolves `tenant_id` from the `TenantWecomConfig` row matching `corp_id`.
-- A server-side session (`admin_sessions` table) is created; HTTP-only cookie (`session_id`), 8-hour TTL, SameSite=Lax.
-- All archive API and HTML admin routes scope every DB query by `session.tenant_id`.
 - CSRF protection: random single-use state token with 5-minute TTL.
-- No password authentication. No separate user accounts. No allow-list file.
 
 ```
-Desktop browser → GET /admin/login (login page with WeCom QR button)
+Desktop browser → GET /admin/login (WeCom button)
         → GET /api/auth/wecom/login
         → redirect to open.weixin.qq.com/connect/oauth2/authorize
         → user scans QR / approves in WeCom
@@ -141,11 +149,44 @@ Desktop browser → GET /admin/login (login page with WeCom QR button)
         → GET /cgi-bin/user/get → verify active employee
         → resolve tenant_id from TenantWecomConfig by corp_id
         → upsert admin_users, create admin_sessions row
-        → set session_id cookie (HttpOnly, SameSite=Lax)
+        → set session_id cookie (HttpOnly, SameSite=Lax, 8h TTL)
         → redirect to /admin/conversations
 ```
 
-`/api/wecom/archive/events` is a WeCom server-to-server callback and is explicitly **not** protected by session auth.
+#### Password fallback mode (`AUTH_MODE=password`) — RND-112 temporary
+
+**This mode is a temporary fallback only.** Use it exclusively when WeCom OAuth domain authorization is pending in production. Switch back to `AUTH_MODE=wecom` once the domain is registered.
+
+- Env vars: `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`.
+- `ADMIN_PASSWORD_HASH` is generated with `python -c "from app.auth import hash_password; print(hash_password('your-password'))"`.
+- Hash format: `pbkdf2:sha256:260000:<salt_b64>:<hash_b64>` (stdlib `hashlib.pbkdf2_hmac`, no new dependencies).
+- Login endpoint: `POST /api/auth/password/login` (JSON body: `{"username": "...", "password": "..."}`).
+- Returns 404 when `AUTH_MODE=wecom`.
+- On success: creates an `admin_sessions` row bound to the default tenant (slug=`default`, created by RND-111 bootstrap).
+- Session cookie is identical in flags to WeCom OAuth sessions: HttpOnly, SameSite=Lax, Path=/, Secure in production, 8h TTL.
+- Password and hash are never logged.
+
+```
+Desktop browser → GET /admin/login (username/password form)
+        → POST /api/auth/password/login {username, password}
+        → verify ADMIN_USERNAME (constant-time)
+        → verify password against ADMIN_PASSWORD_HASH (PBKDF2)
+        → resolve default tenant (slug='default')
+        → upsert admin_users (sentinel wecom_user_id)
+        → create admin_sessions row
+        → set session_id cookie (HttpOnly, SameSite=Lax, 8h TTL)
+        → return {logged_in: true} → JS redirects to /admin/conversations
+```
+
+#### Shared session behavior (both modes)
+
+- A server-side session (`admin_sessions` table) is created; HTTP-only cookie (`session_id`), 8-hour TTL, SameSite=Lax.
+- All archive API and HTML admin routes scope every DB query by `session.tenant_id`.
+- `tenant_id` is never accepted from user-supplied request params or headers.
+- Logout: `POST /api/auth/logout` revokes the session row and clears the cookie.
+- `/api/auth/me`: always returns HTTP 200; `authenticated` field reflects session validity.
+
+`/api/wecom/archive/events` is a WeCom server-to-server callback and is explicitly **not** protected by session auth in either mode.
 
 ---
 
@@ -239,6 +280,9 @@ Defined fully in `.env.example`. Summarized here for architectural reference:
 | `WECOM_AGENT_ID` | WeCom self-built app agent ID for OAuth login |
 | `WECOM_OAUTH_SECRET` | App secret for OAuth (separate from archive secret) |
 | `ADMIN_DOMAIN` | Domain registered as WeCom OAuth trusted domain; used to construct callback URL |
+| `AUTH_MODE` | `wecom` (default) \| `password` — selects active login method |
+| `ADMIN_USERNAME` | Admin username for `AUTH_MODE=password` |
+| `ADMIN_PASSWORD_HASH` | PBKDF2 hash of admin password for `AUTH_MODE=password` — generated via `hash_password()` |
 | `STORAGE_BACKEND` | `local` \| `oss` \| `s3` |
 | `STORAGE_LOCAL_PATH` | Root path for local media files |
 | `OSS_*` | Alibaba Cloud OSS credentials and endpoint |
@@ -249,4 +293,4 @@ No real values are stored in this document or in the repository.
 
 ---
 
-_Last updated: 2026-06-29 — RND-87, RND-110_
+_Last updated: 2026-06-29 — RND-87, RND-110, RND-112_

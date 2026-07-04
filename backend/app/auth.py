@@ -1,18 +1,29 @@
 """
-WeCom OAuth auth utilities for RND-110.
+Auth utilities for RND-110 (WeCom OAuth) and RND-112 (password fallback).
 
 Public surface:
+  get_auth_mode       Returns AUTH_MODE env var ('wecom' | 'password')
   get_current_user    FastAPI dependency — raises HTTP 401 if no valid session
   generate_state      Generate and store an OAuth CSRF state token (5-min TTL, single-use)
   consume_state       Validate and remove a state token
   get_wecom_token     Get/cache a WeCom access_token keyed by corp_id
+  hash_password       Hash a plaintext password for storage in ADMIN_PASSWORD_HASH
+  verify_password     Constant-time verify a submitted password against the stored hash
 
 State store: in-memory dict, single-process (sufficient for single-instance MVP).
 Token cache: in-memory dict keyed by corp_id, TTL ~7000 s (WeCom issues 7200 s tokens).
+
+Password hashing (RND-112):
+  Algorithm: PBKDF2-HMAC-SHA256, 260 000 iterations, 16-byte random salt.
+  Format:    pbkdf2:sha256:<iterations>:<salt_b64>:<hash_b64>
+  Never log submitted password, stored hash, or session token.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import logging
 import os
 import secrets
@@ -34,6 +45,74 @@ SESSION_COOKIE = "session_id"
 SESSION_TTL_HOURS = 8
 _STATE_TTL_SECONDS = 300  # 5 minutes
 _TOKEN_CACHE_TTL = 7000   # seconds (WeCom tokens expire in 7200 s)
+
+# ---------------------------------------------------------------------------
+# Auth mode (RND-112)
+# ---------------------------------------------------------------------------
+
+_VALID_AUTH_MODES = frozenset({"wecom", "password"})
+
+# PBKDF2 parameters — kept as constants so they are easy to audit.
+_PBKDF2_HASH = "sha256"
+_PBKDF2_ITERATIONS = 260_000
+_PBKDF2_SALT_BYTES = 16
+
+
+def get_auth_mode() -> str:
+    """
+    Return the configured auth mode.
+
+    - 'wecom'    → WeCom OAuth flow (RND-110, default).
+    - 'password' → Temporary username/password fallback (RND-112).
+
+    If AUTH_MODE is unset or unrecognized, defaults to 'wecom' and logs a warning.
+    """
+    raw = os.getenv("AUTH_MODE", "").strip().lower()
+    if raw in _VALID_AUTH_MODES:
+        return raw
+    if raw:
+        logger.warning("AUTH_MODE=%r not recognized; defaulting to 'wecom'", raw)
+    return "wecom"
+
+
+def hash_password(plain: str) -> str:
+    """
+    Hash a plaintext password using PBKDF2-HMAC-SHA256.
+
+    Returns a portable string suitable for ADMIN_PASSWORD_HASH.
+    Format: pbkdf2:sha256:<iterations>:<salt_b64>:<hash_b64>
+
+    Usage (from backend/):
+        python -c "from app.auth import hash_password; print(hash_password('yourpassword'))"
+    """
+    salt = secrets.token_bytes(_PBKDF2_SALT_BYTES)
+    dk = hashlib.pbkdf2_hmac(_PBKDF2_HASH, plain.encode(), salt, _PBKDF2_ITERATIONS)
+    salt_b64 = base64.b64encode(salt).decode()
+    hash_b64 = base64.b64encode(dk).decode()
+    return f"pbkdf2:{_PBKDF2_HASH}:{_PBKDF2_ITERATIONS}:{salt_b64}:{hash_b64}"
+
+
+def verify_password(plain: str, stored_hash: str) -> bool:
+    """
+    Constant-time verify a submitted plaintext password against a stored PBKDF2 hash.
+
+    Returns True only when both the hash parses correctly and the digest matches.
+    Never logs plain, stored_hash, or any derived value.
+    """
+    try:
+        parts = stored_hash.split(":")
+        if len(parts) != 5 or parts[0] != "pbkdf2":
+            return False
+        _, hash_name, iterations_str, salt_b64, expected_b64 = parts
+        iterations = int(iterations_str)
+        if iterations <= 0:
+            return False
+        salt = base64.b64decode(salt_b64)
+        expected = base64.b64decode(expected_b64)
+        dk = hashlib.pbkdf2_hmac(hash_name, plain.encode(), salt, iterations)
+        return hmac.compare_digest(dk, expected)
+    except Exception:
+        return False
 
 # ---------------------------------------------------------------------------
 # CSRF OAuth state store
@@ -152,3 +231,7 @@ def get_current_user(
 
 def _is_production() -> bool:
     return os.getenv("APP_ENV", "development").strip().lower() == "production"
+
+
+# Sentinel wecom_user_id prefix used for password-mode AdminUser rows.
+PASSWORD_MODE_WECOM_PREFIX = "__pwd__"

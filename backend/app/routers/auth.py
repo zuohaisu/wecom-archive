@@ -1,20 +1,23 @@
 """
-WeCom OAuth auth routes for RND-110.
+Auth routes for RND-110 (WeCom OAuth) and RND-112 (password fallback).
 
 Routes (public):
-  GET  /admin/login               Login page HTML
-  GET  /api/auth/wecom/login      Redirect to WeCom OAuth URL
-  GET  /api/auth/wecom/callback   Handle WeCom OAuth callback
+  GET  /admin/login                   Login page HTML (mode-aware: password or WeCom)
+  GET  /api/auth/wecom/login          Redirect to WeCom OAuth URL
+  GET  /api/auth/wecom/callback       Handle WeCom OAuth callback
+  POST /api/auth/password/login       Temporary password login (AUTH_MODE=password only)
 
 Routes (session required):
-  GET  /api/auth/me               Current user metadata (always 200; authenticated field)
-  POST /api/auth/logout           Revoke session, clear cookie
+  GET  /api/auth/me                   Current user metadata (always 200; authenticated field)
+  POST /api/auth/logout               Revoke session, clear cookie
 
 Security notes:
   - /api/wecom/archive/events is NOT in this router and is NOT protected by session auth.
-  - State is validated and single-use before code exchange.
+  - State is validated and single-use before code exchange (WeCom mode).
   - No user-controlled redirect URLs are accepted.
   - WeCom code, access_token, secrets are never logged.
+  - Submitted password, hash, and session token are never logged (password mode).
+  - /api/auth/password/login is a 404 when AUTH_MODE != 'password'.
 """
 
 from __future__ import annotations
@@ -25,20 +28,26 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import hmac as _hmac
+
 import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import (
+    PASSWORD_MODE_WECOM_PREFIX,
     SESSION_COOKIE,
     SESSION_TTL_HOURS,
     _is_production,
     consume_state,
     generate_state,
+    get_auth_mode,
     get_wecom_token,
+    verify_password,
 )
-from app.db.models import AdminSession, AdminUser, TenantWecomConfig
+from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
 from app.db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -55,35 +64,76 @@ _ERROR_MESSAGES: dict[str, str] = {
     "config_error": "Server configuration error. Please contact your administrator.",
 }
 
+_PAGE_STYLE = """\
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#f0f2f5;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#fff;border-radius:8px;padding:2.5rem 2rem;width:100%;max-width:360px;box-shadow:0 2px 12px rgba(0,0,0,.09);text-align:center}
+h1{font-size:1.15rem;color:#111;margin-bottom:.35rem;font-weight:700}
+.sub{font-size:.82rem;color:#999;margin-bottom:2rem}
+.btn-wecom{display:inline-flex;align-items:center;gap:.55rem;padding:.7rem 1.6rem;background:#07c160;color:#fff;border:none;border-radius:5px;font-size:.95rem;cursor:pointer;text-decoration:none;font-weight:600;letter-spacing:.01em}
+.btn-wecom:hover{background:#06ad56}
+.error{margin-top:1.2rem;padding:.55rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:4px;font-size:.82rem;text-align:left}
+.footer{margin-top:2rem;font-size:.75rem;color:#ccc}
+.pwd-form{display:flex;flex-direction:column;gap:.7rem;margin-bottom:.5rem}
+.pwd-form input{border:1px solid #d9d9d9;border-radius:4px;padding:.55rem .75rem;font-size:.92rem;outline:none;width:100%}
+.pwd-form input:focus{border-color:#1890ff;box-shadow:0 0 0 2px rgba(24,144,255,.1)}
+.btn-login{padding:.65rem 0;background:#1890ff;color:#fff;border:none;border-radius:4px;font-size:.95rem;font-weight:600;cursor:pointer;width:100%}
+.btn-login:hover{background:#096dd9}
+.btn-login:disabled{background:#91caff;cursor:not-allowed}
+"""
 
-def _login_page(error: Optional[str] = None) -> str:
+
+def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
     error_html = ""
     if error:
         msg = _ERROR_MESSAGES.get(error, "Login failed. Please try again.")
-        error_html = f'<div class="error">{msg}</div>'
+        error_html = f'<div class="error" id="login-error">{msg}</div>'
 
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Login — 365 WeCom Archive</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:system-ui,sans-serif;background:#f0f2f5;display:flex;align-items:center;justify-content:center;min-height:100vh}}
-.card{{background:#fff;border-radius:8px;padding:2.5rem 2rem;width:100%;max-width:360px;box-shadow:0 2px 12px rgba(0,0,0,.09);text-align:center}}
-h1{{font-size:1.15rem;color:#111;margin-bottom:.35rem;font-weight:700}}
-.sub{{font-size:.82rem;color:#999;margin-bottom:2rem}}
-.btn-wecom{{display:inline-flex;align-items:center;gap:.55rem;padding:.7rem 1.6rem;background:#07c160;color:#fff;border:none;border-radius:5px;font-size:.95rem;cursor:pointer;text-decoration:none;font-weight:600;letter-spacing:.01em}}
-.btn-wecom:hover{{background:#06ad56}}
-.error{{margin-top:1.2rem;padding:.55rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:4px;font-size:.82rem;text-align:left}}
-.footer{{margin-top:2rem;font-size:.75rem;color:#ccc}}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>365 WeCom Archive</h1>
-  <p class="sub">Conversation Review Console</p>
+    if mode == "password":
+        login_body = f"""\
+  <form class="pwd-form" id="pwd-form" onsubmit="doLogin(event)">
+    <input type="text" id="uname" name="username" placeholder="Username"
+           autocomplete="username" required>
+    <input type="password" id="pwd" name="password" placeholder="Password"
+           autocomplete="current-password" required>
+    <button class="btn-login" type="submit" id="submit-btn">Login</button>
+  </form>
+  {error_html}
+  <div class="footer">Temporary admin access — WeCom login coming soon</div>
+<script>
+function doLogin(e){{
+  e.preventDefault();
+  var btn=document.getElementById('submit-btn');
+  btn.disabled=true;btn.textContent='Logging in…';
+  var errEl=document.getElementById('login-error');
+  if(errEl)errEl.style.display='none';
+  fetch('/api/auth/password/login',{{
+    method:'POST',
+    headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{
+      username:document.getElementById('uname').value,
+      password:document.getElementById('pwd').value
+    }})
+  }}).then(function(r){{
+    if(r.ok){{window.location.href='/admin/conversations';return;}}
+    return r.json().then(function(d){{
+      var el=document.getElementById('login-error');
+      if(!el){{el=document.createElement('div');el.id='login-error';el.className='error';document.getElementById('pwd-form').after(el);}}
+      el.textContent='Invalid credentials. Please try again.';
+      el.style.display='block';
+      btn.disabled=false;btn.textContent='Login';
+    }});
+  }}).catch(function(){{
+    var el=document.getElementById('login-error');
+    if(!el){{el=document.createElement('div');el.id='login-error';el.className='error';document.getElementById('pwd-form').after(el);}}
+    el.textContent='Login failed. Please try again.';
+    el.style.display='block';
+    btn.disabled=false;btn.textContent='Login';
+  }});
+}}
+</script>"""
+    else:
+        login_body = f"""\
   <a href="/api/auth/wecom/login" class="btn-wecom">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
       <path d="M9.5 7C7.57 7 6 8.34 6 10c0 .99.58 1.87 1.47 2.44-.03.08-.05.16-.05.25 0 .27.22.5.5.5s.5-.23.5-.5c0-.12-.05-.22-.12-.31C9.02 12.2 9.25 12 9.5 12c.39 0 .71-.25.82-.6.05-.01.11-.02.16-.02.97 0 1.75-.67 1.75-1.5S10.45 8.38 9.5 8.38 7.75 9.05 7.75 9.88c0 .31.11.59.28.83"/>
@@ -93,7 +143,23 @@ h1{{font-size:1.15rem;color:#111;margin-bottom:.35rem;font-weight:700}}
     使用企业微信登录
   </a>
   {error_html}
-  <div class="footer">仅限企业内部员工访问</div>
+  <div class="footer">仅限企业内部员工访问</div>"""
+
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login — 365 WeCom Archive</title>
+<style>
+{_PAGE_STYLE}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>365 WeCom Archive</h1>
+  <p class="sub">Conversation Review Console</p>
+  {login_body}
 </div>
 </body>
 </html>"""
@@ -105,7 +171,10 @@ def admin_login_page(
     error: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """Login page. Redirects to /admin/conversations if already authenticated."""
+    """Login page. Redirects to /admin/conversations if already authenticated.
+
+    Renders password form when AUTH_MODE=password; WeCom button otherwise.
+    """
     session_id = request.cookies.get(SESSION_COOKIE) if request else None
     if session_id:
         now = datetime.now(timezone.utc)
@@ -121,8 +190,125 @@ def admin_login_page(
         if session:
             return RedirectResponse("/admin/conversations", status_code=302)
 
+    mode = get_auth_mode()
     safe_error = error if error in _ERROR_MESSAGES else (error and "auth_failed")
-    return HTMLResponse(content=_login_page(safe_error))
+    return HTMLResponse(content=_login_page(mode=mode, error=safe_error))
+
+
+# ---------------------------------------------------------------------------
+# Password login (RND-112 — AUTH_MODE=password only)
+# ---------------------------------------------------------------------------
+
+
+class _PasswordLoginBody(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/api/auth/password/login")
+def password_login(
+    body: _PasswordLoginBody,
+    db: Session = Depends(get_db),
+):
+    """
+    Temporary username/password login (RND-112).
+
+    Only active when AUTH_MODE=password; returns 404 in wecom mode.
+    Verifies ADMIN_USERNAME and ADMIN_PASSWORD_HASH from environment.
+    On success: creates an AdminSession bound to the default tenant and sets
+    an HttpOnly session cookie (same flags as WeCom OAuth sessions).
+    On failure: returns 401 with a sanitized error — no session is created.
+    Never logs submitted password, stored hash, or session token.
+    """
+    if get_auth_mode() != "password":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    logger.info("password_login: attempt received")
+
+    admin_username = os.getenv("ADMIN_USERNAME", "").strip()
+    admin_hash = os.getenv("ADMIN_PASSWORD_HASH", "").strip()
+
+    if not admin_username or not admin_hash:
+        logger.error("password_login: ADMIN_USERNAME or ADMIN_PASSWORD_HASH not configured")
+        raise HTTPException(status_code=500, detail="Server configuration error")
+
+    # Constant-time username comparison + PBKDF2 password verification.
+    # Both checks always run to prevent timing oracle on username enumeration.
+    username_ok = _hmac.compare_digest(body.username, admin_username)
+    password_ok = verify_password(body.password, admin_hash)
+
+    if not (username_ok and password_ok):
+        logger.warning("password_login: failed (credentials not logged)")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Resolve default tenant — bound to slug='default' created by RND-111 bootstrap.
+    # Must NEVER fall back to any other tenant: password-mode sessions are only
+    # ever valid for the RND-111 default tenant. If it's missing or inactive,
+    # fail closed rather than binding to an arbitrary active tenant.
+    tenant = (
+        db.query(Tenant)
+        .filter(Tenant.slug == "default", Tenant.is_active.is_(True))
+        .first()
+    )
+    if tenant is None:
+        logger.error("password_login: default tenant missing or inactive — run bootstrap_default_tenant.py")
+        raise HTTPException(status_code=500, detail="Server configuration error")
+
+    tenant_id: str = tenant.id
+    now = datetime.now(timezone.utc)
+
+    # Sentinel wecom_user_id for password-mode users (no real WeCom identity).
+    wecom_sentinel = f"{PASSWORD_MODE_WECOM_PREFIX}{admin_username}__"
+
+    # Upsert AdminUser row for the password-mode account.
+    user = (
+        db.query(AdminUser)
+        .filter(
+            AdminUser.tenant_id == tenant_id,
+            AdminUser.wecom_user_id == wecom_sentinel,
+        )
+        .first()
+    )
+    if user is None:
+        user = AdminUser(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            wecom_user_id=wecom_sentinel,
+            name=admin_username,
+            last_login_at=now,
+        )
+        db.add(user)
+    else:
+        user.last_login_at = now
+    db.flush()
+
+    # Create session row.
+    session_id = str(uuid.uuid4())
+    expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
+    session = AdminSession(
+        id=session_id,
+        admin_user_id=user.id,
+        tenant_id=tenant_id,
+        wecom_user_id=wecom_sentinel,
+        expires_at=expires_at,
+        is_revoked=False,
+    )
+    db.add(session)
+    db.commit()
+
+    logger.info("password_login: success, session created (id not logged)")
+
+    response = JSONResponse({"logged_in": True})
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=session_id,
+        httponly=True,
+        secure=_is_production(),
+        samesite="lax",
+        path="/",
+        max_age=SESSION_TTL_HOURS * 3600,
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -353,10 +539,15 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
     if user is None:
         return JSONResponse({"authenticated": False})
 
+    # For password-mode users the wecom_user_id is an internal sentinel;
+    # return None rather than exposing the implementation detail to the frontend.
+    is_password_user = user.wecom_user_id.startswith(PASSWORD_MODE_WECOM_PREFIX)
+    exposed_wecom_id = None if is_password_user else user.wecom_user_id
+
     return JSONResponse(
         {
             "authenticated": True,
-            "wecom_user_id": user.wecom_user_id,
+            "wecom_user_id": exposed_wecom_id,
             "display_name": user.name or user.wecom_user_id,
             "tenant_id": session.tenant_id,
             "role": None,
