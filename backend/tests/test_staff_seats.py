@@ -45,16 +45,17 @@ from unittest.mock import MagicMock
 import pytest
 
 
-def _msg(id, sender, roomid=None, msgtime=0, content_text=""):
+def _msg(id, sender, roomid=None, msgtime=0, content_text="", msgtype="text", sdkfileid=None):
     return SimpleNamespace(
         id=id,
         msgid=f"m-{id}",
         sender=sender,
         roomid=roomid,
         msgtime=msgtime,
-        msgtype="text",
+        msgtype=msgtype,
         content_text=content_text,
         decrypt_status="success",
+        sdkfileid=sdkfileid,
     )
 
 

@@ -56,6 +56,7 @@ from app.auth import get_current_user
 from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
+from app.media_classification import classify_media
 
 router = APIRouter()
 
@@ -453,6 +454,9 @@ class TimelineMessageOut(BaseModel):
     content_text: Optional[str] = None
     roomid: Optional[str] = None
     decrypt_status: str
+    media_type: str
+    media_status: Optional[str] = None
+    unsupported_reason: Optional[str] = None
 
 
 class PaginationOut(BaseModel):
@@ -742,6 +746,7 @@ def get_conversation_messages(
     result = []
     for msg in page:
         recipients = recipients_map.get(msg.id, [])
+        media = classify_media(msg.msgtype, bool(getattr(msg, "sdkfileid", None)))
         result.append(
             TimelineMessageOut(
                 msgid=msg.msgid,
@@ -762,6 +767,9 @@ def get_conversation_messages(
                 content_text=msg.content_text,
                 roomid=msg.roomid,
                 decrypt_status=msg.decrypt_status,
+                media_type=media.media_type,
+                media_status=media.media_status,
+                unsupported_reason=media.unsupported_reason,
             )
         )
     return ConversationMessagesOut(

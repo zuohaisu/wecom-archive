@@ -319,6 +319,8 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .empty-state{padding:2.5rem 1rem;text-align:center;color:#ccc;font-size:.83rem}
 .loading{padding:1rem;text-align:center;color:#bbb;font-size:.82rem}
 .error-msg{margin:.5rem;padding:.6rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:3px;font-size:.8rem}
+.media-placeholder{background:#fafafa;border:1px dashed #d9d9d9;border-radius:4px;padding:.35rem .6rem;font-size:.8rem;color:#888;font-style:italic}
+.media-preview{max-width:280px;max-height:280px;border-radius:4px;display:block}
 </style>
 </head>
 <body>
@@ -505,6 +507,26 @@ function loadOlderMessages(){
     body2.scrollTop=prevScrollTop+(body2.scrollHeight-prevScrollHeight);
   });
 }
+var MEDIA_LABELS={image:'Image message',video:'Video message',voice:'Voice message',file:'File message'};
+var MEDIA_STATUS_LABELS={not_downloaded:'not downloaded',unsupported:'unsupported',unknown:'status unknown'};
+function renderMessageBody(m){
+  var mediaType=m.media_type||'text';
+  if(mediaType==='text'){
+    return m.content_text?esc(m.content_text):'<div class="media-placeholder">Empty text message</div>';
+  }
+  if(mediaType==='image'&&m.media_status==='available'&&m.media_url){
+    return '<img class="media-preview" src="'+esc(m.media_url)+'" alt="Image message">';
+  }
+  if(mediaType==='unsupported'){
+    return '<div class="media-placeholder">Unsupported message type</div>';
+  }
+  if(mediaType==='unknown'){
+    return '<div class="media-placeholder">Unknown message type</div>';
+  }
+  var label=MEDIA_LABELS[mediaType]||'Media message';
+  var statusLabel=MEDIA_STATUS_LABELS[m.media_status]||'unsupported';
+  return '<div class="media-placeholder">'+esc(label)+' · '+esc(statusLabel)+'</div>';
+}
 function renderTimeline(scrollToBottom){
   var body=document.getElementById('timeline-body');
   if(!timelineMsgs||!timelineMsgs.length){body.innerHTML='<div class="empty-state">No messages</div>';return;}
@@ -519,7 +541,7 @@ function renderTimeline(scrollToBottom){
     var rowCls='tl-row '+(isSelf?'tl-row-self':'tl-row-other');
     var sc='tl-sender'+(isStaff?' tl-staff':'');
     var bc='tl-bubble '+(isSelf?'tl-bubble-self':(mode==='staff'?'tl-bubble-other':(isStaff?'tl-bubble-staff':'')));
-    var text=m.content_text?esc(m.content_text):'['+esc(m.msgtype||'message')+']';
+    var text=renderMessageBody(m);
     var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
     var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">group</span>':'';
     var senderName=m.sender_display_name||m.sender||'?';
