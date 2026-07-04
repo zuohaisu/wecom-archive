@@ -153,16 +153,20 @@ _token_cache: dict[str, tuple[str, float]] = {}
 _token_lock = threading.Lock()
 
 
-def get_wecom_token(corp_id: str, oauth_secret: str) -> str:
+def get_wecom_token(corp_id: str, oauth_secret: str, cache_key: Optional[str] = None) -> str:
     """
     Return a cached or freshly-fetched WeCom access_token for the given corp_id.
 
-    Cache key includes corp_id so multi-tenant future use stays safe.
+    Cache key defaults to corp_id but can be overridden via cache_key — this
+    lets callers hold two independent tokens for the same corp_id when a
+    second app secret is used (e.g. an external-contact secret alongside the
+    main agent secret), without colliding in the shared token cache.
     Never logs token value, code, or secret.
     """
+    key = cache_key or corp_id
     now = time.monotonic()
     with _token_lock:
-        cached = _token_cache.get(corp_id)
+        cached = _token_cache.get(key)
         if cached and now < cached[1]:
             return cached[0]
 
@@ -184,7 +188,7 @@ def get_wecom_token(corp_id: str, oauth_secret: str) -> str:
     cached_until = now + min(expires_in - 200, _TOKEN_CACHE_TTL)
 
     with _token_lock:
-        _token_cache[corp_id] = (token, cached_until)
+        _token_cache[key] = (token, cached_until)
 
     logger.info("WeCom access_token refreshed for corp (value not logged)")
     return token
