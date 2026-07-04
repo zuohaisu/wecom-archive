@@ -280,12 +280,14 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .entity-item.active{background:#e6f4ff;color:#0958d9}
 .entity-avatar{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#fff;flex-shrink:0}
 .entity-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.entity-raw{color:#bbb;font-weight:400}
 .conv-card{padding:.55rem .75rem;border-bottom:1px solid #f0f0f0;cursor:pointer}
 .conv-card:hover{background:#f5f8ff}
 .conv-card.active{background:#e6f4ff;border-left:3px solid #1890ff}
 .conv-top{display:flex;align-items:baseline;gap:.3rem;margin-bottom:.15rem}
 .conv-name{font-weight:600;font-size:.83rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv-time{font-size:.7rem;color:#bbb;white-space:nowrap;flex-shrink:0}
+.conv-secondary{font-size:.7rem;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:.15rem}
 .conv-snippet{font-size:.78rem;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:.2rem}
 .conv-meta{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap}
 .badge{display:inline-block;font-size:.7rem;padding:.05rem .3rem;border-radius:2px;font-weight:500;line-height:1.4}
@@ -298,6 +300,7 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .tl-meta{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
 .tl-sender{font-size:.78rem;font-weight:600;color:#555}
 .tl-staff{color:#0958d9}
+.tl-sender-raw{font-size:.7rem;color:#bbb;font-weight:400}
 .tl-time{font-size:.72rem;color:#bbb}
 .tl-bubble{background:#f0f0f0;border-radius:4px;padding:.3rem .5rem;font-size:.83rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-width:580px}
 .tl-bubble-staff{background:#e6f4ff;border-left:3px solid #1890ff}
@@ -384,12 +387,14 @@ function renderEntityList(items){
   var html='';
   items.forEach(function(item){
     var id=mode==='staff'?item.monitored_account_id:item.contact_id;
+    var rawId=item.raw_id||id;
     var name=item.display_name||id;
     var av=esc(name.charAt(0).toUpperCase());
     var bg=mode==='staff'?'#1890ff':'#389e0d';
+    var secondary=(rawId&&rawId!==name)?'<span class="entity-raw"> · '+esc(rawId)+'</span>':'';
     html+='<div class="entity-item" data-id="'+esc(id)+'" data-name="'+esc(name)+'" onclick="onEntityClick(this)">'
       +'<div class="entity-avatar" style="background:'+bg+'">'+av+'</div>'
-      +'<span class="entity-name">'+esc(name)+'</span></div>';
+      +'<span class="entity-name">'+esc(name)+secondary+'</span></div>';
   });
   body.innerHTML=html;
   if(selEntityId){
@@ -426,10 +431,16 @@ function renderConvList(convs){
     var raw=c.last_message_text||'';
     var snip=raw.length>60?esc(raw.substring(0,60))+'…':esc(raw);
     var t=fmtTime(c.last_message_time);
-    var acct=(mode==='contact'&&c.monitored_account_ids&&c.monitored_account_ids.length)
-      ?'<span class="badge-account">'+esc(c.monitored_account_ids.join(', '))+'</span>':'';
+    var acctNames=(c.monitored_account_display_names&&c.monitored_account_display_names.length)
+      ?c.monitored_account_display_names:(c.monitored_account_ids||[]);
+    var acct=(mode==='contact'&&acctNames.length)
+      ?'<span class="badge-account">'+esc(acctNames.join(', '))+'</span>':'';
+    var rawId=c.raw_id||c.room_raw_id||'';
+    var secondary=(rawId&&rawId!==c.display_name)
+      ?'<div class="conv-secondary" title="'+esc(rawId)+'">'+esc(rawId)+'</div>':'';
     html+='<div class="conv-card" data-id="'+esc(c.conversation_id)+'" data-name="'+esc(c.display_name)+'" onclick="onConvClick(this)">'
-      +'<div class="conv-top"><span class="conv-name">'+esc(c.display_name)+'</span><span class="conv-time">'+esc(t)+'</span></div>'
+      +'<div class="conv-top"><span class="conv-name" title="'+esc(rawId)+'">'+esc(c.display_name)+'</span><span class="conv-time">'+esc(t)+'</span></div>'
+      +secondary
       +(snip?'<div class="conv-snippet">'+snip+'</div>':'')
       +'<div class="conv-meta">'+tb+' <span class="badge badge-count">'+esc(c.message_count)+' msgs</span>'+acct+'</div>'
       +'</div>';
@@ -462,9 +473,13 @@ function renderTimeline(msgs){
     var text=m.content_text?esc(m.content_text):'['+esc(m.msgtype||'message')+']';
     var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
     var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">group</span>':'';
-    var rcpt=(m.recipients&&m.recipients.length)?'<div class="tl-rcpt">→ '+esc(m.recipients.join(', '))+'</div>':'';
+    var senderName=m.sender_display_name||m.sender||'?';
+    var senderRaw=m.sender_raw_id||m.sender;
+    var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
+    var rcptNames=(m.recipient_display_names&&m.recipient_display_names.length)?m.recipient_display_names:(m.recipients||[]);
+    var rcpt=rcptNames.length?'<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>':'';
     html+='<div class="tl-msg">'
-      +'<div class="tl-meta"><span class="'+sc+'">'+esc(m.sender||'?')+'</span>'
+      +'<div class="tl-meta"><span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
       +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+'</div>'
       +'<div class="'+bc+'">'+text+'</div>'
       +rcpt+'</div>';

@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
 from app.db.session import get_db
+from app.display_names import resolve_person_display_name, resolve_room_display_name
 
 router = APIRouter()
 
@@ -49,10 +50,17 @@ def _direct_conv_id(uid_a: str, uid_b: str) -> str:
     return f"direct__{a}___{b}"
 
 
-def _load_display_names(db: Session, tenant_id: str) -> dict[str, str]:
-    """Return {wecom_userid: display_name} from the contacts table, scoped to tenant."""
+def _load_display_names(db: Session, tenant_id: str) -> dict[str, Optional[str]]:
+    """Return {wecom_userid: name} raw from Contact.name, scoped to tenant.
+
+    Values are never blank (Contact rows are only ever created with a
+    non-blank name — see upsert_contact_display_name), but a given ID may
+    simply be absent from the dict if no Contact row exists yet. Callers
+    resolve the final display label via resolve_person_display_name, which
+    supplies the raw-ID fallback for absent/blank entries.
+    """
     return {
-        c.wecom_userid: (c.name or c.wecom_userid)
+        c.wecom_userid: c.name
         for c in db.query(Contact).filter(Contact.tenant_id == tenant_id).all()
     }
 
@@ -198,28 +206,57 @@ def _build_conversation_list(
         msgs_sorted = sorted(data["msgs"], key=lambda m: m.msgtime or 0)
         latest = msgs_sorted[-1]
 
+        sids = sorted(data["monitored_account_ids"])
+        cids = sorted(data["contact_ids"])
+
         if data["conversation_type"] == "group":
-            display_name = data["roomid"] or conv_id
+            room_raw_id = data["roomid"] or conv_id
+            room_display_name = resolve_room_display_name(room_raw_id)
+            display_name = room_display_name
+            raw_id = room_raw_id
         else:
-            cids = sorted(data["contact_ids"])
+            room_display_name = None
+            room_raw_id = None
             if cids:
-                display_name = display_names.get(cids[0], cids[0])
+                raw_id = cids[0]
+            elif sids:
+                raw_id = sids[0]
             else:
-                sids = sorted(data["monitored_account_ids"])
-                display_name = display_names.get(sids[0], sids[0]) if sids else conv_id
+                raw_id = conv_id
+            display_name = resolve_person_display_name(raw_id, display_names.get(raw_id))
+
+        latest_sender_id = latest.sender
+        latest_sender_display_name = (
+            resolve_person_display_name(latest_sender_id, display_names.get(latest_sender_id))
+            if latest_sender_id
+            else None
+        )
 
         result.append(
             {
                 "conversation_id": conv_id,
                 "conversation_type": data["conversation_type"],
                 "display_name": display_name,
+                "raw_id": raw_id,
                 "roomid": data["roomid"],
-                "monitored_account_ids": sorted(data["monitored_account_ids"]),
-                "contact_ids": sorted(data["contact_ids"]),
+                "monitored_account_ids": sids,
+                "monitored_account_raw_ids": sids,
+                "monitored_account_display_names": [
+                    resolve_person_display_name(sid, display_names.get(sid)) for sid in sids
+                ],
+                "contact_ids": cids,
+                "contact_raw_ids": cids,
+                "contact_display_names": [
+                    resolve_person_display_name(cid, display_names.get(cid)) for cid in cids
+                ],
+                "room_display_name": room_display_name,
+                "room_raw_id": room_raw_id,
                 "last_message_time": latest.msgtime,
                 "last_message_text": (latest.content_text or "")[:200],
                 "message_count": len(msgs_sorted),
-                "latest_sender_id": latest.sender,
+                "latest_sender_id": latest_sender_id,
+                "latest_sender_raw_id": latest_sender_id,
+                "latest_sender_display_name": latest_sender_display_name,
                 "review_status": None,
                 "ai_status": None,
                 "ai_summary": None,
@@ -243,19 +280,29 @@ class MonitoredAccountOut(BaseModel):
 class ContactOut(BaseModel):
     contact_id: str
     display_name: str
+    raw_id: str
 
 
 class ConversationOut(BaseModel):
     conversation_id: str
     conversation_type: str
     display_name: str
+    raw_id: str
     roomid: Optional[str] = None
     monitored_account_ids: list[str]
+    monitored_account_raw_ids: list[str]
+    monitored_account_display_names: list[str]
     contact_ids: list[str]
+    contact_raw_ids: list[str]
+    contact_display_names: list[str]
+    room_display_name: Optional[str] = None
+    room_raw_id: Optional[str] = None
     last_message_time: Optional[int] = None
     last_message_text: Optional[str] = None
     message_count: int
     latest_sender_id: Optional[str] = None
+    latest_sender_raw_id: Optional[str] = None
+    latest_sender_display_name: Optional[str] = None
     review_status: Optional[str] = None
     ai_status: Optional[str] = None
     ai_summary: Optional[str] = None
@@ -264,7 +311,11 @@ class ConversationOut(BaseModel):
 class TimelineMessageOut(BaseModel):
     msgid: str
     sender: Optional[str] = None
+    sender_display_name: Optional[str] = None
+    sender_raw_id: Optional[str] = None
     recipients: list[str]
+    recipient_display_names: list[str] = []
+    recipient_raw_ids: list[str] = []
     msgtime: Optional[int] = None
     msgtype: Optional[str] = None
     content_text: Optional[str] = None
@@ -307,7 +358,7 @@ def get_monitored_accounts(
     return [
         MonitoredAccountOut(
             monitored_account_id=sid,
-            display_name=display_names.get(sid, sid),
+            display_name=resolve_person_display_name(sid, display_names.get(sid)),
         )
         for sid in sorted(staff_ids)
     ]
@@ -344,7 +395,8 @@ def get_contacts(
     return [
         ContactOut(
             contact_id=cid,
-            display_name=display_names.get(cid, cid),
+            display_name=resolve_person_display_name(cid, display_names.get(cid)),
+            raw_id=cid,
         )
         for cid in sorted(contact_ids)
     ]
@@ -459,17 +511,31 @@ def get_conversation_messages(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     recipients_map = _load_recipients_map(db, [m.id for m in messages])
+    display_names = _load_display_names(db, tenant_id)
 
-    return [
-        TimelineMessageOut(
-            msgid=msg.msgid,
-            sender=msg.sender,
-            recipients=recipients_map.get(msg.id, []),
-            msgtime=msg.msgtime,
-            msgtype=msg.msgtype,
-            content_text=msg.content_text,
-            roomid=msg.roomid,
-            decrypt_status=msg.decrypt_status,
+    result = []
+    for msg in sorted(messages, key=lambda m: m.msgtime or 0):
+        recipients = recipients_map.get(msg.id, [])
+        result.append(
+            TimelineMessageOut(
+                msgid=msg.msgid,
+                sender=msg.sender,
+                sender_display_name=(
+                    resolve_person_display_name(msg.sender, display_names.get(msg.sender))
+                    if msg.sender
+                    else None
+                ),
+                sender_raw_id=msg.sender,
+                recipients=recipients,
+                recipient_display_names=[
+                    resolve_person_display_name(r, display_names.get(r)) for r in recipients
+                ],
+                recipient_raw_ids=recipients,
+                msgtime=msg.msgtime,
+                msgtype=msg.msgtype,
+                content_text=msg.content_text,
+                roomid=msg.roomid,
+                decrypt_status=msg.decrypt_status,
+            )
         )
-        for msg in sorted(messages, key=lambda m: m.msgtime or 0)
-    ]
+    return result
