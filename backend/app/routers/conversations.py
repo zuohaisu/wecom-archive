@@ -48,15 +48,21 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
-from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
+from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
-from app.media_classification import classify_media
+from app.media_classification import classify_media, resolve_image_media_status
+from app.media_storage import (
+    detect_image_content_type,
+    resolve_image_file_state,
+    resolve_servable_image_path,
+)
 
 router = APIRouter()
 
@@ -147,6 +153,20 @@ def _load_recipients_map(db: Session, msg_ids: list[int]) -> dict[int, list[str]
     ):
         result.setdefault(r.message_id, []).append(r.receiver_userid)
     return result
+
+
+def _load_media_files_map(db: Session, msg_ids: list[int]) -> dict[int, MediaFile]:
+    """Return {archive_message_id: MediaFile} for the given message primary-key
+    IDs. At most one row per message is expected (media_files.sdkfileid is
+    unique and one image message has one sdkfileid)."""
+    if not msg_ids:
+        return {}
+    return {
+        row.archive_message_id: row
+        for row in db.query(MediaFile)
+        .filter(MediaFile.archive_message_id.in_(msg_ids))
+        .all()
+    }
 
 
 def _latest_own_participation_time(
@@ -457,6 +477,7 @@ class TimelineMessageOut(BaseModel):
     media_type: str
     media_status: Optional[str] = None
     unsupported_reason: Optional[str] = None
+    media_url: Optional[str] = None
 
 
 class PaginationOut(BaseModel):
@@ -631,6 +652,72 @@ def get_conversations(
     return _build_conversation_list(messages, recipients_map, display_names, staff_ids)
 
 
+def _fetch_conversation_messages(
+    db: Session, conversation_id: str, tenant_id: str
+) -> list[ArchiveMessage]:
+    """
+    Return every ArchiveMessage row belonging to conversation_id, scoped to
+    tenant_id. Shared by the timeline route and the media-serving route so
+    both use identical, tenant-scoped membership rules — a message is only
+    ever considered part of a conversation if this function says so.
+
+    conversation_id formats:
+      Group:  <roomid>                          e.g. "after_sales_group_001"
+      Direct: "direct__<uid_a>___<uid_b>"       e.g. "direct__contact_zhangsan___staff_yingzi"
+    """
+    if conversation_id.startswith("direct__"):
+        rest = conversation_id[len("direct__"):]
+        parts = rest.split("___", 1)
+        if len(parts) != 2:
+            raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
+        uid_a, uid_b = parts
+
+        msgs_a_to_b = (
+            db.query(ArchiveMessage)
+            .join(
+                ArchiveMessageRecipient,
+                ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+            )
+            .filter(
+                ArchiveMessage.sender == uid_a,
+                ArchiveMessageRecipient.receiver_userid == uid_b,
+                or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+                ArchiveMessage.tenant_id == tenant_id,
+            )
+            .all()
+        )
+        msgs_b_to_a = (
+            db.query(ArchiveMessage)
+            .join(
+                ArchiveMessageRecipient,
+                ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+            )
+            .filter(
+                ArchiveMessage.sender == uid_b,
+                ArchiveMessageRecipient.receiver_userid == uid_a,
+                or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+                ArchiveMessage.tenant_id == tenant_id,
+            )
+            .all()
+        )
+        seen: set[int] = set()
+        messages = []
+        for msg in msgs_a_to_b + msgs_b_to_a:
+            if msg.id not in seen:
+                seen.add(msg.id)
+                messages.append(msg)
+        return messages
+
+    return (
+        db.query(ArchiveMessage)
+        .filter(
+            ArchiveMessage.roomid == conversation_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
+
+
 @router.get(
     "/api/conversations/{conversation_id}/messages",
     response_model=ConversationMessagesOut,
@@ -674,56 +761,7 @@ def get_conversation_messages(
     """
     _, tenant_id = auth
 
-    if conversation_id.startswith("direct__"):
-        rest = conversation_id[len("direct__"):]
-        parts = rest.split("___", 1)
-        if len(parts) != 2:
-            raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
-        uid_a, uid_b = parts
-
-        msgs_a_to_b = (
-            db.query(ArchiveMessage)
-            .join(
-                ArchiveMessageRecipient,
-                ArchiveMessage.id == ArchiveMessageRecipient.message_id,
-            )
-            .filter(
-                ArchiveMessage.sender == uid_a,
-                ArchiveMessageRecipient.receiver_userid == uid_b,
-                or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
-                ArchiveMessage.tenant_id == tenant_id,
-            )
-            .all()
-        )
-        msgs_b_to_a = (
-            db.query(ArchiveMessage)
-            .join(
-                ArchiveMessageRecipient,
-                ArchiveMessage.id == ArchiveMessageRecipient.message_id,
-            )
-            .filter(
-                ArchiveMessage.sender == uid_b,
-                ArchiveMessageRecipient.receiver_userid == uid_a,
-                or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
-                ArchiveMessage.tenant_id == tenant_id,
-            )
-            .all()
-        )
-        seen: set[int] = set()
-        messages = []
-        for msg in msgs_a_to_b + msgs_b_to_a:
-            if msg.id not in seen:
-                seen.add(msg.id)
-                messages.append(msg)
-    else:
-        messages = (
-            db.query(ArchiveMessage)
-            .filter(
-                ArchiveMessage.roomid == conversation_id,
-                ArchiveMessage.tenant_id == tenant_id,
-            )
-            .all()
-        )
+    messages = _fetch_conversation_messages(db, conversation_id, tenant_id)
 
     if not messages:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -743,10 +781,27 @@ def get_conversation_messages(
         _encode_message_cursor(page[0].msgtime, page[0].id) if page and has_older else None
     )
 
+    media_files_map = _load_media_files_map(db, [m.id for m in page])
+
     result = []
     for msg in page:
         recipients = recipients_map.get(msg.id, [])
         media = classify_media(msg.msgtype, bool(getattr(msg, "sdkfileid", None)))
+
+        media_url: Optional[str] = None
+        if media.media_type == "image":
+            media_file = media_files_map.get(msg.id)
+            file_state = "missing"
+            if media_file and media_file.download_status == "downloaded":
+                file_state = resolve_image_file_state(media_file.local_path)
+            media = resolve_image_media_status(
+                media,
+                media_file.download_status if media_file else None,
+                file_state,
+            )
+            if media.media_status == "available":
+                media_url = f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media"
+
         result.append(
             TimelineMessageOut(
                 msgid=msg.msgid,
@@ -770,9 +825,58 @@ def get_conversation_messages(
                 media_type=media.media_type,
                 media_status=media.media_status,
                 unsupported_reason=media.unsupported_reason,
+                media_url=media_url,
             )
         )
     return ConversationMessagesOut(
         messages=result,
         pagination=PaginationOut(has_older=has_older, next_before=next_before),
     )
+
+
+@router.get("/api/conversations/{conversation_id}/messages/{msgid}/media")
+def get_message_media(
+    conversation_id: str,
+    msgid: str,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
+    """
+    Serve an already-downloaded image message's file content (RND-144).
+
+    Authenticated (get_current_user), tenant-scoped (tenant_id comes only
+    from the session, never a request param), and conversation-scoped (the
+    message must actually belong to conversation_id per
+    _fetch_conversation_messages — the same membership rules the timeline
+    route uses). Every failure mode — wrong tenant, wrong conversation,
+    non-image message, missing/pending/failed media_files row, unsafe or
+    missing local_path, disallowed file extension — returns a plain 404.
+    Never includes sdkfileid, local_path, or oss_key in the response or in
+    any log line.
+    """
+    _, tenant_id = auth
+
+    messages = _fetch_conversation_messages(db, conversation_id, tenant_id)
+    msg = next((m for m in messages if m.msgid == msgid), None)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if msg.msgtype != "image":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    media_file = (
+        db.query(MediaFile).filter(MediaFile.archive_message_id == msg.id).first()
+    )
+    if media_file is None or media_file.download_status != "downloaded":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # Same tri-state predicate the timeline serializer uses to decide
+    # media_status/media_url (resolve_image_file_state) — this route only
+    # ever serves the "servable" case, so a media_url the timeline emitted
+    # can never 404 here for a servability reason (RND-144 QA fix).
+    safe_path = resolve_servable_image_path(media_file.local_path)
+    if safe_path is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    content_type = detect_image_content_type(safe_path)
+    return FileResponse(path=str(safe_path), media_type=content_type)

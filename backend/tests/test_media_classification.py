@@ -123,7 +123,7 @@ def client():
 
 def _run_messages_query(client, app, all_msgs):
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessageRecipient, Contact
+    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile
     from app.db.session import get_db
 
     def _override_db():
@@ -141,11 +141,17 @@ def _run_messages_query(client, app, all_msgs):
         contact_q.filter.return_value = contact_q
         contact_q.all.return_value = []
 
+        media_q = MagicMock()
+        media_q.filter.return_value = media_q
+        media_q.all.return_value = []
+
         def _query(model):
             if model is ArchiveMessageRecipient:
                 return rcpt_q
             if model is Contact:
                 return contact_q
+            if model is MediaFile:
+                return media_q
             return msg_q
 
         mock.query.side_effect = _query

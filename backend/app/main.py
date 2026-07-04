@@ -508,14 +508,15 @@ function loadOlderMessages(){
   });
 }
 var MEDIA_LABELS={image:'Image message',video:'Video message',voice:'Voice message',file:'File message'};
-var MEDIA_STATUS_LABELS={not_downloaded:'not downloaded',unsupported:'unsupported',unknown:'status unknown'};
+var MEDIA_STATUS_LABELS={not_downloaded:'not downloaded',unsupported:'unsupported',unknown:'status unknown',failed:'download failed'};
 function renderMessageBody(m){
   var mediaType=m.media_type||'text';
   if(mediaType==='text'){
     return m.content_text?esc(m.content_text):'<div class="media-placeholder">Empty text message</div>';
   }
   if(mediaType==='image'&&m.media_status==='available'&&m.media_url){
-    return '<img class="media-preview" src="'+esc(m.media_url)+'" alt="Image message">';
+    return '<a href="'+esc(m.media_url)+'" target="_blank" rel="noopener noreferrer">'
+      +'<img class="media-preview" src="'+esc(m.media_url)+'" alt="Image message" loading="lazy"></a>';
   }
   if(mediaType==='unsupported'){
     return '<div class="media-placeholder">Unsupported message type</div>';

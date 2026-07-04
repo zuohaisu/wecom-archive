@@ -373,7 +373,7 @@ def test_staff_sessions_sorted_by_latest_message_time_desc(client, monkeypatch) 
 
 def test_conversation_messages_default_returns_latest_20_ascending(client) -> None:
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessageRecipient, Contact
+    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile
     from app.db.session import get_db
     from app.main import app
 
@@ -397,11 +397,17 @@ def test_conversation_messages_default_returns_latest_20_ascending(client) -> No
         contact_q.filter.return_value = contact_q
         contact_q.all.return_value = []
 
+        media_q = MagicMock()
+        media_q.filter.return_value = media_q
+        media_q.all.return_value = []
+
         def _query(model):
             if model is ArchiveMessageRecipient:
                 return rcpt_q
             if model is Contact:
                 return contact_q
+            if model is MediaFile:
+                return media_q
             return msg_q
 
         mock.query.side_effect = _query
@@ -458,7 +464,7 @@ def test_conversation_messages_requires_auth_still_blocked(client) -> None:
 
 def _run_messages_query(client, app, all_msgs, before=None, limit=20):
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessageRecipient, Contact
+    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile
     from app.db.session import get_db
 
     def _override_db():
@@ -476,11 +482,17 @@ def _run_messages_query(client, app, all_msgs, before=None, limit=20):
         contact_q.filter.return_value = contact_q
         contact_q.all.return_value = []
 
+        media_q = MagicMock()
+        media_q.filter.return_value = media_q
+        media_q.all.return_value = []
+
         def _query(model):
             if model is ArchiveMessageRecipient:
                 return rcpt_q
             if model is Contact:
                 return contact_q
+            if model is MediaFile:
+                return media_q
             return msg_q
 
         mock.query.side_effect = _query

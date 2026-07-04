@@ -58,3 +58,46 @@ def classify_media(msgtype: Optional[str], has_sdkfileid: bool) -> MediaClassifi
         return MediaClassification("file", status, "file_download_not_implemented")
 
     return MediaClassification("unsupported", "unsupported", "unsupported_msgtype")
+
+
+def resolve_image_media_status(
+    base: MediaClassification,
+    media_file_download_status: Optional[str],
+    file_state: str = "missing",
+) -> MediaClassification:
+    """Combine a base image classification with media_files download state
+    (RND-144 Phase 1 — image download/render).
+
+    Stays pure: callers are responsible for the media_files DB lookup and
+    the on-disk servability check (see
+    app/media_storage.py:resolve_image_file_state) and pass the result in
+    as a plain string. Only ever changes anything when
+    base.media_type == "image" — every other media type passes through
+    unchanged.
+
+    file_state must be one of "servable" / "unsupported_type" / "missing"
+    (see resolve_image_file_state) — this is the exact same tri-state the
+    media route uses to decide whether it can serve the file, so
+    media_status=="available" here and the route actually returning 200 can
+    never disagree (RND-144 QA fix).
+
+    media_file_download_status is None when no media_files row exists for
+    the message (nothing to combine with — base classification stands).
+    """
+    if base.media_type != "image":
+        return base
+
+    if media_file_download_status == "downloaded":
+        if file_state == "servable":
+            return MediaClassification("image", "available", None)
+        if file_state == "unsupported_type":
+            return MediaClassification("image", "failed", "media_file_type_unsupported")
+        return MediaClassification("image", "failed", "media_file_missing_on_disk")
+
+    if media_file_download_status == "failed":
+        return MediaClassification("image", "failed", "media_download_failed")
+
+    # "pending", or no media_files row at all (None) — base classification
+    # (not_downloaded/unknown, media_download_not_implemented) already
+    # covers this correctly.
+    return base
