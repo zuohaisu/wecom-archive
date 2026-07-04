@@ -263,7 +263,7 @@ source queries include `WHERE archive_messages.tenant_id = <tenant_id>`.
 
 | Object | Derived from |
 |---|---|
-| `monitored_accounts` | `sender`/`receiver_userid` LIKE `'staff_%'` |
+| `monitored_accounts` (archive seats) | RND-132: union of (a) `sender`/`receiver_userid` LIKE `'staff_%'` (legacy mock/dev convention) and (b) any `admin_users.wecom_user_id` for the tenant that also appears as a sender/recipient in the archive — no formal seat-roster table exists yet. See `_collect_staff_ids()` in `app/routers/conversations.py`. |
 | `conversations` | Aggregated from `archive_messages` + `archive_message_recipients` |
 
 ---

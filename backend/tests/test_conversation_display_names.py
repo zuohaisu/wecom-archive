@@ -224,8 +224,9 @@ def test_group_messages_endpoint_includes_sender_and_recipient_display_fields(cl
         resp = client.get("/api/conversations/wra_room_abc123/messages")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 1
-        m = data[0]
+        messages = data["messages"]
+        assert len(messages) == 1
+        m = messages[0]
         assert m["sender"] == "contact_zhangsan"
         assert m["sender_display_name"] == "张三"
         assert m["sender_raw_id"] == "contact_zhangsan"
@@ -233,6 +234,7 @@ def test_group_messages_endpoint_includes_sender_and_recipient_display_fields(cl
         # No Contact row for staff_yingzi -> fallback is the raw ID, never blank.
         assert m["recipient_display_names"] == ["staff_yingzi"]
         assert m["recipient_raw_ids"] == ["staff_yingzi"]
+        assert data["pagination"]["has_older"] is False
     finally:
         app.dependency_overrides.clear()
 
@@ -261,7 +263,7 @@ def test_group_messages_endpoint_still_requires_auth(client) -> None:
 
 def test_contacts_endpoint_includes_raw_id_field(client) -> None:
     from app.auth import get_current_user
-    from app.db.models import Contact
+    from app.db.models import AdminUser, Contact
     from app.db.session import get_db
     from app.main import app
 
@@ -286,6 +288,14 @@ def test_contacts_endpoint_includes_raw_id_field(client) -> None:
         contact_q.filter.return_value = contact_q
         contact_q.all.return_value = [contact_row]
 
+        # No admin_users rows for this tenant — _collect_staff_ids() falls
+        # back to the "staff_" prefix signal alone, which finds nothing
+        # among these fixture IDs (see module docstring on RND-132 seats).
+        admin_user_q = MagicMock()
+        admin_user_q.filter.return_value = admin_user_q
+        admin_user_q.distinct.return_value = admin_user_q
+        admin_user_q.all.return_value = []
+
         def _query(target):
             key = getattr(target, "key", None)
             if key == "sender":
@@ -294,6 +304,8 @@ def test_contacts_endpoint_includes_raw_id_field(client) -> None:
                 return recipient_q
             if target is Contact:
                 return contact_q
+            if key == "wecom_user_id" or target is AdminUser:
+                return admin_user_q
             raise AssertionError(f"unexpected query target: {target}")
 
         mock.query.side_effect = _query

@@ -281,6 +281,9 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .entity-avatar{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#fff;flex-shrink:0}
 .entity-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .entity-raw{color:#bbb;font-weight:400}
+.seat-badge{font-size:.62rem;padding:.05rem .35rem;border-radius:2px;margin-left:.3rem;font-weight:600;flex-shrink:0}
+.seat-badge-active{background:#f6ffed;color:#389e0d;border:1px solid #b7eb8f}
+.seat-badge-history{background:#f5f5f5;color:#999;border:1px solid #e8e8e8}
 .conv-card{padding:.55rem .75rem;border-bottom:1px solid #f0f0f0;cursor:pointer}
 .conv-card:hover{background:#f5f8ff}
 .conv-card.active{background:#e6f4ff;border-left:3px solid #1890ff}
@@ -297,6 +300,9 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .badge-account{font-size:.68rem;color:#888}
 .timeline{padding:.6rem .75rem;display:flex;flex-direction:column;gap:.65rem}
 .tl-msg{display:flex;flex-direction:column;gap:.12rem}
+.tl-row{display:flex;flex-direction:column;gap:.12rem;max-width:100%}
+.tl-row-self{align-items:flex-end}
+.tl-row-other{align-items:flex-start}
 .tl-meta{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
 .tl-sender{font-size:.78rem;font-weight:600;color:#555}
 .tl-staff{color:#0958d9}
@@ -304,7 +310,12 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .tl-time{font-size:.72rem;color:#bbb}
 .tl-bubble{background:#f0f0f0;border-radius:4px;padding:.3rem .5rem;font-size:.83rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-width:580px}
 .tl-bubble-staff{background:#e6f4ff;border-left:3px solid #1890ff}
+.tl-bubble-self{background:#d9f7be;border:1px solid #b7eb8f}
+.tl-bubble-other{background:#fff;border:1px solid #e8e8e8}
 .tl-rcpt{font-size:.7rem;color:#ccc}
+.load-older-btn{margin:0 auto .6rem;display:block;padding:.3rem .9rem;font-size:.75rem;border:1px solid #d9d9d9;border-radius:3px;background:#fff;color:#555;cursor:pointer}
+.load-older-btn:hover{background:#f5f5f5}
+.load-older-btn:disabled{color:#ccc;cursor:default}
 .empty-state{padding:2.5rem 1rem;text-align:center;color:#ccc;font-size:.83rem}
 .loading{padding:1rem;text-align:center;color:#bbb;font-size:.82rem}
 .error-msg{margin:.5rem;padding:.6rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:3px;font-size:.8rem}
@@ -339,6 +350,7 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 </div>
 <script>
 var mode='staff',selEntityId=null,selConvId=null;
+var timelineConvId=null,timelineMsgs=[],timelineHasOlder=false,timelineNextBefore=null,timelineLoadingOlder=false;
 function esc(s){
   return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -366,6 +378,7 @@ function doLogout(){
 }
 function setMode(m){
   mode=m; selEntityId=null; selConvId=null;
+  timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.getElementById('tab-staff').classList.toggle('active',m==='staff');
   document.getElementById('tab-contact').classList.toggle('active',m==='contact');
   document.getElementById('entity-header').textContent=m==='staff'?'Monitored Accounts':'Contacts';
@@ -386,15 +399,21 @@ function renderEntityList(items){
   if(!items||!items.length){body.innerHTML='<div class="empty-state">None found</div>';return;}
   var html='';
   items.forEach(function(item){
-    var id=mode==='staff'?item.monitored_account_id:item.contact_id;
+    var id=mode==='staff'?item.staff_id:item.contact_id;
     var rawId=item.raw_id||id;
     var name=item.display_name||id;
     var av=esc(name.charAt(0).toUpperCase());
     var bg=mode==='staff'?'#1890ff':'#389e0d';
     var secondary=(rawId&&rawId!==name)?'<span class="entity-raw"> · '+esc(rawId)+'</span>':'';
+    var seatBadge='';
+    if(mode==='staff'&&item.seat_status){
+      var seatCls=item.seat_status==='active'?'seat-badge-active':'seat-badge-history';
+      var seatLabel=item.seat_status==='active'?'Active':'History';
+      seatBadge='<span class="seat-badge '+seatCls+'">'+esc(seatLabel)+'</span>';
+    }
     html+='<div class="entity-item" data-id="'+esc(id)+'" data-name="'+esc(name)+'" onclick="onEntityClick(this)">'
       +'<div class="entity-avatar" style="background:'+bg+'">'+av+'</div>'
-      +'<span class="entity-name">'+esc(name)+secondary+'</span></div>';
+      +'<span class="entity-name">'+esc(name)+secondary+'</span>'+seatBadge+'</div>';
   });
   body.innerHTML=html;
   if(selEntityId){
@@ -405,6 +424,7 @@ function renderEntityList(items){
 }
 function onEntityClick(el){
   selEntityId=el.dataset.id; selConvId=null;
+  timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.querySelectorAll('.entity-item').forEach(function(e){e.classList.remove('active');});
   el.classList.add('active');
   document.getElementById('conv-header').textContent='Conversations — '+el.dataset.name;
@@ -455,21 +475,50 @@ function onConvClick(el){
   loadTimeline(selConvId);
 }
 function loadTimeline(convId){
-  var url='/api/conversations/'+encodeURIComponent(convId)+'/messages';
+  timelineConvId=convId; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.getElementById('timeline-body').innerHTML='<div class="loading">Loading…</div>';
-  fetch(url)
+  fetchTimelinePage(null, true);
+}
+function fetchTimelinePage(before, isInitial){
+  var url='/api/conversations/'+encodeURIComponent(timelineConvId)+'/messages?limit=20';
+  if(before)url+='&before='+encodeURIComponent(before);
+  return fetch(url)
     .then(function(r){if(handleUnauth(r))return null;if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
-    .then(function(msgs){if(msgs)renderTimeline(msgs);})
+    .then(function(data){
+      if(!data)return;
+      timelineMsgs=before?data.messages.concat(timelineMsgs):data.messages;
+      timelineHasOlder=data.pagination.has_older;
+      timelineNextBefore=data.pagination.next_before;
+      renderTimeline(isInitial);
+    })
     .catch(function(e){document.getElementById('timeline-body').innerHTML='<div class="error-msg">Failed to load: '+esc(e.message)+'</div>';});
 }
-function renderTimeline(msgs){
+function loadOlderMessages(){
+  if(timelineLoadingOlder||!timelineHasOlder)return;
+  timelineLoadingOlder=true;
   var body=document.getElementById('timeline-body');
-  if(!msgs||!msgs.length){body.innerHTML='<div class="empty-state">No messages</div>';return;}
-  var html='<div class="timeline">';
-  msgs.forEach(function(m){
+  var prevScrollHeight=body.scrollHeight;
+  var prevScrollTop=body.scrollTop;
+  fetchTimelinePage(timelineNextBefore, false).then(function(){
+    timelineLoadingOlder=false;
+    var body2=document.getElementById('timeline-body');
+    body2.scrollTop=prevScrollTop+(body2.scrollHeight-prevScrollHeight);
+  });
+}
+function renderTimeline(scrollToBottom){
+  var body=document.getElementById('timeline-body');
+  if(!timelineMsgs||!timelineMsgs.length){body.innerHTML='<div class="empty-state">No messages</div>';return;}
+  var html='';
+  if(timelineHasOlder){
+    html+='<button class="load-older-btn" onclick="loadOlderMessages()">Load older messages</button>';
+  }
+  html+='<div class="timeline">';
+  timelineMsgs.forEach(function(m){
+    var isSelf=mode==='staff'&&selEntityId&&m.sender===selEntityId;
     var isStaff=m.sender&&m.sender.indexOf('staff_')===0;
+    var rowCls='tl-row '+(isSelf?'tl-row-self':'tl-row-other');
     var sc='tl-sender'+(isStaff?' tl-staff':'');
-    var bc='tl-bubble'+(isStaff?' tl-bubble-staff':'');
+    var bc='tl-bubble '+(isSelf?'tl-bubble-self':(mode==='staff'?'tl-bubble-other':(isStaff?'tl-bubble-staff':'')));
     var text=m.content_text?esc(m.content_text):'['+esc(m.msgtype||'message')+']';
     var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
     var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">group</span>':'';
@@ -478,7 +527,7 @@ function renderTimeline(msgs){
     var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
     var rcptNames=(m.recipient_display_names&&m.recipient_display_names.length)?m.recipient_display_names:(m.recipients||[]);
     var rcpt=rcptNames.length?'<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>':'';
-    html+='<div class="tl-msg">'
+    html+='<div class="'+rowCls+'">'
       +'<div class="tl-meta"><span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
       +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+'</div>'
       +'<div class="'+bc+'">'+text+'</div>'
@@ -486,7 +535,7 @@ function renderTimeline(msgs){
   });
   html+='</div>';
   body.innerHTML=html;
-  body.scrollTop=body.scrollHeight;
+  if(scrollToBottom){body.scrollTop=body.scrollHeight;}
 }
 loadCurrentUser();
 setMode('staff');

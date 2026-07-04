@@ -13,9 +13,34 @@ Conversation identity:
   Group  → conversation_id = roomid
   Direct → conversation_id = "direct__<uid_a>___<uid_b>"  (sorted, triple-underscore separator)
 
-Monitored-account detection:
-  Any sender or recipient whose ID starts with "staff_" is a monitored account.
-  All other participants are contacts.
+Monitored-account / archive-seat detection (RND-132):
+  No formal archive-seat roster exists anywhere in this schema — there is no
+  config table or tenant field that explicitly lists which WeCom userid is a
+  monitored archive seat. Two signals are combined, in order of confidence:
+
+    1. Legacy "staff_" prefix convention. This is how the RND-96 mock/dev
+       fixtures name monitored accounts, and is kept for backward
+       compatibility with existing tests and any tenant that happens to
+       provision seat accounts with this prefix.
+    2. Any wecom_userid that is BOTH (a) an admin_users row for this tenant
+       (i.e. has authenticated into this admin console at least once) AND
+       (b) observed as a sender/recipient in this tenant's archive. Only an
+       actual WeCom employee operating a monitored seat can satisfy both —
+       an external contact never logs into the internal admin console — so
+       this is a real relational signal, not an inference over message
+       content. It is the production fallback: real decrypted senders are
+       plain WeCom userids with no "staff_" prefix, so signal 1 alone
+       finds nothing outside mock data.
+
+  See _collect_staff_ids() for the implementation. This is deliberately NOT
+  "every distinct sender" — that would surface customer/contact IDs as fake
+  "staff" entries, which the console must never do.
+
+  Among the resulting set, the seat with the most recent latest_message_time
+  is reported as the single "active" seat (seat_status=active); all others
+  are "history" (seat_status=history) — still visible so their archived
+  conversations remain reviewable. This ranking is itself a stand-in for a
+  real active-seat configuration source, which does not exist yet.
 """
 
 from __future__ import annotations
@@ -24,7 +49,7 @@ from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -42,6 +67,50 @@ router = APIRouter()
 
 def _is_staff(uid: str) -> bool:
     return uid.startswith("staff_")
+
+
+def _collect_archive_participant_ids(db: Session, tenant_id: str) -> set[str]:
+    """Return every distinct wecom_userid observed as a sender or recipient
+    in this tenant's archive — staff and contacts alike, unfiltered."""
+    sender_rows = (
+        db.query(ArchiveMessage.sender)
+        .filter(
+            ArchiveMessage.sender.isnot(None),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .distinct()
+        .all()
+    )
+    recipient_rows = (
+        db.query(ArchiveMessageRecipient.receiver_userid)
+        .filter(ArchiveMessageRecipient.tenant_id == tenant_id)
+        .distinct()
+        .all()
+    )
+    return {row[0] for row in sender_rows + recipient_rows if row[0]}
+
+
+def _collect_staff_ids(db: Session, tenant_id: str) -> set[str]:
+    """
+    Return the set of wecom_userids treated as WeCom archive seats (staff)
+    for this tenant. See the module docstring for why two signals are
+    combined instead of a single formal source.
+    """
+    participant_ids = _collect_archive_participant_ids(db, tenant_id)
+    prefix_ids = {p for p in participant_ids if _is_staff(p)}
+
+    admin_user_rows = (
+        db.query(AdminUser.wecom_user_id)
+        .filter(AdminUser.tenant_id == tenant_id)
+        .distinct()
+        .all()
+    )
+    admin_user_ids = {row[0] for row in admin_user_rows if row[0]}
+    if not admin_user_ids:
+        return prefix_ids
+
+    admin_seat_ids = admin_user_ids & participant_ids
+    return prefix_ids | admin_seat_ids
 
 
 def _direct_conv_id(uid_a: str, uid_b: str) -> str:
@@ -77,6 +146,49 @@ def _load_recipients_map(db: Session, msg_ids: list[int]) -> dict[int, list[str]
     ):
         result.setdefault(r.message_id, []).append(r.receiver_userid)
     return result
+
+
+def _latest_own_participation_time(
+    db: Session, entity_id: str, tenant_id: str
+) -> Optional[int]:
+    """
+    Return the max msgtime among messages where entity_id is literally the
+    sender, or literally a listed recipient — WITHOUT expanding through
+    shared group rooms.
+
+    This is deliberately narrower than _fetch_messages_for_entity(), which
+    expands seed messages to every message in a shared group room so the
+    Sessions list can show full group context. That expansion is correct
+    for session viewing, but if it were also used to compute a seat's
+    "latest activity" for active/history ranking, a historical seat that
+    once participated in a group would incorrectly inherit a later message
+    in that same room sent by someone else after the seat stopped
+    participating (RND-132 QA fix). Only this function's result may be used
+    for seat active/history classification and ranking.
+    """
+    sender_max = (
+        db.query(func.max(ArchiveMessage.msgtime))
+        .filter(
+            ArchiveMessage.sender == entity_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .scalar()
+    )
+    recipient_max = (
+        db.query(func.max(ArchiveMessage.msgtime))
+        .join(
+            ArchiveMessageRecipient,
+            ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+        )
+        .filter(
+            ArchiveMessageRecipient.receiver_userid == entity_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .scalar()
+    )
+    candidates = [v for v in (sender_max, recipient_max) if v is not None]
+    return max(candidates) if candidates else None
 
 
 def _fetch_messages_for_entity(
@@ -157,21 +269,35 @@ def _build_conversation_list(
     messages: list,
     recipients_map: dict[int, list[str]],
     display_names: dict[str, str],
+    staff_ids: Optional[set[str]] = None,
 ) -> list[dict]:
     """
     Aggregate a flat message list into conversation summary objects.
 
+    staff_ids: when provided (the tenant's resolved seat set from
+    _collect_staff_ids), membership in this set determines staff/contact
+    classification instead of the legacy "staff_" prefix check — this lets
+    callers classify participants correctly in tenants where the archive
+    seat's real userid does not use that prefix. Defaults to None so this
+    remains a pure function callable without a DB round-trip (existing
+    tests rely on this).
+
     Returns a list sorted by last_message_time descending (most recent first).
     """
     convs: dict[str, dict] = {}
+
+    def is_staff(uid: str) -> bool:
+        if staff_ids is not None:
+            return uid in staff_ids
+        return _is_staff(uid)
 
     for msg in messages:
         sender = msg.sender or ""
         roomid = msg.roomid or ""
         recipients = recipients_map.get(msg.id, [])
         all_parties = {p for p in ({sender} | set(recipients)) if p}
-        staff_set = {p for p in all_parties if _is_staff(p)}
-        contact_set = {p for p in all_parties if not _is_staff(p)}
+        staff_set = {p for p in all_parties if is_staff(p)}
+        contact_set = {p for p in all_parties if not is_staff(p)}
 
         if roomid:
             conv_id = roomid
@@ -275,6 +401,12 @@ def _build_conversation_list(
 class MonitoredAccountOut(BaseModel):
     monitored_account_id: str
     display_name: str
+    staff_id: str
+    raw_id: str
+    seat_status: str  # "active" | "history" | "unknown"
+    is_active_archive_seat: bool
+    latest_message_time: Optional[int] = None
+    conversation_count: int = 0
 
 
 class ContactOut(BaseModel):
@@ -323,6 +455,42 @@ class TimelineMessageOut(BaseModel):
     decrypt_status: str
 
 
+class PaginationOut(BaseModel):
+    has_older: bool
+    next_before: Optional[str] = None
+
+
+class ConversationMessagesOut(BaseModel):
+    messages: list[TimelineMessageOut]
+    pagination: PaginationOut
+
+
+# ---------------------------------------------------------------------------
+# Message pagination cursor (RND-132 QA fix)
+#
+# msgtime alone is not a unique key — multiple archive_messages rows can
+# share the exact same msgtime (e.g. a burst ingested in one batch). A
+# cursor built from msgtime only, compared with strict "<", silently drops
+# every row that shares the boundary msgtime once more than `limit` rows
+# share it. The cursor is therefore a compound (msgtime, id) pair: id is
+# the ArchiveMessage primary key, which is always present and gives a
+# stable, monotonic tie-breaker so pagination order is a strict total
+# order with no gaps or duplicates regardless of msgtime collisions.
+# ---------------------------------------------------------------------------
+
+
+def _encode_message_cursor(msgtime: Optional[int], message_id: int) -> str:
+    return f"{msgtime if msgtime is not None else 0}:{message_id}"
+
+
+def _decode_message_cursor(cursor: str) -> tuple[int, int]:
+    try:
+        msgtime_str, id_str = cursor.split(":", 1)
+        return int(msgtime_str), int(id_str)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Malformed pagination cursor")
+
+
 # ---------------------------------------------------------------------------
 # Routes — all protected by get_current_user
 # ---------------------------------------------------------------------------
@@ -333,35 +501,72 @@ def get_monitored_accounts(
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
-    """Return all monitored accounts inferred from tenant archive data."""
+    """
+    Return all WeCom archive seats (monitored accounts) for this tenant —
+    both the currently active seat and historical seats with archived
+    records — sorted active-first, then by latest_message_time descending.
+
+    See _collect_staff_ids() and the module docstring for how seats are
+    identified in the absence of a formal seat-roster source.
+
+    latest_message_time (and therefore active/history ranking) is computed
+    from _latest_own_participation_time() — each seat's own sender/recipient
+    rows only, never the group-room-expanded set _fetch_messages_for_entity()
+    returns. conversation_count still uses the expanded set: that is a
+    session-viewing concern (how many threads to show under this seat), not
+    a classification concern (RND-132 QA fix — see _latest_own_participation_time
+    docstring for why these two must stay separate).
+    """
     _, tenant_id = auth
-    sender_rows = (
-        db.query(ArchiveMessage.sender)
-        .filter(
-            ArchiveMessage.sender.like("staff_%"),
-            ArchiveMessage.tenant_id == tenant_id,
-        )
-        .distinct()
-        .all()
-    )
-    recipient_rows = (
-        db.query(ArchiveMessageRecipient.receiver_userid)
-        .filter(
-            ArchiveMessageRecipient.receiver_userid.like("staff_%"),
-            ArchiveMessageRecipient.tenant_id == tenant_id,
-        )
-        .distinct()
-        .all()
-    )
-    staff_ids = {row[0] for row in sender_rows + recipient_rows if row[0]}
+    staff_ids = _collect_staff_ids(db, tenant_id)
+    if not staff_ids:
+        return []
+
     display_names = _load_display_names(db, tenant_id)
-    return [
-        MonitoredAccountOut(
-            monitored_account_id=sid,
-            display_name=resolve_person_display_name(sid, display_names.get(sid)),
+
+    seats: list[dict] = []
+    for sid in staff_ids:
+        latest_message_time = _latest_own_participation_time(db, sid, tenant_id)
+        if latest_message_time is None:
+            # No direct participation at all for this identity — not a seat
+            # worth surfacing (definition requires archived records where
+            # the seat is literally the sender or a listed recipient).
+            continue
+        messages = _fetch_messages_for_entity(db, sid, tenant_id)
+        recipients_map = _load_recipients_map(db, [m.id for m in messages])
+        conversation_count = len(
+            _build_conversation_list(messages, recipients_map, display_names, staff_ids)
         )
-        for sid in sorted(staff_ids)
-    ]
+        seats.append(
+            {
+                "staff_id": sid,
+                "latest_message_time": latest_message_time,
+                "conversation_count": conversation_count,
+            }
+        )
+
+    if not seats:
+        return []
+
+    seats.sort(key=lambda s: (s["latest_message_time"] or 0, s["staff_id"]), reverse=True)
+
+    result = []
+    for idx, seat in enumerate(seats):
+        sid = seat["staff_id"]
+        is_active = idx == 0
+        result.append(
+            MonitoredAccountOut(
+                monitored_account_id=sid,
+                staff_id=sid,
+                raw_id=sid,
+                display_name=resolve_person_display_name(sid, display_names.get(sid)),
+                seat_status="active" if is_active else "history",
+                is_active_archive_seat=is_active,
+                latest_message_time=seat["latest_message_time"],
+                conversation_count=seat["conversation_count"],
+            )
+        )
+    return result
 
 
 @router.get("/api/contacts", response_model=list[ContactOut])
@@ -371,26 +576,9 @@ def get_contacts(
 ):
     """Return all contacts (non-staff participants) observed in the tenant archive."""
     _, tenant_id = auth
-    sender_rows = (
-        db.query(ArchiveMessage.sender)
-        .filter(
-            ArchiveMessage.sender.isnot(None),
-            ~ArchiveMessage.sender.like("staff_%"),
-            ArchiveMessage.tenant_id == tenant_id,
-        )
-        .distinct()
-        .all()
-    )
-    recipient_rows = (
-        db.query(ArchiveMessageRecipient.receiver_userid)
-        .filter(
-            ~ArchiveMessageRecipient.receiver_userid.like("staff_%"),
-            ArchiveMessageRecipient.tenant_id == tenant_id,
-        )
-        .distinct()
-        .all()
-    )
-    contact_ids = {row[0] for row in sender_rows + recipient_rows if row[0]}
+    participant_ids = _collect_archive_participant_ids(db, tenant_id)
+    staff_ids = _collect_staff_ids(db, tenant_id)
+    contact_ids = participant_ids - staff_ids
     display_names = _load_display_names(db, tenant_id)
     return [
         ContactOut(
@@ -435,20 +623,46 @@ def get_conversations(
 
     recipients_map = _load_recipients_map(db, [m.id for m in messages])
     display_names = _load_display_names(db, tenant_id)
-    return _build_conversation_list(messages, recipients_map, display_names)
+    staff_ids = _collect_staff_ids(db, tenant_id)
+    return _build_conversation_list(messages, recipients_map, display_names, staff_ids)
 
 
 @router.get(
     "/api/conversations/{conversation_id}/messages",
-    response_model=list[TimelineMessageOut],
+    response_model=ConversationMessagesOut,
 )
 def get_conversation_messages(
     conversation_id: str,
+    limit: int = Query(20, ge=1, le=100, description="Max messages to return"),
+    before: Optional[str] = Query(
+        None,
+        description=(
+            "Opaque pagination cursor from a previous response's "
+            "pagination.next_before — pass it back verbatim to load the "
+            "next older page. Do not construct this value manually: it is "
+            "a compound msgtime:id token (see _decode_message_cursor)."
+        ),
+    ),
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
     """
-    Return the ordered message timeline for a conversation, scoped to the session tenant.
+    Return a page of the message timeline for a conversation, scoped to the
+    session tenant, always in ascending msgtime order (oldest first) so the
+    UI can render it directly without re-sorting.
+
+    Default (no `before`): the latest `limit` messages.
+    With `before=<cursor>`: the `limit` messages immediately preceding that
+    cursor — used to load older history without re-fetching what is already
+    rendered. pagination.next_before is the cursor to pass for the next
+    "load older" call; pagination.has_older tells the UI whether to show
+    that control at all.
+
+    The cursor is a compound (msgtime, id) pair, not a bare msgtime: several
+    archive_messages rows can legitimately share the exact same msgtime, and
+    a msgtime-only cursor with a strict "<" comparison would silently drop
+    every row at the boundary once more than `limit` rows share it. See
+    _encode_message_cursor / _decode_message_cursor.
 
     conversation_id formats:
       Group:  <roomid>                          e.g. "after_sales_group_001"
@@ -513,8 +727,20 @@ def get_conversation_messages(
     recipients_map = _load_recipients_map(db, [m.id for m in messages])
     display_names = _load_display_names(db, tenant_id)
 
+    all_sorted_asc = sorted(messages, key=lambda m: (m.msgtime or 0, m.id))
+    if before is not None:
+        cursor = _decode_message_cursor(before)
+        eligible = [m for m in all_sorted_asc if (m.msgtime or 0, m.id) < cursor]
+    else:
+        eligible = all_sorted_asc
+    page = eligible[-limit:]
+    has_older = len(eligible) > limit
+    next_before = (
+        _encode_message_cursor(page[0].msgtime, page[0].id) if page and has_older else None
+    )
+
     result = []
-    for msg in sorted(messages, key=lambda m: m.msgtime or 0):
+    for msg in page:
         recipients = recipients_map.get(msg.id, [])
         result.append(
             TimelineMessageOut(
@@ -538,4 +764,7 @@ def get_conversation_messages(
                 decrypt_status=msg.decrypt_status,
             )
         )
-    return result
+    return ConversationMessagesOut(
+        messages=result,
+        pagination=PaginationOut(has_older=has_older, next_before=next_before),
+    )

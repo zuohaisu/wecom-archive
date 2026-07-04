@@ -343,7 +343,7 @@ def test_contacts_still_requires_auth(client) -> None:
 
 def test_get_contacts_returns_display_name_from_contact_name(client) -> None:
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessage, ArchiveMessageRecipient, Contact
+    from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
     from app.db.session import get_db
     from app.main import app
 
@@ -368,6 +368,14 @@ def test_get_contacts_returns_display_name_from_contact_name(client) -> None:
         contact_q.filter.return_value = contact_q
         contact_q.all.return_value = [contact_row]
 
+        # No admin_users rows for this tenant — _collect_staff_ids() falls
+        # back to the "staff_" prefix signal alone (see RND-132), which
+        # finds nothing among these fixture IDs.
+        admin_user_q = MagicMock()
+        admin_user_q.filter.return_value = admin_user_q
+        admin_user_q.distinct.return_value = admin_user_q
+        admin_user_q.all.return_value = []
+
         def _query(target):
             key = getattr(target, "key", None)
             if key == "sender":
@@ -376,6 +384,8 @@ def test_get_contacts_returns_display_name_from_contact_name(client) -> None:
                 return recipient_q
             if target is Contact:
                 return contact_q
+            if key == "wecom_user_id" or target is AdminUser:
+                return admin_user_q
             raise AssertionError(f"unexpected query target: {target}")
 
         mock.query.side_effect = _query
