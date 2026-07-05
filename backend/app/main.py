@@ -1,5 +1,5 @@
 import html as _html
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -62,12 +62,23 @@ def _e(value) -> str:
     return _html.escape(str(value)) if value is not None else ""
 
 
+# Beijing time has used a fixed UTC+8 offset (no DST) since 1991; a fixed-offset
+# timezone avoids depending on system tzdata being installed at deploy time.
+_BEIJING_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
+
+
 def _fmt_msgtime(ms: Optional[int]) -> str:
+    """Format an epoch-ms timestamp as Beijing time (UTC+8) for admin display only.
+
+    Stored/raw msgtime values are untouched; this is purely for rendering.
+    """
     if ms is None:
         return ""
     try:
-        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S UTC"
+        return (
+            datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+            .astimezone(_BEIJING_TZ)
+            .strftime("%Y-%m-%d %H:%M:%S")
         )
     except Exception:
         return _e(ms)
@@ -181,7 +192,7 @@ def admin_messages(
 <table>
   <thead><tr>
     <th>msgid</th><th>sender</th><th>room</th><th>type</th>
-    <th>time (UTC)</th><th>content</th><th>status</th>
+    <th>time (UTC+8)</th><th>content</th><th>status</th>
   </tr></thead>
   <tbody>{row_html}</tbody>
 </table>
@@ -238,7 +249,7 @@ def admin_message_detail(
   <dt>msgtype</dt><dd>{_e(msg.msgtype)}</dd>
   <dt>sender</dt><dd>{_e(msg.sender)}</dd>
   <dt>roomid</dt><dd>{_e(msg.roomid)}</dd>
-  <dt>msgtime</dt><dd>{_fmt_msgtime(msg.msgtime)}</dd>
+  <dt>msgtime (UTC+8)</dt><dd>{_fmt_msgtime(msg.msgtime)}</dd>
   <dt>decrypt_status</dt><dd>{_badge(msg.decrypt_status)}</dd>
   <dt>content_text</dt><dd><pre style="white-space:pre-wrap">{_e(msg.content_text)}</pre></dd>
 </dl>
@@ -262,6 +273,7 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .top-bar a{color:#8ca0b3;font-size:.82rem;text-decoration:none}
 .top-bar a:hover{color:#fff}
 .top-bar-user{margin-left:auto;font-size:.8rem;color:#8ca0b3;display:flex;align-items:center;gap:.75rem}
+.tz-note{font-size:.72rem;color:#5c7185}
 .btn-logout{background:transparent;border:1px solid #3a4a5a;color:#8ca0b3;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem}
 .btn-logout:hover{border-color:#8ca0b3;color:#fff}
 .layout{display:flex;flex:1;overflow:hidden}
@@ -326,6 +338,7 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 <body>
 <div class="top-bar">
   <h1>Conversation Review Console</h1>
+  <span class="tz-note">Times shown in Beijing time (UTC+8)</span>
   <div class="top-bar-user">
     <span id="current-user"></span>
     <a href="/admin/messages">Messages ↗</a>
@@ -357,9 +370,13 @@ function esc(s){
   return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function fmtTime(ms){
+  // Display-only: renders Beijing time (UTC+8, no DST) from a UTC epoch-ms value.
+  // Raw ms is never mutated; ordering/pagination always use the original value.
+  // Timezone is communicated once via the page-level tz-note, not per value —
+  // this returns a bare "YYYY-MM-DD HH:mm:ss" with no timezone suffix.
   if(!ms)return'';
-  var d=new Date(ms);
-  return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+' '+pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+' UTC';
+  var d=new Date(ms+8*3600*1000);
+  return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+' '+pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds());
 }
 function pad(n){return String(n).padStart(2,'0');}
 function handleUnauth(r){
