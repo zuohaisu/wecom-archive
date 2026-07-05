@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Manual one-shot: download image media for archived WeCom messages and
-populate media_files rows (RND-147).
+One-shot: download image media for archived WeCom messages and populate
+media_files rows (RND-147).
 
-Image only. Not invoked by any timer/worker — media_files is currently
+Image only. This script can be run manually or by the scheduled recent
+image media download timer (RND-168; see
+deploy/systemd/wecom-archive-media-download.timer and
+docs/wecom_archive_media_download_runbook.md). media_files is otherwise
 never populated by any other code path (RND-144 only serves/renders rows
-that already exist here), so an operator runs this by hand to backfill it
-for existing attachment-bearing archive messages.
+that already exist here).
 
 Usage (from backend/):
     python scripts/download_wecom_image_media_once.py --count-only
