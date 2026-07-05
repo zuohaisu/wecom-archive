@@ -566,7 +566,14 @@ function renderTimeline(scrollToBottom){
     var senderRaw=m.sender_raw_id||m.sender;
     var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
     var rcptNames=(m.recipient_display_names&&m.recipient_display_names.length)?m.recipient_display_names:(m.recipients||[]);
-    var rcpt=rcptNames.length?'<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>':'';
+    var rcpt='';
+    if(m.roomid){
+      if(rcptNames.length){
+        rcpt='<div class="tl-rcpt">Group chat · '+rcptNames.length+' participant'+(rcptNames.length===1?'':'s')+'</div>';
+      }
+    }else if(rcptNames.length){
+      rcpt='<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>';
+    }
     html+='<div class="'+rowCls+'">'
       +'<div class="tl-meta"><span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
       +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+'</div>'
