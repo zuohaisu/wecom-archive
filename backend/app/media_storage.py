@@ -110,6 +110,27 @@ def resolve_image_file_state(local_path: Optional[str]) -> str:
     return "servable"
 
 
+def detect_image_type_from_bytes(data: bytes) -> Optional[str]:
+    """Return an allow-listed image extension (".jpg", ".png", ".gif",
+    ".webp") based on *data*'s magic-byte header, or None if it does not
+    match any allowed image signature.
+
+    Used by the RND-147 download script before marking a freshly
+    downloaded file as "downloaded" — the sdkfileid, msgtype, or any
+    caller-supplied hint must never be trusted for this decision, only the
+    actual byte content.
+    """
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
 def resolve_servable_image_path(local_path: Optional[str]) -> Optional[Path]:
     """Return the resolved Path only when resolve_image_file_state(local_path)
     == "servable" — i.e. exactly the case the media route is allowed to
