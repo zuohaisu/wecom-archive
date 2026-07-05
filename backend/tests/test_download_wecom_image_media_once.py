@@ -20,6 +20,7 @@ from __future__ import annotations
 import fcntl
 import os
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -131,6 +132,59 @@ def test_downloaded_repair_query_is_image_only_tenant_scoped_and_downloaded_only
 
 
 # ---------------------------------------------------------------------------
+# RND-151 — since_ms recency filter and newest_first ordering (query shape)
+# ---------------------------------------------------------------------------
+
+
+def test_candidate_query_default_omits_since_filter_and_orders_by_id_ascending() -> None:
+    """Backward-compat: with no since_ms/newest_first args, the query shape
+    (and therefore behavior) is unchanged from pre-RND-151."""
+    from scripts.download_wecom_image_media_once import build_candidate_query
+
+    engine = create_engine("sqlite:///:memory:")
+    with RealSession(engine) as session:
+        sql = _compiled_sql(build_candidate_query(session, "tenant-a", retry=False))
+
+    assert "msgtime >=" not in sql
+    assert "ORDER BY archive_messages.id" in sql
+    assert "DESC" not in sql
+
+
+def test_candidate_query_since_ms_adds_msgtime_lower_bound() -> None:
+    from scripts.download_wecom_image_media_once import build_candidate_query
+
+    engine = create_engine("sqlite:///:memory:")
+    with RealSession(engine) as session:
+        sql = _compiled_sql(
+            build_candidate_query(session, "tenant-a", retry=False, since_ms=1000)
+        )
+
+    assert "archive_messages.msgtime >= 1000" in sql
+
+
+def test_candidate_query_newest_first_orders_by_msgtime_desc_then_id_desc() -> None:
+    from scripts.download_wecom_image_media_once import build_candidate_query
+
+    engine = create_engine("sqlite:///:memory:")
+    with RealSession(engine) as session:
+        sql = _compiled_sql(
+            build_candidate_query(session, "tenant-a", retry=False, newest_first=True)
+        )
+
+    assert "ORDER BY archive_messages.msgtime DESC, archive_messages.id DESC" in sql
+
+
+def test_since_ms_cutoff_is_derived_from_current_utc_time() -> None:
+    from scripts.download_wecom_image_media_once import _since_ms_cutoff
+
+    now_ms = int(time.time() * 1000)
+    cutoff = _since_ms_cutoff(72)
+    expected = now_ms - 72 * 3600 * 1000
+    # allow a small tolerance for wall-clock drift between the two time.time() calls
+    assert abs(cutoff - expected) < 5000
+
+
+# ---------------------------------------------------------------------------
 # is_downloaded_media_file_stale — reuses the RND-144 servability predicate
 # ---------------------------------------------------------------------------
 
@@ -216,7 +270,9 @@ def test_select_candidates_combines_actionable_and_stale_repairs(monkeypatch, tm
     downloaded_q = _query_mock(all_result=downloaded_rows)
 
     monkeypatch.setattr(
-        script, "build_candidate_query", lambda _session, _tenant_id, _retry: actionable_q
+        script,
+        "build_candidate_query",
+        lambda _session, _tenant_id, _retry, since_ms=None, newest_first=False: actionable_q,
     )
     monkeypatch.setattr(
         script, "build_downloaded_repair_query", lambda _session, _tenant_id: downloaded_q
@@ -245,7 +301,9 @@ def test_select_candidates_skips_repair_scan_when_limit_exhausted_by_actionable(
         raise AssertionError("must not scan for repairs when limit already exhausted")
 
     monkeypatch.setattr(
-        script, "build_candidate_query", lambda _session, _tenant_id, _retry: actionable_q
+        script,
+        "build_candidate_query",
+        lambda _session, _tenant_id, _retry, since_ms=None, newest_first=False: actionable_q,
     )
     monkeypatch.setattr(script, "build_downloaded_repair_query", _repair_query)
 
@@ -273,7 +331,9 @@ def test_select_candidates_caps_repairs_to_remaining_budget(monkeypatch, tmp_pat
     downloaded_q = _query_mock(all_result=downloaded_rows)
 
     monkeypatch.setattr(
-        script, "build_candidate_query", lambda _session, _tenant_id, _retry: actionable_q
+        script,
+        "build_candidate_query",
+        lambda _session, _tenant_id, _retry, since_ms=None, newest_first=False: actionable_q,
     )
     monkeypatch.setattr(
         script, "build_downloaded_repair_query", lambda _session, _tenant_id: downloaded_q
@@ -381,6 +441,185 @@ def _insert_downloaded_message(session, msg_id: int, tenant_id: str, sdkfileid: 
         )
     )
     session.commit()
+
+
+def _insert_pending_message(
+    session, msg_id: int, tenant_id: str, sdkfileid: str, msgtime: int
+) -> None:
+    """Insert an image ArchiveMessage with no media_files row at all —
+    i.e. a fresh actionable candidate per build_candidate_query — at a
+    given msgtime (epoch-ms), for RND-151 recency/ordering tests."""
+    from app.db.models import ArchiveMessage
+
+    session.add(
+        ArchiveMessage(
+            id=msg_id,
+            msgid=f"m-{msg_id}",
+            seq=msg_id,
+            publickey_ver=1,
+            encrypt_random_key="k",
+            encrypt_chat_msg="c",
+            decrypt_status="success",
+            msgtype="image",
+            sdkfileid=sdkfileid,
+            tenant_id=tenant_id,
+            msgtime=msgtime,
+        )
+    )
+    session.commit()
+
+
+# ---------------------------------------------------------------------------
+# RND-151 regression: recent images must not be starved by old expired ones
+#
+# The bug: the downloader selected fresh candidates oldest-first with no
+# recency filter, so on a tenant with many old, already platform-expired
+# image messages, --limit was fully consumed by those old rows before ever
+# reaching recently ingested ones — new images silently never got
+# downloaded. --since-hours + --newest-first fix this at the candidate
+# selection layer (not via any manual SQL update).
+# ---------------------------------------------------------------------------
+
+
+def test_select_candidates_since_hours_and_newest_first_prioritizes_recent(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.download_wecom_image_media_once import _since_ms_cutoff, select_candidates
+
+    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
+    engine = _make_sqlite_engine(tmp_path)
+    session = RealSession(engine)
+
+    now_ms = int(time.time() * 1000)
+    retention_ms = 72 * 3600 * 1000
+
+    # 37 old messages, well outside the 72h retention window, lower ids so
+    # they would be selected first under the old oldest-first-by-id default.
+    for i in range(1, 38):
+        _insert_pending_message(
+            session, i, "tenant-a", f"sdk-old-{i}", now_ms - retention_ms - (i * 1000)
+        )
+    # 23 recent messages, inside the window, higher ids and higher msgtime.
+    for i in range(38, 61):
+        _insert_pending_message(
+            session, i, "tenant-a", f"sdk-recent-{i}", now_ms - (i * 1000)
+        )
+
+    since_ms = _since_ms_cutoff(72)
+    actionable, _repairs, _total = select_candidates(
+        session, "tenant-a", retry=False, limit=10, since_ms=since_ms, newest_first=True
+    )
+
+    assert len(actionable) == 10
+    # every selected candidate must come from the recent batch (id >= 38),
+    # never one of the 37 old expired candidates.
+    assert all(msg.id >= 38 for msg in actionable)
+    # newest-first: strictly descending msgtime across the selected batch.
+    msgtimes = [msg.msgtime for msg in actionable]
+    assert msgtimes == sorted(msgtimes, reverse=True)
+
+
+def test_select_candidates_since_hours_excludes_old_candidates_entirely(tmp_path, monkeypatch) -> None:
+    from scripts.download_wecom_image_media_once import _since_ms_cutoff, select_candidates
+
+    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
+    engine = _make_sqlite_engine(tmp_path)
+    session = RealSession(engine)
+
+    now_ms = int(time.time() * 1000)
+    retention_ms = 72 * 3600 * 1000
+
+    _insert_pending_message(session, 1, "tenant-a", "sdk-old-1", now_ms - retention_ms - 60_000)
+    _insert_pending_message(session, 2, "tenant-a", "sdk-recent-1", now_ms - 60_000)
+
+    since_ms = _since_ms_cutoff(72)
+    actionable, _repairs, _total = select_candidates(
+        session, "tenant-a", retry=False, limit=10, since_ms=since_ms
+    )
+
+    assert [msg.id for msg in actionable] == [2]
+
+
+def test_select_candidates_without_since_hours_default_is_oldest_first_by_id(
+    tmp_path, monkeypatch
+) -> None:
+    """Default behavior (no --since-hours/--newest-first) stays unchanged:
+    oldest-first by ascending id, no recency exclusion."""
+    from scripts.download_wecom_image_media_once import select_candidates
+
+    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
+    engine = _make_sqlite_engine(tmp_path)
+    session = RealSession(engine)
+
+    now_ms = int(time.time() * 1000)
+    _insert_pending_message(session, 1, "tenant-a", "sdk-1", now_ms - 999_000_000)
+    _insert_pending_message(session, 2, "tenant-a", "sdk-2", now_ms)
+
+    actionable, _repairs, _total = select_candidates(session, "tenant-a", retry=False, limit=10)
+
+    assert [msg.id for msg in actionable] == [1, 2]
+
+
+def _insert_failed_message(
+    session, msg_id: int, tenant_id: str, sdkfileid: str, msgtime: int
+) -> None:
+    """Insert an image ArchiveMessage with an existing media_files row whose
+    download_status is 'failed' — only actionable with --retry."""
+    from app.db.models import ArchiveMessage, MediaFile
+
+    session.add(
+        ArchiveMessage(
+            id=msg_id,
+            msgid=f"m-{msg_id}",
+            seq=msg_id,
+            publickey_ver=1,
+            encrypt_random_key="k",
+            encrypt_chat_msg="c",
+            decrypt_status="success",
+            msgtype="image",
+            sdkfileid=sdkfileid,
+            tenant_id=tenant_id,
+            msgtime=msgtime,
+        )
+    )
+    session.add(
+        MediaFile(sdkfileid=sdkfileid, archive_message_id=msg_id, download_status="failed")
+    )
+    session.commit()
+
+
+def test_select_candidates_old_failed_rows_do_not_block_recent_no_row_candidates(
+    tmp_path, monkeypatch
+) -> None:
+    """Requirement: existing failed old media rows must not consume the
+    --limit budget ahead of recent messages that have no media row at all,
+    once --since-hours excludes the old ones from the window."""
+    from scripts.download_wecom_image_media_once import _since_ms_cutoff, select_candidates
+
+    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
+    engine = _make_sqlite_engine(tmp_path)
+    session = RealSession(engine)
+
+    now_ms = int(time.time() * 1000)
+    retention_ms = 72 * 3600 * 1000
+
+    # Old messages with an existing "failed" media row — only actionable
+    # with --retry, and low ids so they'd sort first under oldest-first.
+    for i in range(1, 6):
+        _insert_failed_message(
+            session, i, "tenant-a", f"sdk-old-failed-{i}", now_ms - retention_ms - (i * 1000)
+        )
+    # Recent messages with no media row at all.
+    for i in range(6, 11):
+        _insert_pending_message(session, i, "tenant-a", f"sdk-recent-{i}", now_ms - (i * 1000))
+
+    since_ms = _since_ms_cutoff(72)
+    actionable, _repairs, _total = select_candidates(
+        session, "tenant-a", retry=True, limit=5, since_ms=since_ms, newest_first=True
+    )
+
+    assert len(actionable) == 5
+    assert all(msg.id >= 6 for msg in actionable)
 
 
 def test_select_candidates_stale_row_not_starved_by_preceding_valid_rows(tmp_path, monkeypatch) -> None:
@@ -780,6 +1019,8 @@ def test_main_releases_lock_after_completion(tmp_path, monkeypatch) -> None:
     def _query(model):
         if model is script.TenantWecomConfig:
             return _query_mock(first_result=tenant_row)
+        if model is script.ArchiveMessage:
+            return _query_mock(count_result=0)
         raise AssertionError(f"unexpected model queried: {model}")
 
     session = MagicMock()
@@ -828,6 +1069,8 @@ def test_count_only_performs_no_writes_and_never_touches_sdk(tmp_path, monkeypat
     def _query(model):
         if model is script.TenantWecomConfig:
             return _query_mock(first_result=tenant_row)
+        if model is script.ArchiveMessage:
+            return _query_mock(count_result=5)
         raise AssertionError(f"unexpected model queried in count-only mode: {model}")
 
     session = MagicMock()
@@ -857,6 +1100,86 @@ def test_count_only_performs_no_writes_and_never_touches_sdk(tmp_path, monkeypat
 
     captured = capsys.readouterr()
     assert "candidate_total: 3" in captured.out
+    assert "candidate_ordering: oldest_first" in captured.out
+    assert "candidates_with_existing_media_row: 5" in captured.out
+    assert "sdk-should-not-be-printed" not in captured.out
+
+
+@pytest.mark.parametrize("bad_value", ["0", "-5"])
+def test_main_rejects_non_positive_since_hours(bad_value, tmp_path, monkeypatch, capsys) -> None:
+    import scripts.download_wecom_image_media_once as script
+
+    _use_scratch_lock(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        script,
+        "create_engine",
+        MagicMock(side_effect=AssertionError("must not touch DB on validation failure")),
+    )
+    monkeypatch.setattr(sys, "argv", ["prog", "--count-only", "--since-hours", bad_value])
+
+    with pytest.raises(SystemExit) as exc:
+        script.main()
+    assert exc.value.code == 1
+
+    captured = capsys.readouterr()
+    assert "--since-hours must be a positive number" in captured.out
+
+
+def test_count_only_with_since_hours_and_newest_first_reports_window_stats_and_no_writes(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """RND-151: --count-only combined with --since-hours/--newest-first must
+    still perform zero DB writes, zero file writes, and zero SDK calls, and
+    must report the new aggregate window stats without leaking identifiers."""
+    import scripts.download_wecom_image_media_once as script
+
+    _use_scratch_lock(monkeypatch, tmp_path)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
+    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+
+    tenant_row = SimpleNamespace(tenant_id="tenant-a")
+    candidate_msg = SimpleNamespace(id=1, sdkfileid="sdk-should-not-be-printed")
+
+    def _query(model):
+        if model is script.TenantWecomConfig:
+            return _query_mock(first_result=tenant_row)
+        if model is script.ArchiveMessage:
+            return _query_mock(count_result=7)
+        raise AssertionError(f"unexpected model queried in count-only mode: {model}")
+
+    session = MagicMock()
+    session.query.side_effect = _query
+    session.add.side_effect = AssertionError("must not write in count-only mode")
+    session.commit.side_effect = AssertionError("must not commit in count-only mode")
+
+    @contextmanager
+    def _fake_session(_engine):
+        yield session
+
+    monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
+    monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(
+        script, "select_candidates", lambda *_a, **_k: ([candidate_msg], [], 10)
+    )
+    monkeypatch.setattr(
+        script.wecom_sdk,
+        "load_sdk",
+        MagicMock(side_effect=AssertionError("must not load SDK in count-only mode")),
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--count-only", "--since-hours", "72", "--newest-first"]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        script.main()
+    assert exc.value.code == 0
+
+    captured = capsys.readouterr()
+    assert "candidate_ordering: newest_first" in captured.out
+    assert "since_hours: 72.0" in captured.out
+    assert "candidates_in_window: 7" in captured.out
+    assert "candidates_excluded_by_window: 3" in captured.out  # 10 total - 7 in window
+    assert "candidates_with_existing_media_row: 7" in captured.out
     assert "sdk-should-not-be-printed" not in captured.out
 
 
@@ -1049,13 +1372,15 @@ def test_main_failed_row_not_retried_without_flag(tmp_path, monkeypatch) -> None
     tenant_row = SimpleNamespace(tenant_id="tenant-a")
     seen_retry_flags = []
 
-    def _spy_select_candidates(_session, _tenant_id, retry, _limit):
+    def _spy_select_candidates(_session, _tenant_id, retry, _limit, since_ms=None, newest_first=False):
         seen_retry_flags.append(retry)
         return [], [], 0
 
     def _query(model):
         if model is script.TenantWecomConfig:
             return _query_mock(first_result=tenant_row)
+        if model is script.ArchiveMessage:
+            return _query_mock(count_result=0)
         raise AssertionError(f"unexpected model queried: {model}")
 
     session = MagicMock()
@@ -1086,13 +1411,15 @@ def test_main_retry_flag_threads_through_to_select_candidates(tmp_path, monkeypa
     tenant_row = SimpleNamespace(tenant_id="tenant-a")
     seen_retry_flags = []
 
-    def _spy_select_candidates(_session, _tenant_id, retry, _limit):
+    def _spy_select_candidates(_session, _tenant_id, retry, _limit, since_ms=None, newest_first=False):
         seen_retry_flags.append(retry)
         return [], [], 0
 
     def _query(model):
         if model is script.TenantWecomConfig:
             return _query_mock(first_result=tenant_row)
+        if model is script.ArchiveMessage:
+            return _query_mock(count_result=0)
         raise AssertionError(f"unexpected model queried: {model}")
 
     session = MagicMock()

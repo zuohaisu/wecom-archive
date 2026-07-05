@@ -12,6 +12,19 @@ Usage (from backend/):
     python scripts/download_wecom_image_media_once.py --count-only
     python scripts/download_wecom_image_media_once.py --limit 20
     python scripts/download_wecom_image_media_once.py --limit 20 --retry
+    python scripts/download_wecom_image_media_once.py --since-hours 72 --newest-first --limit 10
+
+RND-151: the WeCom platform media retrieval window expires, so a run with
+the default oldest-first ordering can have its whole --limit budget
+consumed by old, already-expired image candidates before ever reaching
+recently ingested ones. --since-hours restricts fresh-candidate selection
+to messages no older than N hours (by msgtime, epoch-ms, compared against
+current UTC time — never local timezone formatting); --newest-first
+orders fresh candidates by msgtime descending (id descending as a stable
+tie-breaker) instead of the default ascending-id order. The production
+runbook should use both together. Neither flag affects
+build_downloaded_repair_query (the stale "downloaded" repair scan), which
+is about already-downloaded rows, not new-candidate prioritization.
 
 Required environment variables (only DATABASE_URL / WECOM_CORP_ID are
 needed for --count-only, since that mode never touches the SDK or
@@ -77,6 +90,7 @@ import argparse
 import fcntl
 import os
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -187,13 +201,30 @@ def _require_tenant_id(session: Session, corp_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_candidate_query(session: Session, tenant_id: str, retry: bool) -> Query:
+def build_candidate_query(
+    session: Session,
+    tenant_id: str,
+    retry: bool,
+    since_ms: Optional[int] = None,
+    newest_first: bool = False,
+) -> Query:
     """Tenant-scoped, image-only query for rows eligible for a *fresh*
     download attempt: no media_files row yet, an existing "pending" row
     (safe to resume — it never completed), or (only with --retry) an
     existing "failed" row. Never includes "downloaded" rows — those are
     handled separately by build_downloaded_repair_query so a servability
     re-check can decide whether they need repair.
+
+    since_ms (RND-151): when set, restricts to ArchiveMessage.msgtime >=
+    since_ms (epoch-ms, same units already used for msgtime elsewhere in
+    this codebase). None (default) applies no recency filter — unchanged
+    behavior.
+
+    newest_first (RND-151): when True, orders by msgtime descending with
+    id descending as a stable tie-breaker (messages sharing one msgtime
+    are common in a batch-ingested burst), instead of the default
+    ascending-id order — so a run can prioritize recently ingested images
+    over old, possibly platform-expired ones.
     """
     query = (
         session.query(ArchiveMessage)
@@ -210,6 +241,10 @@ def build_candidate_query(session: Session, tenant_id: str, retry: bool) -> Quer
     query = query.filter(
         or_(MediaFile.id.is_(None), MediaFile.download_status.in_(eligible_statuses))
     )
+    if since_ms is not None:
+        query = query.filter(ArchiveMessage.msgtime >= since_ms)
+    if newest_first:
+        return query.order_by(ArchiveMessage.msgtime.desc(), ArchiveMessage.id.desc())
     return query.order_by(ArchiveMessage.id)
 
 
@@ -298,12 +333,18 @@ def _scan_for_stale_downloaded(
 
 
 def select_candidates(
-    session: Session, tenant_id: str, retry: bool, limit: int
+    session: Session,
+    tenant_id: str,
+    retry: bool,
+    limit: int,
+    since_ms: Optional[int] = None,
+    newest_first: bool = False,
 ) -> Tuple[List[ArchiveMessage], List[Tuple[ArchiveMessage, MediaFile]], int]:
     """Return (actionable, stale_repairs, total_eligible).
 
-    actionable: fresh-download candidates (see build_candidate_query), up
-    to `limit`.
+    actionable: fresh-download candidates (see build_candidate_query),
+    filtered by since_ms and ordered per newest_first (RND-151), up to
+    `limit`.
     stale_repairs: (message, media_file) pairs currently marked
     "downloaded" that fail the servability check, filling whatever budget
     remains after `actionable` — capped so the repair scan can never push
@@ -311,16 +352,48 @@ def select_candidates(
     itself (_scan_for_stale_downloaded) is not limited by that budget
     until *after* servability filtering, so a valid/servable "downloaded"
     row can never consume the quota or starve a later stale one out of it.
-    total_eligible: count of `actionable` ignoring `limit` (for
-    --count-only reporting).
+    total_eligible: count of *all* fresh candidates ignoring both `limit`
+    and since_ms (for --count-only reporting) — unaffected by RND-151's
+    recency window so it keeps meaning "total eligible ignoring window".
     """
     total_eligible = build_candidate_query(session, tenant_id, retry).count()
-    actionable = build_candidate_query(session, tenant_id, retry).limit(limit).all()
+    actionable = (
+        build_candidate_query(
+            session, tenant_id, retry, since_ms=since_ms, newest_first=newest_first
+        )
+        .limit(limit)
+        .all()
+    )
 
     remaining_budget = limit - len(actionable)
     stale_repairs = _scan_for_stale_downloaded(session, tenant_id, remaining_budget)
 
     return actionable, stale_repairs, total_eligible
+
+
+def _since_ms_cutoff(since_hours: float) -> int:
+    """Convert --since-hours into an epoch-ms cutoff using the current UTC
+    time (time.time() is already timezone-independent — never derived from
+    local wall-clock formatting)."""
+    return int(time.time() * 1000) - int(since_hours * 3600 * 1000)
+
+
+def count_candidates_with_existing_media_row(session: Session, tenant_id: str) -> int:
+    """Count of tenant-scoped, image-only, decrypted messages that already
+    have *any* media_files row (any download_status) — safe, aggregate-only
+    visibility for --count-only reporting; never touches sdkfileid/paths."""
+    return (
+        session.query(ArchiveMessage)
+        .join(MediaFile, MediaFile.archive_message_id == ArchiveMessage.id)
+        .filter(
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessage.decrypt_status == "success",
+            ArchiveMessage.msgtype == "image",
+            ArchiveMessage.sdkfileid.isnot(None),
+            ArchiveMessage.sdkfileid != "",
+        )
+        .count()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -495,10 +568,31 @@ def main() -> None:
         action="store_true",
         help="Also retry media_files rows with download_status='failed'",
     )
+    parser.add_argument(
+        "--since-hours",
+        type=float,
+        default=None,
+        help=(
+            "Only select candidates with msgtime within the last N hours "
+            "(RND-151; recommended production value: 72)"
+        ),
+    )
+    parser.add_argument(
+        "--newest-first",
+        action="store_true",
+        help=(
+            "Order candidates by msgtime descending (id descending as tie-"
+            "breaker) instead of oldest-first (RND-151)"
+        ),
+    )
     args = parser.parse_args()
 
     if args.limit <= 0:
         print("[FAIL] --limit must be a positive integer", flush=True)
+        sys.exit(1)
+
+    if args.since_hours is not None and args.since_hours <= 0:
+        print("[FAIL] --since-hours must be a positive number", flush=True)
         sys.exit(1)
 
     lock_path = os.environ.get("MEDIA_DOWNLOAD_LOCK_PATH", "").strip() or _DEFAULT_LOCK_PATH
@@ -528,8 +622,15 @@ def _run(args: argparse.Namespace) -> None:
     with Session(engine) as session:
         tenant_id = _require_tenant_id(session, corp_id)
 
+        since_ms = _since_ms_cutoff(args.since_hours) if args.since_hours is not None else None
+
         actionable, stale_repairs, total_eligible = select_candidates(
-            session, tenant_id, args.retry, args.limit
+            session,
+            tenant_id,
+            args.retry,
+            args.limit,
+            since_ms=since_ms,
+            newest_first=args.newest_first,
         )
         candidates: List[ArchiveMessage] = list(actionable) + [m for m, _mf in stale_repairs]
 
@@ -540,8 +641,27 @@ def _run(args: argparse.Namespace) -> None:
                 f"[INFO] stale_downloaded_repair_selected: {len(stale_repairs)}",
                 flush=True,
             )
-
         if args.count_only:
+            print(
+                f"[INFO] candidate_ordering: "
+                f"{'newest_first' if args.newest_first else 'oldest_first'}",
+                flush=True,
+            )
+            if since_ms is not None:
+                within_window = build_candidate_query(
+                    session, tenant_id, args.retry, since_ms=since_ms
+                ).count()
+                print(f"[INFO] since_hours: {args.since_hours}", flush=True)
+                print(f"[INFO] candidates_in_window: {within_window}", flush=True)
+                print(
+                    f"[INFO] candidates_excluded_by_window: {total_eligible - within_window}",
+                    flush=True,
+                )
+            existing_media_count = count_candidates_with_existing_media_row(session, tenant_id)
+            print(
+                f"[INFO] candidates_with_existing_media_row: {existing_media_count}",
+                flush=True,
+            )
             print("[PASS] count-only mode — no writes performed", flush=True)
             sys.exit(0)
 
