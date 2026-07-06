@@ -276,11 +276,16 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .tz-note{font-size:.72rem;color:#5c7185}
 .btn-logout{background:transparent;border:1px solid #3a4a5a;color:#8ca0b3;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem}
 .btn-logout:hover{border-color:#8ca0b3;color:#fff}
+.refresh-bar{display:flex;align-items:center;gap:.5rem;font-size:.76rem;color:#8ca0b3;flex-shrink:0}
+.refresh-status{white-space:nowrap}
+.refresh-status .refresh-status-error{color:#ff7875}
+.btn-refresh{background:transparent;border:1px solid #3a4a5a;color:#8ca0b3;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem}
+.btn-refresh:hover{border-color:#8ca0b3;color:#fff}
 .layout{display:flex;flex:1;overflow:hidden}
 .col{display:flex;flex-direction:column;overflow:hidden;background:#fff;border-right:1px solid #e8e8e8}
 .col-left{width:220px;flex-shrink:0}
 .col-mid{width:304px;flex-shrink:0}
-.col-right{flex:1;border-right:none}
+.col-right{flex:1;border-right:none;position:relative}
 .col-header{padding:.4rem .75rem;font-size:.74rem;font-weight:600;color:#666;background:#fafafa;border-bottom:1px solid #ebebeb;text-transform:uppercase;letter-spacing:.05em;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mode-tabs{display:flex;flex-shrink:0;border-bottom:1px solid #e8e8e8}
 .mode-tab{flex:1;padding:.45rem 0;font-size:.83rem;text-align:center;cursor:pointer;border:none;background:transparent;color:#666;border-bottom:2px solid transparent}
@@ -333,12 +338,18 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .error-msg{margin:.5rem;padding:.6rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:3px;font-size:.8rem}
 .media-placeholder{background:#fafafa;border:1px dashed #d9d9d9;border-radius:4px;padding:.35rem .6rem;font-size:.8rem;color:#888;font-style:italic}
 .media-preview{max-width:280px;max-height:280px;border-radius:4px;display:block}
+.new-msg-indicator{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:#1890ff;color:#fff;border:none;border-radius:999px;padding:.35rem 1rem;font-size:.78rem;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.new-msg-indicator:hover{background:#0958d9}
 </style>
 </head>
 <body>
 <div class="top-bar">
   <h1>Conversation Review Console</h1>
   <span class="tz-note">Times shown in Beijing time (UTC+8)</span>
+  <div class="refresh-bar">
+    <span id="refresh-status" class="refresh-status"></span>
+    <button class="btn-refresh" id="btn-refresh" onclick="refreshNow('manual')">刷新</button>
+  </div>
   <div class="top-bar-user">
     <span id="current-user"></span>
     <a href="/admin/messages">Messages ↗</a>
@@ -361,11 +372,18 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
   <div class="col col-right">
     <div class="col-header" id="timeline-header">Message Timeline</div>
     <div class="col-body" id="timeline-body"><div class="empty-state">Select a conversation</div></div>
+    <button class="new-msg-indicator" id="new-msg-indicator" style="display:none" onclick="scrollTimelineToBottom()">有新消息 ↓</button>
   </div>
 </div>
 <script>
 var mode='staff',selEntityId=null,selConvId=null;
 var timelineConvId=null,timelineMsgs=[],timelineHasOlder=false,timelineNextBefore=null,timelineLoadingOlder=false;
+var REFRESH_INTERVAL_SEC=30;
+var refreshCountdownSec=REFRESH_INTERVAL_SEC;
+var refreshTickTimer=null;
+var refreshInFlight=false;
+var refreshErrorText=null;
+var lastRefreshAt=null;
 function esc(s){
   return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -405,6 +423,7 @@ function setMode(m){
   document.getElementById('timeline-header').textContent='Message Timeline';
   document.getElementById('conv-body').innerHTML='<div class="empty-state">Select an account or contact</div>';
   document.getElementById('timeline-body').innerHTML='<div class="empty-state">Select a conversation</div>';
+  hideNewMessageIndicator();
   loadEntityList();
 }
 function loadEntityList(){
@@ -485,6 +504,11 @@ function renderConvList(convs){
       +'</div>';
   });
   body.innerHTML=html;
+  if(selConvId){
+    body.querySelectorAll('.conv-card').forEach(function(el){
+      el.classList.toggle('active',el.dataset.id===selConvId);
+    });
+  }
 }
 function onConvClick(el){
   selConvId=el.dataset.id;
@@ -495,6 +519,7 @@ function onConvClick(el){
 }
 function loadTimeline(convId){
   timelineConvId=convId; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
+  hideNewMessageIndicator();
   document.getElementById('timeline-body').innerHTML='<div class="loading">Loading…</div>';
   fetchTimelinePage(null, true);
 }
@@ -584,8 +609,152 @@ function renderTimeline(scrollToBottom){
   body.innerHTML=html;
   if(scrollToBottom){body.scrollTop=body.scrollHeight;}
 }
+function isNearBottom(){
+  var body=document.getElementById('timeline-body');
+  if(!body)return true;
+  return (body.scrollHeight-body.scrollTop-body.clientHeight)<80;
+}
+function scrollTimelineToBottom(){
+  var body=document.getElementById('timeline-body');
+  if(body)body.scrollTop=body.scrollHeight;
+  hideNewMessageIndicator();
+}
+function showNewMessageIndicator(){
+  var el=document.getElementById('new-msg-indicator');
+  if(el)el.style.display='block';
+}
+function hideNewMessageIndicator(){
+  var el=document.getElementById('new-msg-indicator');
+  if(el)el.style.display='none';
+}
+function mergeMessagesByMsgid(existing,incoming){
+  var map={},order=[];
+  (existing||[]).forEach(function(m){
+    if(!Object.prototype.hasOwnProperty.call(map,m.msgid))order.push(m.msgid);
+    map[m.msgid]=m;
+  });
+  (incoming||[]).forEach(function(m){
+    if(!Object.prototype.hasOwnProperty.call(map,m.msgid))order.push(m.msgid);
+    map[m.msgid]=m;
+  });
+  var merged=order.map(function(id){return map[id];});
+  merged.sort(function(a,b){return(a.msgtime||0)-(b.msgtime||0);});
+  return merged;
+}
+function refreshEntityList(){
+  var url=mode==='staff'?'/api/monitored-accounts':'/api/contacts';
+  return fetch(url).then(function(r){
+    if(handleUnauth(r))return null;
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(function(items){
+    if(items)renderEntityList(items);
+  });
+}
+function refreshConversationList(){
+  if(!selEntityId)return Promise.resolve();
+  var url=mode==='staff'
+    ?'/api/conversations?mode=staff&staff_id='+encodeURIComponent(selEntityId)
+    :'/api/conversations?mode=contact&contact_id='+encodeURIComponent(selEntityId);
+  return fetch(url).then(function(r){
+    if(handleUnauth(r))return null;
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(function(convs){
+    if(convs)renderConvList(convs);
+  });
+}
+function refreshTimelineIfSelected(){
+  if(!timelineConvId)return Promise.resolve();
+  var convId=timelineConvId;
+  var body=document.getElementById('timeline-body');
+  var wasNearBottom=isNearBottom();
+  var prevScrollTop=body?body.scrollTop:0;
+  var url='/api/conversations/'+encodeURIComponent(convId)+'/messages?limit=20';
+  return fetch(url).then(function(r){
+    if(handleUnauth(r))return null;
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(function(data){
+    if(!data||timelineConvId!==convId)return;
+    var existingIds={};
+    timelineMsgs.forEach(function(m){existingIds[m.msgid]=true;});
+    var hasNew=data.messages.some(function(m){return!existingIds[m.msgid];});
+    timelineMsgs=mergeMessagesByMsgid(timelineMsgs,data.messages);
+    renderTimeline(false);
+    var body2=document.getElementById('timeline-body');
+    if(!body2)return;
+    if(wasNearBottom){
+      body2.scrollTop=body2.scrollHeight;
+      hideNewMessageIndicator();
+    }else{
+      body2.scrollTop=prevScrollTop;
+      if(hasNew)showNewMessageIndicator();
+    }
+  });
+}
+function _refreshErrMsg(e){return(e&&e.message)?e.message:'refresh failed';}
+function setRefreshError(msg){
+  refreshErrorText=msg;
+  updateRefreshStatus();
+}
+function updateRefreshStatus(){
+  var el=document.getElementById('refresh-status');
+  if(!el)return;
+  var lastStr=lastRefreshAt?fmtTime(lastRefreshAt):'—';
+  var html='最近更新：'+esc(lastStr);
+  if(typeof document!=='undefined'&&document.hidden){
+    html+=' · 已暂停（页面不可见）';
+  }else{
+    html+=' · 下次刷新：'+Math.max(refreshCountdownSec,0)+' 秒后';
+  }
+  if(refreshErrorText){
+    html+=' · <span class="refresh-status-error">刷新失败：'+esc(refreshErrorText)+'</span>';
+  }
+  el.innerHTML=html;
+}
+function scheduleNextRefresh(){
+  refreshCountdownSec=REFRESH_INTERVAL_SEC;
+  updateRefreshStatus();
+}
+function refreshNow(reason){
+  if(refreshInFlight)return;
+  refreshInFlight=true;
+  setRefreshError(null);
+  var tasks=[refreshEntityList().catch(function(e){setRefreshError(_refreshErrMsg(e));})];
+  if(selEntityId)tasks.push(refreshConversationList().catch(function(e){setRefreshError(_refreshErrMsg(e));}));
+  if(timelineConvId)tasks.push(refreshTimelineIfSelected().catch(function(e){setRefreshError(_refreshErrMsg(e));}));
+  Promise.all(tasks).then(function(){
+    refreshInFlight=false;
+    lastRefreshAt=Date.now();
+    scheduleNextRefresh();
+  });
+}
+function tickRefreshCountdown(){
+  if(document.hidden)return;
+  refreshCountdownSec--;
+  if(refreshCountdownSec<=0){
+    refreshNow('interval');
+  }else{
+    updateRefreshStatus();
+  }
+}
+function startAutoRefresh(){
+  if(refreshTickTimer)clearInterval(refreshTickTimer);
+  refreshTickTimer=setInterval(tickRefreshCountdown,1000);
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden){
+      updateRefreshStatus();
+    }else{
+      refreshNow('visibility');
+    }
+  });
+}
 loadCurrentUser();
 setMode('staff');
+lastRefreshAt=Date.now();
+updateRefreshStatus();
+startAutoRefresh();
 </script>
 </body>
 </html>
