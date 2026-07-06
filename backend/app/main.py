@@ -330,9 +330,13 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .tl-bubble-self{background:#d9f7be;border:1px solid #b7eb8f}
 .tl-bubble-other{background:#fff;border:1px solid #e8e8e8}
 .tl-rcpt{font-size:.7rem;color:#ccc}
-.load-older-btn{margin:0 auto .6rem;display:block;padding:.3rem .9rem;font-size:.75rem;border:1px solid #d9d9d9;border-radius:3px;background:#fff;color:#555;cursor:pointer}
-.load-older-btn:hover{background:#f5f5f5}
-.load-older-btn:disabled{color:#ccc;cursor:default}
+#timeline-top-sentinel{height:1px}
+.history-status{margin:0 0 .5rem;padding:.35rem .6rem;text-align:center;font-size:.75rem;border-radius:3px}
+.history-loading{color:#888}
+.history-end{color:#bbb}
+.history-error{color:#cf1322;background:#fff2f0;border:1px solid #ffccc7}
+.history-retry-btn{margin-left:.5rem;padding:.15rem .6rem;font-size:.72rem;border:1px solid #d9d9d9;border-radius:3px;background:#fff;color:#555;cursor:pointer}
+.history-retry-btn:hover{background:#f5f5f5}
 .empty-state{padding:2.5rem 1rem;text-align:center;color:#ccc;font-size:.83rem}
 .loading{padding:1rem;text-align:center;color:#bbb;font-size:.82rem}
 .error-msg{margin:.5rem;padding:.6rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:3px;font-size:.8rem}
@@ -378,6 +382,7 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 <script>
 var mode='staff',selEntityId=null,selConvId=null;
 var timelineConvId=null,timelineMsgs=[],timelineHasOlder=false,timelineNextBefore=null,timelineLoadingOlder=false;
+var timelineHistoryError=null,timelineTopObserver=null;
 var REFRESH_INTERVAL_SEC=30;
 var refreshCountdownSec=REFRESH_INTERVAL_SEC;
 var refreshTickTimer=null;
@@ -519,6 +524,8 @@ function onConvClick(el){
 }
 function loadTimeline(convId){
   timelineConvId=convId; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
+  timelineLoadingOlder=false; timelineHistoryError=null;
+  stopHistoryObserver();
   hideNewMessageIndicator();
   document.getElementById('timeline-body').innerHTML='<div class="loading">Loading…</div>';
   fetchTimelinePage(null, true);
@@ -534,20 +541,91 @@ function fetchTimelinePage(before, isInitial){
       timelineHasOlder=data.pagination.has_older;
       timelineNextBefore=data.pagination.next_before;
       renderTimeline(isInitial);
+      startHistoryObserver();
     })
     .catch(function(e){document.getElementById('timeline-body').innerHTML='<div class="error-msg">Failed to load: '+esc(e.message)+'</div>';});
 }
-function loadOlderMessages(){
-  if(timelineLoadingOlder||!timelineHasOlder)return;
-  timelineLoadingOlder=true;
+function isNearTop(){
   var body=document.getElementById('timeline-body');
-  var prevScrollHeight=body.scrollHeight;
-  var prevScrollTop=body.scrollTop;
-  fetchTimelinePage(timelineNextBefore, false).then(function(){
-    timelineLoadingOlder=false;
-    var body2=document.getElementById('timeline-body');
-    body2.scrollTop=prevScrollTop+(body2.scrollHeight-prevScrollHeight);
+  if(!body)return false;
+  return body.scrollTop<80;
+}
+function preserveScrollPosition(body,beforeHeight){
+  if(!body)return;
+  body.scrollTop+=(body.scrollHeight-beforeHeight);
+}
+function historyStatusEl(){return document.getElementById('timeline-history-status');}
+function showLoadingOlder(){
+  var el=historyStatusEl();
+  if(el)el.innerHTML='<div class="history-status history-loading">Loading older messages…</div>';
+}
+function showEndOfHistory(){
+  var el=historyStatusEl();
+  if(el)el.innerHTML='<div class="history-status history-end">No more history</div>';
+}
+function historyRetryHtml(){
+  return '<div class="history-status history-error">Failed to load history'
+    +'<button class="history-retry-btn" onclick="retryLoadOlder()">Retry</button></div>';
+}
+function showHistoryRetry(){
+  var el=historyStatusEl();
+  if(el)el.innerHTML=historyRetryHtml();
+}
+function fetchOlderMessages(convId,before){
+  var url='/api/conversations/'+encodeURIComponent(convId)+'/messages?limit=20&before='+encodeURIComponent(before);
+  return fetch(url).then(function(r){
+    if(handleUnauth(r)){var e=new Error('unauthorized');e.handled=true;throw e;}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(function(data){
+    if(timelineConvId!==convId)return;
+    timelineMsgs=data.messages.concat(timelineMsgs);
+    timelineHasOlder=data.pagination.has_older;
+    timelineNextBefore=data.pagination.next_before;
   });
+}
+function loadOlderAutomatically(){
+  if(timelineLoadingOlder||!timelineHasOlder||timelineHistoryError)return;
+  var requestConvId=timelineConvId;
+  var body=document.getElementById('timeline-body');
+  var beforeHeight=body?body.scrollHeight:0;
+  timelineLoadingOlder=true;
+  showLoadingOlder();
+  preserveScrollPosition(body,beforeHeight);
+  var beforeHeight2=body?body.scrollHeight:0;
+  fetchOlderMessages(requestConvId,timelineNextBefore).then(function(){
+    if(timelineConvId!==requestConvId)return;
+    timelineLoadingOlder=false;
+    renderTimeline(false);
+    startHistoryObserver();
+    preserveScrollPosition(body,beforeHeight2);
+  }).catch(function(e){
+    if(timelineConvId!==requestConvId)return;
+    timelineLoadingOlder=false;
+    if(e&&e.handled)return;
+    timelineHistoryError=(e&&e.message)?e.message:'load failed';
+    showHistoryRetry();
+    preserveScrollPosition(body,beforeHeight2);
+  });
+}
+function retryLoadOlder(){
+  timelineHistoryError=null;
+  loadOlderAutomatically();
+}
+function startHistoryObserver(){
+  stopHistoryObserver();
+  var root=document.getElementById('timeline-body');
+  var sentinel=document.getElementById('timeline-top-sentinel');
+  if(!root||!sentinel||typeof IntersectionObserver==='undefined')return;
+  timelineTopObserver=new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if(entry.isIntersecting&&isNearTop())loadOlderAutomatically();
+    });
+  },{root:root,threshold:0});
+  timelineTopObserver.observe(sentinel);
+}
+function stopHistoryObserver(){
+  if(timelineTopObserver){timelineTopObserver.disconnect();timelineTopObserver=null;}
 }
 var MEDIA_LABELS={image:'Image message',video:'Video message',voice:'Voice message',file:'File message'};
 var MEDIA_STATUS_LABELS={not_downloaded:'not downloaded',unsupported:'unsupported',unknown:'status unknown',failed:'download failed'};
@@ -573,10 +651,11 @@ function renderMessageBody(m){
 function renderTimeline(scrollToBottom){
   var body=document.getElementById('timeline-body');
   if(!timelineMsgs||!timelineMsgs.length){body.innerHTML='<div class="empty-state">No messages</div>';return;}
-  var html='';
-  if(timelineHasOlder){
-    html+='<button class="load-older-btn" onclick="loadOlderMessages()">Load older messages</button>';
-  }
+  var pendingHistoryError=(typeof timelineHistoryError!=='undefined')&&timelineHistoryError;
+  var html='<div id="timeline-history-status">'
+    +(pendingHistoryError?historyRetryHtml():(timelineHasOlder?'':'<div class="history-status history-end">No more history</div>'))
+    +'</div>';
+  html+='<div id="timeline-top-sentinel"></div>';
   html+='<div class="timeline">';
   timelineMsgs.forEach(function(m){
     var isSelf=mode==='staff'&&selEntityId&&m.sender===selEntityId;
@@ -665,7 +744,7 @@ function refreshConversationList(){
   });
 }
 function refreshTimelineIfSelected(){
-  if(!timelineConvId)return Promise.resolve();
+  if(!timelineConvId||timelineLoadingOlder)return Promise.resolve();
   var convId=timelineConvId;
   var body=document.getElementById('timeline-body');
   var wasNearBottom=isNearBottom();
@@ -676,12 +755,13 @@ function refreshTimelineIfSelected(){
     if(!r.ok)throw new Error('HTTP '+r.status);
     return r.json();
   }).then(function(data){
-    if(!data||timelineConvId!==convId)return;
+    if(!data||timelineConvId!==convId||timelineLoadingOlder)return;
     var existingIds={};
     timelineMsgs.forEach(function(m){existingIds[m.msgid]=true;});
     var hasNew=data.messages.some(function(m){return!existingIds[m.msgid];});
     timelineMsgs=mergeMessagesByMsgid(timelineMsgs,data.messages);
     renderTimeline(false);
+    startHistoryObserver();
     var body2=document.getElementById('timeline-body');
     if(!body2)return;
     if(wasNearBottom){
