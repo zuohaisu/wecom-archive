@@ -268,6 +268,7 @@ _REVIEW_CONSOLE_HTML = """\
 <title>Conversation Review Console</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
+:root{--bubble-self-bg:#cfe6fd;--bubble-self-text:#000;--bubble-other-bg:#fff;--bubble-other-text:#000;--link-color:#417ce8}
 body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh;display:flex;flex-direction:column;overflow:hidden}
 .top-bar{height:44px;background:#001529;color:#fff;display:flex;align-items:center;padding:0 1rem;gap:1rem;flex-shrink:0}
 .top-bar h1{font-size:.95rem;font-weight:600;letter-spacing:.01em}
@@ -326,10 +327,11 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .tl-staff{color:#0958d9}
 .tl-sender-raw{font-size:.7rem;color:#bbb;font-weight:400}
 .tl-time{font-size:.72rem;color:#bbb}
-.tl-bubble{background:#f0f0f0;border-radius:4px;padding:.3rem .5rem;font-size:.83rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-width:580px}
+.tl-bubble{background:#f0f0f0;border-radius:11px;padding:.35rem .6rem;font-size:.83rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-width:580px}
+.tl-bubble a{color:var(--link-color)}
 .tl-bubble-staff{background:#e6f4ff;border-left:3px solid #1890ff}
-.tl-bubble-self{background:#d9f7be;border:1px solid #b7eb8f}
-.tl-bubble-other{background:#fff;border:1px solid #e8e8e8}
+.tl-bubble-self{background:var(--bubble-self-bg);color:var(--bubble-self-text)}
+.tl-bubble-other{background:var(--bubble-other-bg);color:var(--bubble-other-text);border:1px solid #e8e8e8}
 .tl-rcpt{font-size:.7rem;color:#ccc}
 #timeline-top-sentinel{height:1px}
 .history-status{margin:0 0 .5rem;padding:.35rem .6rem;text-align:center;font-size:.75rem;border-radius:3px}
