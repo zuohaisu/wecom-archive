@@ -63,6 +63,11 @@ def _extract_render_timeline_bundle() -> str:
     media_status_labels_src = _extract(
         r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"
     )
+    # RND-173: renderMessageBody() now resolves unsupported/placeholder types
+    # through MessageTypeRegistry instead of an inline generic string.
+    message_type_registry_src = _extract(
+        r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
+    )
     render_message_body_src = _extract(
         r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"
     )
@@ -78,6 +83,7 @@ def _extract_render_timeline_bundle() -> str:
             pad_src,
             media_labels_src,
             media_status_labels_src,
+            message_type_registry_src,
             render_message_body_src,
             render_timeline_src,
         ]

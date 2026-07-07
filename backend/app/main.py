@@ -705,6 +705,30 @@ function rebuildMediaLabels(){
   MEDIA_LABELS={image:I18N.t('media.image'),video:I18N.t('media.video'),voice:I18N.t('media.voice'),file:I18N.t('media.file')};
   MEDIA_STATUS_LABELS={not_downloaded:I18N.t('media.status.notDownloaded'),unsupported:I18N.t('media.status.unsupported'),unknown:I18N.t('media.status.unknown'),failed:I18N.t('media.status.failed')};
 }
+var MessageTypeRegistry=(function(){
+  var entries={
+    text:{category:'text'},
+    image:{category:'media',mediaType:'image',previewSupported:true},
+    video:{category:'placeholder',mediaType:'video',previewSupported:false,placeholderKey:'placeholder.video'},
+    voice:{category:'placeholder',mediaType:'voice',previewSupported:false,placeholderKey:'placeholder.voice'},
+    file:{category:'placeholder',mediaType:'file',previewSupported:false,placeholderKey:'placeholder.file'},
+    location:{category:'placeholder',mediaType:'location',previewSupported:false,placeholderKey:'placeholder.location'},
+    link:{category:'placeholder',mediaType:'link',previewSupported:false,placeholderKey:'placeholder.link'},
+    card:{category:'placeholder',mediaType:'card',previewSupported:false,placeholderKey:'placeholder.card'},
+    emotion:{category:'placeholder',mediaType:'emotion',previewSupported:false,placeholderKey:'placeholder.emotion'},
+    miniprogram:{category:'placeholder',mediaType:'miniprogram',previewSupported:false,placeholderKey:'placeholder.miniprogram'},
+    todo:{category:'placeholder',mediaType:'todo',previewSupported:false,placeholderKey:'placeholder.todo'}
+  };
+  var FALLBACK={category:'placeholder',placeholderKey:'placeholder.unsupported'};
+  function resolve(msgtype){
+    return (msgtype&&Object.prototype.hasOwnProperty.call(entries,msgtype))?entries[msgtype]:null;
+  }
+  function resolvePlaceholder(msgtype){
+    var entry=resolve(msgtype);
+    return (entry&&entry.category==='placeholder')?entry:null;
+  }
+  return {entries:entries,resolve:resolve,resolvePlaceholder:resolvePlaceholder,fallback:FALLBACK};
+})();
 function renderMessageBody(m){
   var mediaType=m.media_type||'text';
   if(mediaType==='text'){
@@ -714,15 +738,16 @@ function renderMessageBody(m){
     return '<a href="'+esc(m.media_url)+'" target="_blank" rel="noopener noreferrer">'
       +'<img class="media-preview" src="'+esc(m.media_url)+'" alt="'+esc(I18N.t('media.image'))+'" loading="lazy"></a>';
   }
-  if(mediaType==='unsupported'){
-    return '<div class="media-placeholder">'+I18N.t('media.unsupportedType')+'</div>';
+  if(mediaType==='image'){
+    var imgLabel=MEDIA_LABELS.image||I18N.t('media.generic');
+    var imgStatusLabel=MEDIA_STATUS_LABELS[m.media_status]||I18N.t('media.status.unsupported');
+    return '<div class="media-placeholder">'+esc(imgLabel)+' · '+esc(imgStatusLabel)+'</div>';
   }
   if(mediaType==='unknown'){
     return '<div class="media-placeholder">'+I18N.t('media.unknownType')+'</div>';
   }
-  var label=MEDIA_LABELS[mediaType]||I18N.t('media.generic');
-  var statusLabel=MEDIA_STATUS_LABELS[m.media_status]||I18N.t('media.status.unsupported');
-  return '<div class="media-placeholder">'+esc(label)+' · '+esc(statusLabel)+'</div>';
+  var typeEntry=MessageTypeRegistry.resolvePlaceholder(m.msgtype)||MessageTypeRegistry.fallback;
+  return '<div class="media-placeholder">'+I18N.t(typeEntry.placeholderKey)+'</div>';
 }
 function renderTimeline(scrollToBottom){
   var body=document.getElementById('timeline-body');

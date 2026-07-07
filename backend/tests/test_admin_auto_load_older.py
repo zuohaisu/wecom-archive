@@ -113,6 +113,11 @@ def _bundle() -> str:
         _extract(r"function handleUnauth\(r\)\{.*?\n\}", "handleUnauth()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # RND-173: renderMessageBody() now resolves unsupported/placeholder
+        # types through MessageTypeRegistry instead of an inline generic string.
+        _extract(
+            r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
+        ),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
         _extract(r"function isNearTop\(\)\{.*?\n\}", "isNearTop()"),
