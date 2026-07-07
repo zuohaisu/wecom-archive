@@ -49,6 +49,7 @@ from app.auth import (
 )
 from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
 from app.db.session import get_db
+from app.i18n_assets import I18N_SCRIPT_TAG
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -57,11 +58,16 @@ router = APIRouter()
 # Login page
 # ---------------------------------------------------------------------------
 
-_ERROR_MESSAGES: dict[str, str] = {
-    "invalid_state": "Login session expired or request was tampered with. Please try again.",
-    "auth_failed": "Authentication failed. Please try again.",
-    "user_inactive": "Your WeCom account is inactive. Contact your administrator.",
-    "config_error": "Server configuration error. Please contact your administrator.",
+# Maps an ?error= query code to its i18n key + zh-CN (default locale) fallback
+# text. The fallback text is what's baked into the server-rendered HTML —
+# the client doesn't know the visitor's language preference (it lives only in
+# localStorage), so the page renders in the default locale and the i18n
+# bootstrap script swaps it client-side if a different locale was persisted.
+_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
+    "invalid_state": ("login.error.invalidState", "登录会话已过期或请求被篡改，请重试。"),
+    "auth_failed": ("login.error.authFailed", "认证失败，请重试。"),
+    "user_inactive": ("login.error.userInactive", "您的企业微信账号已停用，请联系管理员。"),
+    "config_error": ("login.error.configError", "服务器配置错误，请联系管理员。"),
 }
 
 _PAGE_STYLE = """\
@@ -80,31 +86,95 @@ h1{font-size:1.15rem;color:#111;margin-bottom:.35rem;font-weight:700}
 .btn-login{padding:.65rem 0;background:#1890ff;color:#fff;border:none;border-radius:4px;font-size:.95rem;font-weight:600;cursor:pointer;width:100%}
 .btn-login:hover{background:#096dd9}
 .btn-login:disabled{background:#91caff;cursor:not-allowed}
+.lang-switch{position:fixed;top:1rem;right:1rem}
+.btn-lang{background:#fff;border:1px solid #d9d9d9;border-radius:4px;padding:.3rem .65rem;font-size:.8rem;cursor:pointer;color:#555}
+.btn-lang:hover{border-color:#1890ff;color:#1890ff}
+.lang-menu{position:absolute;top:110%;right:0;background:#fff;border:1px solid #e8e8e8;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.12);min-width:7rem;overflow:hidden;z-index:20}
+.lang-option{padding:.45rem .75rem;font-size:.83rem;color:#333;cursor:pointer;white-space:nowrap}
+.lang-option:hover{background:#f5f5f5}
+.lang-option.active{color:#1890ff;font-weight:600;background:#e6f4ff}
 """
+
+# Shared client-side bootstrap: renders the language dropdown from
+# I18N.availableLocales() (never a hardcoded list) and applies translations
+# to every [data-i18n] / [data-i18n-placeholder] element. Both login modes
+# (password/WeCom) reuse this verbatim.
+_I18N_BOOTSTRAP_JS = """\
+<script>
+function renderLangMenu(){
+  var menu=document.getElementById('lang-menu');
+  if(!menu)return;
+  var current=I18N.getLocale();
+  var html='';
+  I18N.availableLocales().forEach(function(loc){
+    var cls='lang-option'+(loc.code===current?' active':'');
+    html+='<div class="'+cls+'" onclick="selectLocale(&quot;'+loc.code+'&quot;)">'+loc.nativeName+'</div>';
+  });
+  menu.innerHTML=html;
+}
+function toggleLangMenu(){
+  var menu=document.getElementById('lang-menu');
+  if(!menu)return;
+  if(menu.style.display==='block'){menu.style.display='none';return;}
+  renderLangMenu();
+  menu.style.display='block';
+}
+function selectLocale(code){
+  I18N.setLocale(code);
+  var menu=document.getElementById('lang-menu');
+  if(menu)menu.style.display='none';
+  applyI18n();
+}
+function applyI18n(){
+  document.documentElement.lang=I18N.getLocale();
+  var nodes=document.querySelectorAll('[data-i18n]');
+  for(var i=0;i<nodes.length;i++){
+    nodes[i].textContent=I18N.t(nodes[i].getAttribute('data-i18n'));
+  }
+  var placeholders=document.querySelectorAll('[data-i18n-placeholder]');
+  for(var j=0;j<placeholders.length;j++){
+    placeholders[j].setAttribute('placeholder',I18N.t(placeholders[j].getAttribute('data-i18n-placeholder')));
+  }
+}
+document.addEventListener('click',function(e){
+  var sw=document.getElementById('lang-switch');
+  var menu=document.getElementById('lang-menu');
+  if(sw&&menu&&!sw.contains(e.target))menu.style.display='none';
+});
+applyI18n();
+</script>"""
+
+_LANG_SWITCH_HTML = """\
+<div class="lang-switch" id="lang-switch">
+  <button class="btn-lang" id="btn-lang-toggle" type="button" onclick="toggleLangMenu()" data-i18n="nav.language">语言</button>
+  <div class="lang-menu" id="lang-menu" style="display:none"></div>
+</div>"""
 
 
 def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
     error_html = ""
     if error:
-        msg = _ERROR_MESSAGES.get(error, "Login failed. Please try again.")
-        error_html = f'<div class="error" id="login-error">{msg}</div>'
+        key, fallback_text = _ERROR_MESSAGES.get(
+            error, _ERROR_MESSAGES["auth_failed"]
+        )
+        error_html = f'<div class="error" id="login-error" data-i18n="{key}">{fallback_text}</div>'
 
     if mode == "password":
         login_body = f"""\
   <form class="pwd-form" id="pwd-form" onsubmit="doLogin(event)">
-    <input type="text" id="uname" name="username" placeholder="Username"
+    <input type="text" id="uname" name="username" data-i18n-placeholder="login.username" placeholder="用户名"
            autocomplete="username" required>
-    <input type="password" id="pwd" name="password" placeholder="Password"
+    <input type="password" id="pwd" name="password" data-i18n-placeholder="login.password" placeholder="密码"
            autocomplete="current-password" required>
-    <button class="btn-login" type="submit" id="submit-btn">Login</button>
+    <button class="btn-login" type="submit" id="submit-btn" data-i18n="login.submit">登录</button>
   </form>
   {error_html}
-  <div class="footer">Temporary admin access — WeCom login coming soon</div>
+  <div class="footer" data-i18n="login.footerPassword">临时管理员登录 — 企业微信登录即将上线</div>
 <script>
 function doLogin(e){{
   e.preventDefault();
   var btn=document.getElementById('submit-btn');
-  btn.disabled=true;btn.textContent='Logging in…';
+  btn.disabled=true;btn.textContent=I18N.t('login.submitting');
   var errEl=document.getElementById('login-error');
   if(errEl)errEl.style.display='none';
   fetch('/api/auth/password/login',{{
@@ -119,16 +189,16 @@ function doLogin(e){{
     return r.json().then(function(d){{
       var el=document.getElementById('login-error');
       if(!el){{el=document.createElement('div');el.id='login-error';el.className='error';document.getElementById('pwd-form').after(el);}}
-      el.textContent='Invalid credentials. Please try again.';
+      el.textContent=I18N.t('login.invalidCredentials');
       el.style.display='block';
-      btn.disabled=false;btn.textContent='Login';
+      btn.disabled=false;btn.textContent=I18N.t('login.submit');
     }});
   }}).catch(function(){{
     var el=document.getElementById('login-error');
     if(!el){{el=document.createElement('div');el.id='login-error';el.className='error';document.getElementById('pwd-form').after(el);}}
-    el.textContent='Login failed. Please try again.';
+    el.textContent=I18N.t('login.genericFailure');
     el.style.display='block';
-    btn.disabled=false;btn.textContent='Login';
+    btn.disabled=false;btn.textContent=I18N.t('login.submit');
   }});
 }}
 </script>"""
@@ -140,10 +210,10 @@ function doLogin(e){{
       <path d="M15.5 9c-1.38 0-2.5.9-2.5 2 0 .6.32 1.14.83 1.51a.35.35 0 00-.08.23c0 .2.15.37.33.37.19 0 .33-.16.33-.37 0-.09-.03-.17-.08-.23.22.1.47.15.75.15.34 0 .65-.08.92-.22.05.03.09.05.15.05.45 0 .81-.4.81-.89 0-.18-.06-.35-.15-.49C16.12 11.32 16.28 11.19 16.5 11c.55-.27.94-.78.94-1.38C17.44 8.73 16.59 8 15.5 8c-.78 0-1.47.35-1.87.88"/>
       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5H9V9h2v7.5zm4 0h-2V9h2v7.5z" fill="white" opacity="0"/>
     </svg>
-    使用企业微信登录
+    <span data-i18n="login.wecomButton">使用企业微信登录</span>
   </a>
   {error_html}
-  <div class="footer">仅限企业内部员工访问</div>"""
+  <div class="footer" data-i18n="login.footerWecom">仅限企业内部员工访问</div>"""
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -156,11 +226,14 @@ function doLogin(e){{
 </style>
 </head>
 <body>
+{I18N_SCRIPT_TAG}
+{_LANG_SWITCH_HTML}
 <div class="card">
   <h1>365 WeCom Archive</h1>
-  <p class="sub">Conversation Review Console</p>
+  <p class="sub" data-i18n="app.subtitle">对话审阅控制台</p>
   {login_body}
 </div>
+{_I18N_BOOTSTRAP_JS}
 </body>
 </html>"""
 

@@ -47,6 +47,15 @@ def _extract(pattern: str, label: str) -> str:
 
 def _extract_render_timeline_bundle() -> str:
     """Pull out every JS symbol renderTimeline() transitively depends on."""
+    # RND-157: renderTimeline()/renderMessageBody() now render their labels
+    # via I18N.t(...) rather than hardcoded English. Prepend the i18n core
+    # and pin locale to English so this file's literal-English assertions
+    # keep working — the app's default locale is zh-CN, which would
+    # otherwise make these functions render Chinese text.
+    i18n_core_src = _extract(
+        r"/\* I18N_CORE_START.*?I18N_CORE_END \*/", "I18N core"
+    )
+    force_en = "I18N.setLocale('en');"
     esc_src = _extract(r"function esc\(s\)\{.*?\n\}", "esc()")
     fmt_time_src = _extract(r"function fmtTime\(ms\)\{.*?\n\}", "fmtTime()")
     pad_src = _extract(r"function pad\(n\)\{.*?\}", "pad()")
@@ -62,6 +71,8 @@ def _extract_render_timeline_bundle() -> str:
     )
     return "\n".join(
         [
+            i18n_core_src,
+            force_en,
             esc_src,
             fmt_time_src,
             pad_src,

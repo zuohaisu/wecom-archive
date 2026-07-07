@@ -222,11 +222,19 @@ def test_is_near_bottom_false_when_scrolled_up() -> None:
 
 def _run_render_conv_list_active(convs: list[dict], sel_conv_id: str) -> list[str]:
     assert NODE, "node executable not found"
+    # RND-157: renderConvList() now renders its direct/group badge and message
+    # count via I18N.t(...) instead of hardcoded English. Bring in the i18n
+    # core so I18N is defined (this test only checks .active class toggling,
+    # not label text, so the locale choice itself doesn't matter here).
+    i18n_core_src = _extract(
+        r"/\* I18N_CORE_START.*?I18N_CORE_END \*/", "I18N core"
+    )
     esc_src = _extract(r"function esc\(s\)\{.*?\n\}", "esc()")
     fmt_time_src = _extract(r"function fmtTime\(ms\)\{.*?\n\}", "fmtTime()")
     pad_src = _extract(r"function pad\(n\)\{.*?\}", "pad()")
     render_conv_list_src = _extract(r"function renderConvList\(convs\)\{.*?\n\}", "renderConvList()")
     harness = f"""
+{i18n_core_src}
 {esc_src}
 {fmt_time_src}
 {pad_src}

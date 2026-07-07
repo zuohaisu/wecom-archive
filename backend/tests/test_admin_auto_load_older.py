@@ -98,7 +98,15 @@ def test_uses_intersection_observer() -> None:
 
 
 def _bundle() -> str:
+    # RND-157: renderMessageBody/renderTimeline/history status helpers now go
+    # through I18N.t(...) instead of hardcoded English strings. Pull in the
+    # i18n core (Locale Registry + helpers) and pin the locale to English so
+    # this file's pre-existing literal-English assertions keep meaning what
+    # they said before i18n existed — the default locale is zh-CN, so without
+    # this the same functions would render Chinese text instead.
     parts = [
+        _extract(r"/\* I18N_CORE_START.*?I18N_CORE_END \*/", "I18N core"),
+        "I18N.setLocale('en');",
         _extract(r"function esc\(s\)\{.*?\n\}", "esc()"),
         _extract(r"function fmtTime\(ms\)\{.*?\n\}", "fmtTime()"),
         _extract(r"function pad\(n\)\{.*?\}", "pad()"),

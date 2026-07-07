@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth import SESSION_COOKIE, get_current_user
 from app.db.models import AdminSession, ArchiveMessage, ArchiveMessageRecipient
 from app.db.session import get_db
+from app.i18n_assets import I18N_SCRIPT_TAG
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
 from app.routers.wecom_events import router as wecom_events_router
@@ -261,7 +262,7 @@ def admin_message_detail(
 
 _REVIEW_CONSOLE_HTML = """\
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <title>Conversation Review Console</title>
@@ -344,43 +345,56 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .media-preview{max-width:280px;max-height:280px;border-radius:4px;display:block}
 .new-msg-indicator{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:#1890ff;color:#fff;border:none;border-radius:999px;padding:.35rem 1rem;font-size:.78rem;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .new-msg-indicator:hover{background:#0958d9}
+.lang-switch{position:relative}
+.btn-lang{background:transparent;border:1px solid #3a4a5a;color:#8ca0b3;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem}
+.btn-lang:hover{border-color:#8ca0b3;color:#fff}
+.lang-menu{position:absolute;top:135%;right:0;background:#fff;border:1px solid #e8e8e8;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.18);min-width:7rem;overflow:hidden;z-index:50}
+.lang-option{padding:.4rem .7rem;font-size:.8rem;color:#333;cursor:pointer;white-space:nowrap}
+.lang-option:hover{background:#f5f5f5}
+.lang-option.active{color:#1890ff;font-weight:600;background:#e6f4ff}
 </style>
 </head>
 <body>
+""" + I18N_SCRIPT_TAG + """
 <div class="top-bar">
-  <h1>Conversation Review Console</h1>
-  <span class="tz-note">Times shown in Beijing time (UTC+8)</span>
+  <h1 data-i18n="app.subtitle">对话审阅控制台</h1>
+  <span class="tz-note" data-i18n="console.tzNote">时间均为北京时间 (UTC+8)</span>
   <div class="refresh-bar">
     <span id="refresh-status" class="refresh-status"></span>
-    <button class="btn-refresh" id="btn-refresh" onclick="refreshNow('manual')">刷新</button>
+    <button class="btn-refresh" id="btn-refresh" onclick="refreshNow('manual')" data-i18n="refresh.manual">刷新</button>
   </div>
   <div class="top-bar-user">
     <span id="current-user"></span>
-    <a href="/admin/messages">Messages ↗</a>
-    <button class="btn-logout" onclick="doLogout()">Logout</button>
+    <a href="/admin/messages"><span data-i18n="nav.messages">消息记录</span> ↗</a>
+    <div class="lang-switch" id="lang-switch">
+      <button class="btn-lang" id="btn-lang-toggle" type="button" onclick="toggleLangMenu()" data-i18n="nav.language">语言</button>
+      <div class="lang-menu" id="lang-menu" style="display:none"></div>
+    </div>
+    <button class="btn-logout" onclick="doLogout()" data-i18n="nav.logout">退出登录</button>
   </div>
 </div>
 <div class="layout">
   <div class="col col-left">
     <div class="mode-tabs">
-      <button class="mode-tab active" id="tab-staff" onclick="setMode('staff')">Staff</button>
-      <button class="mode-tab" id="tab-contact" onclick="setMode('contact')">Contact</button>
+      <button class="mode-tab active" id="tab-staff" onclick="setMode('staff')" data-i18n="nav.staff">员工</button>
+      <button class="mode-tab" id="tab-contact" onclick="setMode('contact')" data-i18n="nav.contact">联系人</button>
     </div>
-    <div class="col-header" id="entity-header">Monitored Accounts</div>
-    <div class="col-body" id="entity-body"><div class="loading">Loading…</div></div>
+    <div class="col-header" id="entity-header" data-i18n="console.monitoredAccounts">监控账号</div>
+    <div class="col-body" id="entity-body"><div class="loading" data-i18n="console.loading">加载中…</div></div>
   </div>
   <div class="col col-mid">
-    <div class="col-header" id="conv-header">Conversations</div>
-    <div class="col-body" id="conv-body"><div class="empty-state">Select an account or contact</div></div>
+    <div class="col-header" id="conv-header" data-i18n="nav.conversations">会话</div>
+    <div class="col-body" id="conv-body"><div class="empty-state" data-i18n="console.selectAccountOrContact">请选择账号或联系人</div></div>
   </div>
   <div class="col col-right">
-    <div class="col-header" id="timeline-header">Message Timeline</div>
-    <div class="col-body" id="timeline-body"><div class="empty-state">Select a conversation</div></div>
-    <button class="new-msg-indicator" id="new-msg-indicator" style="display:none" onclick="scrollTimelineToBottom()">有新消息 ↓</button>
+    <div class="col-header" id="timeline-header" data-i18n="console.timelineHeader">消息时间线</div>
+    <div class="col-body" id="timeline-body"><div class="empty-state" data-i18n="console.selectConversation">请选择会话</div></div>
+    <button class="new-msg-indicator" id="new-msg-indicator" style="display:none" onclick="scrollTimelineToBottom()"><span data-i18n="refresh.newMessages">有新消息</span> ↓</button>
   </div>
 </div>
 <script>
-var mode='staff',selEntityId=null,selConvId=null;
+var mode='staff',selEntityId=null,selConvId=null,selEntityName=null,selConvName=null;
+var lastEntityItems=null,lastConvItems=null;
 var timelineConvId=null,timelineMsgs=[],timelineHasOlder=false,timelineNextBefore=null,timelineLoadingOlder=false;
 var timelineHistoryError=null,timelineTopObserver=null;
 var REFRESH_INTERVAL_SEC=30;
@@ -406,6 +420,61 @@ function handleUnauth(r){
   if(r.status===401){window.location.href='/admin/login';return true;}
   return false;
 }
+function applyStaticI18n(){
+  document.documentElement.lang=I18N.getLocale();
+  document.querySelectorAll('[data-i18n]').forEach(function(el){
+    el.textContent=I18N.t(el.getAttribute('data-i18n'));
+  });
+}
+function renderLangMenu(){
+  var menu=document.getElementById('lang-menu');
+  if(!menu)return;
+  var current=I18N.getLocale();
+  var html='';
+  I18N.availableLocales().forEach(function(loc){
+    var cls='lang-option'+(loc.code===current?' active':'');
+    html+='<div class="'+cls+'" onclick="selectLocale(&quot;'+loc.code+'&quot;)">'+esc(loc.nativeName)+'</div>';
+  });
+  menu.innerHTML=html;
+}
+function toggleLangMenu(){
+  var menu=document.getElementById('lang-menu');
+  if(!menu)return;
+  if(menu.style.display==='block'){menu.style.display='none';return;}
+  renderLangMenu();
+  menu.style.display='block';
+}
+function selectLocale(code){
+  I18N.setLocale(code);
+  var menu=document.getElementById('lang-menu');
+  if(menu)menu.style.display='none';
+  applyLocale();
+}
+function applyLocale(){
+  applyStaticI18n();
+  renderLangMenu();
+  rebuildMediaLabels();
+  document.getElementById('entity-header').textContent=mode==='staff'?I18N.t('console.monitoredAccounts'):I18N.t('console.contactsHeader');
+  document.getElementById('conv-header').textContent=selEntityName?(I18N.t('nav.conversations')+' — '+selEntityName):I18N.t('nav.conversations');
+  document.getElementById('timeline-header').textContent=selConvName?(I18N.t('console.timelineHeader')+' — '+selConvName):I18N.t('console.timelineHeader');
+  if(lastEntityItems)renderEntityList(lastEntityItems);
+  if(selEntityId&&lastConvItems){
+    renderConvList(lastConvItems);
+  }else if(!selEntityId){
+    document.getElementById('conv-body').innerHTML='<div class="empty-state">'+I18N.t('console.selectAccountOrContact')+'</div>';
+  }
+  if(timelineConvId&&timelineMsgs.length){
+    renderTimeline(false);
+  }else if(!timelineConvId){
+    document.getElementById('timeline-body').innerHTML='<div class="empty-state">'+I18N.t('console.selectConversation')+'</div>';
+  }
+  updateRefreshStatus();
+}
+document.addEventListener('click',function(e){
+  var sw=document.getElementById('lang-switch');
+  var menu=document.getElementById('lang-menu');
+  if(sw&&menu&&!sw.contains(e.target))menu.style.display='none';
+});
 function loadCurrentUser(){
   fetch('/api/auth/me').then(function(r){return r.json();}).then(function(d){
     if(!d.authenticated){window.location.href='/admin/login';return;}
@@ -419,27 +488,29 @@ function doLogout(){
   }).catch(function(){window.location.href='/admin/login';});
 }
 function setMode(m){
-  mode=m; selEntityId=null; selConvId=null;
+  mode=m; selEntityId=null; selConvId=null; selEntityName=null; selConvName=null;
+  lastConvItems=null;
   timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.getElementById('tab-staff').classList.toggle('active',m==='staff');
   document.getElementById('tab-contact').classList.toggle('active',m==='contact');
-  document.getElementById('entity-header').textContent=m==='staff'?'Monitored Accounts':'Contacts';
-  document.getElementById('conv-header').textContent='Conversations';
-  document.getElementById('timeline-header').textContent='Message Timeline';
-  document.getElementById('conv-body').innerHTML='<div class="empty-state">Select an account or contact</div>';
-  document.getElementById('timeline-body').innerHTML='<div class="empty-state">Select a conversation</div>';
+  document.getElementById('entity-header').textContent=m==='staff'?I18N.t('console.monitoredAccounts'):I18N.t('console.contactsHeader');
+  document.getElementById('conv-header').textContent=I18N.t('nav.conversations');
+  document.getElementById('timeline-header').textContent=I18N.t('console.timelineHeader');
+  document.getElementById('conv-body').innerHTML='<div class="empty-state">'+I18N.t('console.selectAccountOrContact')+'</div>';
+  document.getElementById('timeline-body').innerHTML='<div class="empty-state">'+I18N.t('console.selectConversation')+'</div>';
   hideNewMessageIndicator();
   loadEntityList();
 }
 function loadEntityList(){
   var url=mode==='staff'?'/api/monitored-accounts':'/api/contacts';
-  document.getElementById('entity-body').innerHTML='<div class="loading">Loading…</div>';
+  document.getElementById('entity-body').innerHTML='<div class="loading">'+I18N.t('console.loading')+'</div>';
   fetch(url).then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(items){if(items)renderEntityList(items);})
-    .catch(function(){document.getElementById('entity-body').innerHTML='<div class="error-msg">Failed to load entities</div>';});
+    .catch(function(){document.getElementById('entity-body').innerHTML='<div class="error-msg">'+I18N.t('console.failedToLoadEntities')+'</div>';});
 }
 function renderEntityList(items){
+  lastEntityItems=items;
   var body=document.getElementById('entity-body');
-  if(!items||!items.length){body.innerHTML='<div class="empty-state">None found</div>';return;}
+  if(!items||!items.length){body.innerHTML='<div class="empty-state">'+I18N.t('console.noneFound')+'</div>';return;}
   var html='';
   items.forEach(function(item){
     var id=mode==='staff'?item.staff_id:item.contact_id;
@@ -451,7 +522,7 @@ function renderEntityList(items){
     var seatBadge='';
     if(mode==='staff'&&item.seat_status){
       var seatCls=item.seat_status==='active'?'seat-badge-active':'seat-badge-history';
-      var seatLabel=item.seat_status==='active'?'Active':'History';
+      var seatLabel=item.seat_status==='active'?I18N.t('console.seatActive'):I18N.t('console.seatHistory');
       seatBadge='<span class="seat-badge '+seatCls+'">'+esc(seatLabel)+'</span>';
     }
     html+='<div class="entity-item" data-id="'+esc(id)+'" data-name="'+esc(name)+'" onclick="onEntityClick(this)">'
@@ -466,31 +537,32 @@ function renderEntityList(items){
   }
 }
 function onEntityClick(el){
-  selEntityId=el.dataset.id; selConvId=null;
+  selEntityId=el.dataset.id; selEntityName=el.dataset.name; selConvId=null; selConvName=null;
   timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.querySelectorAll('.entity-item').forEach(function(e){e.classList.remove('active');});
   el.classList.add('active');
-  document.getElementById('conv-header').textContent='Conversations — '+el.dataset.name;
-  document.getElementById('timeline-header').textContent='Message Timeline';
-  document.getElementById('timeline-body').innerHTML='<div class="empty-state">Select a conversation</div>';
+  document.getElementById('conv-header').textContent=I18N.t('nav.conversations')+' — '+el.dataset.name;
+  document.getElementById('timeline-header').textContent=I18N.t('console.timelineHeader');
+  document.getElementById('timeline-body').innerHTML='<div class="empty-state">'+I18N.t('console.selectConversation')+'</div>';
   loadConversations(selEntityId);
 }
 function loadConversations(entityId){
   var url=mode==='staff'
     ?'/api/conversations?mode=staff&staff_id='+encodeURIComponent(entityId)
     :'/api/conversations?mode=contact&contact_id='+encodeURIComponent(entityId);
-  document.getElementById('conv-body').innerHTML='<div class="loading">Loading…</div>';
+  document.getElementById('conv-body').innerHTML='<div class="loading">'+I18N.t('console.loading')+'</div>';
   fetch(url).then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(convs){if(convs)renderConvList(convs);})
-    .catch(function(){document.getElementById('conv-body').innerHTML='<div class="error-msg">Failed to load conversations</div>';});
+    .catch(function(){document.getElementById('conv-body').innerHTML='<div class="error-msg">'+I18N.t('console.failedToLoadConversations')+'</div>';});
 }
 function renderConvList(convs){
+  lastConvItems=convs;
   var body=document.getElementById('conv-body');
-  if(!convs||!convs.length){body.innerHTML='<div class="empty-state">No conversations found</div>';return;}
+  if(!convs||!convs.length){body.innerHTML='<div class="empty-state">'+I18N.t('console.noConversations')+'</div>';return;}
   var html='';
   convs.forEach(function(c){
     var tb=c.conversation_type==='group'
-      ?'<span class="badge badge-group">group</span>'
-      :'<span class="badge badge-direct">direct</span>';
+      ?'<span class="badge badge-group">'+esc(I18N.t('convList.groupBadge'))+'</span>'
+      :'<span class="badge badge-direct">'+esc(I18N.t('convList.directBadge'))+'</span>';
     var raw=c.last_message_text||'';
     var snip=raw.length>60?esc(raw.substring(0,60))+'…':esc(raw);
     var t=fmtTime(c.last_message_time);
@@ -505,7 +577,7 @@ function renderConvList(convs){
       +'<div class="conv-top"><span class="conv-name" title="'+esc(rawId)+'">'+esc(c.display_name)+'</span><span class="conv-time">'+esc(t)+'</span></div>'
       +secondary
       +(snip?'<div class="conv-snippet">'+snip+'</div>':'')
-      +'<div class="conv-meta">'+tb+' <span class="badge badge-count">'+esc(c.message_count)+' msgs</span>'+acct+'</div>'
+      +'<div class="conv-meta">'+tb+' <span class="badge badge-count">'+esc(c.message_count)+' '+esc(I18N.t('convList.messagesSuffix'))+'</span>'+acct+'</div>'
       +'</div>';
   });
   body.innerHTML=html;
@@ -516,10 +588,10 @@ function renderConvList(convs){
   }
 }
 function onConvClick(el){
-  selConvId=el.dataset.id;
+  selConvId=el.dataset.id; selConvName=el.dataset.name;
   document.querySelectorAll('.conv-card').forEach(function(e){e.classList.remove('active');});
   el.classList.add('active');
-  document.getElementById('timeline-header').textContent='Timeline — '+el.dataset.name;
+  document.getElementById('timeline-header').textContent=I18N.t('console.timelineHeader')+' — '+el.dataset.name;
   loadTimeline(selConvId);
 }
 function loadTimeline(convId){
@@ -527,7 +599,7 @@ function loadTimeline(convId){
   timelineLoadingOlder=false; timelineHistoryError=null;
   stopHistoryObserver();
   hideNewMessageIndicator();
-  document.getElementById('timeline-body').innerHTML='<div class="loading">Loading…</div>';
+  document.getElementById('timeline-body').innerHTML='<div class="loading">'+I18N.t('console.loading')+'</div>';
   fetchTimelinePage(null, true);
 }
 function fetchTimelinePage(before, isInitial){
@@ -543,7 +615,7 @@ function fetchTimelinePage(before, isInitial){
       renderTimeline(isInitial);
       startHistoryObserver();
     })
-    .catch(function(e){document.getElementById('timeline-body').innerHTML='<div class="error-msg">Failed to load: '+esc(e.message)+'</div>';});
+    .catch(function(e){document.getElementById('timeline-body').innerHTML='<div class="error-msg">'+I18N.t('console.failedToLoadPrefix')+esc(e.message)+'</div>';});
 }
 function isNearTop(){
   var body=document.getElementById('timeline-body');
@@ -557,15 +629,15 @@ function preserveScrollPosition(body,beforeHeight){
 function historyStatusEl(){return document.getElementById('timeline-history-status');}
 function showLoadingOlder(){
   var el=historyStatusEl();
-  if(el)el.innerHTML='<div class="history-status history-loading">Loading older messages…</div>';
+  if(el)el.innerHTML='<div class="history-status history-loading">'+I18N.t('history.loadingOlder')+'</div>';
 }
 function showEndOfHistory(){
   var el=historyStatusEl();
-  if(el)el.innerHTML='<div class="history-status history-end">No more history</div>';
+  if(el)el.innerHTML='<div class="history-status history-end">'+I18N.t('history.noMore')+'</div>';
 }
 function historyRetryHtml(){
-  return '<div class="history-status history-error">Failed to load history'
-    +'<button class="history-retry-btn" onclick="retryLoadOlder()">Retry</button></div>';
+  return '<div class="history-status history-error">'+I18N.t('history.failedToLoad')
+    +'<button class="history-retry-btn" onclick="retryLoadOlder()">'+I18N.t('history.retry')+'</button></div>';
 }
 function showHistoryRetry(){
   var el=historyStatusEl();
@@ -627,33 +699,37 @@ function startHistoryObserver(){
 function stopHistoryObserver(){
   if(timelineTopObserver){timelineTopObserver.disconnect();timelineTopObserver=null;}
 }
-var MEDIA_LABELS={image:'Image message',video:'Video message',voice:'Voice message',file:'File message'};
-var MEDIA_STATUS_LABELS={not_downloaded:'not downloaded',unsupported:'unsupported',unknown:'status unknown',failed:'download failed'};
+var MEDIA_LABELS={image:I18N.t('media.image'),video:I18N.t('media.video'),voice:I18N.t('media.voice'),file:I18N.t('media.file')};
+var MEDIA_STATUS_LABELS={not_downloaded:I18N.t('media.status.notDownloaded'),unsupported:I18N.t('media.status.unsupported'),unknown:I18N.t('media.status.unknown'),failed:I18N.t('media.status.failed')};
+function rebuildMediaLabels(){
+  MEDIA_LABELS={image:I18N.t('media.image'),video:I18N.t('media.video'),voice:I18N.t('media.voice'),file:I18N.t('media.file')};
+  MEDIA_STATUS_LABELS={not_downloaded:I18N.t('media.status.notDownloaded'),unsupported:I18N.t('media.status.unsupported'),unknown:I18N.t('media.status.unknown'),failed:I18N.t('media.status.failed')};
+}
 function renderMessageBody(m){
   var mediaType=m.media_type||'text';
   if(mediaType==='text'){
-    return m.content_text?esc(m.content_text):'<div class="media-placeholder">Empty text message</div>';
+    return m.content_text?esc(m.content_text):'<div class="media-placeholder">'+I18N.t('timeline.emptyText')+'</div>';
   }
   if(mediaType==='image'&&m.media_status==='available'&&m.media_url){
     return '<a href="'+esc(m.media_url)+'" target="_blank" rel="noopener noreferrer">'
-      +'<img class="media-preview" src="'+esc(m.media_url)+'" alt="Image message" loading="lazy"></a>';
+      +'<img class="media-preview" src="'+esc(m.media_url)+'" alt="'+esc(I18N.t('media.image'))+'" loading="lazy"></a>';
   }
   if(mediaType==='unsupported'){
-    return '<div class="media-placeholder">Unsupported message type</div>';
+    return '<div class="media-placeholder">'+I18N.t('media.unsupportedType')+'</div>';
   }
   if(mediaType==='unknown'){
-    return '<div class="media-placeholder">Unknown message type</div>';
+    return '<div class="media-placeholder">'+I18N.t('media.unknownType')+'</div>';
   }
-  var label=MEDIA_LABELS[mediaType]||'Media message';
-  var statusLabel=MEDIA_STATUS_LABELS[m.media_status]||'unsupported';
+  var label=MEDIA_LABELS[mediaType]||I18N.t('media.generic');
+  var statusLabel=MEDIA_STATUS_LABELS[m.media_status]||I18N.t('media.status.unsupported');
   return '<div class="media-placeholder">'+esc(label)+' · '+esc(statusLabel)+'</div>';
 }
 function renderTimeline(scrollToBottom){
   var body=document.getElementById('timeline-body');
-  if(!timelineMsgs||!timelineMsgs.length){body.innerHTML='<div class="empty-state">No messages</div>';return;}
+  if(!timelineMsgs||!timelineMsgs.length){body.innerHTML='<div class="empty-state">'+I18N.t('console.noMessages')+'</div>';return;}
   var pendingHistoryError=(typeof timelineHistoryError!=='undefined')&&timelineHistoryError;
   var html='<div id="timeline-history-status">'
-    +(pendingHistoryError?historyRetryHtml():(timelineHasOlder?'':'<div class="history-status history-end">No more history</div>'))
+    +(pendingHistoryError?historyRetryHtml():(timelineHasOlder?'':'<div class="history-status history-end">'+I18N.t('history.noMore')+'</div>'))
     +'</div>';
   html+='<div id="timeline-top-sentinel"></div>';
   html+='<div class="timeline">';
@@ -665,7 +741,7 @@ function renderTimeline(scrollToBottom){
     var bc='tl-bubble '+(isSelf?'tl-bubble-self':(mode==='staff'?'tl-bubble-other':(isStaff?'tl-bubble-staff':'')));
     var text=renderMessageBody(m);
     var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
-    var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">group</span>':'';
+    var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">'+esc(I18N.t('timeline.groupBadge'))+'</span>':'';
     var senderName=m.sender_display_name||m.sender||'?';
     var senderRaw=m.sender_raw_id||m.sender;
     var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
@@ -673,7 +749,7 @@ function renderTimeline(scrollToBottom){
     var rcpt='';
     if(m.roomid){
       if(rcptNames.length){
-        rcpt='<div class="tl-rcpt">Group chat · '+rcptNames.length+' participant'+(rcptNames.length===1?'':'s')+'</div>';
+        rcpt='<div class="tl-rcpt">'+I18N.t('timeline.groupChat')+' · '+rcptNames.length+' '+(rcptNames.length===1?I18N.t('timeline.participant'):I18N.t('timeline.participants'))+'</div>';
       }
     }else if(rcptNames.length){
       rcpt='<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>';
@@ -782,14 +858,14 @@ function updateRefreshStatus(){
   var el=document.getElementById('refresh-status');
   if(!el)return;
   var lastStr=lastRefreshAt?fmtTime(lastRefreshAt):'—';
-  var html='最近更新：'+esc(lastStr);
+  var html=I18N.t('refresh.lastUpdated')+esc(lastStr);
   if(typeof document!=='undefined'&&document.hidden){
-    html+=' · 已暂停（页面不可见）';
+    html+=' · '+I18N.t('refresh.paused');
   }else{
-    html+=' · 下次刷新：'+Math.max(refreshCountdownSec,0)+' 秒后';
+    html+=' · '+I18N.t('refresh.nextIn')+Math.max(refreshCountdownSec,0)+I18N.t('refresh.secondsSuffix');
   }
   if(refreshErrorText){
-    html+=' · <span class="refresh-status-error">刷新失败：'+esc(refreshErrorText)+'</span>';
+    html+=' · <span class="refresh-status-error">'+I18N.t('refresh.failedPrefix')+esc(refreshErrorText)+'</span>';
   }
   el.innerHTML=html;
 }
@@ -830,6 +906,7 @@ function startAutoRefresh(){
     }
   });
 }
+applyStaticI18n();
 loadCurrentUser();
 setMode('staff');
 lastRefreshAt=Date.now();
