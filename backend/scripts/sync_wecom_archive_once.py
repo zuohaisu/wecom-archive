@@ -272,7 +272,7 @@ def main() -> None:
             session.commit()
 
             # --- 6. Update seq cursor after successful commit ---
-            new_seq = max_seq + 1
+            new_seq = max_seq
             with Session(engine) as update_session:
                 _upsert_seq(update_session, corp_id, new_seq, tenant_id)
                 update_session.commit()
