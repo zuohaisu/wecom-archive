@@ -202,15 +202,37 @@ def _upsert_recipients(
     tolist: list,
     tenant_id: "str | None" = None,
 ) -> None:
-    """Insert ArchiveMessageRecipient rows for each entry in tolist."""
-    existing = {
+    """
+    Insert ArchiveMessageRecipient rows for each entry in tolist.
+
+    Deduplicates against rows already persisted for this message AND
+    against repeats within tolist itself (RND-179 fix): the previous
+    version queried `existing` once up front and never updated it as rows
+    were added within this same call, so a tolist containing the same
+    receiver twice (observed in real WeCom fanout payloads) inserted a
+    duplicate archive_message_recipients row per repeat.
+
+    The "already persisted" check is tenant-scoped (QA fix — RND-179): a
+    plain message_id match previously let a malformed cross-tenant row
+    (same message_id, wrong tenant_id, e.g. also "contact_a") count as
+    "already there" and silently block insertion of the real tenant-owned
+    row — a message could then never be repaired even though it correctly
+    holds zero recipients for *its own* tenant. Matches how every other
+    recipient read in this codebase is tenant-scoped (see
+    _load_recipient_userids_map in app/reachability_audit.py and
+    build_missing_recipient_repair_query below).
+    """
+    seen = {
         r.receiver_userid
         for r in session.query(ArchiveMessageRecipient)
-        .filter(ArchiveMessageRecipient.message_id == message_id)
+        .filter(
+            ArchiveMessageRecipient.message_id == message_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
         .all()
     }
     for recipient in tolist:
-        if recipient and recipient not in existing:
+        if recipient and recipient not in seen:
             session.add(
                 ArchiveMessageRecipient(
                     message_id=message_id,
@@ -219,6 +241,116 @@ def _upsert_recipients(
                     tenant_id=tenant_id,
                 )
             )
+            seen.add(recipient)
+
+
+# ---------------------------------------------------------------------------
+# Recipient-persistence recovery (RND-179)
+#
+# RND-178's Message Reachability Audit found that a recipient-upsert
+# failure is intentionally non-fatal to decrypt_status (see the call site
+# in main()) — decrypt success and recipient persistence are allowed to
+# diverge so a transient recipient-write problem never blocks decryption.
+# But that left a gap: this script only ever reprocesses archive_messages
+# rows with decrypt_status in ("pending", "failed"), so a message that hit
+# exactly that failure — decrypt succeeded, recipient upsert didn't — was
+# never revisited again. The tolist column already holds everything needed
+# to recover it; this scan finds and repairs exactly that gap, using the
+# same _upsert_recipients() persistence/dedup path as the live decrypt
+# loop rather than a parallel implementation.
+#
+# Mirrors the established build_downloaded_repair_query /
+# build_candidate_query pattern in scripts/download_wecom_image_media_once.py
+# (RND-147): a pure query-construction function plus a thin driver.
+# ---------------------------------------------------------------------------
+
+
+def build_missing_recipient_repair_query(session: Session, tenant_id: "str | None" = None):
+    """
+    Coarse candidate query: already-decrypted messages with zero
+    *tenant-scoped* archive_message_recipients rows. Pure query
+    construction — no execution.
+
+    "Has recipients" is checked with a tenant_id match against the parent
+    message (ArchiveMessageRecipient.tenant_id == ArchiveMessage.tenant_id),
+    not merely a message_id match (QA fix — RND-179): the Reachability
+    Audit (RND-178, see _load_recipient_userids_map in
+    app/reachability_audit.py) already treats a recipient row carrying the
+    wrong tenant_id as not belonging to the message for reachability
+    purposes, since message_id alone doesn't prove tenant ownership for
+    malformed/corrupt rows. Using a plain message_id match here would let
+    such a stray row falsely mark a genuinely-unrepaired message as
+    "already has recipients" and skip it forever, contradicting what the
+    audit reports for the same message.
+
+    Deliberately does NOT try to filter out an empty tolist at the SQL
+    layer: SQLAlchemy's JSON/JSONB column type binds a Python `None` value
+    as the JSON literal `null` (not SQL NULL) by default, so
+    `tolist.isnot(None)` cannot reliably distinguish "no tolist" from "a
+    JSON-null tolist" across backends. Same coarse-SQL-then-precise-Python
+    split used by build_downloaded_repair_query() in
+    download_wecom_image_media_once.py — repair_missing_recipients() below
+    does the exact, per-row tolist check.
+    """
+    has_recipient = (
+        session.query(ArchiveMessageRecipient.id)
+        .filter(
+            ArchiveMessageRecipient.message_id == ArchiveMessage.id,
+            ArchiveMessageRecipient.tenant_id == ArchiveMessage.tenant_id,
+        )
+        .exists()
+    )
+    query = session.query(ArchiveMessage).filter(
+        ArchiveMessage.decrypt_status == "success",
+        ~has_recipient,
+    )
+    if tenant_id is not None:
+        query = query.filter(ArchiveMessage.tenant_id == tenant_id)
+    return query.order_by(ArchiveMessage.id)
+
+
+def repair_missing_recipients(session: Session, tenant_id: "str | None" = None) -> int:
+    """
+    Recover archive_message_recipients rows for every candidate from
+    build_missing_recipient_repair_query() that actually has at least one
+    valid (non-blank) recipient in tolist — the precise check the coarse
+    SQL candidate query cannot make (see its docstring).
+
+    A message is only counted as repaired if a tenant-scoped recipient row
+    for it actually exists after the upsert (QA fix — RND-179): a tolist
+    made up entirely of blank/falsy entries (e.g. `[""]`) previously still
+    incremented the repaired count even though _upsert_recipients() (by
+    design) inserts nothing for a falsy entry, over-reporting success and
+    weakening the operator-facing repair count as a diagnostic signal. Such
+    a message is left alone and stays exactly as unreachable as the audit
+    already correctly reports it (unreachable_missing_recipient), because
+    there is no real data to recover it from.
+
+    Idempotent — a message already holding recipient rows never matches
+    the candidate query again, so calling this on every script run is
+    always safe.
+
+    Returns the number of messages repaired.
+    """
+    repaired = 0
+    for message in build_missing_recipient_repair_query(session, tenant_id).all():
+        tolist = message.tolist or []
+        if not any(tolist):
+            continue
+        _upsert_recipients(session, message.id, tolist, message.tenant_id)
+        session.flush()
+        has_persisted_recipient = (
+            session.query(ArchiveMessageRecipient.id)
+            .filter(
+                ArchiveMessageRecipient.message_id == message.id,
+                ArchiveMessageRecipient.tenant_id == message.tenant_id,
+            )
+            .first()
+            is not None
+        )
+        if has_persisted_recipient:
+            repaired += 1
+    return repaired
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +443,7 @@ def main() -> None:
     key_mismatch = 0
     rsa_failed = 0
     recipient_upsert_failed = 0
+    recipients_repaired = 0
     return_codes: dict[int, int] = {}
 
     with Session(engine) as session:
@@ -405,6 +538,12 @@ def main() -> None:
             else:
                 unsupported += 1
 
+        # --- 4b. Repair recipient rows for previously-affected messages
+        # (RND-179) — self-healing scan, safe to run on every invocation.
+        # Must happen in the same session/commit as the loop above so a
+        # single script run leaves the database fully consistent.
+        recipients_repaired = repair_missing_recipients(session)
+
         # --- 5. Commit all changes ---
         try:
             session.commit()
@@ -442,6 +581,11 @@ def main() -> None:
     if recipient_upsert_failed:
         print(
             f"[INFO] decrypt recipient_upsert_failed: {recipient_upsert_failed}",
+            flush=True,
+        )
+    if recipients_repaired:
+        print(
+            f"[INFO] decrypt recipients_repaired: {recipients_repaired}",
             flush=True,
         )
     # Safe return-code diagnostic (e.g. "ret_0=3, ret_90002=1")
