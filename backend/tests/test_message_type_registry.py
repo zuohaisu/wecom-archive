@@ -230,12 +230,12 @@ def test_image_renderer_not_downloaded_placeholder_unchanged() -> None:
 @pytest.mark.parametrize(
     "msgtype,expected_text",
     [
-        ("location", "Location message"),
-        ("link", "Link message"),
-        ("card", "Contact card message"),
-        ("emotion", "Sticker message"),
-        ("miniprogram", "Mini program message"),
-        ("todo", "To-do message"),
+        ("location", "Unsupported location message"),
+        ("link", "Unsupported link message"),
+        ("card", "Unsupported contact card message"),
+        ("emotion", "Unsupported sticker message"),
+        ("miniprogram", "Unsupported mini program message"),
+        ("todo", "Unsupported to-do message"),
     ],
 )
 def test_new_type_shows_distinct_placeholder(msgtype: str, expected_text: str) -> None:
@@ -247,19 +247,19 @@ def test_new_type_shows_distinct_placeholder(msgtype: str, expected_text: str) -
 def test_video_placeholder_is_distinct_and_readable() -> None:
     msg = _msg("video", "unsupported")
     html = _render(msg)
-    assert html == '<div class="media-placeholder">Video message</div>'
+    assert html == '<div class="media-placeholder">Unsupported video message</div>'
 
 
 def test_voice_placeholder_is_distinct_and_readable() -> None:
     msg = _msg("voice", "unsupported")
     html = _render(msg)
-    assert html == '<div class="media-placeholder">Voice message</div>'
+    assert html == '<div class="media-placeholder">Unsupported voice message</div>'
 
 
 def test_file_placeholder_is_distinct_and_readable() -> None:
     msg = _msg("file", "unsupported")
     html = _render(msg)
-    assert html == '<div class="media-placeholder">File message</div>'
+    assert html == '<div class="media-placeholder">Unsupported file message</div>'
 
 
 def test_different_unsupported_types_render_different_text() -> None:
@@ -289,17 +289,19 @@ def test_missing_registry_entry_falls_back_to_generic_unsupported_placeholder() 
     still render a safe, generic placeholder rather than breaking."""
     msg = _msg("some_future_wecom_type", "unsupported")
     html = _render(msg)
-    assert html == '<div class="media-placeholder">Unsupported message type</div>'
+    assert html == '<div class="media-placeholder">Unknown message type</div>'
 
 
 def test_pre_existing_generic_unsupported_placeholder_text_unchanged() -> None:
     """RND-150 regression: a msgtype the registry itself owns for another
     purpose (here 'text') combined with a backend media_type of
     'unsupported' — an unrealistic combination used only to exercise the
-    generic-fallback branch — must still render the exact original text."""
+    generic-fallback branch — must still route through the registry
+    fallback (RND-177 updated its copy from "Unsupported message type" to
+    "Unknown message type" to match the missing/unknown-msgtype branch)."""
     msg = _msg("text", "unsupported", content_text=None)
     html = _render(msg)
-    assert html == '<div class="media-placeholder">Unsupported message type</div>'
+    assert html == '<div class="media-placeholder">Unknown message type</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +367,7 @@ process.stdout.write(JSON.stringify(capturedHtml));
     )
     assert "before" in out
     assert "after" in out
-    assert "Unsupported message type" in out
+    assert "Unknown message type" in out
 
 
 # ---------------------------------------------------------------------------
@@ -376,9 +378,9 @@ process.stdout.write(JSON.stringify(capturedHtml));
 @pytest.mark.parametrize(
     "locale,expected",
     [
-        ("zh-CN", "【视频消息】"),
-        ("zh-TW", "【影片訊息】"),
-        ("en", "Video message"),
+        ("zh-CN", "不支持视频消息"),
+        ("zh-TW", "不支援影片訊息"),
+        ("en", "Unsupported video message"),
     ],
 )
 def test_placeholder_uses_i18n_per_locale(locale: str, expected: str) -> None:
@@ -420,8 +422,8 @@ var after = renderMessageBody({msgtype:'weapp_vote', media_type:'unsupported', c
 process.stdout.write(JSON.stringify({before:before, after:after}));
 """
     )
-    assert out["before"] == '<div class="media-placeholder">Unsupported message type</div>'
-    assert out["after"] == '<div class="media-placeholder">Contact card message</div>'
+    assert out["before"] == '<div class="media-placeholder">Unknown message type</div>'
+    assert out["after"] == '<div class="media-placeholder">Unsupported contact card message</div>'
 
 
 def test_registry_fallback_is_exposed_and_used_for_unregistered_types() -> None:

@@ -253,11 +253,15 @@ def test_direct_message_has_no_group_badge_or_participant_summary() -> None:
 
 
 def test_unsupported_media_placeholder_unchanged() -> None:
+    """RND-177 updated the generic fallback copy from "Unsupported message
+    type" to "Unknown message type" — this test still only asserts that
+    group-participant-overflow work (RND-150) doesn't affect which
+    placeholder branch renders, not the exact fallback wording."""
     msg = _direct_message()
     msg["media_type"] = "unsupported"
     msg["content_text"] = None
     html = _run_render_timeline([msg])
-    assert '<div class="media-placeholder">Unsupported message type</div>' in html
+    assert '<div class="media-placeholder">Unknown message type</div>' in html
 
 
 def test_media_not_downloaded_placeholder_unchanged() -> None:
