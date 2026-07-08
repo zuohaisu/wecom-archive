@@ -210,11 +210,65 @@ process.stdout.write(JSON.stringify(capturedHtml));
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("msgtype", ["video", "location", "todo"])
+@pytest.mark.parametrize("msgtype", ["video", "voice", "location", "todo"])
 def test_direct_and_group_timeline_show_the_same_label(msgtype: str) -> None:
     direct_html = _render("zh-CN", _msg(msgtype, "unsupported", roomid=None))
     group_html = _render("zh-CN", _msg(msgtype, "unsupported", roomid="room-1"))
     assert direct_html == group_html
+
+
+def test_voice_not_downloaded_status_renders_specific_placeholder() -> None:
+    msg = _msg(
+        "voice",
+        "voice",
+        media_status="not_downloaded",
+        content_text=None,
+    )
+    html = _render("zh-CN", msg)
+    assert html == '<div class="media-placeholder">不支持语音消息</div>'
+    assert GENERIC_LEGACY_STRING not in html
+
+
+def test_timeline_continues_rendering_before_and_after_voice() -> None:
+    before = _msg("text", "text", content_text="before")
+    before["msgid"] = "m-before"
+    before["msgtime"] = 1000
+    voice = _msg(
+        "voice",
+        "voice",
+        media_status="not_downloaded",
+        content_text=None,
+    )
+    voice["msgid"] = "m-voice"
+    voice["msgtime"] = 2000
+    after = _msg("text", "text", content_text="after")
+    after["msgid"] = "m-after"
+    after["msgtime"] = 3000
+
+    out = _run(
+        f"""
+I18N.setLocale('zh-CN');
+var mode='staff', selEntityId=null, timelineHasOlder=false, timelineHistoryError=null;
+var timelineMsgs={json.dumps([before, voice, after])};
+var capturedHtml=null;
+var timelineBodyEl={{
+  get innerHTML(){{return capturedHtml;}},
+  set innerHTML(v){{capturedHtml=v;}},
+  scrollHeight:0, scrollTop:0
+}};
+var document={{getElementById:function(id){{
+  if(id==='timeline-body')return timelineBodyEl;
+  throw new Error('unexpected getElementById('+id+')');
+}}}};
+renderTimeline(false);
+process.stdout.write(JSON.stringify(capturedHtml));
+"""
+    )
+    assert "before" in out
+    assert "不支持语音消息" in out
+    assert "after" in out
+    assert GENERIC_LEGACY_STRING not in out
+    assert "【" not in out and "】" not in out
 
 
 def test_group_context_and_sender_metadata_survive_unsupported_rendering() -> None:

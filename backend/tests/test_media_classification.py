@@ -121,7 +121,7 @@ def client():
         yield c
 
 
-def _run_messages_query(client, app, all_msgs):
+def _run_messages_query(client, app, all_msgs, conversation_id="room1"):
     from app.auth import get_current_user
     from app.db.models import ArchiveMessageRecipient, Contact, MediaFile
     from app.db.session import get_db
@@ -160,7 +160,7 @@ def _run_messages_query(client, app, all_msgs):
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db
     try:
-        return client.get("/api/conversations/room1/messages")
+        return client.get(f"/api/conversations/{conversation_id}/messages")
     finally:
         app.dependency_overrides.clear()
 
@@ -226,6 +226,61 @@ def test_timeline_voice_placeholder_status(client) -> None:
     assert msg["unsupported_reason"]
 
 
+def test_timeline_direct_voice_empty_text_still_serialized(client, monkeypatch) -> None:
+    import app.routers.conversations as conv
+
+    from app.main import app
+
+    msg = _msg(
+        1,
+        "staff_a",
+        roomid=None,
+        msgtime=1000,
+        content_text=None,
+        msgtype="voice",
+        sdkfileid="redacted-media-id",
+    )
+    monkeypatch.setattr(conv, "_fetch_conversation_messages", lambda db, cid, tenant_id: [msg])
+    resp = _run_messages_query(client, app, [], conversation_id="direct__contact_a___staff_a")
+    assert resp.status_code == 200
+    data = resp.json()["messages"]
+    assert len(data) == 1
+    assert data[0]["msgid"] == "m-1"
+    assert data[0]["content_text"] is None
+    assert data[0]["msgtype"] == "voice"
+    assert data[0]["media_type"] == "voice"
+    assert data[0]["media_status"] == "not_downloaded"
+    assert data[0]["sender"]
+    assert data[0]["msgtime"] == 1000
+    assert data[0]["roomid"] is None
+
+
+def test_timeline_group_voice_empty_text_still_serialized(client) -> None:
+    from app.main import app
+
+    msg = _msg(
+        1,
+        "staff_a",
+        roomid="room1",
+        msgtime=1000,
+        content_text=None,
+        msgtype="voice",
+        sdkfileid="redacted-media-id",
+    )
+    resp = _run_messages_query(client, app, [msg])
+    assert resp.status_code == 200
+    data = resp.json()["messages"]
+    assert len(data) == 1
+    assert data[0]["msgid"] == "m-1"
+    assert data[0]["content_text"] is None
+    assert data[0]["msgtype"] == "voice"
+    assert data[0]["media_type"] == "voice"
+    assert data[0]["media_status"] == "not_downloaded"
+    assert data[0]["sender"]
+    assert data[0]["msgtime"] == 1000
+    assert data[0]["roomid"] == "room1"
+
+
 def test_timeline_file_placeholder_status(client) -> None:
     from app.main import app
 
@@ -287,6 +342,35 @@ def test_timeline_never_exposes_raw_media_identifiers(client) -> None:
         "sdkfileid",
         "local_path",
         "oss_key",
+        "raw_encrypted_payload",
+        "decrypted_payload",
+    ):
+        assert forbidden_field not in msg
+
+
+def test_timeline_voice_never_exposes_raw_media_identifiers(client) -> None:
+    from app.main import app
+
+    all_msgs = [
+        _msg(
+            1,
+            "staff_a",
+            roomid="room1",
+            msgtime=1000,
+            msgtype="voice",
+            sdkfileid="redacted-media-id",
+        )
+    ]
+    resp = _run_messages_query(client, app, all_msgs)
+    assert resp.status_code == 200
+    body_text = resp.text
+    assert "redacted-media-id" not in body_text
+    msg = resp.json()["messages"][0]
+    for forbidden_field in (
+        "sdkfileid",
+        "local_path",
+        "oss_key",
+        "raw_payload",
         "raw_encrypted_payload",
         "decrypted_payload",
     ):
