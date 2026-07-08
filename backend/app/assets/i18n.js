@@ -107,7 +107,51 @@
         "login.error.invalidState": "登录会话已过期或请求被篡改，请重试。",
         "login.error.authFailed": "认证失败，请重试。",
         "login.error.userInactive": "您的企业微信账号已停用，请联系管理员。",
-        "login.error.configError": "服务器配置错误，请联系管理员。"
+        "login.error.configError": "服务器配置错误，请联系管理员。",
+
+        "nav.diagnostics": "系统诊断",
+
+        "diagnostics.pageTitle": "消息可达性诊断",
+        "diagnostics.pageDescription": "本页仅展示消息可达性审计的聚合统计数据，不包含消息内容或原始标识符。",
+        "diagnostics.reachabilityTitle": "消息可达性",
+        "diagnostics.refresh": "刷新",
+        "diagnostics.loading": "正在加载诊断数据…",
+        "diagnostics.noData": "暂无诊断数据",
+        "diagnostics.failedToLoad": "诊断数据加载失败",
+        "diagnostics.retry": "重试",
+        "diagnostics.backToConsole": "返回审阅控制台",
+
+        "diagnostics.successfulDecrypted": "成功解密消息数",
+        "diagnostics.reachableMessages": "可达消息数",
+        "diagnostics.unreachableMessages": "不可达消息数",
+        "diagnostics.reachabilityRate": "可达率",
+
+        "diagnostics.scanMetadataTitle": "扫描范围",
+        "diagnostics.scannedMessages": "已扫描消息数",
+        "diagnostics.matchingTotal": "匹配消息总数",
+        "diagnostics.limitLabel": "扫描上限",
+        "diagnostics.offsetLabel": "偏移量",
+        "diagnostics.hasMoreLabel": "是否有更多",
+        "diagnostics.hasMoreYes": "是",
+        "diagnostics.hasMoreNo": "否",
+        "diagnostics.moreMessagesExist": "本报告仅基于已扫描的分页数据，仍有更多匹配消息未扫描。",
+
+        "diagnostics.unreachableReasons": "不可达原因分布",
+        "diagnostics.byMessageType": "按消息类型统计",
+        "diagnostics.reasonColumn": "原因",
+        "diagnostics.countColumn": "数量",
+        "diagnostics.percentColumn": "占比",
+        "diagnostics.typeColumn": "消息类型",
+        "diagnostics.totalColumn": "总数",
+
+        "reachability.status.reachable_direct": "可达（单聊）",
+        "reachability.status.reachable_group": "可达（群聊）",
+        "reachability.status.unreachable_missing_recipient": "不可达：缺少接收方记录",
+        "reachability.status.unreachable_missing_room": "不可达：缺少群聊房间标识",
+        "reachability.status.unreachable_missing_sender": "不可达：缺少发送方",
+        "reachability.status.unreachable_membership": "不可达：会话成员归属未命中",
+        "reachability.status.unreachable_other": "不可达：其他原因",
+        "reachability.status.unknown": "未知状态"
       }
     },
     "zh-TW": {
@@ -200,7 +244,51 @@
         "login.error.invalidState": "登入工作階段已過期或請求遭竄改，請重試。",
         "login.error.authFailed": "驗證失敗，請重試。",
         "login.error.userInactive": "您的企業微信帳號已停用，請聯絡管理員。",
-        "login.error.configError": "伺服器設定錯誤，請聯絡管理員。"
+        "login.error.configError": "伺服器設定錯誤，請聯絡管理員。",
+
+        "nav.diagnostics": "系統診斷",
+
+        "diagnostics.pageTitle": "訊息可達性診斷",
+        "diagnostics.pageDescription": "本頁僅顯示訊息可達性稽核的彙總統計數據，不包含訊息內容或原始識別碼。",
+        "diagnostics.reachabilityTitle": "訊息可達性",
+        "diagnostics.refresh": "重新整理",
+        "diagnostics.loading": "正在載入診斷資料…",
+        "diagnostics.noData": "暫無診斷資料",
+        "diagnostics.failedToLoad": "診斷資料載入失敗",
+        "diagnostics.retry": "重試",
+        "diagnostics.backToConsole": "返回審閱控制台",
+
+        "diagnostics.successfulDecrypted": "成功解密訊息數",
+        "diagnostics.reachableMessages": "可達訊息數",
+        "diagnostics.unreachableMessages": "不可達訊息數",
+        "diagnostics.reachabilityRate": "可達率",
+
+        "diagnostics.scanMetadataTitle": "掃描範圍",
+        "diagnostics.scannedMessages": "已掃描訊息數",
+        "diagnostics.matchingTotal": "符合訊息總數",
+        "diagnostics.limitLabel": "掃描上限",
+        "diagnostics.offsetLabel": "偏移量",
+        "diagnostics.hasMoreLabel": "是否有更多",
+        "diagnostics.hasMoreYes": "是",
+        "diagnostics.hasMoreNo": "否",
+        "diagnostics.moreMessagesExist": "本報告僅基於已掃描的分頁資料，仍有更多符合訊息尚未掃描。",
+
+        "diagnostics.unreachableReasons": "不可達原因分佈",
+        "diagnostics.byMessageType": "依訊息類型統計",
+        "diagnostics.reasonColumn": "原因",
+        "diagnostics.countColumn": "數量",
+        "diagnostics.percentColumn": "佔比",
+        "diagnostics.typeColumn": "訊息類型",
+        "diagnostics.totalColumn": "總數",
+
+        "reachability.status.reachable_direct": "可達（單聊）",
+        "reachability.status.reachable_group": "可達（群聊）",
+        "reachability.status.unreachable_missing_recipient": "不可達：缺少接收方紀錄",
+        "reachability.status.unreachable_missing_room": "不可達：缺少群聊房間識別碼",
+        "reachability.status.unreachable_missing_sender": "不可達：缺少發送方",
+        "reachability.status.unreachable_membership": "不可達：會話成員歸屬未命中",
+        "reachability.status.unreachable_other": "不可達：其他原因",
+        "reachability.status.unknown": "未知狀態"
       }
     },
     en: {
@@ -293,7 +381,51 @@
         "login.error.invalidState": "Login session expired or request was tampered with. Please try again.",
         "login.error.authFailed": "Authentication failed. Please try again.",
         "login.error.userInactive": "Your WeCom account is inactive. Contact your administrator.",
-        "login.error.configError": "Server configuration error. Please contact your administrator."
+        "login.error.configError": "Server configuration error. Please contact your administrator.",
+
+        "nav.diagnostics": "System Diagnostics",
+
+        "diagnostics.pageTitle": "Message Reachability Diagnostics",
+        "diagnostics.pageDescription": "This page shows aggregate statistics from the message reachability audit only — no message content or raw identifiers are displayed.",
+        "diagnostics.reachabilityTitle": "Message Reachability",
+        "diagnostics.refresh": "Refresh",
+        "diagnostics.loading": "Loading diagnostics…",
+        "diagnostics.noData": "No diagnostic data available",
+        "diagnostics.failedToLoad": "Failed to load diagnostics",
+        "diagnostics.retry": "Retry",
+        "diagnostics.backToConsole": "Back to review console",
+
+        "diagnostics.successfulDecrypted": "Successful decrypted messages",
+        "diagnostics.reachableMessages": "Reachable messages",
+        "diagnostics.unreachableMessages": "Unreachable messages",
+        "diagnostics.reachabilityRate": "Reachability rate",
+
+        "diagnostics.scanMetadataTitle": "Scan metadata",
+        "diagnostics.scannedMessages": "Scanned messages",
+        "diagnostics.matchingTotal": "Matching total",
+        "diagnostics.limitLabel": "Scan limit",
+        "diagnostics.offsetLabel": "Offset",
+        "diagnostics.hasMoreLabel": "More matching messages",
+        "diagnostics.hasMoreYes": "Yes",
+        "diagnostics.hasMoreNo": "No",
+        "diagnostics.moreMessagesExist": "This report is based on the scanned page. More matching messages exist.",
+
+        "diagnostics.unreachableReasons": "Unreachable reason distribution",
+        "diagnostics.byMessageType": "By message type",
+        "diagnostics.reasonColumn": "Reason",
+        "diagnostics.countColumn": "Count",
+        "diagnostics.percentColumn": "Percentage",
+        "diagnostics.typeColumn": "Message type",
+        "diagnostics.totalColumn": "Total",
+
+        "reachability.status.reachable_direct": "Reachable (direct)",
+        "reachability.status.reachable_group": "Reachable (group)",
+        "reachability.status.unreachable_missing_recipient": "Unreachable: missing recipient record",
+        "reachability.status.unreachable_missing_room": "Unreachable: missing room id",
+        "reachability.status.unreachable_missing_sender": "Unreachable: missing sender",
+        "reachability.status.unreachable_membership": "Unreachable: conversation membership miss",
+        "reachability.status.unreachable_other": "Unreachable: other reason",
+        "reachability.status.unknown": "Unknown status"
       }
     }
   };
