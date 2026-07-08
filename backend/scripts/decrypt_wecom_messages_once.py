@@ -310,6 +310,7 @@ def main() -> None:
     pending_remaining = 0
     key_mismatch = 0
     rsa_failed = 0
+    recipient_upsert_failed = 0
     return_codes: dict[int, int] = {}
 
     with Session(engine) as session:
@@ -387,13 +388,17 @@ def main() -> None:
             record.content_text = normalised["content_text"]
             record.decrypt_status = "success"
 
-            # Upsert recipient rows — inherit tenant_id from the parent message
+            # Upsert recipient rows — inherit tenant_id from the parent message.
+            # Non-fatal by design (a recipient-persistence failure must not
+            # block decrypt success), but silently swallowing it here used to
+            # leave direct-conversation messages permanently unreachable with
+            # no operator-visible signal (RND-178 finding). Counted below so
+            # it shows up in the safe operational summary instead.
             tolist = normalised["tolist"] or []
             try:
                 _upsert_recipients(session, record.id, tolist, record.tenant_id)
             except Exception:
-                # Non-fatal: recipients are auxiliary; message is still decrypted
-                pass
+                recipient_upsert_failed += 1
 
             if msgtype == "text":
                 success += 1
@@ -434,6 +439,11 @@ def main() -> None:
         print(f"[INFO] decrypt key_version_mismatch: {key_mismatch}", flush=True)
     if rsa_failed:
         print(f"[INFO] decrypt rsa_decrypt_failed: {rsa_failed}", flush=True)
+    if recipient_upsert_failed:
+        print(
+            f"[INFO] decrypt recipient_upsert_failed: {recipient_upsert_failed}",
+            flush=True,
+        )
     # Safe return-code diagnostic (e.g. "ret_0=3, ret_90002=1")
     if return_codes:
         sorted_codes = sorted(return_codes.items())

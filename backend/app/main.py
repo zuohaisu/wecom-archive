@@ -13,11 +13,13 @@ from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
+from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.wecom_events import router as wecom_events_router
 
 app = FastAPI(title="365 WeCom Archive")
 app.include_router(auth_router)
 app.include_router(conversations_router)
+app.include_router(reachability_audit_router)
 app.include_router(wecom_events_router)
 
 _MAX_LIMIT = 100

@@ -45,7 +45,7 @@ Monitored-account / archive-seat detection (RND-132):
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -286,6 +286,43 @@ def _fetch_messages_for_entity(
     )
 
 
+def _derive_conversation_membership(
+    sender: Optional[str],
+    roomid: Optional[str],
+    recipients: list[str],
+    is_staff: Callable[[str], bool],
+) -> Tuple[str, str, set[str], set[str]]:
+    """
+    Compute (conversation_id, conversation_type, staff_participants,
+    contact_participants) for a single message, using the same per-message
+    rule _build_conversation_list has always used.
+
+    Extracted as a standalone, reusable function so the Message
+    Reachability Audit (RND-178) can recompute a message's expected
+    conversation membership through this exact path instead of a parallel,
+    divergence-prone reimplementation. Pure behavior-preserving refactor —
+    no change to conv_id/conv_type outputs.
+    """
+    sender = sender or ""
+    roomid = roomid or ""
+    all_parties = {p for p in ({sender} | set(recipients)) if p}
+    staff_set = {p for p in all_parties if is_staff(p)}
+    contact_set = {p for p in all_parties if not is_staff(p)}
+
+    if roomid:
+        return roomid, "group", staff_set, contact_set
+
+    if staff_set and contact_set:
+        conv_id = _direct_conv_id(sorted(staff_set)[0], sorted(contact_set)[0])
+    else:
+        parts = sorted(all_parties)
+        if len(parts) >= 2:
+            conv_id = f"direct__{parts[0]}___{parts[1]}"
+        else:
+            conv_id = f"direct__{parts[0] if parts else 'unknown'}"
+    return conv_id, "direct", staff_set, contact_set
+
+
 def _build_conversation_list(
     messages: list,
     recipients_map: dict[int, list[str]],
@@ -313,26 +350,11 @@ def _build_conversation_list(
         return _is_staff(uid)
 
     for msg in messages:
-        sender = msg.sender or ""
         roomid = msg.roomid or ""
         recipients = recipients_map.get(msg.id, [])
-        all_parties = {p for p in ({sender} | set(recipients)) if p}
-        staff_set = {p for p in all_parties if is_staff(p)}
-        contact_set = {p for p in all_parties if not is_staff(p)}
-
-        if roomid:
-            conv_id = roomid
-            conv_type = "group"
-        else:
-            if staff_set and contact_set:
-                conv_id = _direct_conv_id(sorted(staff_set)[0], sorted(contact_set)[0])
-            else:
-                parts = sorted(all_parties)
-                if len(parts) >= 2:
-                    conv_id = f"direct__{parts[0]}___{parts[1]}"
-                else:
-                    conv_id = f"direct__{parts[0] if parts else 'unknown'}"
-            conv_type = "direct"
+        conv_id, conv_type, staff_set, contact_set = _derive_conversation_membership(
+            msg.sender, msg.roomid, recipients, is_staff
+        )
 
         if conv_id not in convs:
             convs[conv_id] = {
