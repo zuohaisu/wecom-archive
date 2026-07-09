@@ -9,12 +9,19 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
+    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.base import Base
+
+
+class DuplicateCorpIdError(ValueError):
+    """Raised when a TenantWecomConfig write would assign an active corp_id
+    to more than one tenant. See RND-184."""
 
 
 class Tenant(Base):
@@ -51,6 +58,16 @@ class TenantWecomConfig(Base):
     __tablename__ = "tenant_wecom_configs"
     __table_args__ = (
         UniqueConstraint("tenant_id", name="uq_tenant_wecom_configs_tenant"),
+        # A given WeCom corp_id must resolve to exactly one active tenant.
+        # Partial index — inactive/disabled configs are exempt so a corp_id
+        # can be freely reassigned after the old config is deactivated.
+        Index(
+            "uq_tenant_wecom_configs_active_corp_id",
+            "corp_id",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+            sqlite_where=text("is_active = 1"),
+        ),
     )
 
     id = Column(String(36), primary_key=True)
@@ -73,6 +90,40 @@ class TenantWecomConfig(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+def _reject_duplicate_active_corp_id(connection, target: "TenantWecomConfig") -> None:
+    """Application-level guard mirroring uq_tenant_wecom_configs_active_corp_id.
+
+    Runs on every ORM insert/update of TenantWecomConfig so callers get a
+    clear error before the DB constraint would reject the write. Inactive
+    configs are exempt — a corp_id may be reassigned once its old config is
+    deactivated.
+    """
+    if not target.is_active:
+        return
+
+    conflict = connection.execute(
+        select(TenantWecomConfig.__table__.c.id).where(
+            TenantWecomConfig.__table__.c.corp_id == target.corp_id,
+            TenantWecomConfig.__table__.c.is_active.is_(True),
+            TenantWecomConfig.__table__.c.id != target.id,
+        )
+    ).first()
+    if conflict is not None:
+        raise DuplicateCorpIdError(
+            "This WeCom CorpID is already assigned to another tenant."
+        )
+
+
+@event.listens_for(TenantWecomConfig, "before_insert")
+def _validate_corp_id_on_insert(mapper, connection, target: TenantWecomConfig) -> None:
+    _reject_duplicate_active_corp_id(connection, target)
+
+
+@event.listens_for(TenantWecomConfig, "before_update")
+def _validate_corp_id_on_update(mapper, connection, target: TenantWecomConfig) -> None:
+    _reject_duplicate_active_corp_id(connection, target)
 
 
 class AdminUser(Base):
