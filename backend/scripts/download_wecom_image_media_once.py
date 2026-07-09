@@ -79,7 +79,7 @@ Safety constraints:
       removed on any failure path (download error, write error,
       unsupported type, rename error) via a single centralized cleanup —
       see download_one()'s try/finally.
-    - media_files.sdkfileid is globally unique with no tenant_id column.
+    - media_files.sdkfileid is unique per tenant (UNIQUE(tenant_id, sdkfileid)).
       get_or_reset_media_file() never reuses/overwrites an existing row
       whose archive_message_id does not match the message currently being
       processed — a mismatch fails that candidate safely instead of
@@ -98,7 +98,7 @@ from typing import List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import create_engine, or_
+from sqlalchemy import and_, create_engine, or_
 from sqlalchemy.orm import Query, Session
 
 from app.db.models import ArchiveMessage, MediaFile, TenantWecomConfig
@@ -228,9 +228,24 @@ def build_candidate_query(
     ascending-id order — so a run can prioritize recently ingested images
     over old, possibly platform-expired ones.
     """
+    # tenant_id must be part of the JOIN's ON clause, not a later WHERE
+    # filter: this is an OUTER join specifically so a message with no media
+    # row yet still matches (as a NULL MediaFile side) and is treated as a
+    # fresh candidate. A stray media_files row belonging to another tenant
+    # but sharing this message's archive_message_id must not be allowed to
+    # participate in the join at all — if it were joined and then rejected
+    # by a WHERE-level tenant filter, the whole (message, stray-row) pairing
+    # would be dropped instead of falling back to the NULL-media case,
+    # silently starving this message of any future download attempt.
     query = (
         session.query(ArchiveMessage)
-        .outerjoin(MediaFile, MediaFile.archive_message_id == ArchiveMessage.id)
+        .outerjoin(
+            MediaFile,
+            and_(
+                MediaFile.archive_message_id == ArchiveMessage.id,
+                MediaFile.tenant_id == tenant_id,
+            ),
+        )
         .filter(
             ArchiveMessage.tenant_id == tenant_id,
             ArchiveMessage.decrypt_status == "success",
@@ -262,6 +277,7 @@ def build_downloaded_repair_query(session: Session, tenant_id: str) -> Query:
         .join(MediaFile, MediaFile.archive_message_id == ArchiveMessage.id)
         .filter(
             ArchiveMessage.tenant_id == tenant_id,
+            MediaFile.tenant_id == tenant_id,
             ArchiveMessage.decrypt_status == "success",
             ArchiveMessage.msgtype == "image",
             ArchiveMessage.sdkfileid.isnot(None),
@@ -382,13 +398,17 @@ def _since_ms_cutoff(since_hours: float) -> int:
 
 def count_candidates_with_existing_media_row(session: Session, tenant_id: str) -> int:
     """Count of tenant-scoped, image-only, decrypted messages that already
-    have *any* media_files row (any download_status) — safe, aggregate-only
-    visibility for --count-only reporting; never touches sdkfileid/paths."""
+    have *any* media_files row for this tenant (any download_status) —
+    safe, aggregate-only visibility for --count-only reporting; never
+    touches sdkfileid/paths. MediaFile.tenant_id is filtered explicitly so
+    a stray other-tenant media_files row sharing an archive_message_id
+    never inflates this tenant's count."""
     return (
         session.query(ArchiveMessage)
         .join(MediaFile, MediaFile.archive_message_id == ArchiveMessage.id)
         .filter(
             ArchiveMessage.tenant_id == tenant_id,
+            MediaFile.tenant_id == tenant_id,
             ArchiveMessage.decrypt_status == "success",
             ArchiveMessage.msgtype == "image",
             ArchiveMessage.sdkfileid.isnot(None),
@@ -439,24 +459,31 @@ def _safe_unlink(path: Path) -> None:
 
 
 def get_or_reset_media_file(
-    session: Session, sdkfileid: str, archive_message_id: int
+    session: Session, tenant_id: str, sdkfileid: str, archive_message_id: int
 ) -> Optional[MediaFile]:
-    """Return the media_files row for sdkfileid, creating it (or resetting
-    an existing pending/failed/stale-downloaded row) to
+    """Return the media_files row for (tenant_id, sdkfileid), creating it (or
+    resetting an existing pending/failed/stale-downloaded row) to
     download_status="pending" before an attempt begins.
 
-    media_files.sdkfileid is globally unique with no tenant_id column on
-    this table yet. An existing row is only ever safe to reuse when its
-    archive_message_id already matches the message about to be processed.
-    If an existing row's archive_message_id differs — a genuine sdkfileid
-    collision across messages/tenants, or an inconsistent (msg, media_file)
-    pairing — reusing it would silently reassign someone else's media row,
-    so this returns None. Callers must treat None as "fail this candidate
-    safely" and must not touch the conflicting row.
+    media_files.sdkfileid is unique per tenant (UNIQUE(tenant_id,
+    sdkfileid)), not globally — the lookup is scoped by tenant_id so two
+    tenants can never see or reset each other's row even if their WeCom
+    corps happen to hand back the same sdkfileid. An existing row is only
+    ever safe to reuse when its archive_message_id already matches the
+    message about to be processed. If an existing row's archive_message_id
+    differs — an inconsistent (msg, media_file) pairing within the same
+    tenant — reusing it would silently reassign another message's media
+    row, so this returns None. Callers must treat None as "fail this
+    candidate safely" and must not touch the conflicting row.
     """
-    row = session.query(MediaFile).filter(MediaFile.sdkfileid == sdkfileid).first()
+    row = (
+        session.query(MediaFile)
+        .filter(MediaFile.tenant_id == tenant_id, MediaFile.sdkfileid == sdkfileid)
+        .first()
+    )
     if row is None:
         row = MediaFile(
+            tenant_id=tenant_id,
             sdkfileid=sdkfileid,
             archive_message_id=archive_message_id,
             download_status="pending",
@@ -711,7 +738,7 @@ def _run(args: argparse.Namespace) -> None:
         reason_counts: dict[str, int] = {}
 
         for msg in candidates:
-            media_file = get_or_reset_media_file(session, msg.sdkfileid, msg.id)
+            media_file = get_or_reset_media_file(session, tenant_id, msg.sdkfileid, msg.id)
             if media_file is None:
                 failed += 1
                 reason_counts["media_identity_conflict"] = (

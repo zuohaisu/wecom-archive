@@ -14,8 +14,9 @@ Steps:
   4. Backfill archive_message_recipients.tenant_id WHERE tenant_id IS NULL.
   5. Backfill sync_states.tenant_id WHERE tenant_id IS NULL.
   6. Backfill contacts.tenant_id WHERE tenant_id IS NULL.
-  7. Enforce NOT NULL on all four backfilled columns (idempotent guard).
-  8. Print row-count diagnostics (no message content, no secrets).
+  7. Backfill media_files.tenant_id WHERE tenant_id IS NULL.
+  8. Enforce NOT NULL on all five backfilled columns (idempotent guard).
+  9. Print row-count diagnostics (no message content, no secrets).
 
 Usage (from backend/):
     python scripts/bootstrap_default_tenant.py
@@ -213,6 +214,7 @@ _ARCHIVE_TABLES = [
     "archive_message_recipients",
     "sync_states",
     "contacts",
+    "media_files",
 ]
 
 

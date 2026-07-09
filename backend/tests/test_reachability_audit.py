@@ -93,15 +93,17 @@ CREATE TABLE admin_users (
 );
 CREATE TABLE media_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sdkfileid TEXT UNIQUE NOT NULL,
+    sdkfileid TEXT NOT NULL,
     archive_message_id INTEGER NOT NULL,
     file_type TEXT,
     local_path TEXT,
     oss_key TEXT,
     file_size INTEGER,
     download_status TEXT NOT NULL DEFAULT 'pending',
+    tenant_id TEXT,
     created_at TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    UNIQUE(tenant_id, sdkfileid)
 );
 """
 

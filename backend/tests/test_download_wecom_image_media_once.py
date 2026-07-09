@@ -398,15 +398,17 @@ def _make_sqlite_engine(tmp_path):
                 """
                 CREATE TABLE media_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sdkfileid TEXT UNIQUE NOT NULL,
+                    sdkfileid TEXT NOT NULL,
                     archive_message_id INTEGER NOT NULL,
                     file_type TEXT,
                     local_path TEXT,
                     oss_key TEXT,
                     file_size INTEGER,
                     download_status TEXT NOT NULL DEFAULT 'pending',
+                    tenant_id TEXT,
                     created_at TEXT,
-                    updated_at TEXT
+                    updated_at TEXT,
+                    UNIQUE(tenant_id, sdkfileid)
                 )
                 """
             )
@@ -435,6 +437,7 @@ def _insert_downloaded_message(session, msg_id: int, tenant_id: str, sdkfileid: 
         MediaFile(
             sdkfileid=sdkfileid,
             archive_message_id=msg_id,
+            tenant_id=tenant_id,
             file_type="image",
             local_path=local_path,
             download_status="downloaded",
@@ -711,10 +714,11 @@ def test_get_or_reset_media_file_creates_pending_row_when_absent() -> None:
     q.first.return_value = None
     session.query.return_value = q
 
-    get_or_reset_media_file(session, "sdk-1", 100)
+    get_or_reset_media_file(session, "tenant-a", "sdk-1", 100)
 
     session.add.assert_called_once()
     added = session.add.call_args[0][0]
+    assert added.tenant_id == "tenant-a"
     assert added.sdkfileid == "sdk-1"
     assert added.archive_message_id == 100
     assert added.download_status == "pending"
@@ -740,7 +744,7 @@ def test_get_or_reset_media_file_resets_existing_failed_row_to_pending() -> None
     q.first.return_value = existing
     session.query.return_value = q
 
-    row = get_or_reset_media_file(session, "sdk-1", 100)
+    row = get_or_reset_media_file(session, "tenant-a", "sdk-1", 100)
 
     assert row is existing
     assert row.download_status == "pending"
@@ -767,7 +771,7 @@ def test_get_or_reset_media_file_resets_stale_downloaded_row_belonging_to_same_m
     q.first.return_value = existing
     session.query.return_value = q
 
-    row = get_or_reset_media_file(session, "sdk-1", 100)
+    row = get_or_reset_media_file(session, "tenant-a", "sdk-1", 100)
 
     assert row is existing
     assert row.download_status == "pending"
@@ -775,10 +779,10 @@ def test_get_or_reset_media_file_resets_stale_downloaded_row_belonging_to_same_m
 
 
 def test_get_or_reset_media_file_refuses_to_reuse_row_from_a_different_message() -> None:
-    """RND-147 QA fix: media_files.sdkfileid is globally unique with no
-    tenant_id column. An existing row whose archive_message_id does not
+    """RND-147 QA fix: an existing row whose archive_message_id does not
     match must never be reset/reused — that would silently reassign
-    another message's media row (a genuine identifier collision)."""
+    another message's media row (a genuine identifier collision within the
+    same tenant)."""
     from app.db.models import MediaFile
     from scripts.download_wecom_image_media_once import get_or_reset_media_file
 
@@ -796,7 +800,7 @@ def test_get_or_reset_media_file_refuses_to_reuse_row_from_a_different_message()
     q.first.return_value = existing
     session.query.return_value = q
 
-    result = get_or_reset_media_file(session, "sdk-shared", 42)  # different archive_message_id
+    result = get_or_reset_media_file(session, "tenant-a", "sdk-shared", 42)  # different archive_message_id
 
     assert result is None
     session.add.assert_not_called()

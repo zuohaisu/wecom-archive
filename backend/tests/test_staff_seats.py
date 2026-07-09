@@ -192,7 +192,7 @@ def test_monitored_accounts_ranks_active_seat_first_and_keeps_history(
     monkeypatch.setattr(conv, "_collect_staff_ids", fake_collect_staff_ids)
     monkeypatch.setattr(conv, "_latest_own_participation_time", fake_latest_own_participation)
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_fetch_messages)
-    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, ids: {})
+    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
     monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
@@ -260,7 +260,7 @@ def test_monitored_accounts_display_name_falls_back_when_contact_name_missing(
         "_fetch_messages_for_entity",
         lambda db, entity_id, tenant_id: [_msg(1, entity_id, msgtime=100)],
     )
-    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, ids: {})
+    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
     monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
@@ -308,7 +308,7 @@ def test_staff_sessions_include_direct_and_group_conversations(client, monkeypat
     monkeypatch.setattr(
         conv, "_fetch_messages_for_entity", lambda db, entity_id, tenant_id: messages
     )
-    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, ids: recipients_map)
+    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: recipients_map)
     monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
     monkeypatch.setattr(
         conv, "_collect_staff_ids", lambda db, tenant_id: {"real_wecom_user_001"}
@@ -346,7 +346,7 @@ def test_staff_sessions_sorted_by_latest_message_time_desc(client, monkeypatch) 
     monkeypatch.setattr(
         conv, "_fetch_messages_for_entity", lambda db, entity_id, tenant_id: messages
     )
-    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, ids: {})
+    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
     monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
     monkeypatch.setattr(
         conv, "_collect_staff_ids", lambda db, tenant_id: {"real_wecom_user_001"}
@@ -703,7 +703,7 @@ def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
     )
     monkeypatch.setattr(conv, "_latest_own_participation_time", fake_latest_own_participation)
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_fetch_messages)
-    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, ids: {})
+    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
     monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")

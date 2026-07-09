@@ -141,30 +141,50 @@ def _load_display_names(db: Session, tenant_id: str) -> dict[str, Optional[str]]
     }
 
 
-def _load_recipients_map(db: Session, msg_ids: list[int]) -> dict[int, list[str]]:
-    """Return {message_id: [receiver_userid, ...]} for the given message primary-key IDs."""
+def _load_recipients_map(
+    db: Session, tenant_id: str, msg_ids: list[int]
+) -> dict[int, list[str]]:
+    """Return {message_id: [receiver_userid, ...]} for the given message
+    primary-key IDs, scoped to tenant_id. The explicit tenant_id filter is
+    defense-in-depth on top of msg_ids already coming from a tenant-scoped
+    message query — a malformed/mistagged archive_message_recipients row
+    (wrong tenant_id, but message_id pointing at a real message belonging
+    to a different tenant) must never leak into this tenant's recipient
+    list on the strength of message_id alone."""
     if not msg_ids:
         return {}
     result: dict[int, list[str]] = {}
     for r in (
         db.query(ArchiveMessageRecipient)
-        .filter(ArchiveMessageRecipient.message_id.in_(msg_ids))
+        .filter(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.message_id.in_(msg_ids),
+        )
         .all()
     ):
         result.setdefault(r.message_id, []).append(r.receiver_userid)
     return result
 
 
-def _load_media_files_map(db: Session, msg_ids: list[int]) -> dict[int, MediaFile]:
+def _load_media_files_map(
+    db: Session, tenant_id: str, msg_ids: list[int]
+) -> dict[int, MediaFile]:
     """Return {archive_message_id: MediaFile} for the given message primary-key
-    IDs. At most one row per message is expected (media_files.sdkfileid is
-    unique and one image message has one sdkfileid)."""
+    IDs, scoped to tenant_id. At most one row per message is expected
+    (media_files.sdkfileid is unique per tenant and one image message has
+    one sdkfileid). The explicit tenant_id filter is defense-in-depth on
+    top of msg_ids already coming from a tenant-scoped message query — a
+    media_files row must never be surfaced on the strength of
+    archive_message_id alone."""
     if not msg_ids:
         return {}
     return {
         row.archive_message_id: row
         for row in db.query(MediaFile)
-        .filter(MediaFile.archive_message_id.in_(msg_ids))
+        .filter(
+            MediaFile.tenant_id == tenant_id,
+            MediaFile.archive_message_id.in_(msg_ids),
+        )
         .all()
     }
 
@@ -580,7 +600,7 @@ def get_monitored_accounts(
             # the seat is literally the sender or a listed recipient).
             continue
         messages = _fetch_messages_for_entity(db, sid, tenant_id)
-        recipients_map = _load_recipients_map(db, [m.id for m in messages])
+        recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
         conversation_count = len(
             _build_conversation_list(messages, recipients_map, display_names, staff_ids)
         )
@@ -668,7 +688,7 @@ def get_conversations(
     if not messages:
         return []
 
-    recipients_map = _load_recipients_map(db, [m.id for m in messages])
+    recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
     display_names = _load_display_names(db, tenant_id)
     staff_ids = _collect_staff_ids(db, tenant_id)
     return _build_conversation_list(messages, recipients_map, display_names, staff_ids)
@@ -694,6 +714,12 @@ def _fetch_conversation_messages(
             raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
         uid_a, uid_b = parts
 
+        # ArchiveMessageRecipient.tenant_id == tenant_id (in addition to
+        # ArchiveMessage.tenant_id == tenant_id) is required here, not
+        # optional: message_id is a global primary key, so a malformed
+        # cross-tenant recipient row that happens to share a message_id and
+        # receiver_userid with this tenant's data would otherwise let the
+        # join manufacture false direct-conversation membership.
         msgs_a_to_b = (
             db.query(ArchiveMessage)
             .join(
@@ -705,6 +731,7 @@ def _fetch_conversation_messages(
                 ArchiveMessageRecipient.receiver_userid == uid_b,
                 or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
                 ArchiveMessage.tenant_id == tenant_id,
+                ArchiveMessageRecipient.tenant_id == tenant_id,
             )
             .all()
         )
@@ -719,6 +746,7 @@ def _fetch_conversation_messages(
                 ArchiveMessageRecipient.receiver_userid == uid_a,
                 or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
                 ArchiveMessage.tenant_id == tenant_id,
+                ArchiveMessageRecipient.tenant_id == tenant_id,
             )
             .all()
         )
@@ -788,7 +816,7 @@ def get_conversation_messages(
     if not messages:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    recipients_map = _load_recipients_map(db, [m.id for m in messages])
+    recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
     display_names = _load_display_names(db, tenant_id)
 
     all_sorted_asc = sorted(messages, key=lambda m: (m.msgtime or 0, m.id))
@@ -803,7 +831,7 @@ def get_conversation_messages(
         _encode_message_cursor(page[0].msgtime, page[0].id) if page and has_older else None
     )
 
-    media_files_map = _load_media_files_map(db, [m.id for m in page])
+    media_files_map = _load_media_files_map(db, tenant_id, [m.id for m in page])
 
     result = []
     for msg in page:
@@ -870,11 +898,15 @@ def get_message_media(
     from the session, never a request param), and conversation-scoped (the
     message must actually belong to conversation_id per
     _fetch_conversation_messages — the same membership rules the timeline
-    route uses). Every failure mode — wrong tenant, wrong conversation,
-    non-image message, missing/pending/failed media_files row, unsafe or
-    missing local_path, disallowed file extension — returns a plain 404.
-    Never includes sdkfileid, local_path, or oss_key in the response or in
-    any log line.
+    route uses). The media_files lookup is additionally filtered by
+    tenant_id directly (RND-156) — a second, independent check on top of
+    message ownership, so a media row can never be served on the strength
+    of archive_message_id alone even if message/media tenant assignment
+    were ever to diverge. Every failure mode — wrong tenant, wrong
+    conversation, non-image message, missing/pending/failed media_files
+    row, unsafe or missing local_path, disallowed file extension — returns
+    a plain 404. Never includes sdkfileid, local_path, or oss_key in the
+    response or in any log line.
     """
     _, tenant_id = auth
 
@@ -887,7 +919,12 @@ def get_message_media(
         raise HTTPException(status_code=404, detail="Not found")
 
     media_file = (
-        db.query(MediaFile).filter(MediaFile.archive_message_id == msg.id).first()
+        db.query(MediaFile)
+        .filter(
+            MediaFile.tenant_id == tenant_id,
+            MediaFile.archive_message_id == msg.id,
+        )
+        .first()
     )
     if media_file is None or media_file.download_status != "downloaded":
         raise HTTPException(status_code=404, detail="Not found")

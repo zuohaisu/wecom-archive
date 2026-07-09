@@ -231,7 +231,10 @@ def admin_message_detail(
 
     recipients = (
         db.query(ArchiveMessageRecipient)
-        .filter(ArchiveMessageRecipient.message_id == msg.id)
+        .filter(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.message_id == msg.id,
+        )
         .all()
     )
     recipient_html = "".join(
@@ -1240,10 +1243,15 @@ def get_message(
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    # Recipients safe to load by message PK: parent was already tenant-verified above.
+    # message_id is a global PK — parent tenant verification above is not
+    # sufficient on its own; a malformed/mistagged recipient row could
+    # still carry a different tenant_id, so it must be filtered here too.
     recipients = (
         db.query(ArchiveMessageRecipient)
-        .filter(ArchiveMessageRecipient.message_id == msg.id)
+        .filter(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.message_id == msg.id,
+        )
         .all()
     )
 

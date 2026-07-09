@@ -259,14 +259,31 @@ class ArchiveMessageRecipient(Base):
 
 
 class MediaFile(Base):
-    """Tracks download state for media attachments referenced by archive messages."""
+    """Tracks download state for media attachments referenced by archive messages.
+
+    tenant_id is nullable during migration (backfilled by
+    bootstrap_default_tenant.py, then enforced NOT NULL), matching the same
+    pattern used for archive_messages/archive_message_recipients/sync_states/
+    contacts. sdkfileid uniqueness is scoped to (tenant_id, sdkfileid), not
+    global — two different tenants' WeCom corps could in principle hand back
+    the same sdkfileid, and a global unique constraint would make the second
+    tenant's insert fail outright.
+    """
 
     __tablename__ = "media_files"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "sdkfileid", name="uq_media_files_tenant_sdkfileid"
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    sdkfileid = Column(Text, unique=True, nullable=False)
+    sdkfileid = Column(Text, nullable=False)
     archive_message_id = Column(
         BigInteger, ForeignKey("archive_messages.id"), nullable=False, index=True
+    )
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=True, index=True
     )
     file_type = Column(String(32), nullable=True)
     local_path = Column(Text, nullable=True)
