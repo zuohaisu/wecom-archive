@@ -106,6 +106,40 @@ def test_resolve_image_status_non_image_passthrough() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_local_storage_provider_save_read_exists_delete(tmp_path) -> None:
+    from app.media_storage import LocalStorageProvider
+
+    provider = LocalStorageProvider(tmp_path)
+    stored_ref = provider.save_bytes("tenants/tenant-a/images/1.part", b"image-bytes")
+
+    assert provider.exists(stored_ref) is True
+    assert provider.read_bytes(stored_ref) == b"image-bytes"
+    assert provider.size_bytes(stored_ref) == len(b"image-bytes")
+    assert provider.delete(stored_ref) is True
+    assert provider.exists(stored_ref) is False
+
+
+def test_local_storage_provider_blocks_path_escape(tmp_path) -> None:
+    from app.media_storage import LocalStorageProvider
+
+    provider = LocalStorageProvider(tmp_path / "media")
+
+    assert provider.exists(str(tmp_path / "outside.jpg")) is False
+    assert provider.get_local_path(str(tmp_path / "outside.jpg")) is None
+
+
+def test_media_storage_provider_factory_defaults_to_local(tmp_path, monkeypatch) -> None:
+    from app.media_storage import LocalStorageProvider, get_media_storage_provider
+
+    monkeypatch.delenv("MEDIA_STORAGE_PROVIDER", raising=False)
+    monkeypatch.delenv("STORAGE_BACKEND", raising=False)
+    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
+
+    provider = get_media_storage_provider()
+    assert isinstance(provider, LocalStorageProvider)
+    assert provider.supports_local_path() is True
+
+
 def test_media_root_unset_returns_none(monkeypatch) -> None:
     from app import media_storage
 

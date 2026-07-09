@@ -932,13 +932,14 @@ def test_download_one_write_failure_leaves_no_part_file(tmp_path, monkeypatch) -
 
 def test_download_one_rename_failure_leaves_no_part_file(tmp_path, monkeypatch) -> None:
     import scripts.download_wecom_image_media_once as script
+    from app import media_storage
 
     jpeg_bytes = b"\xff\xd8\xff" + b"jpeg-body"
     monkeypatch.setattr(
         script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
     )
     monkeypatch.setattr(
-        script.os, "replace", MagicMock(side_effect=OSError("simulated rename failure"))
+        media_storage.os, "replace", MagicMock(side_effect=OSError("simulated rename failure"))
     )
 
     outcome, detail = script.download_one(

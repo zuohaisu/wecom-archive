@@ -102,7 +102,14 @@ from sqlalchemy import and_, create_engine, or_
 from sqlalchemy.orm import Query, Session
 
 from app.db.models import ArchiveMessage, MediaFile, TenantWecomConfig
-from app.media_storage import detect_image_type_from_bytes, resolve_image_file_state
+from app.media_storage import (
+    LocalStorageProvider,
+    MediaStorageProvider,
+    UnsupportedMediaStorageProvider,
+    detect_image_type_from_bytes,
+    get_media_storage_provider,
+    resolve_image_file_state,
+)
 from app.sdk import wecom_sdk
 
 _DEFAULT_LIMIT = 10
@@ -419,38 +426,37 @@ def count_candidates_with_existing_media_row(session: Session, tenant_id: str) -
 
 
 # ---------------------------------------------------------------------------
-# Storage paths
+# Storage provider and references
 # ---------------------------------------------------------------------------
 
 
-def _media_root() -> Path:
-    raw = os.environ.get("STORAGE_LOCAL_PATH", "").strip()
-    if not raw:
+def _media_storage_provider() -> MediaStorageProvider:
+    try:
+        provider = get_media_storage_provider()
+    except UnsupportedMediaStorageProvider as exc:
+        print(f"[FAIL] {exc}", flush=True)
+        sys.exit(1)
+
+    if isinstance(provider, LocalStorageProvider) and provider.root is None:
         print("[FAIL] STORAGE_LOCAL_PATH is not set", flush=True)
         sys.exit(1)
-    root = Path(raw)
-    root.mkdir(parents=True, exist_ok=True)
-    return root.resolve()
+    return provider
 
 
-def target_paths(media_root: Path, tenant_id: str, archive_message_id: int) -> Tuple[Path, Path]:
-    """Return (base_path_without_extension, part_path) under
-    <media_root>/tenants/<tenant_id>/images/. The .part path is fixed
+def target_storage_refs(tenant_id: str, archive_message_id: int) -> Tuple[str, str]:
+    """Return (base_ref_without_extension, part_ref) under
+    tenants/<tenant_id>/images/. The .part ref is fixed
     regardless of the eventual detected type so on-failure cleanup is
     unambiguous."""
-    directory = media_root / "tenants" / tenant_id / "images"
-    directory.mkdir(parents=True, exist_ok=True)
-    base = directory / str(archive_message_id)
-    part_path = directory / f"{archive_message_id}.part"
-    return base, part_path
+    directory = f"tenants/{tenant_id}/images"
+    base = f"{directory}/{archive_message_id}"
+    part_ref = f"{directory}/{archive_message_id}.part"
+    return base, part_ref
 
 
-def _safe_unlink(path: Path) -> None:
-    """Best-effort remove; never raises, never prints the path."""
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        pass
+def _safe_delete(provider: MediaStorageProvider, storage_ref: Optional[str]) -> None:
+    """Best-effort remove; never raises, never prints the storage ref."""
+    provider.delete(storage_ref)
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +514,7 @@ def get_or_reset_media_file(
 def download_one(
     lib,
     handle,
-    media_root: Path,
+    storage: MediaStorageProvider | Path,
     tenant_id: str,
     archive_message_id: int,
     sdkfileid: str,
@@ -526,7 +532,13 @@ def download_one(
     exactly one place that can leak a stray .part file rather than one per
     failure branch.
     """
-    base_path, part_path = target_paths(media_root, tenant_id, archive_message_id)
+    provider: MediaStorageProvider
+    if isinstance(storage, MediaStorageProvider):
+        provider = storage
+    else:
+        provider = LocalStorageProvider(storage)
+
+    base_ref, part_ref = target_storage_refs(tenant_id, archive_message_id)
     outcome = "failed"
     detail: Optional[str] = "unknown_error"
 
@@ -548,8 +560,11 @@ def download_one(
             return outcome, detail
 
         try:
-            part_path.write_bytes(data)
+            part_ref = provider.save_bytes(part_ref, data)
         except OSError:
+            detail = "write_error"
+            return outcome, detail
+        except ValueError:
             detail = "write_error"
             return outcome, detail
 
@@ -558,18 +573,18 @@ def download_one(
             detail = "unsupported_type"
             return outcome, detail
 
-        final_path = base_path.with_suffix(ext)
+        final_ref = f"{base_ref}{ext}"
         try:
-            os.replace(part_path, final_path)
-        except OSError:
+            final_ref = provider.replace(part_ref, final_ref)
+        except (FileNotFoundError, OSError, ValueError):
             detail = "rename_error"
             return outcome, detail
 
-        outcome, detail = "downloaded", str(final_path)
+        outcome, detail = "downloaded", final_ref
         return outcome, detail
     finally:
         if outcome != "downloaded":
-            _safe_unlink(part_path)
+            _safe_delete(provider, part_ref)
 
 
 # ---------------------------------------------------------------------------
@@ -701,7 +716,7 @@ def _run(args: argparse.Namespace) -> None:
         lib_path = _require_env("WECOM_SDK_LIB_PATH")
         secret = _require_env("WECOM_ARCHIVE_SECRET")
         timeout = _optional_int_env("WECOM_MEDIA_TIMEOUT", _DEFAULT_TIMEOUT)
-        media_root = _media_root()
+        media_storage = _media_storage_provider()
 
         try:
             lib = wecom_sdk.load_sdk(lib_path)
@@ -747,7 +762,7 @@ def _run(args: argparse.Namespace) -> None:
                 continue
 
             outcome, detail = download_one(
-                lib, handle, media_root, tenant_id, msg.id, msg.sdkfileid, timeout
+                lib, handle, media_storage, tenant_id, msg.id, msg.sdkfileid, timeout
             )
 
             try:
@@ -755,7 +770,7 @@ def _run(args: argparse.Namespace) -> None:
                     media_file.file_type = "image"
                     media_file.download_status = "downloaded"
                     media_file.local_path = detail
-                    media_file.file_size = os.path.getsize(detail)
+                    media_file.file_size = media_storage.size_bytes(detail)
                     media_file.oss_key = None
                     session.commit()
                     downloaded += 1
@@ -774,7 +789,7 @@ def _run(args: argparse.Namespace) -> None:
                     # DB commit failed after a successful download+rename —
                     # remove the orphaned file rather than leave a file on
                     # disk with no corresponding media_files record.
-                    _safe_unlink(Path(detail))
+                    _safe_delete(media_storage, detail)
                 failed += 1
                 reason_counts["db_commit_error"] = reason_counts.get("db_commit_error", 0) + 1
 
