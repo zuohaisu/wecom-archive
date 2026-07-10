@@ -69,17 +69,35 @@ def resolve_image_media_status(
     (RND-144 Phase 1 — image download/render).
 
     Stays pure: callers are responsible for the media_files DB lookup and
-    the on-disk servability check (see
-    app/media_storage.py:resolve_image_file_state) and pass the result in
-    as a plain string. Only ever changes anything when
-    base.media_type == "image" — every other media type passes through
-    unchanged.
+    the storage servability check (see
+    app/media_storage.py:resolve_image_file_state /
+    resolve_media_file_state) and pass the result in as a plain string.
+    Only ever changes anything when base.media_type == "image" — every
+    other media type passes through unchanged.
 
-    file_state must be one of "servable" / "unsupported_type" / "missing"
-    (see resolve_image_file_state) — this is the exact same tri-state the
-    media route uses to decide whether it can serve the file, so
-    media_status=="available" here and the route actually returning 200 can
-    never disagree (RND-144 QA fix).
+    file_state must be one of "servable" / "unsupported_type" / "missing" /
+    "unavailable":
+
+      "servable"         — the media route can serve this file (200).
+      "unsupported_type" — exists but has a disallowed extension.
+      "missing"          — the object is *confirmed* not to exist (or no
+                            storage is configured at all). Never used for a
+                            provider that could not be reached — see
+                            "unavailable".
+      "unavailable"      — the storage provider could not confirm the
+                            object's state (a transient outage, timeout, or
+                            configuration problem) — see
+                            app.media_storage.MediaStorageUnavailable /
+                            MediaStorageConfigurationError. Distinct from
+                            "missing" (RND-174 QA fix): a temporary Qiniu
+                            outage must never be reported as if the media
+                            were actually gone — the media route uses the
+                            same distinction to return 503 instead of 404.
+
+    "servable"/"unsupported_type"/"missing" keep the media route and this
+    classifier in agreement on media_status=="available" (RND-144 QA fix,
+    unchanged); "unavailable" is additive and does not change that
+    guarantee.
 
     media_file_download_status is None when no media_files row exists for
     the message (nothing to combine with — base classification stands).
@@ -92,6 +110,8 @@ def resolve_image_media_status(
             return MediaClassification("image", "available", None)
         if file_state == "unsupported_type":
             return MediaClassification("image", "failed", "media_file_type_unsupported")
+        if file_state == "unavailable":
+            return MediaClassification("image", "unavailable", "media_storage_unavailable")
         return MediaClassification("image", "failed", "media_file_missing_on_disk")
 
     if media_file_download_status == "failed":

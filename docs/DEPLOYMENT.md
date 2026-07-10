@@ -53,6 +53,19 @@ Why both init steps are required:
 Without the bootstrap step, password-mode login and tenant-scoped APIs will not
 work.
 
+**Qiniu Kodo storage (RND-174, optional).** `requirements.txt` pins the
+`qiniu` SDK, so a normal `pip install -r requirements.txt` (including on
+an upgrade — re-run it before enabling Qiniu on an existing deployment)
+is sufficient; nothing extra to install. Qiniu is only used if
+`MEDIA_STORAGE_PROVIDER=qiniu_kodo` is set (for new writes) or an
+existing `media_files` row has `storage_backend=qiniu_kodo` (for reads) —
+local-only deployments never need `QINIU_*` configured. See
+`.env.example` for the required variables (`QINIU_ACCESS_KEY`,
+`QINIU_SECRET_KEY`, `QINIU_BUCKET`, `QINIU_DOMAIN` — must be a full
+`https://` URL) and
+[research/rnd_174_qiniu_kodo_provider.md](research/rnd_174_qiniu_kodo_provider.md)
+for the per-row storage model and rollback behavior.
+
 ---
 
 ## 3. Required Environment Variables
@@ -73,7 +86,8 @@ Additional variables are required for:
 
 - WeCom OAuth: `ADMIN_DOMAIN`
 - Sync/decrypt/media scripts: `WECOM_SDK_LIB_PATH`, `WECOM_ARCHIVE_SECRET`, `WECOM_PRIVATE_KEY_PATH`, `WECOM_PUBLIC_KEY_VERSION`
-- Media serving/download: `STORAGE_LOCAL_PATH`
+- Media serving/download, local-backed rows only: `STORAGE_LOCAL_PATH`
+- Media serving/download, Qiniu-backed rows only (optional — see below): `QINIU_ACCESS_KEY`, `QINIU_SECRET_KEY`, `QINIU_BUCKET`, `QINIU_DOMAIN` (full `https://` URL), `QINIU_REGION` (optional)
 
 ---
 

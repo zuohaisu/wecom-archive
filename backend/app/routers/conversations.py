@@ -45,10 +45,11 @@ Monitored-account / archive-seat detection (RND-132):
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -59,12 +60,21 @@ from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.media_classification import classify_media, resolve_image_media_status
 from app.media_storage import (
+    MediaObjectNotFound,
+    MediaStorageConfigurationError,
+    MediaStorageOperationError,
+    MediaStorageUnavailable,
     detect_image_content_type,
+    detect_image_content_type_for_ref,
+    get_media_storage_provider,
+    resolve_effective_storage_reference,
     resolve_image_file_state,
+    resolve_media_file_state,
     resolve_servable_image_path,
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -843,7 +853,38 @@ def get_conversation_messages(
             media_file = media_files_map.get(msg.id)
             file_state = "missing"
             if media_file and media_file.download_status == "downloaded":
-                file_state = resolve_image_file_state(media_file.local_path)
+                # Provider resolved from the row's own storage_backend/
+                # storage_ref (RND-174 QA fix) — never the deployment-wide
+                # default provider, so a row's servability never changes
+                # just because MEDIA_STORAGE_PROVIDER was switched for new
+                # writes.
+                #
+                # Explicit per-exception mapping (RND-174 QA fix #2 — a
+                # second QA pass flagged that folding MediaStorageUnavailable
+                # into "missing" here misreported a transient Qiniu outage
+                # as the media having actually disappeared, i.e.
+                # media_file_missing_on_disk). A provider outage or
+                # configuration problem degrades only this one row to
+                # "unavailable" rather than failing the whole timeline
+                # response for every message in the page — the conversation
+                # still loads. MediaObjectNotFound (surfaced internally as a
+                # "missing" tri-state result, not an exception here — see
+                # resolve_image_file_state) is the only case mapped to
+                # "missing". The dedicated media route (get_message_media)
+                # independently returns 503 for the same outage, for a
+                # request that is actually about this one object.
+                try:
+                    file_state = resolve_media_file_state(media_file)
+                except MediaStorageUnavailable:
+                    file_state = "unavailable"
+                except MediaStorageConfigurationError:
+                    # Covers both a genuinely invalid/missing Qiniu config
+                    # and an unsupported/unknown storage_backend value on
+                    # this row — the timeline has no "crash the whole page"
+                    # option, so both degrade this one row to "unavailable"
+                    # rather than a 500. The dedicated media route keeps its
+                    # own, unchanged 500 behavior for the latter case.
+                    file_state = "unavailable"
             media = resolve_image_media_status(
                 media,
                 media_file.download_status if media_file else None,
@@ -902,11 +943,35 @@ def get_message_media(
     tenant_id directly (RND-156) — a second, independent check on top of
     message ownership, so a media row can never be served on the strength
     of archive_message_id alone even if message/media tenant assignment
-    were ever to diverge. Every failure mode — wrong tenant, wrong
-    conversation, non-image message, missing/pending/failed media_files
-    row, unsafe or missing local_path, disallowed file extension — returns
-    a plain 404. Never includes sdkfileid, local_path, or oss_key in the
-    response or in any log line.
+    were ever to diverge. The authorization sequence (authenticate ->
+    resolve tenant -> tenant-scoped message/media lookup -> ownership
+    check) completes in full *before* any storage provider is selected or
+    called — the provider is never part of the authorization boundary
+    (RND-174).
+
+    The provider used to serve this row is resolved from the row's own
+    storage_backend/storage_ref (RND-174 QA fix), never from the
+    deployment-wide MEDIA_STORAGE_PROVIDER default — so this route keeps
+    working correctly for both local- and Qiniu-backed rows in the same
+    deployment, regardless of which provider is currently configured for
+    new writes.
+
+    Response codes:
+      404  wrong tenant, wrong conversation, non-image message,
+           missing/pending/failed media_files row, unsafe/missing storage
+           reference, disallowed file extension, or a confirmed-missing
+           remote object.
+      503  the storage provider could not confirm the object's state
+           (network timeout, auth failure, bucket error, SDK failure) —
+           never reported as a plain 404 (RND-174 QA fix: an outage must
+           not look like missing media).
+      502  a storage operation otherwise failed against a provider that
+           did respond.
+      500  the row names a storage backend that is unset/unsupported/
+           misconfigured.
+
+    Never includes sdkfileid, local_path, storage_ref, oss_key, or any raw
+    provider/SDK error detail in the response or in any log line.
     """
     _, tenant_id = auth
 
@@ -929,13 +994,66 @@ def get_message_media(
     if media_file is None or media_file.download_status != "downloaded":
         raise HTTPException(status_code=404, detail="Not found")
 
-    # Same tri-state predicate the timeline serializer uses to decide
-    # media_status/media_url (resolve_image_file_state) — this route only
-    # ever serves the "servable" case, so a media_url the timeline emitted
-    # can never 404 here for a servability reason (RND-144 QA fix).
-    safe_path = resolve_servable_image_path(media_file.local_path)
-    if safe_path is None:
+    # Tenant authorization is fully resolved above this line. Only now does
+    # provider/storage resolution begin, driven entirely by this row's own
+    # fields (RND-174 QA fix — see resolve_effective_storage_reference for
+    # the legacy local_path compatibility rule). getattr(..., None): a
+    # MediaFile ORM row always has these columns, but duck-typed test
+    # doubles may not.
+    effective_backend, effective_ref = resolve_effective_storage_reference(
+        getattr(media_file, "storage_backend", None),
+        getattr(media_file, "storage_ref", None),
+        getattr(media_file, "local_path", None),
+    )
+    if effective_backend is None:
         raise HTTPException(status_code=404, detail="Not found")
 
-    content_type = detect_image_content_type(safe_path)
-    return FileResponse(path=str(safe_path), media_type=content_type)
+    try:
+        file_state = resolve_image_file_state(effective_ref, effective_backend)
+    except MediaStorageConfigurationError:
+        logger.error(
+            "media route: storage configuration error (backend=%s)", effective_backend
+        )
+        raise HTTPException(status_code=500, detail="Media storage is misconfigured")
+    except MediaStorageUnavailable:
+        logger.warning(
+            "media route: storage provider unavailable (backend=%s)", effective_backend
+        )
+        raise HTTPException(status_code=503, detail="Media storage temporarily unavailable")
+
+    if file_state != "servable":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    provider = get_media_storage_provider(effective_backend)
+
+    if provider.supports_local_path():
+        safe_path = resolve_servable_image_path(effective_ref, effective_backend)
+        if safe_path is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        content_type = detect_image_content_type(safe_path)
+        return FileResponse(path=str(safe_path), media_type=content_type)
+
+    # Cloud-backed media (RND-174): the bucket is private and this route is
+    # still the only controlled access path (RND-187 signed-URL/CDN
+    # delivery is out of scope here) — fetch the bytes through the provider
+    # and proxy them back. The response shape (raw image bytes, same URL,
+    # same content-type behavior) stays identical to the local case, so the
+    # frontend needs no changes. No Qiniu URL or credential ever reaches
+    # the client.
+    content_type = detect_image_content_type_for_ref(effective_ref)
+    try:
+        data = provider.read_bytes(effective_ref)
+    except MediaObjectNotFound:
+        raise HTTPException(status_code=404, detail="Not found")
+    except MediaStorageUnavailable:
+        logger.warning(
+            "media route: storage provider unavailable during read (backend=%s)",
+            effective_backend,
+        )
+        raise HTTPException(status_code=503, detail="Media storage temporarily unavailable")
+    except MediaStorageOperationError:
+        logger.error(
+            "media route: storage operation failed during read (backend=%s)", effective_backend
+        )
+        raise HTTPException(status_code=502, detail="Media storage operation failed")
+    return Response(content=data, media_type=content_type)

@@ -403,6 +403,8 @@ def _make_sqlite_engine(tmp_path):
                     file_type TEXT,
                     local_path TEXT,
                     oss_key TEXT,
+                    storage_backend TEXT,
+                    storage_ref TEXT,
                     file_size INTEGER,
                     download_status TEXT NOT NULL DEFAULT 'pending',
                     tenant_id TEXT,
@@ -825,7 +827,7 @@ def test_download_one_success_writes_and_atomically_renames(tmp_path, monkeypatc
         script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
     )
 
-    outcome, detail = script.download_one(
+    outcome, detail, file_size = script.download_one(
         MagicMock(), MagicMock(), tmp_path, "tenant-a", 42, "sdk-1", timeout=5
     )
 
@@ -834,6 +836,9 @@ def test_download_one_success_writes_and_atomically_renames(tmp_path, monkeypatc
     assert final_path.suffix == ".jpg"
     assert final_path.read_bytes() == jpeg_bytes
     assert not (final_path.parent / "42.part").exists()
+    # RND-174 QA fix: file_size is the in-memory payload length, not a
+    # post-publish stat() call.
+    assert file_size == len(jpeg_bytes)
 
 
 def test_download_one_multi_chunk_assembly(tmp_path, monkeypatch) -> None:
@@ -845,7 +850,7 @@ def test_download_one_multi_chunk_assembly(tmp_path, monkeypatch) -> None:
         script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([part_a, part_b])
     )
 
-    outcome, detail = script.download_one(
+    outcome, detail, _file_size = script.download_one(
         MagicMock(), MagicMock(), tmp_path, "tenant-a", 5, "sdk-png", timeout=5
     )
 
@@ -862,7 +867,7 @@ def test_download_one_unsupported_type_rejected_and_part_cleaned_up(tmp_path, mo
         script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([garbage])
     )
 
-    outcome, detail = script.download_one(
+    outcome, detail, _file_size = script.download_one(
         MagicMock(), MagicMock(), tmp_path, "tenant-a", 7, "sdk-2", timeout=5
     )
 
@@ -881,7 +886,7 @@ def test_download_one_sdk_error_leaves_no_part_file(tmp_path, monkeypatch) -> No
 
     monkeypatch.setattr(script.wecom_sdk, "iter_media_chunks", _raise)
 
-    outcome, detail = script.download_one(
+    outcome, detail, _file_size = script.download_one(
         MagicMock(), MagicMock(), tmp_path, "tenant-a", 9, "sdk-3", timeout=5
     )
 
@@ -896,7 +901,7 @@ def test_download_one_empty_payload_is_failure(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([]))
 
-    outcome, detail = script.download_one(
+    outcome, detail, _file_size = script.download_one(
         MagicMock(), MagicMock(), tmp_path, "tenant-a", 11, "sdk-4", timeout=5
     )
     assert outcome == "failed"
@@ -919,7 +924,7 @@ def test_download_one_write_failure_leaves_no_part_file(tmp_path, monkeypatch) -
 
     monkeypatch.setattr(Path, "write_bytes", _raise_write)
 
-    outcome, detail = script.download_one(
+    outcome, detail, _file_size = script.download_one(
         MagicMock(), MagicMock(), tmp_path, "tenant-a", 13, "sdk-5", timeout=5
     )
 
@@ -942,7 +947,7 @@ def test_download_one_rename_failure_leaves_no_part_file(tmp_path, monkeypatch) 
         media_storage.os, "replace", MagicMock(side_effect=OSError("simulated rename failure"))
     )
 
-    outcome, detail = script.download_one(
+    outcome, detail, _file_size = script.download_one(
         MagicMock(), MagicMock(), tmp_path, "tenant-a", 15, "sdk-6", timeout=5
     )
 
@@ -1480,7 +1485,7 @@ def test_script_produced_media_file_is_servable_via_rnd144_timeline(
     monkeypatch.setattr(
         script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
     )
-    outcome, final_path = script.download_one(
+    outcome, final_path, _file_size = script.download_one(
         MagicMock(), MagicMock(), media_root, "tenant-a", 1, "sdk-1", timeout=5
     )
     assert outcome == "downloaded"

@@ -7,3 +7,4 @@ psycopg2-binary==2.9.9
 sqlalchemy==2.0.36
 alembic==1.14.0
 httpx>=0.24.0
+qiniu==7.18.0

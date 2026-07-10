@@ -30,6 +30,7 @@ Run (from backend/):
 
 from __future__ import annotations
 
+from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -50,13 +51,24 @@ def _insert_media_file(
     sdkfileid: str,
     download_status: str = "downloaded",
     local_path: str = "/data/x.jpg",
+    storage_backend: Optional[str] = None,
+    storage_ref: Optional[str] = None,
 ) -> MediaFile:
+    """storage_backend/storage_ref default to None so existing local-mode
+    callers (passing only local_path) keep exercising the RND-174
+    compatibility fallback (resolve_effective_storage_reference treats a
+    populated local_path with no storage_backend as a legacy local row).
+    Pass storage_backend="qiniu_kodo" explicitly to simulate a properly
+    per-row-tagged Qiniu row — such a row must never also set local_path
+    (see app.media_storage module docstring)."""
     mf = MediaFile(
         tenant_id=tenant_id,
         sdkfileid=sdkfileid,
         archive_message_id=archive_message_id,
         download_status=download_status,
         local_path=local_path,
+        storage_backend=storage_backend,
+        storage_ref=storage_ref,
         file_type="image",
     )
     db.add(mf)

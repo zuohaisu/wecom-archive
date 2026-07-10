@@ -98,6 +98,8 @@ CREATE TABLE media_files (
     file_type TEXT,
     local_path TEXT,
     oss_key TEXT,
+    storage_backend TEXT,
+    storage_ref TEXT,
     file_size INTEGER,
     download_status TEXT NOT NULL DEFAULT 'pending',
     tenant_id TEXT,

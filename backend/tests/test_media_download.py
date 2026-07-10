@@ -67,6 +67,20 @@ def test_resolve_image_status_downloaded_but_unsupported_type() -> None:
     assert "." not in result.unsupported_reason
 
 
+def test_resolve_image_status_downloaded_but_storage_unavailable() -> None:
+    """RND-174 QA fix (second pass): a provider outage (file_state=
+    "unavailable") must be reported distinctly from a confirmed-missing
+    object — never as media_file_missing_on_disk. A temporary storage
+    outage is not equivalent to the media actually being gone."""
+    from app.media_classification import classify_media, resolve_image_media_status
+
+    base = classify_media("image", has_sdkfileid=True)
+    result = resolve_image_media_status(base, "downloaded", "unavailable")
+    assert result.media_status == "unavailable"
+    assert result.unsupported_reason == "media_storage_unavailable"
+    assert result.unsupported_reason != "media_file_missing_on_disk"
+
+
 def test_resolve_image_status_failed_download() -> None:
     from app.media_classification import classify_media, resolve_image_media_status
 

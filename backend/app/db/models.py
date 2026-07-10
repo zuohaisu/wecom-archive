@@ -319,6 +319,25 @@ class MediaFile(Base):
     global — two different tenants' WeCom corps could in principle hand back
     the same sdkfileid, and a global unique constraint would make the second
     tenant's insert fail outright.
+
+    storage_backend / storage_ref (RND-174 QA remediation, migration 0005):
+    the authoritative, per-row record of which MediaStorageProvider holds
+    this row's bytes ("local" or "qiniu_kodo") and that provider's own
+    reference (a local path for "local", a Qiniu object key for
+    "qiniu_kodo"). Media access must resolve the provider from THESE
+    columns, never from the deployment-wide MEDIA_STORAGE_PROVIDER setting
+    — that setting only controls where NEW media is written, so switching
+    it must never reinterpret an existing row (see
+    app.media_storage.resolve_media_file_state). Migration 0005 backfills
+    every pre-existing row as storage_backend="local",
+    storage_ref=local_path.
+
+    local_path is kept for backward compatibility only — legacy/local-only,
+    never authoritative for a Qiniu-backed row (a Qiniu row's local_path is
+    always left None; only its storage_ref holds the object key). New code
+    should read storage_backend/storage_ref, falling back to a populated
+    legacy local_path only when storage_backend was never backfilled (see
+    app.media_storage.resolve_effective_storage_reference).
     """
 
     __tablename__ = "media_files"
@@ -339,6 +358,8 @@ class MediaFile(Base):
     file_type = Column(String(32), nullable=True)
     local_path = Column(Text, nullable=True)
     oss_key = Column(Text, nullable=True)
+    storage_backend = Column(String(32), nullable=True, index=True)
+    storage_ref = Column(Text, nullable=True)
     file_size = Column(BigInteger, nullable=True)
     download_status = Column(String(16), nullable=False, default="pending")
     created_at = Column(

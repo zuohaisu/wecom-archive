@@ -101,14 +101,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import and_, create_engine, or_
 from sqlalchemy.orm import Query, Session
 
+from app import media_storage
 from app.db.models import ArchiveMessage, MediaFile, TenantWecomConfig
 from app.media_storage import (
     LocalStorageProvider,
     MediaStorageProvider,
     UnsupportedMediaStorageProvider,
+    build_tenant_media_key,
     detect_image_type_from_bytes,
+    get_configured_write_backend_name,
     get_media_storage_provider,
-    resolve_image_file_state,
 )
 from app.sdk import wecom_sdk
 
@@ -301,11 +303,26 @@ def is_downloaded_media_file_stale(media_file: MediaFile) -> bool:
     outside the configured storage root, or a disallowed extension) — i.e.
     this row is stale/broken and safe to repair, not a real skip case.
 
-    Reuses app.media_storage.resolve_image_file_state — the exact same
-    tri-state the timeline serializer and the media route use — so "stale"
-    here means precisely "the RND-144 route could not serve this file".
+    Reuses app.media_storage.resolve_media_file_state — the exact same
+    per-row-backend-aware tri-state the timeline serializer and the media
+    route use — so "stale" here means precisely "the RND-144 route could
+    not serve this file". Resolves the provider from the row's own
+    storage_backend/storage_ref (RND-174 QA fix), not the deployment-wide
+    default provider, so a Qiniu-backed row is never wrongly judged stale
+    just because the default write provider happens to currently be local
+    (or vice versa).
+
+    A MediaStorageUnavailable/MediaStorageConfigurationError (the provider
+    could not confirm either way — e.g. a transient Qiniu outage during the
+    scan) is treated as "not stale": this repair scan must never reset a
+    perfectly fine row just because the backend was briefly unreachable at
+    scan time (RND-174 QA fix — an outage must not be reported as missing
+    media, including here).
     """
-    return resolve_image_file_state(media_file.local_path) != "servable"
+    try:
+        return media_storage.resolve_media_file_state(media_file) != "servable"
+    except (media_storage.MediaStorageUnavailable, media_storage.MediaStorageConfigurationError):
+        return False
 
 
 _REPAIR_SCAN_BATCH_SIZE = 500
@@ -430,9 +447,14 @@ def count_candidates_with_existing_media_row(session: Session, tenant_id: str) -
 # ---------------------------------------------------------------------------
 
 
-def _media_storage_provider() -> MediaStorageProvider:
+def _media_storage_provider(backend_name: str) -> MediaStorageProvider:
+    """Construct the provider for `backend_name` explicitly (rather than
+    via the no-argument default-provider form) so the caller's own
+    already-resolved backend name and the constructed provider can never
+    drift apart — the worker stamps every new row with exactly the name it
+    used to build this provider (see _run())."""
     try:
-        provider = get_media_storage_provider()
+        provider = get_media_storage_provider(backend_name)
     except UnsupportedMediaStorageProvider as exc:
         print(f"[FAIL] {exc}", flush=True)
         sys.exit(1)
@@ -445,12 +467,19 @@ def _media_storage_provider() -> MediaStorageProvider:
 
 def target_storage_refs(tenant_id: str, archive_message_id: int) -> Tuple[str, str]:
     """Return (base_ref_without_extension, part_ref) under
-    tenants/<tenant_id>/images/. The .part ref is fixed
-    regardless of the eventual detected type so on-failure cleanup is
-    unambiguous."""
-    directory = f"tenants/{tenant_id}/images"
-    base = f"{directory}/{archive_message_id}"
-    part_ref = f"{directory}/{archive_message_id}.part"
+    tenants/<tenant_id>/images/. The .part ref is fixed regardless of the
+    eventual detected type so on-failure cleanup is unambiguous.
+
+    Built via app.media_storage.build_tenant_media_key (RND-174) — the same
+    tenant-aware, traversal-safe key format works unchanged as both a
+    LocalStorageProvider relative path and a QiniuStorageProvider object
+    key, since it is provider-opaque (just a '/'-separated string).
+    Deterministic per (tenant_id, archive_message_id): a retried download of
+    the same message overwrites the same objects instead of accumulating
+    duplicates.
+    """
+    base = build_tenant_media_key(tenant_id, "images", str(archive_message_id))
+    part_ref = build_tenant_media_key(tenant_id, "images", str(archive_message_id), suffix=".part")
     return base, part_ref
 
 
@@ -505,6 +534,14 @@ def get_or_reset_media_file(
     row.download_status = "pending"
     row.local_path = None
     row.oss_key = None
+    # storage_backend/storage_ref reset together with local_path (RND-174
+    # QA fix): a fresh attempt must not leave a stale backend/reference
+    # pair from a previous attempt lying around inconsistently — e.g. a
+    # previously Qiniu-backed row being retried after the default write
+    # provider was switched back to local must not keep pointing at the
+    # old Qiniu object key once the new attempt writes a local file.
+    row.storage_backend = None
+    row.storage_ref = None
     row.file_size = None
     session.commit()
     session.refresh(row)
@@ -519,18 +556,32 @@ def download_one(
     archive_message_id: int,
     sdkfileid: str,
     timeout: int,
-) -> Tuple[str, Optional[str]]:
+) -> Tuple[str, Optional[str], Optional[int]]:
     """Download one image message's media.
 
-    Returns (outcome, detail): outcome is "downloaded" or "failed"; detail
-    is the final file path as a string when downloaded, or a short internal
-    diagnostic tag (never an identifier/path/payload fragment) when failed.
+    Returns (outcome, detail, file_size): outcome is "downloaded" or
+    "failed"; detail is the final storage reference (string) when
+    downloaded, or a short internal diagnostic tag (never an
+    identifier/path/payload fragment) when failed; file_size is the exact
+    byte length of the downloaded payload (len(data)) on success, else
+    None.
+
+    RND-174 QA fix: file_size is computed from the in-memory payload
+    *before* upload, not by a post-publish remote provider.size_bytes()
+    stat call — the caller must persist this value directly rather than
+    re-querying the provider on the success path. A transient stat/
+    metadata failure after a successful upload must never be able to look
+    like an upload failure and trigger deletion of the just-published
+    object; not calling stat() at all on this path is what guarantees that
+    (see _run()'s persistence step).
 
     The .part temp file is always cleaned up on any failure path — a
     single try/finally guard covers download errors, write failures,
     unsupported byte signatures, and rename failures alike, so there is
     exactly one place that can leak a stray .part file rather than one per
-    failure branch.
+    failure branch. A publish (replace) failure only ever removes the
+    temporary .part object — the final object is never touched here because
+    it was never created on a failure path.
     """
     provider: MediaStorageProvider
     if isinstance(storage, MediaStorageProvider):
@@ -541,6 +592,7 @@ def download_one(
     base_ref, part_ref = target_storage_refs(tenant_id, archive_message_id)
     outcome = "failed"
     detail: Optional[str] = "unknown_error"
+    file_size: Optional[int] = None
 
     try:
         try:
@@ -550,38 +602,40 @@ def download_one(
             data = bytes(chunks)
         except wecom_sdk.SdkMediaError:
             detail = "sdk_error"
-            return outcome, detail
+            return outcome, detail, file_size
         except Exception:
             detail = "download_error"
-            return outcome, detail
+            return outcome, detail, file_size
 
         if not data:
             detail = "empty_payload"
-            return outcome, detail
+            return outcome, detail, file_size
 
         try:
             part_ref = provider.save_bytes(part_ref, data)
         except OSError:
             detail = "write_error"
-            return outcome, detail
+            return outcome, detail, file_size
         except ValueError:
             detail = "write_error"
-            return outcome, detail
+            return outcome, detail, file_size
 
         ext = detect_image_type_from_bytes(data)
         if ext is None:
             detail = "unsupported_type"
-            return outcome, detail
+            return outcome, detail, file_size
 
         final_ref = f"{base_ref}{ext}"
         try:
             final_ref = provider.replace(part_ref, final_ref)
         except (FileNotFoundError, OSError, ValueError):
             detail = "rename_error"
-            return outcome, detail
+            return outcome, detail, file_size
 
-        outcome, detail = "downloaded", final_ref
-        return outcome, detail
+        # Publish confirmed. file_size is the payload's own length — no
+        # further remote call is made or required to know it.
+        outcome, detail, file_size = "downloaded", final_ref, len(data)
+        return outcome, detail, file_size
     finally:
         if outcome != "downloaded":
             _safe_delete(provider, part_ref)
@@ -716,7 +770,13 @@ def _run(args: argparse.Namespace) -> None:
         lib_path = _require_env("WECOM_SDK_LIB_PATH")
         secret = _require_env("WECOM_ARCHIVE_SECRET")
         timeout = _optional_int_env("WECOM_MEDIA_TIMEOUT", _DEFAULT_TIMEOUT)
-        media_storage = _media_storage_provider()
+        # write_backend_name is resolved once and used both to construct
+        # storage_provider and to stamp every new row's storage_backend
+        # (RND-174 QA fix) — the two can never disagree because
+        # storage_provider is built from this exact name, not re-derived
+        # separately.
+        write_backend_name = get_configured_write_backend_name()
+        storage_provider = _media_storage_provider(write_backend_name)
 
         try:
             lib = wecom_sdk.load_sdk(lib_path)
@@ -761,22 +821,42 @@ def _run(args: argparse.Namespace) -> None:
                 )
                 continue
 
-            outcome, detail = download_one(
-                lib, handle, media_storage, tenant_id, msg.id, msg.sdkfileid, timeout
+            outcome, detail, file_size = download_one(
+                lib, handle, storage_provider, tenant_id, msg.id, msg.sdkfileid, timeout
             )
 
+            # RND-174 QA fix: this try body performs *only* database
+            # persistence (attribute assignment + commit) — no remote
+            # provider call (in particular, no provider.size_bytes()/
+            # exists() stat round-trip) happens here. file_size above came
+            # from download_one's in-memory payload length, not a post-
+            # publish stat. That is what makes the except block below safe:
+            # reaching it on the "downloaded" branch can only mean the
+            # upload/publish already succeeded and the database commit
+            # itself failed — never a transient metadata/stat hiccup — so
+            # deleting the now-unreferenced final object here is a
+            # deliberate, narrow rollback for a confirmed DB persistence
+            # failure, not a blanket "clean up on any exception" rule.
             try:
                 if outcome == "downloaded":
                     media_file.file_type = "image"
                     media_file.download_status = "downloaded"
-                    media_file.local_path = detail
-                    media_file.file_size = media_storage.size_bytes(detail)
+                    media_file.storage_backend = write_backend_name
+                    media_file.storage_ref = detail
+                    # local_path is legacy/local-only (see
+                    # app.media_storage module docstring): populated only
+                    # for the local backend so it can never be mistaken for
+                    # an authoritative Qiniu reference.
+                    media_file.local_path = detail if write_backend_name == "local" else None
+                    media_file.file_size = file_size
                     media_file.oss_key = None
                     session.commit()
                     downloaded += 1
                 else:
                     media_file.download_status = "failed"
                     media_file.local_path = None
+                    media_file.storage_backend = None
+                    media_file.storage_ref = None
                     media_file.oss_key = None
                     session.commit()
                     failed += 1
@@ -786,10 +866,13 @@ def _run(args: argparse.Namespace) -> None:
             except Exception:
                 session.rollback()
                 if outcome == "downloaded" and detail:
-                    # DB commit failed after a successful download+rename —
-                    # remove the orphaned file rather than leave a file on
-                    # disk with no corresponding media_files record.
-                    _safe_delete(media_storage, detail)
+                    # Database commit failed after a successful
+                    # upload+publish — remove the now-orphaned object
+                    # rather than leave it with no corresponding
+                    # media_files record. Best-effort: delete() never
+                    # raises, so a cleanup failure here cannot mask this
+                    # db_commit_error outcome.
+                    _safe_delete(storage_provider, detail)
                 failed += 1
                 reason_counts["db_commit_error"] = reason_counts.get("db_commit_error", 0) + 1
 

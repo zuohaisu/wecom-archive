@@ -24,7 +24,8 @@ Live production state should be verified separately from git.
 | Auto-refresh | RND-153 | Periodic UI refresh, new-message indicator |
 | i18n | RND-157 | Chinese + English locale switching |
 | Media download worker | RND-151, RND-168 | Scheduled image download via systemd timer |
-| Media storage abstraction | RND-185 | Pluggable provider interface (local implemented) |
+| Media storage abstraction | RND-185 | Pluggable `MediaStorageProvider` interface; `LocalStorageProvider` |
+| Qiniu Kodo storage provider | RND-174 | Optional second backend (`MEDIA_STORAGE_PROVIDER=qiniu_kodo`); local remains default/rollback. Per-row `storage_backend`/`storage_ref` (migration 0005) so local and Qiniu media coexist safely; HTTPS-only private retrieval proxied through the existing authenticated route |
 | System diagnostics | RND-178, RND-180 | Message reachability audit with aggregate stats |
 | Message type placeholders | RND-173, RND-177 | Named display for all WeCom message types |
 | Corp ID uniqueness | RND-184 | Active corp_id uniqueness constraint across tenants |
@@ -35,8 +36,8 @@ Live production state should be verified separately from git.
 
 | Feature | Priority | Status | Notes |
 |---------|----------|--------|-------|
-| Qiniu Kodo storage provider | P1 | Planned (RND-186) | Second storage provider implementation |
-| OSS signed URL serving | P2 | Not started (RND-188) | Direct signed URL strategy |
+| Local → Qiniu historical media migration | P2 | Not started (RND-186) | Migrate existing local-backed rows to Qiniu; out of scope for RND-174 |
+| Media URL / Signed URL / CDN delivery | P2 | Not started (RND-187) | Client-facing signed URL strategy; media is currently always proxied through the authenticated backend route, never a direct/public Qiniu URL |
 | Multi-tenant onboarding UI | P3 | Not started | Admin UI for adding tenant configs |
 | App secret encryption | P3 | Not started | Encrypt at rest in tenant_wecom_configs |
 | Conversation export | P3 | Not started | Security approval required |

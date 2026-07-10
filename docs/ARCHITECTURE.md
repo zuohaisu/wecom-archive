@@ -44,7 +44,10 @@ It is **not** a public-facing product. Access is restricted to employees authent
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │              Media Storage Provider (pluggable)           │   │
 │  │   LocalStorageProvider (implemented, RND-185)             │   │
-│  │   Qiniu Kodo / Alibaba OSS / S3 (future, RND-186)        │   │
+│  │   QiniuStorageProvider (implemented, RND-174 — optional,  │   │
+│  │     per-row storage_backend; local remains default/       │   │
+│  │     rollback)                                             │   │
+│  │   Alibaba OSS / S3 (not implemented, reserved config)     │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                │
@@ -67,7 +70,7 @@ It is **not** a public-facing product. Access is restricted to employees authent
 |-----------|-----------|--------|
 | REST API | Python 3.11 + FastAPI | ✅ Fully implemented |
 | Database | PostgreSQL 14+ | ✅ Schema deployed, Alembic migrations active |
-| Media storage | Pluggable provider (`MediaStorageProvider` interface) | ✅ Local disk (RND-185); OSS/S3 contract ready |
+| Media storage | Pluggable provider (`MediaStorageProvider` interface) | ✅ Local disk (RND-185) + Qiniu Kodo, optional (RND-174); OSS/S3 contract ready |
 | Sync worker | Python scripts via systemd timer (`OnCalendar=*:0/5`) | ✅ Implemented; worker/media timer units are versioned in repo |
 | Admin UI — Conversation Review Console | Server-rendered HTML + JS (FastAPI) | ✅ Three-column, WeCom-style (RND-154/157) |
 | Admin UI — Diagnostics | Server-rendered HTML + JS | ✅ Message reachability audit (RND-180) |
@@ -134,7 +137,7 @@ PostgreSQL → tenant-scoped queries (WHERE tenant_id = ?)
 JSON response → rendered as HTML (client-side JS)
 ```
 
-Media files are served via the authenticated API route (`GET /api/conversations/{id}/messages/{msgid}/media`), which performs tenant authorization before checking the media storage provider.
+Media files are served via the authenticated API route (`GET /api/conversations/{id}/messages/{msgid}/media`), which performs tenant authorization before resolving any media storage provider. The provider used to serve a given row is resolved from that row's own `storage_backend`/`storage_ref` columns (RND-174), not from the deployment-wide default write provider — so local and Qiniu-backed rows can coexist safely in the same deployment (see §5).
 
 ---
 
@@ -204,14 +207,32 @@ Desktop browser → GET /admin/login (WeCom button)
 
 | Backend | Config value | Status |
 |---------|-------------|--------|
-| Local disk | `MEDIA_STORAGE_PROVIDER=local` (or `STORAGE_BACKEND=local`) | ✅ Implemented (RND-185) |
+| Local disk | `MEDIA_STORAGE_PROVIDER=local` (or `STORAGE_BACKEND=local`) | ✅ Implemented (RND-185). Default, and the rollback target. |
+| Qiniu Kodo | `MEDIA_STORAGE_PROVIDER=qiniu_kodo` | ✅ Implemented (RND-174). Optional — requires `QINIU_*` config (see §6). |
 | Alibaba Cloud OSS | `STORAGE_BACKEND=oss` | Contract defined, not implemented |
 | S3-compatible | `STORAGE_BACKEND=s3` | Reserved placeholder |
-| Qiniu Kodo | — | Contract defined for future (RND-186) |
 
-The storage layer is abstracted behind `MediaStorageProvider` interface (`backend/app/media_storage.py`). Switching backends requires only a config change and provider implementation.
+The storage layer is abstracted behind the `MediaStorageProvider` interface (`backend/app/media_storage.py`). `MEDIA_STORAGE_PROVIDER` selects the **default write provider** — where *new* media is uploaded — not how existing rows are read.
 
-See [research/rnd_185_media_storage_abstraction.md](research/rnd_185_media_storage_abstraction.md) for the provider contract details.
+**Per-row storage resolution (RND-174).** Every `media_files` row records its own `storage_backend` ("local" or "qiniu_kodo") and `storage_ref` (that provider's own reference — a local path or a Qiniu object key). Reads always resolve the provider from the row, never from the current `MEDIA_STORAGE_PROVIDER` value. This is what makes the following safe:
+
+- **Mixed storage.** Local-backed and Qiniu-backed rows can coexist in the same deployment, even the same conversation timeline — each is served through its own recorded provider.
+- **Cutover.** Setting `MEDIA_STORAGE_PROVIDER=qiniu_kodo` only changes where *new* downloads are written. Every existing row keeps using the provider recorded on it.
+- **Rollback.** Setting `MEDIA_STORAGE_PROVIDER` back to `local` only changes new writes again. Rows already written to Qiniu (`storage_backend=qiniu_kodo`) are **not** reinterpreted as local and are **not** automatically migrated — they remain readable only as long as Qiniu credentials stay configured. A full rollback off Qiniu (no Qiniu access retained at all) requires migrating those rows' bytes back to local storage first — RND-186, not yet implemented. Simply flipping the env var back does not do this.
+
+Legacy rows written before this ticket (or migration 0005's backfill) are stamped `storage_backend="local"`, `storage_ref=<their local_path>`; `local_path` itself is retained as a legacy/local-only compatibility field and is never treated as an authoritative Qiniu reference.
+
+`STORAGE_LOCAL_PATH` applies only to rows with `storage_backend=local` — it has no effect on Qiniu-backed rows, which are resolved entirely through `QINIU_*` configuration instead.
+
+Object keys for Qiniu are tenant-scoped and deterministic: `tenants/{tenant_id}/images/{archive_message_id}{ext}`.
+
+**Qiniu bucket must be private.** This app never assumes public-read access and never issues a permanent public object URL; media is always proxied through the authenticated backend route (`GET /api/conversations/{id}/messages/{msgid}/media`). Private object retrieval uses a short-lived (60s) signed download request built from `QINIU_DOMAIN`, which **must** be a full `https://` base URL — `http://` and bare hostnames are rejected at provider-construction time.
+
+**Before enabling Qiniu**, refresh backend dependencies (`pip install -r requirements.txt` inside the venv) so the `qiniu` SDK package is present — the app does not require it in local mode, but `qiniu_kodo` selection will fail fast if it and/or `QINIU_*` config are missing.
+
+See [research/rnd_185_media_storage_abstraction.md](research/rnd_185_media_storage_abstraction.md) for the base provider contract and [research/rnd_174_qiniu_kodo_provider.md](research/rnd_174_qiniu_kodo_provider.md) for the Qiniu provider, per-row storage model, and rollback details.
+
+Not yet implemented: historical local→Qiniu media migration (RND-186) and client-facing signed URL / CDN delivery (RND-187) — media is always proxied through the backend route, never a direct Qiniu URL.
 
 ---
 
@@ -223,7 +244,7 @@ See [research/rnd_185_media_storage_abstraction.md](research/rnd_185_media_stora
 | Process manager | systemd for worker/media timers; main web service is operator-managed |
 | Reverse proxy | Operator-managed reverse proxy in front of port 8035 |
 | Database | PostgreSQL on the same ECS instance (or RDS) |
-| Media | Local disk on ECS (Phase 1) |
+| Media | Mixed local filesystem + optional Qiniu Kodo object storage (RND-174). Each `media_files` row records its own storage backend; new writes use the configured default provider (`MEDIA_STORAGE_PROVIDER`), reads are selected per row. See §5. |
 | Secrets | Environment variables injected by systemd `EnvironmentFile` — never in code |
 
 ### systemd units
