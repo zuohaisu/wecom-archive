@@ -3,14 +3,14 @@
 PostgreSQL schema for storing WeCom conversation archive messages and tenant
 management infrastructure for future SaaS use.
 
-Related issues: RND-75 (initial schema), RND-111 (tenant foundation).
+Related issues: RND-75 (initial schema), RND-111 (tenant foundation), RND-156 (multi-tenant), RND-184 (corp ID uniqueness).
 
 ---
 
 ## Overview
 
 Ten tables cover the full lifecycle from encrypted pull to searchable archive,
-plus the tenant-aware foundation required for RND-110 (employee login) and
+plus the tenant-aware foundation for employee login (RND-110, shipped) and
 future multi-tenant SaaS operation:
 
 | Table | Purpose |
@@ -18,12 +18,12 @@ future multi-tenant SaaS operation:
 | `tenants` | Top-level tenant entity; one default row for MVP |
 | `tenant_wecom_configs` | Per-tenant WeCom app credentials |
 | `admin_users` | WeCom employees who have authenticated |
-| `admin_sessions` | Active login sessions (used by RND-110) |
+| `admin_sessions` | Active login sessions |
 | `key_versions` | Registry mapping WeCom `publickey_ver` to a private key path or alias |
-| `sync_states` | Cursor tracking — last successfully synced `seq` per corp |
+| `sync_states` | Cursor tracking — last successfully synced `seq` per tenant+corp |
 | `archive_messages` | Core message store — encrypted envelope + decrypted payload |
 | `archive_message_recipients` | Per-receiver lookup rows derived from `tolist` |
-| `media_files` | Download state for media attachments |
+| `media_files` | Download state for media attachments (tenant-scoped via `UNIQUE(tenant_id, sdkfileid)`) |
 | `contacts` | Lightweight WeCom user identity cache |
 
 ---
@@ -51,7 +51,8 @@ Indexes: unique on `slug`.
 ### `tenant_wecom_configs`
 
 One row per tenant. Stores WeCom app credentials used for archive sync and
-(Phase 2) OAuth login.
+OAuth login. A given `corp_id` can be active on at most one tenant
+(RND-184, enforced by partial unique index `uq_tenant_wecom_configs_active_corp_id`).
 
 | Column | Type | Notes |
 |---|---|---|
@@ -61,7 +62,7 @@ One row per tenant. Stores WeCom app credentials used for archive sync and
 | `agent_id` | varchar(64) | WeCom Agent ID (self-built app) |
 | `app_secret` | text | Phase 1: plaintext (internal only). Phase 3: encrypt at rest. **Do not log.** |
 | `callback_domain` | varchar(255) | OAuth trusted domain registered in WeCom Admin |
-| `is_active` | boolean | |
+| `is_active` | boolean | Active configs must have unique `corp_id` (partial unique index) |
 | `created_at` | timestamptz | auto-set on insert |
 | `updated_at` | timestamptz | auto-updated on write |
 
@@ -86,15 +87,16 @@ successful authentication. Not pre-populated — records are created at login ti
 | `created_at` | timestamptz | auto-set on insert |
 | `updated_at` | timestamptz | auto-updated on write |
 
-Indexes: unique on `(tenant_id, wecom_user_id)`.
+Indexes:
+- Unique on `(tenant_id, wecom_user_id)`.
 
 ---
 
 ### `admin_sessions`
 
 Active login sessions. The `id` is the session UUID stored as a cookie value.
-Phase 2 (RND-110) implements the `get_current_user` FastAPI dependency that
-validates rows in this table on every protected request.
+The `get_current_user()` FastAPI dependency validates rows in this table on
+every protected request.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -109,15 +111,14 @@ validates rows in this table on every protected request.
 Indexes: B-tree on `expires_at` (used by session validation and cleanup queries).
 
 Cleanup: `DELETE FROM admin_sessions WHERE expires_at < NOW() - INTERVAL '1 day'`
-(scheduled cleanup, not yet automated).
+(scheduled cleanup, **not yet automated** — technical debt).
 
 ---
 
 ## Archive Tables
 
-All four archive tables gained a `tenant_id` column in migration 0002.
-Existing rows are backfilled with the default tenant ID by
-`bootstrap_default_tenant.py`, which also enforces `NOT NULL`.
+All archive tables have a `tenant_id` column (migration 0002). Existing rows
+are backfilled with the default tenant ID by `bootstrap_default_tenant.py`.
 
 ### `key_versions`
 
@@ -138,12 +139,12 @@ Indexes: unique on `publickey_ver`.
 
 ### `sync_states`
 
-One row per corp. Tracks the highest `seq` value that was successfully pulled and stored. The sync worker reads this on startup to resume without duplicating messages.
+One row per (tenant, corp). Tracks the highest `seq` value that was successfully pulled and stored. The sync worker reads this on startup to resume without duplicating messages.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | integer PK | auto-increment |
-| `corp_id` | varchar(64) | WeCom corp ID; unique within tenant (`UNIQUE(tenant_id, corp_id)` as of migration 0002) |
+| `corp_id` | varchar(64) | WeCom corp ID; unique within tenant (`UNIQUE(tenant_id, corp_id)`) |
 | `last_seq` | bigint | last successfully processed sequence number |
 | `tenant_id` | varchar(36) FK → `tenants.id` | NOT NULL after bootstrap |
 | `updated_at` | timestamptz | auto-updated on write |
@@ -159,7 +160,7 @@ Primary message store. Each row is one WeCom conversation archive message. Colum
 | Column | Type | Notes |
 |---|---|---|
 | `id` | bigint PK | auto-increment |
-| `msgid` | varchar(64) | WeCom stable message ID; unique within tenant (`UNIQUE(tenant_id, msgid)` as of migration 0002) |
+| `msgid` | varchar(64) | WeCom stable message ID; unique within tenant (`UNIQUE(tenant_id, msgid)`) |
 | `seq` | bigint | WeCom pull sequence number; indexed for cursor-based sync |
 | `publickey_ver` | integer | identifies which RSA key was used to encrypt this message |
 | `raw_encrypted_payload` | jsonb | the full encrypted SDK record as received (see note below) |
@@ -217,23 +218,24 @@ Indexes:
 
 ### `media_files`
 
-Tracks the download and storage state for each media attachment. One row per `sdkfileid`. Media download is handled by a separate worker (not in Phase 1 scope). Tenant-scoped via join to parent `archive_messages`.
+Tracks the download and storage state for each media attachment. One row per `(tenant_id, sdkfileid)` pair. Media download is handled by a dedicated worker (RND-151/168).
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | integer PK | auto-increment |
-| `sdkfileid` | text | unique; WeCom SDK file ID |
+| `sdkfileid` | text | WeCom SDK file ID; unique within tenant (`UNIQUE(tenant_id, sdkfileid)`) |
 | `archive_message_id` | bigint FK → `archive_messages.id` | the message this media belongs to |
+| `tenant_id` | varchar(36) FK → `tenants.id` | NOT NULL after bootstrap |
 | `file_type` | varchar(32) | `image`, `voice`, `video`, `file`, `emotion`, … |
-| `local_path` | text | absolute path on disk (Phase 1 local storage) |
-| `oss_key` | text | OSS object key (Phase 2) |
+| `local_path` | text | storage reference; resolved through `MediaStorageProvider` |
+| `oss_key` | text | OSS object key (Phase 2, reserved) |
 | `file_size` | bigint | bytes; null until downloaded |
 | `download_status` | varchar(16) | `pending` \| `downloaded` \| `failed` |
 | `created_at` | timestamptz | row insert time |
 | `updated_at` | timestamptz | last status change |
 
 Indexes:
-- Unique on `sdkfileid`
+- Unique on `(tenant_id, sdkfileid)`
 - B-tree on `archive_message_id`
 
 ---
@@ -287,6 +289,8 @@ alembic downgrade base
 Migrations:
 - `backend/alembic/versions/0001_initial_schema.py` — initial archive schema
 - `backend/alembic/versions/0002_tenant_foundation.py` — tenant tables + tenant_id columns
+- `backend/alembic/versions/0003_media_tenant_scoping.py` — media_files tenant scoping
+- `backend/alembic/versions/0004_tenant_wecom_config_corp_id_uniqueness.py` — corp_id uniqueness (RND-184)
 
 After applying migration 0002, run the bootstrap script to create the default
 tenant and backfill existing rows:
@@ -303,17 +307,12 @@ Required env vars for bootstrap: `DATABASE_URL`, `WECOM_CORP_ID`, `WECOM_AGENT_I
 
 ## Design Notes
 
-### Tenant scoping — Phase 1 (single tenant)
+### Tenant Scoping
 
-All admin queries will add `WHERE tenant_id = <session_tenant_id>` in Phase 2
-(RND-110). For the current MVP, there is one default tenant and the current
-admin console display queries work without tenant filtering. After RND-110
-ships, the `get_current_user()` FastAPI dependency will provide `tenant_id`
-from the session cookie, and all admin queries will be scoped to it.
-
-Cross-tenant data access prevention is enforced entirely server-side. The
-`tenant_id` in the session is the sole authorization scope; it is never
-accepted as a user-supplied API parameter.
+All admin queries are scoped by `WHERE tenant_id = <session_tenant_id>`, enforced
+by `get_current_user()` FastAPI dependency (RND-110, shipped). The `tenant_id`
+in the session is the sole authorization scope; it is never accepted as a
+user-supplied API parameter.
 
 ### Receiver lookup: why `archive_message_recipients` alongside `tolist`
 
@@ -357,4 +356,4 @@ The WeCom SDK returns an encrypted envelope JSON object containing both `encrypt
 
 ---
 
-_Last updated: 2026-06-28 — RND-111_
+_Last updated: 2026-07-10 — Documentation refresh_

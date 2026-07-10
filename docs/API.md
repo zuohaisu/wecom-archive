@@ -1,0 +1,157 @@
+# API Reference — 365 WeCom Archive
+
+Route catalog for the current FastAPI application.
+
+Source of truth:
+
+- runtime routes: `backend/app/main.py`
+- router modules under `backend/app/routers/`
+- interactive OpenAPI UI at `/docs`
+
+This document focuses on the stable HTTP surface and the auth model. For ORM
+details, see [DATA_MODEL.md](DATA_MODEL.md).
+
+---
+
+## 1. Auth Model
+
+### Public routes
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/health` | Liveness check |
+| `GET` | `/admin/login` | Login page shell |
+| `POST` | `/api/auth/password/login` | Password login when `AUTH_MODE=password` |
+| `GET` | `/api/auth/wecom/login` | Start WeCom OAuth flow |
+| `GET` | `/api/auth/wecom/callback` | Finish WeCom OAuth flow |
+| `GET` | `/api/wecom/archive/events` | WeCom callback URL verification |
+| `POST` | `/api/wecom/archive/events` | WeCom event signature validation |
+
+### Session-protected routes
+
+All routes below require a valid `session_id` cookie and derive authorization
+scope exclusively from `admin_sessions.tenant_id`.
+
+`tenant_id` is never accepted from request params or headers.
+
+---
+
+## 2. Auth / Session APIs
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/auth/me` | Always returns HTTP 200; payload includes `authenticated` |
+| `POST` | `/api/auth/logout` | Revokes server-side session and clears cookie |
+
+---
+
+## 3. Review Console APIs
+
+### Monitored accounts
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/api/monitored-accounts` | none | Array of monitored-account summary objects |
+
+Monitored accounts are derived at query time from archive participants plus
+authenticated admin identities; there is no separate seat-roster table.
+
+### Contacts
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/api/contacts` | none | Array of contact summary objects |
+
+### Conversations
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/api/conversations` | `mode=staff&staff_id=...` or `mode=contact&contact_id=...` | Array of conversation summaries |
+
+Rules:
+
+- `mode=staff` requires `staff_id`
+- `mode=contact` requires `contact_id`
+- conversations are returned latest-activity-first
+
+### Conversation timeline
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/api/conversations/{conversation_id}/messages` | `limit`, `before` | Paginated message timeline |
+
+Important behavior:
+
+- results are tenant-scoped
+- returned in ascending message-time order within the page
+- `before` is an opaque cursor from the previous response's `pagination.next_before`
+- conversation IDs are either:
+  - group: `<roomid>`
+  - direct: `direct__<uid_a>___<uid_b>`
+
+### Media serving
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/api/conversations/{conversation_id}/messages/{msgid}/media` | none | Image file bytes or HTTP 404 |
+
+This route only serves already-downloaded image media and applies both tenant
+authorization and safe-path checks before returning a file.
+
+---
+
+## 4. Search / Message APIs
+
+These routes expose raw message-centric access in addition to the main
+conversation-oriented review console.
+
+### HTML message search pages
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/admin/messages` | Search/filter archive messages in HTML |
+| `GET` | `/admin/messages/{msgid}` | Message detail page in HTML |
+
+### JSON message search APIs
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/api/messages` | `sender`, `q`, `msgtype`, `roomid`, `limit` | Array of messages |
+| `GET` | `/api/messages/{msgid}` | none | One message plus recipient list |
+
+Search behavior:
+
+- `q` is a case-insensitive substring match on `content_text`
+- `sender`, `msgtype`, and `roomid` are exact-match filters
+- all queries are tenant-scoped
+
+---
+
+## 5. Diagnostics APIs
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/admin/diagnostics/reachability` | none | HTML diagnostics shell |
+| `GET` | `/api/admin/reachability-audit` | `conversation_id`, `message_type`, `msgtime_from`, `msgtime_to`, `limit`, `offset`, `include_samples`, `sample_limit` | Aggregate reachability report |
+
+The HTML page is a thin UI over the JSON diagnostics endpoint. All
+classification happens server-side in `app/reachability_audit.py`.
+
+---
+
+## 6. WeCom Callback APIs
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/wecom/archive/events` | Decrypts and verifies WeCom `echostr` |
+| `POST` | `/api/wecom/archive/events` | Verifies signature only; does not trigger worker execution |
+
+These routes are intentionally **not** session-protected.
+
+---
+
+## 7. Verification Notes
+
+This document was aligned against the current FastAPI route table and OpenAPI
+schema generated by the app itself. If you change routes, update this file in
+the same change.

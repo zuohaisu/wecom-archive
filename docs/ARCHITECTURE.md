@@ -1,9 +1,6 @@
 # Architecture — 365 WeCom Archive
 
-Reference document for contributors before SDK integration and data model work.
-Covers product boundary, components, data flow, auth, storage, deployment, and explicit non-goals.
-
-Related issues: RND-87 (this doc), RND-75 (data model and migration).
+Reference document covering product boundary, components, data flow, auth, storage, deployment, and explicit non-goals.
 
 ---
 
@@ -12,10 +9,11 @@ Related issues: RND-87 (this doc), RND-75 (data model and migration).
 365 WeCom Archive is an **internal, admin-only** system that:
 
 - Pulls conversation messages and media from the WeCom Conversation Archive API on a scheduled basis.
-- Stores messages (text, attachments, metadata) in a company-controlled database and media store.
-- Exposes a search and review interface to authorized 365 administrators.
+- Decrypts messages using RSA + AES (WeCom SDK encryption scheme).
+- Stores messages, attachments, and metadata in company-controlled PostgreSQL and media store.
+- Exposes a **Conversation Review Console** (three-column server-rendered UI) and a **Message Reachability Diagnostics** page to authorized administrators.
 
-It is **not** a public-facing product. Access is restricted to employees authenticated via WeCom OAuth (self-built app, `snsapi_base` scope). Any active internal employee can log in; there is no separate allow-list.
+It is **not** a public-facing product. Access is restricted to employees authenticated via WeCom OAuth (self-built app, `snsapi_base` scope) or a password fallback mode. Any active internal employee can log in; there is no separate allow-list.
 
 ---
 
@@ -31,37 +29,50 @@ It is **not** a public-facing product. Access is restricted to employees authent
 │                     FastAPI Backend (Python)                     │
 │                                                                  │
 │  ┌──────────────┐  ┌─────────────────┐  ┌────────────────────┐  │
-│  │  Sync Worker │  │   REST API      │  │   Auth Middleware   │  │
-│  │  (scheduler) │  │  (admin routes) │  │   (WeCom OAuth)    │  │
+│  │  Sync Worker  │  │   REST API      │  │   Auth Middleware   │  │
+│  │  (systemd)    │  │  (admin routes) │  │   (WeCom OAuth)    │  │
 │  └──────┬───────┘  └────────┬────────┘  └────────────────────┘  │
 │         │                   │                                    │
 │  ┌──────▼───────────────────▼────────────────────────────────┐  │
 │  │               PostgreSQL (primary store)                   │  │
-│  │  messages · users · rooms · media_refs · sync_cursors     │  │
+│  │  archive_messages · archive_message_recipients             │  │
+│  │  media_files · sync_states · contacts                      │  │
+│  │  tenants · tenant_wecom_configs                            │  │
+│  │  admin_users · admin_sessions                              │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │              Media Storage (pluggable)                    │   │
-│  │   Phase 1: local disk  │  Later: Alibaba Cloud OSS        │   │
+│  │              Media Storage Provider (pluggable)           │   │
+│  │   LocalStorageProvider (implemented, RND-185)             │   │
+│  │   Qiniu Kodo / Alibaba OSS / S3 (future, RND-186)        │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────────────────┐
-│                     Admin UI (server-rendered HTML)              │
-│                     Served by FastAPI (Phase 2)                  │
+│              Admin UI (server-rendered HTML + JS)                │
+│                                                                  │
+│  Conversation Review Console (three-column, WeCom-style)        │
+│    ├── Left column: entity selector (staff / contact)           │
+│    ├── Middle column: conversation list                         │
+│    └── Right column: message timeline                           │
+│                                                                  │
+│  System Diagnostics Page (message reachability statistics)      │
+│  Message Search (/admin/messages)                                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Component summary
 
 | Component | Technology | Status |
-|---|---|---|
-| REST API | Python 3.11 + FastAPI | Stub exists |
-| Database | PostgreSQL 14+ | Schema not yet defined (RND-75) |
-| Media storage | Local disk → OSS (configurable) | Not yet implemented |
-| Sync worker | Python scheduler (to be chosen) | Not yet implemented |
-| Admin UI | Server-rendered HTML via FastAPI | Phase 2 |
-| WeCom SDK integration | `wework-sdk` or equivalent | Not yet integrated |
+|-----------|-----------|--------|
+| REST API | Python 3.11 + FastAPI | ✅ Fully implemented |
+| Database | PostgreSQL 14+ | ✅ Schema deployed, Alembic migrations active |
+| Media storage | Pluggable provider (`MediaStorageProvider` interface) | ✅ Local disk (RND-185); OSS/S3 contract ready |
+| Sync worker | Python scripts via systemd timer (`OnCalendar=*:0/5`) | ✅ Implemented; worker/media timer units are versioned in repo |
+| Admin UI — Conversation Review Console | Server-rendered HTML + JS (FastAPI) | ✅ Three-column, WeCom-style (RND-154/157) |
+| Admin UI — Diagnostics | Server-rendered HTML + JS | ✅ Message reachability audit (RND-180) |
+| Auth — WeCom OAuth | WeCom OAuth 2.0 (`snsapi_base`) | ✅ RND-110 |
+| Auth — Password fallback | PBKDF2 + env vars | ✅ RND-112 |
 
 ---
 
@@ -70,47 +81,66 @@ It is **not** a public-facing product. Access is restricted to employees authent
 ### 3.1 Message Sync (pull)
 
 ```
-[Scheduled trigger]
-        │
-        ▼
-Sync Worker reads cursor from DB
-        │
-        ▼
-WeCom Archive API → paginated message batch (encrypted)
-        │
-        ▼
-Decrypt with private key (RSA, `WECOM_PRIVATE_KEY_PATH`)
-        │
-        ├──▶ Text / structured messages → PostgreSQL (messages table)
-        │
-        └──▶ Media attachments → download → media store
-                                         → media_refs row in PostgreSQL
+[systemd timer: OnCalendar=*:0/5]
+         │
+         ▼
+run_archive_worker_once.py
+  ├── Acquires file lock (WORKER_LOCK_PATH)
+  ├── sync_wecom_archive_once.py
+  │     ├── Reads cursor from sync_states table
+  │     ├── WeCom Archive API → paginated message batch (encrypted)
+  │     └── Stores encrypted envelope + metadata in archive_messages
+  │
+  └── decrypt_wecom_messages_once.py
+        ├── Reads pending archive_messages rows
+        ├── Decrypts with RSA private key (WECOM_PRIVATE_KEY_PATH)
+        ├── Populates decrypted_payload + content_text + extracted fields
+        └── Creates archive_message_recipients rows from tolist
 ```
 
 Cursor is persisted after each successful batch so restarts are safe and non-duplicating.
 
-### 3.2 Admin Search (read)
+### 3.2 Media Download (separate, independent timer)
+
+```
+[systemd timer: OnBootSec=5min, OnUnitActiveSec=5min]
+         │
+         ▼
+download_wecom_image_media_once.py
+  ├── Acquires file lock (MEDIA_DOWNLOAD_LOCK_PATH)
+  ├── Selects candidate image messages (--since-hours 72, --limit 20)
+  ├── Downloads via WeCom SDK → .part file
+  ├── Validates bytes (magic-byte detection)
+  └── Publishes → media_files row updated to download_status='downloaded'
+```
+
+### 3.3 Admin Review (read)
 
 ```
 Browser (admin user)
-        │  HTTP GET /api/messages?q=...
-        ▼
-FastAPI → verify session (WeCom OAuth token)
-        │
-        ▼
-PostgreSQL full-text or keyword query
-        │
-        ▼
-JSON response → rendered HTML page
+         │
+         ├── GET  /api/monitored-accounts  (staff mode entities)
+         ├── GET  /api/contacts            (contact mode entities)
+         ├── GET  /api/conversations       (conversation list)
+         ├── GET  /api/conversations/{id}/messages (timeline with pagination)
+         │
+         ▼
+FastAPI → verify session (get_current_user dependency)
+         │
+         ▼
+PostgreSQL → tenant-scoped queries (WHERE tenant_id = ?)
+         │
+         ▼
+JSON response → rendered as HTML (client-side JS)
 ```
 
-Media files are served via a signed URL (local path in Phase 1, OSS pre-signed URL later).
+Media files are served via the authenticated API route (`GET /api/conversations/{id}/messages/{msgid}/media`), which performs tenant authorization before checking the media storage provider.
 
 ---
 
 ## 4. Auth Flow
 
-Two separate credential domains:
+Two separate credential domains. Auth mode is controlled by `AUTH_MODE`.
 
 ### 4.1 Archive Credential (server-to-WeCom)
 
@@ -118,16 +148,16 @@ Two separate credential domains:
 - Configured via: `WECOM_CORP_ID`, `WECOM_ARCHIVE_SECRET`, `WECOM_PRIVATE_KEY_PATH`, `WECOM_PUBLIC_KEY_VERSION`.
 - Never exposed to the browser. Lives only on the server.
 
-### 4.2 Admin Login (human-to-system) — RND-110 + RND-112
+### 4.2 Admin Login (human-to-system)
 
 Auth mode is controlled by the `AUTH_MODE` environment variable:
 
 | `AUTH_MODE` | Behavior |
-|---|---|
-| `wecom` (default) | WeCom OAuth employee login (RND-110) |
-| `password` | Temporary username/password fallback (RND-112) |
+|------------|----------|
+| `wecom` (default) | WeCom OAuth employee login |
+| `password` | Temporary username/password fallback |
 
-Both modes share the same session model (`admin_sessions` table), the same cookie (`session_id`), and the same tenant-scoped query model. Switching mode does not require a schema change.
+Both modes share the same session model (`admin_sessions` table), the same cookie (`session_id`), and the same tenant-scoped query model.
 
 #### WeCom OAuth mode (`AUTH_MODE=wecom`)
 
@@ -139,158 +169,136 @@ Both modes share the same session model (`admin_sessions` table), the same cooki
 
 ```
 Desktop browser → GET /admin/login (WeCom button)
-        → GET /api/auth/wecom/login
-        → redirect to open.weixin.qq.com/connect/oauth2/authorize
-        → user scans QR / approves in WeCom
-        → GET /api/auth/wecom/callback?code=...&state=...
-        → validate state (single-use CSRF check)
-        → GET /cgi-bin/gettoken → access_token (cached ≤7000s)
-        → GET /cgi-bin/user/getuserinfo → UserId
-        → GET /cgi-bin/user/get → verify active employee
-        → resolve tenant_id from TenantWecomConfig by corp_id
-        → upsert admin_users, create admin_sessions row
-        → set session_id cookie (HttpOnly, SameSite=Lax, 8h TTL)
-        → redirect to /admin/conversations
+         → GET /api/auth/wecom/login
+         → redirect to open.weixin.qq.com/connect/oauth2/authorize
+         → user scans QR / approves in WeCom
+         → GET /api/auth/wecom/callback?code=...&state=...
+         → validate state (single-use CSRF check)
+         → GET /cgi-bin/gettoken → access_token (cached ≤7000s)
+         → GET /cgi-bin/user/getuserinfo → UserId
+         → GET /cgi-bin/user/get → verify active employee
+         → resolve tenant_id from TenantWecomConfig by corp_id
+         → upsert admin_users, create admin_sessions row
+         → set session_id cookie (HttpOnly, SameSite=Lax, 8h TTL)
+         → redirect to /admin/conversations
 ```
 
-#### Password fallback mode (`AUTH_MODE=password`) — RND-112 temporary
+#### Password fallback mode (`AUTH_MODE=password`)
 
-**This mode is a temporary fallback only.** Use it exclusively when WeCom OAuth domain authorization is pending in production. Switch back to `AUTH_MODE=wecom` once the domain is registered.
-
+- Temporary mode for when WeCom OAuth domain authorization is pending.
 - Env vars: `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`.
-- `ADMIN_PASSWORD_HASH` is generated with `python -c "from app.auth import hash_password; print(hash_password('your-password'))"`.
-- Hash format: `pbkdf2:sha256:260000:<salt_b64>:<hash_b64>` (stdlib `hashlib.pbkdf2_hmac`, no new dependencies).
-- Login endpoint: `POST /api/auth/password/login` (JSON body: `{"username": "...", "password": "..."}`).
-- Returns 404 when `AUTH_MODE=wecom`.
-- On success: creates an `admin_sessions` row bound to the default tenant (slug=`default`, created by RND-111 bootstrap).
-- Session cookie is identical in flags to WeCom OAuth sessions: HttpOnly, SameSite=Lax, Path=/, Secure in production, 8h TTL.
-- Password and hash are never logged.
-
-```
-Desktop browser → GET /admin/login (username/password form)
-        → POST /api/auth/password/login {username, password}
-        → verify ADMIN_USERNAME (constant-time)
-        → verify password against ADMIN_PASSWORD_HASH (PBKDF2)
-        → resolve default tenant (slug='default')
-        → upsert admin_users (sentinel wecom_user_id)
-        → create admin_sessions row
-        → set session_id cookie (HttpOnly, SameSite=Lax, 8h TTL)
-        → return {logged_in: true} → JS redirects to /admin/conversations
-```
+- Hash: `pbkdf2:sha256:260000:<salt_b64>:<hash_b64>`.
+- Session cookie is identical in flags to WeCom OAuth sessions.
 
 #### Shared session behavior (both modes)
 
-- A server-side session (`admin_sessions` table) is created; HTTP-only cookie (`session_id`), 8-hour TTL, SameSite=Lax.
-- All archive API and HTML admin routes scope every DB query by `session.tenant_id`.
+- Server-side session (`admin_sessions` table); HttpOnly cookie (`session_id`), 8-hour TTL, SameSite=Lax.
+- All archive API and HTML admin routes scope every query by `session.tenant_id`.
 - `tenant_id` is never accepted from user-supplied request params or headers.
 - Logout: `POST /api/auth/logout` revokes the session row and clears the cookie.
 - `/api/auth/me`: always returns HTTP 200; `authenticated` field reflects session validity.
-
-`/api/wecom/archive/events` is a WeCom server-to-server callback and is explicitly **not** protected by session auth in either mode.
 
 ---
 
 ## 5. Storage Strategy
 
-| Phase | Backend | Config value | Where |
-|---|---|---|---|
-| Phase 1 | Local disk | `STORAGE_BACKEND=local` | `STORAGE_LOCAL_PATH` (default `./data/media`) |
-| Phase 2+ | Alibaba Cloud OSS | `STORAGE_BACKEND=oss` | `OSS_ENDPOINT`, `OSS_BUCKET`, key pair |
+| Backend | Config value | Status |
+|---------|-------------|--------|
+| Local disk | `MEDIA_STORAGE_PROVIDER=local` (or `STORAGE_BACKEND=local`) | ✅ Implemented (RND-185) |
+| Alibaba Cloud OSS | `STORAGE_BACKEND=oss` | Contract defined, not implemented |
+| S3-compatible | `STORAGE_BACKEND=s3` | Reserved placeholder |
+| Qiniu Kodo | — | Contract defined for future (RND-186) |
 
-The storage layer will be abstracted behind a thin interface so the sync worker and API routes are not coupled to a specific backend. Switching backends requires only a config change, not code changes.
+The storage layer is abstracted behind `MediaStorageProvider` interface (`backend/app/media_storage.py`). Switching backends requires only a config change and provider implementation.
 
-`STORAGE_BACKEND=s3` is reserved as a placeholder for other S3-compatible stores.
+See [research/rnd_185_media_storage_abstraction.md](research/rnd_185_media_storage_abstraction.md) for the provider contract details.
 
 ---
 
-## 6. Deployment Target
+## 6. Deployment
 
 | Concern | Choice |
-|---|---|
-| Server | Alibaba Cloud ECS (single instance, Phase 1) |
-| Process manager | systemd (one service unit for the FastAPI app + worker) |
-| Reverse proxy | Nginx (TLS termination, static file serving, port 443 → 8035) |
-| Database | PostgreSQL on the same ECS instance (Phase 1) or managed RDS (later) |
-| Media | Local disk on ECS (Phase 1), OSS bucket (Phase 2) |
+|---------|--------|
+| Server | Alibaba Cloud ECS (single instance) |
+| Process manager | systemd for worker/media timers; main web service is operator-managed |
+| Reverse proxy | Operator-managed reverse proxy in front of port 8035 |
+| Database | PostgreSQL on the same ECS instance (or RDS) |
+| Media | Local disk on ECS (Phase 1) |
 | Secrets | Environment variables injected by systemd `EnvironmentFile` — never in code |
 
-Phase 1 intentionally avoids Kubernetes, container orchestration, or managed container services to keep operational complexity low.
+### systemd units
+
+| Unit | Type | Schedule | Purpose |
+|------|------|----------|---------|
+| `wecom-archive-worker.service` | oneshot | `OnCalendar=*:0/5` | Sync + decrypt archive messages |
+| `wecom-archive-worker.timer` | timer | — | Activates above |
+| `wecom-archive-media-download.service` | oneshot | `OnUnitActiveSec=5min` | Download recent image media |
+| `wecom-archive-media-download.timer` | timer | — | Activates above |
+
+The repository does **not** currently version:
+
+- the main `wecom-archive-365.service` unit
+- the reverse-proxy configuration
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the explicit repo-owned vs
+operator-managed boundary.
 
 ---
 
-## 7. Phase Scope
+## 7. Tenant Model
 
-### Phase 1 (current focus)
+The system is tenant-aware (RND-156): a single deployment can support multiple companies (tenants) in the future.
 
-- FastAPI app with health endpoint (done).
-- PostgreSQL schema for messages, users, rooms, media refs, sync cursors (RND-75).
-- WeCom SDK integration for archive pull (after RND-75).
-- Sync worker: pull, decrypt, store messages and media.
-- WeCom OAuth admin login.
-- Minimal admin search API (JSON responses only).
-- Local disk media storage.
-- Deployed to a single ECS instance.
-
-### Phase 2 (after Phase 1 is stable)
-
-- Server-rendered admin UI (search, message viewer, media preview).
-- Switch media storage to Alibaba Cloud OSS.
-- Signed URL media serving.
-- Scheduled sync with retry and alerting.
-- PostgreSQL moved to managed RDS.
-
-### Later / unscheduled
-
-- Full-text search engine (Elasticsearch or pg_tsvector tuning).
-- Audit log for admin searches.
-- Multi-corp support.
-- Export functionality.
+- Each `tenant` has its own `tenant_wecom_configs` (WeCom credentials).
+- All archive tables are scoped by `tenant_id`.
+- Sessions carry `tenant_id` as the authorization scope.
+- Current MVP: single default tenant.
 
 ---
 
-## 8. Explicit Non-Goals
+## 8. Conversation Model
 
-The following are **out of scope** and should not be implemented or designed for without a new approved issue:
+### Review Console Identity
 
-| Non-goal | Reason |
-|---|---|
-| Public-facing access | This is an internal compliance tool. |
-| Real-time message streaming | Sync is scheduled pull, not webhook push. |
-| Chat replay / conversation reconstruction UI | Not in Phase 1 scope. |
-| Mobile app or responsive UI | Admin-only on desktop. |
-| Multi-tenant / multi-company support | Single-corp deployment. |
-| End-to-end encryption at rest | Not in scope; WeCom decryption happens server-side at sync time. |
-| Message deletion or editing | Archive is append-only; no write-back to WeCom. |
-| Notification or alerting system | Out of scope for Phase 1. |
-| AI summarization or analysis of messages | Not planned. |
+| Type | Identity Key | Example |
+|------|-------------|---------|
+| Direct conversation | Sorted pair of participant IDs | `direct__staff_001___contact_abc` |
+| Group conversation | `roomid` | `wr_xxxxxxxxxxxxxxxxxxxxx` |
+
+### Monitored Accounts / Archive Seats
+
+No formal archive-seat roster exists. Two signals are combined:
+1. Legacy `"staff_"` prefix convention (mock/dev fixtures).
+2. WeCom user IDs that are BOTH authenticated admin users AND observed as senders/recipients in the archive.
 
 ---
 
 ## 9. Key Environment Variables
 
-Defined fully in `.env.example`. Summarized here for architectural reference:
+The current source of truth is `.env.example`.
 
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` / `DB_*` | PostgreSQL connection |
-| `WECOM_CORP_ID` | WeCom corporation identity |
-| `WECOM_ARCHIVE_SECRET` | Archive API access credential |
-| `WECOM_PRIVATE_KEY_PATH` | Path to RSA private key for message decryption |
-| `WECOM_PUBLIC_KEY_VERSION` | Key version for WeCom encryption |
-| `WECOM_AGENT_ID` | WeCom self-built app agent ID for OAuth login |
-| `WECOM_OAUTH_SECRET` | App secret for OAuth (separate from archive secret) |
-| `ADMIN_DOMAIN` | Domain registered as WeCom OAuth trusted domain; used to construct callback URL |
-| `AUTH_MODE` | `wecom` (default) \| `password` — selects active login method |
-| `ADMIN_USERNAME` | Admin username for `AUTH_MODE=password` |
-| `ADMIN_PASSWORD_HASH` | PBKDF2 hash of admin password for `AUTH_MODE=password` — generated via `hash_password()` |
-| `STORAGE_BACKEND` | `local` \| `oss` \| `s3` |
-| `STORAGE_LOCAL_PATH` | Root path for local media files |
-| `OSS_*` | Alibaba Cloud OSS credentials and endpoint |
-| `SYNC_INTERVAL_SECONDS` | How often the sync worker runs |
-| `SYNC_LOOKBACK_DAYS` | Historical depth on first sync |
+Important caveat:
 
-No real values are stored in this document or in the repository.
+- `DATABASE_URL` is required at app runtime
+- some optional variables are script-specific rather than global runtime settings
+- future storage-provider placeholders should not be treated as implemented config
 
 ---
 
-_Last updated: 2026-06-29 — RND-87, RND-110, RND-112_
+## 10. Explicit Non-Goals
+
+The following are **out of scope**:
+
+| Non-goal | Reason |
+|----------|--------|
+| Public-facing access | Internal compliance tool |
+| Real-time message streaming | Sync is scheduled pull, not webhook push |
+| Mobile app or responsive UI | Admin-only on desktop |
+| End-to-end encryption at rest | WeCom decryption happens server-side at sync time |
+| Message deletion or editing | Archive is append-only; no write-back to WeCom |
+| Notification or alerting system | Out of scope |
+| AI summarization or analysis | Not planned for current phase |
+
+---
+
+_Last updated: 2026-07-10 — Documentation refresh_
