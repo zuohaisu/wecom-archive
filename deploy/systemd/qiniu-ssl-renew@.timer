@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily Qiniu SSL Certificate Renewal — %i
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+# Randomize startup by up to 30 minutes to avoid
+# thundering herd with other daily jobs
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target

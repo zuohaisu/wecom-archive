@@ -1,0 +1,44 @@
+[Unit]
+Description=Qiniu SSL Certificate Renewal — %i (one shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wecomarchive
+Group=wecomarchive
+WorkingDirectory=/srv/apps/wecom-archive-365/current/ssl-renew
+
+# Per-instance config: each domain gets its own env file, so adding a
+# domain never touches this unit template or the core scripts.
+# See ssl-renew/examples/domain.env.example for the schema.
+EnvironmentFile=/etc/qiniu-ssl-renew/%i.env
+
+ExecStart=/srv/apps/wecom-archive-365/current/ssl-renew/renew.sh %i
+
+# acme.sh --renew retries DNS propagation, and verify_https.sh backs off
+# across up to 5 retries — worst case is well over systemd's 90s default.
+TimeoutStartSec=600
+
+# Security hardening
+UMask=0077
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# Default paths for the acme.sh account + cert/state dir and the log
+# directory. If a domain's env file overrides CERT_DIR/STATE_DIR outside
+# these, add the new path here too — ProtectHome=read-only otherwise
+# blocks writes under /home.
+ReadWritePaths=/home/wecomarchive/.acme.sh /var/log/qiniu-ssl-renew
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+
+# Log output goes to journal + /var/log/qiniu-ssl-renew/
+StandardOutput=append:/var/log/qiniu-ssl-renew/renew.log
+StandardError=append:/var/log/qiniu-ssl-renew/renew.log

@@ -1,0 +1,5 @@
+# Runtime dependency for qiniu_helper.py — the official Qiniu Python SDK.
+# Pinned to the major version this project's signing/parity tests were
+# validated against (tests/test_qiniu_helper.py). See
+# https://github.com/qiniu/python-sdk
+qiniu>=7.9,<8

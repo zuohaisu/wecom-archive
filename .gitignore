@@ -219,4 +219,29 @@ __marimo__/
 
 # Backend dependencies
 backend/vendor/
+
+# SSL renewal (ssl-renew/) — never commit private keys, certificates,
+# acme.sh account state, or per-domain secrets/state files.
+*.key
+*.pem
+*.cer
+*.crt
+account.conf
+.deployed_fp
+.tls_verified
+.tls_mismatch_days
+.renew.lock
+ssl-renew/secrets/
+ssl-renew/state/
+ssl-renew/certs/
+ssl-renew/.env*
+!ssl-renew/.env.example
+!ssl-renew/examples/*.env.example
+
+# The generic `lib/` rule above (for Python build artifacts) would also
+# swallow ssl-renew's own lib/ of shared shell functions — un-ignore it
+# explicitly (the parent dir must be un-ignored too, or git never looks
+# inside it for the file-level exception).
+!ssl-renew/lib/
+!ssl-renew/lib/*.sh
 .DS_Store

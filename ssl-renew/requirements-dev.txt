@@ -1,0 +1,4 @@
+# Test-only dependencies for tests/test_qiniu_helper.py (not needed to run
+# renew.sh / qiniu_helper.py in production — see requirements.txt for that).
+-r requirements.txt
+pytest>=7,<9

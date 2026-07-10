@@ -1,0 +1,7 @@
+source-path=SCRIPTDIR
+# lib/*.sh files are sourced via a runtime-computed $SCRIPT_DIR path,
+# which shellcheck cannot statically follow without -x. `make ssl-lint`
+# lints lib/*.sh directly (with this same rc file) so real issues in
+# those files still surface; this only silences the "did not follow a
+# dynamic source" notice on the entrypoint scripts.
+disable=SC1091
