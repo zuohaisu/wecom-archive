@@ -75,6 +75,18 @@ cd "$DEPLOY_DIR"
 
 # ── 2. Pull latest code ────────────────────────────────────────────────────
 echo "[1/5] Pulling latest code from origin/main …"
+
+# Guard: verify .git is readable/writable by the current user.
+# If a previous git operation ran as root (e.g. manual debug pull),
+# .git/index can end up owned by root and break the next deploy.
+# Fail fast with a clear diagnostic instead of a cryptic EACCES.
+if [ ! -r ".git/index" ] || [ ! -w ".git/index" ]; then
+    echo "ERROR: .git/index is not accessible by user $(whoami)." >&2
+    echo "  Run the following on the server to fix:" >&2
+    echo "    sudo chown wecomarchive:wecomarchive $DEPLOY_DIR/.git/index" >&2
+    exit 1
+fi
+
 git pull --ff-only origin main
 
 GIT_SHA=$(git rev-parse HEAD)
