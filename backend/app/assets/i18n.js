@@ -83,6 +83,7 @@
         "media.status.failed": "下载失败",
         "media.unsupportedType": "不支持的消息类型",
         "media.unknownType": "不支持未知消息类型",
+        "media.loadFailed": "图片加载失败",
 
         "placeholder.video": "不支持视频消息",
         "placeholder.voice": "不支持语音消息",
@@ -220,6 +221,7 @@
         "media.status.failed": "下載失敗",
         "media.unsupportedType": "不支援的訊息類型",
         "media.unknownType": "不支援未知訊息類型",
+        "media.loadFailed": "圖片載入失敗",
 
         "placeholder.video": "不支援影片訊息",
         "placeholder.voice": "不支援語音訊息",
@@ -357,6 +359,7 @@
         "media.status.failed": "download failed",
         "media.unsupportedType": "Unsupported message type",
         "media.unknownType": "Unknown message type",
+        "media.loadFailed": "Image failed to load",
 
         "placeholder.video": "Unsupported video message",
         "placeholder.voice": "Unsupported voice message",

@@ -12,11 +12,17 @@ from app.db.models import AdminSession, ArchiveMessage, ArchiveMessageRecipient
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
 from app.routers.auth import router as auth_router
+from app.routers.conversations import MediaAccessNoStoreMiddleware
 from app.routers.conversations import router as conversations_router
 from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.wecom_events import router as wecom_events_router
 
 app = FastAPI(title="365 WeCom Archive")
+# RND-187: guarantees Cache-Control: no-store on every response (success or
+# error, any status code) for the media access descriptor endpoint — see
+# MediaAccessNoStoreMiddleware's docstring for why this must be a
+# response-side middleware rather than a header set inside the route.
+app.add_middleware(MediaAccessNoStoreMiddleware)
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(reachability_audit_router)
@@ -742,9 +748,18 @@ function renderMessageBody(m){
   if(mediaType==='text'){
     return m.content_text?esc(m.content_text):'<div class="media-placeholder">'+I18N.t('timeline.emptyText')+'</div>';
   }
-  if(mediaType==='image'&&m.media_status==='available'&&m.media_url){
-    return '<a href="'+esc(m.media_url)+'" target="_blank" rel="noopener noreferrer">'
-      +'<img class="media-preview" src="'+esc(m.media_url)+'" alt="'+esc(I18N.t('media.image'))+'" loading="lazy"></a>';
+  if(mediaType==='image'&&m.media_status==='available'&&(m.media_access_url||m.media_url)){
+    // RND-187: no src/href set here — the actual URL (a short-lived Qiniu
+    // signed URL, or the local proxy path) is only known after fetching
+    // the unified media access descriptor, done post-render by
+    // hydrateMediaImages(). This keeps the tenant/permission check +
+    // signed-URL minting on the same request boundary as before, just
+    // moved one step later (per-image, on demand) instead of eagerly
+    // embedding a URL in the timeline payload.
+    return '<a class="media-link" target="_blank" rel="noopener noreferrer">'
+      +'<img class="media-preview" data-access-url="'+esc(m.media_access_url||'')
+      +'" data-fallback-url="'+esc(m.media_url||'')+'" data-retried="0" alt="'
+      +esc(I18N.t('media.image'))+'" loading="lazy"></a>';
   }
   if(mediaType==='image'){
     var imgLabel=MEDIA_LABELS.image||I18N.t('media.generic');
@@ -756,6 +771,62 @@ function renderMessageBody(m){
   }
   var typeEntry=MessageTypeRegistry.resolvePlaceholder(m.msgtype)||MessageTypeRegistry.fallback;
   return '<div class="media-placeholder">'+I18N.t(typeEntry.placeholderKey)+'</div>';
+}
+// RND-187: fetch each image's unified media access descriptor on demand and
+// populate its <img src> (and wrapping <a href>) from the returned url —
+// never read/construct a Qiniu or storage_ref URL client-side. Retries the
+// access-descriptor fetch exactly once on load failure (covers a signed URL
+// that expired while scrolled off-screen), then shows an error placeholder.
+// Never persists the resolved URL (no localStorage, no analytics).
+function loadMediaImage(img){
+  var accessUrl=img.getAttribute('data-access-url');
+  if(!accessUrl){
+    var fallback=img.getAttribute('data-fallback-url');
+    img.setAttribute('data-retried','1');
+    if(fallback){
+      img.onerror=function(){onMediaImageError(img);};
+      img.src=fallback;
+      var link0=img.closest('a.media-link');
+      if(link0)link0.href=fallback;
+    }else{
+      showMediaError(img);
+    }
+    return;
+  }
+  fetch(accessUrl,{credentials:'same-origin'}).then(function(r){
+    if(handleUnauth(r))return null;
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(function(desc){
+    if(!desc)return;
+    img.onerror=function(){onMediaImageError(img);};
+    img.src=desc.url;
+    var link=img.closest('a.media-link');
+    if(link)link.href=desc.url;
+  }).catch(function(){
+    onMediaImageError(img);
+  });
+}
+function onMediaImageError(img){
+  if(img.getAttribute('data-retried')!=='1'){
+    img.setAttribute('data-retried','1');
+    img.onerror=null;
+    loadMediaImage(img);
+    return;
+  }
+  showMediaError(img);
+}
+function showMediaError(img){
+  var link=img.closest('a.media-link');
+  var placeholder=document.createElement('div');
+  placeholder.className='media-placeholder';
+  placeholder.textContent=I18N.t('media.loadFailed');
+  var target=link||img;
+  if(target&&target.parentNode)target.parentNode.replaceChild(placeholder,target);
+}
+function hydrateMediaImages(root){
+  var imgs=root.querySelectorAll('img.media-preview');
+  imgs.forEach(function(img){loadMediaImage(img);});
 }
 function renderTimeline(scrollToBottom){
   var body=document.getElementById('timeline-body');
@@ -795,6 +866,7 @@ function renderTimeline(scrollToBottom){
   });
   html+='</div>';
   body.innerHTML=html;
+  hydrateMediaImages(body);
   if(scrollToBottom){body.scrollTop=body.scrollHeight;}
 }
 function isNearBottom(){

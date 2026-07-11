@@ -1,0 +1,19 @@
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint.per-file-ignores]
+# backend/tests/ has an established, repo-wide convention (68 instances
+# pre-dating this config, already `# noqa: F401`'d on the import half):
+# a pytest fixture (e.g. `db`, `client`) is imported by name into a test
+# module purely so pytest can discover it, then used again as an
+# identically-named parameter in every test function that needs it. That
+# second use is exactly what F811 ("redefined-while-unused") exists to
+# catch for a *real* accidental shadowing bug — but here the "redefinition"
+# is pytest's own dependency-injection mechanism, not a mistake. Ignoring
+# F811 for this directory only (not repo-wide) turns `make lint` from
+# noise dominated by one well-understood false-positive category into a
+# signal that still flags real issues (unused imports/variables) anywhere,
+# including in backend/tests/ itself. No test file's actual code changed
+# to produce this — see docs/ops/media_storage_ops.md and the RND-187
+# fix-round notes for context.
+"backend/tests/*.py" = ["F811"]

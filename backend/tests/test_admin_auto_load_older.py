@@ -119,6 +119,12 @@ def _bundle() -> str:
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
+        # RND-187: renderTimeline() now calls hydrateMediaImages() after
+        # every render — pull those in too so the bundle is self-contained.
+        _extract(r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"),
+        _extract(r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"),
+        _extract(r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"),
+        _extract(r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
         _extract(r"function isNearTop\(\)\{.*?\n\}", "isNearTop()"),
         _extract(

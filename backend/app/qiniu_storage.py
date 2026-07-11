@@ -12,13 +12,21 @@ Callers (the download worker, the media route) only ever see the
 MediaStorageProvider contract — they never import `qiniu` or construct
 Qiniu requests themselves.
 
-Serving strategy (RND-174 scope — see docs/research): media stays behind
-the existing authenticated backend route. get_download_url() always
-returns None, exactly like LocalStorageProvider, so no Qiniu URL — signed
-or not — is ever handed to a caller outside this module. read_bytes()
-fetches the object server-side using a short-lived (60s) private download
-credential over HTTPS that is discarded immediately after the HTTP fetch
-and never logged or returned.
+Serving strategy: RND-174 kept media entirely behind the existing
+authenticated backend route (get_download_url() always returned None).
+RND-187 adds real signed-URL delivery: get_download_url(storage_ref,
+expires_in) now returns a short-lived, browser-usable signed URL via the
+official SDK's Auth.private_download_url — but only ever called by
+app.routers.conversations' media-access-descriptor route, and only after
+that route completes the full authenticate -> tenant -> media-ownership ->
+object-key-prefix check chain. This module itself has no authorization
+logic; it trusts that any storage_ref it is asked to sign has already been
+authorized by the caller. read_bytes() is unchanged: it still fetches the
+object server-side using its own short-lived (60s) *internal* private
+download credential over HTTPS, discarded immediately after the HTTP fetch
+and never logged or returned — that internal fetch token is a different,
+unrelated use of the same SDK primitive from the client-facing signed URL
+get_download_url() now produces.
 
 Error handling never surfaces raw Qiniu SDK response bodies, URLs, or
 exception text (qiniu.http.response.ResponseInfo can carry the request URL
@@ -62,6 +70,30 @@ def _sanitized(exc: Exception, fallback: str) -> str:
     network/SDK exceptions can embed request URLs (including signed query
     strings) or response bodies."""
     return f"{fallback} ({type(exc).__name__})"
+
+
+def redact_signed_url_for_log(url: Optional[str]) -> str:
+    """Return url with every query-string value replaced by [REDACTED].
+
+    No current call site logs a signed URL — every call site that issues
+    one (app.routers.conversations' media-access route) deliberately omits
+    it from log lines entirely, which is the preferred discipline. This
+    helper exists as a hard backstop for the rare diagnostic path that might
+    otherwise be tempted to include a URL in a log line, so a future call
+    site cannot accidentally leak the `token`/`e` (expiry) query parameters
+    a private_download_url embeds.
+    """
+    if not url:
+        return ""
+    split = urlsplit(url)
+    if not split.query:
+        return url
+    redacted_query = "&".join(
+        f"{pair.split('=', 1)[0]}=[REDACTED]" if "=" in pair else f"{pair}=[REDACTED]"
+        for pair in split.query.split("&")
+        if pair
+    )
+    return urlunsplit((split.scheme, split.netloc, split.path, redacted_query, split.fragment))
 
 
 def normalize_qiniu_https_base_url(raw: Optional[str]) -> str:
@@ -268,11 +300,38 @@ class QiniuStorageProvider(MediaStorageProvider):
             raise MediaObjectNotFound("media object is missing")
         raise MediaStorageUnavailable(f"qiniu stat failed (status={info.status_code})")
 
-    def get_download_url(self, storage_ref: str) -> Optional[str]:
-        """Always None (RND-174 scope): signed/public URL delivery is
-        RND-187's job, not this ticket's. Media is only ever served through
-        the existing authenticated backend route via read_bytes()."""
-        return None
+    def get_download_url(self, storage_ref: str, expires_in: Optional[int] = None) -> Optional[str]:
+        """Return a short-lived, browser-usable signed URL for storage_ref
+        (RND-187), built from the same validated HTTPS base URL and the
+        official SDK's Auth.private_download_url — never a hand-rolled
+        signature.
+
+        expires_in is required (seconds) — TTL policy (bounds, default)
+        lives one layer up in app.media_storage.get_signed_url_ttl_seconds(),
+        not here; this method is deliberately TTL-policy-agnostic and just
+        signs for whatever duration the caller, which has already completed
+        tenant/permission authorization, asks for.
+
+        Raises MediaObjectNotFound for an empty storage_ref,
+        MediaStorageConfigurationError if expires_in is missing, and
+        MediaStorageOperationError (sanitized — never the raw SDK exception
+        text, which could embed the object URL) if the SDK call itself
+        fails. The returned URL is never logged by this method.
+        """
+        if not storage_ref:
+            raise MediaObjectNotFound("media object is missing")
+        if not expires_in:
+            raise MediaStorageConfigurationError(
+                "expires_in is required to generate a signed download URL"
+            )
+
+        object_url = self._object_url(storage_ref)
+        try:
+            return self._auth.private_download_url(object_url, expires=expires_in)
+        except Exception as exc:  # noqa: BLE001 - never re-raised raw (may embed the URL)
+            raise MediaStorageOperationError(
+                _sanitized(exc, "qiniu signed url generation failed")
+            ) from exc
 
     def supports_local_path(self) -> bool:
         return False

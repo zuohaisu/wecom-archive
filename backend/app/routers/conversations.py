@@ -46,6 +46,7 @@ Monitored-account / archive-seat detection (RND-132):
 from __future__ import annotations
 
 import logging
+import re
 from typing import Callable, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -53,6 +54,10 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+from datetime import datetime, timedelta, timezone
 
 from app.auth import get_current_user
 from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
@@ -67,6 +72,8 @@ from app.media_storage import (
     detect_image_content_type,
     detect_image_content_type_for_ref,
     get_media_storage_provider,
+    get_signed_url_ttl_seconds,
+    object_key_tenant_prefix_matches,
     resolve_effective_storage_reference,
     resolve_image_file_state,
     resolve_media_file_state,
@@ -75,6 +82,43 @@ from app.media_storage import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Cache-Control: no-store for the media access descriptor endpoint
+#
+# get_message_media_access() sets response.headers["Cache-Control"] on its
+# own success path, but that mutation only reaches the client when the route
+# body actually returns a value. Every error path — an HTTPException raised
+# inside the route body (404/500/502/503), *and* a 401 raised by
+# get_current_user() while resolving dependencies, which runs before the
+# route body and therefore never touches that Response object at all — goes
+# through FastAPI/Starlette's own exception-to-Response conversion instead,
+# which builds a brand-new Response from scratch and knows nothing about
+# headers set earlier on the request-scoped Response object.
+#
+# A try/except around the route body would still miss the get_current_user
+# 401 case (it fails before the body starts). This middleware instead
+# inspects the fully-built outgoing Response for every request — after
+# Starlette's ExceptionMiddleware has already converted any exception
+# (dependency-resolution or route-body) into a concrete status code — and
+# adds/overwrites the header there. It is scoped by an exact path-pattern
+# match so no other endpoint's caching behavior changes.
+# ---------------------------------------------------------------------------
+
+_MEDIA_ACCESS_PATH_RE = re.compile(r"^/api/conversations/[^/]+/messages/[^/]+/media/access$")
+
+
+class MediaAccessNoStoreMiddleware(BaseHTTPMiddleware):
+    """Ensures Cache-Control: no-store on every response — success or error,
+    any status code — for GET .../media/access (RND-187). See the module
+    comment above for why this can't be done from inside the route alone."""
+
+    async def dispatch(self, request: Request, call_next: Callable):
+        response = await call_next(request)
+        if _MEDIA_ACCESS_PATH_RE.match(request.url.path):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +574,31 @@ class TimelineMessageOut(BaseModel):
     media_status: Optional[str] = None
     unsupported_reason: Optional[str] = None
     media_url: Optional[str] = None
+    media_access_url: Optional[str] = None
+
+
+class MediaAccessOut(BaseModel):
+    """Unified media access descriptor (RND-187) — the one shape the
+    frontend consumes regardless of storage_backend, so it never needs to
+    understand Qiniu vs local storage details, read storage_ref, or
+    construct a media.crowntime.cn URL itself.
+
+    access_type="signed_url": url is a short-lived, browser-usable Qiniu
+    signed URL good until expires_at; the browser fetches it directly, no
+    FastAPI proxying of image bytes.
+    access_type="proxy": url is this backend's own authenticated route
+    (unchanged local-media behavior); expires_at is None since the URL
+    itself carries no time-boxed credential — the session cookie is what
+    authorizes each request.
+    """
+
+    media_id: int
+    storage_backend: str
+    access_type: str
+    url: str
+    expires_at: Optional[str] = None
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
 
 
 class PaginationOut(BaseModel):
@@ -849,6 +918,7 @@ def get_conversation_messages(
         media = classify_media(msg.msgtype, bool(getattr(msg, "sdkfileid", None)))
 
         media_url: Optional[str] = None
+        media_access_url: Optional[str] = None
         if media.media_type == "image":
             media_file = media_files_map.get(msg.id)
             file_state = "missing"
@@ -892,6 +962,9 @@ def get_conversation_messages(
             )
             if media.media_status == "available":
                 media_url = f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media"
+                media_access_url = (
+                    f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media/access"
+                )
 
         result.append(
             TimelineMessageOut(
@@ -917,12 +990,97 @@ def get_conversation_messages(
                 media_status=media.media_status,
                 unsupported_reason=media.unsupported_reason,
                 media_url=media_url,
+                media_access_url=media_access_url,
             )
         )
     return ConversationMessagesOut(
         messages=result,
         pagination=PaginationOut(has_older=has_older, next_before=next_before),
     )
+
+
+def _resolve_authorized_media(
+    db: Session, conversation_id: str, msgid: str, tenant_id: str
+) -> Tuple[ArchiveMessage, MediaFile]:
+    """
+    Shared authorization + lookup for both media-serving routes
+    (get_message_media, get_message_media_access).
+
+    Authenticated (get_current_user, by every caller), tenant-scoped
+    (tenant_id comes only from the session, never a request param), and
+    conversation-scoped (the message must actually belong to
+    conversation_id per _fetch_conversation_messages — the same membership
+    rules the timeline route uses). The media_files lookup is additionally
+    filtered by tenant_id directly (RND-156) — a second, independent check
+    on top of message ownership, so a media row can never be served on the
+    strength of archive_message_id alone even if message/media tenant
+    assignment were ever to diverge.
+
+    This authorization sequence completes in full *before* any storage
+    provider, URL, or signing operation is touched (RND-174/RND-187) — both
+    media routes share this exact function so a security fix here
+    automatically applies to both.
+    """
+    messages = _fetch_conversation_messages(db, conversation_id, tenant_id)
+    msg = next((m for m in messages if m.msgid == msgid), None)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if msg.msgtype != "image":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    media_file = (
+        db.query(MediaFile)
+        .filter(
+            MediaFile.tenant_id == tenant_id,
+            MediaFile.archive_message_id == msg.id,
+        )
+        .first()
+    )
+    if media_file is None or media_file.download_status != "downloaded":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    return msg, media_file
+
+
+def _resolve_servable_backend_and_ref(media_file: MediaFile, route_label: str) -> Tuple[str, str]:
+    """
+    Resolve (effective_backend, effective_ref) for an already-authorized
+    media_file row (see _resolve_authorized_media) and confirm it is
+    actually servable, raising the shared 404/500/503 HTTPException
+    taxonomy both media routes use.
+
+    route_label only selects the log-line prefix (e.g. "media route" vs
+    "media access route") — never included in the HTTP response.
+
+    getattr(..., None): a MediaFile ORM row always has these columns, but
+    duck-typed test doubles may not.
+    """
+    effective_backend, effective_ref = resolve_effective_storage_reference(
+        getattr(media_file, "storage_backend", None),
+        getattr(media_file, "storage_ref", None),
+        getattr(media_file, "local_path", None),
+    )
+    if effective_backend is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    try:
+        file_state = resolve_image_file_state(effective_ref, effective_backend)
+    except MediaStorageConfigurationError:
+        logger.error(
+            "%s: storage configuration error (backend=%s)", route_label, effective_backend
+        )
+        raise HTTPException(status_code=500, detail="Media storage is misconfigured")
+    except MediaStorageUnavailable:
+        logger.warning(
+            "%s: storage provider unavailable (backend=%s)", route_label, effective_backend
+        )
+        raise HTTPException(status_code=503, detail="Media storage temporarily unavailable")
+
+    if file_state != "servable":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    return effective_backend, effective_ref
 
 
 @router.get("/api/conversations/{conversation_id}/messages/{msgid}/media")
@@ -935,19 +1093,16 @@ def get_message_media(
     """
     Serve an already-downloaded image message's file content (RND-144).
 
-    Authenticated (get_current_user), tenant-scoped (tenant_id comes only
-    from the session, never a request param), and conversation-scoped (the
-    message must actually belong to conversation_id per
-    _fetch_conversation_messages — the same membership rules the timeline
-    route uses). The media_files lookup is additionally filtered by
-    tenant_id directly (RND-156) — a second, independent check on top of
-    message ownership, so a media row can never be served on the strength
-    of archive_message_id alone even if message/media tenant assignment
-    were ever to diverge. The authorization sequence (authenticate ->
-    resolve tenant -> tenant-scoped message/media lookup -> ownership
-    check) completes in full *before* any storage provider is selected or
-    called — the provider is never part of the authorization boundary
-    (RND-174).
+    Kept unchanged by RND-187 for backward compatibility: local-backed rows
+    still only serve this way, and this is still a valid (if no longer the
+    primary) access path for Qiniu-backed rows too — see
+    get_message_media_access for the RND-187 signed-URL descriptor route
+    the frontend now calls first for image messages.
+
+    See _resolve_authorized_media's docstring for the full authorization-
+    boundary rationale (RND-174/RND-156): the sequence completes in full
+    *before* any storage provider is selected or called — the provider is
+    never part of the authorization boundary.
 
     The provider used to serve this row is resolved from the row's own
     storage_backend/storage_ref (RND-174 QA fix), never from the
@@ -975,54 +1130,10 @@ def get_message_media(
     """
     _, tenant_id = auth
 
-    messages = _fetch_conversation_messages(db, conversation_id, tenant_id)
-    msg = next((m for m in messages if m.msgid == msgid), None)
-    if msg is None:
-        raise HTTPException(status_code=404, detail="Not found")
-
-    if msg.msgtype != "image":
-        raise HTTPException(status_code=404, detail="Not found")
-
-    media_file = (
-        db.query(MediaFile)
-        .filter(
-            MediaFile.tenant_id == tenant_id,
-            MediaFile.archive_message_id == msg.id,
-        )
-        .first()
+    _msg, media_file = _resolve_authorized_media(db, conversation_id, msgid, tenant_id)
+    effective_backend, effective_ref = _resolve_servable_backend_and_ref(
+        media_file, "media route"
     )
-    if media_file is None or media_file.download_status != "downloaded":
-        raise HTTPException(status_code=404, detail="Not found")
-
-    # Tenant authorization is fully resolved above this line. Only now does
-    # provider/storage resolution begin, driven entirely by this row's own
-    # fields (RND-174 QA fix — see resolve_effective_storage_reference for
-    # the legacy local_path compatibility rule). getattr(..., None): a
-    # MediaFile ORM row always has these columns, but duck-typed test
-    # doubles may not.
-    effective_backend, effective_ref = resolve_effective_storage_reference(
-        getattr(media_file, "storage_backend", None),
-        getattr(media_file, "storage_ref", None),
-        getattr(media_file, "local_path", None),
-    )
-    if effective_backend is None:
-        raise HTTPException(status_code=404, detail="Not found")
-
-    try:
-        file_state = resolve_image_file_state(effective_ref, effective_backend)
-    except MediaStorageConfigurationError:
-        logger.error(
-            "media route: storage configuration error (backend=%s)", effective_backend
-        )
-        raise HTTPException(status_code=500, detail="Media storage is misconfigured")
-    except MediaStorageUnavailable:
-        logger.warning(
-            "media route: storage provider unavailable (backend=%s)", effective_backend
-        )
-        raise HTTPException(status_code=503, detail="Media storage temporarily unavailable")
-
-    if file_state != "servable":
-        raise HTTPException(status_code=404, detail="Not found")
 
     provider = get_media_storage_provider(effective_backend)
 
@@ -1033,13 +1144,11 @@ def get_message_media(
         content_type = detect_image_content_type(safe_path)
         return FileResponse(path=str(safe_path), media_type=content_type)
 
-    # Cloud-backed media (RND-174): the bucket is private and this route is
-    # still the only controlled access path (RND-187 signed-URL/CDN
-    # delivery is out of scope here) — fetch the bytes through the provider
-    # and proxy them back. The response shape (raw image bytes, same URL,
-    # same content-type behavior) stays identical to the local case, so the
-    # frontend needs no changes. No Qiniu URL or credential ever reaches
-    # the client.
+    # Cloud-backed media (RND-174): still a valid controlled access path —
+    # fetch the bytes through the provider and proxy them back. The
+    # response shape (raw image bytes, same URL, same content-type
+    # behavior) is unchanged. No Qiniu URL or credential ever reaches the
+    # client through this route.
     content_type = detect_image_content_type_for_ref(effective_ref)
     try:
         data = provider.read_bytes(effective_ref)
@@ -1057,3 +1166,138 @@ def get_message_media(
         )
         raise HTTPException(status_code=502, detail="Media storage operation failed")
     return Response(content=data, media_type=content_type)
+
+
+@router.get(
+    "/api/conversations/{conversation_id}/messages/{msgid}/media/access",
+    response_model=MediaAccessOut,
+)
+def get_message_media_access(
+    conversation_id: str,
+    msgid: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
+    """
+    Return a unified media access descriptor (RND-187) instead of proxying
+    image bytes. The frontend calls this first for every image message,
+    then loads the actual image from descriptor.url — it never needs to
+    know which storage_backend served it.
+
+    access_type="proxy" (local-backed rows): url is the existing
+    get_message_media route, unchanged. expires_at is None — the URL
+    carries no time-boxed credential of its own; the session cookie
+    authorizes each request to it, same as before RND-187.
+
+    access_type="signed_url" (Qiniu-backed rows): url is a short-lived
+    Qiniu signed URL, valid for get_signed_url_ttl_seconds() seconds
+    (MEDIA_SIGNED_URL_TTL_SECONDS, default 900, bounded [60, 3600]). Minted
+    only after this route completes the exact same authorization sequence
+    as get_message_media (_resolve_authorized_media /
+    _resolve_servable_backend_and_ref) *plus* an explicit check that the
+    object key's own "tenants/{tenant_id}/" prefix agrees with this row's
+    authenticated tenant_id (object_key_tenant_prefix_matches) — so a
+    corrupted/mistagged row can never mint a signed URL for a different
+    tenant's object on the strength of the tenant_id column alone. The
+    signed URL itself is never logged or included in any exception.
+
+    Cache-Control: no-store on every response this endpoint can produce —
+    success or error, any status code, including a 401 raised by
+    get_current_user() before this function body even runs. The header set
+    below covers the success path (FastAPI copies headers mutated on an
+    injected Response parameter onto the final response for a returned
+    Pydantic model); MediaAccessNoStoreMiddleware (registered on the app in
+    main.py) independently guarantees the same header on every error path,
+    since an exception's Response is built fresh by FastAPI/Starlette and
+    never sees this function's local `response` mutation. Both mechanisms
+    target the same header value, so keeping this line is redundant but
+    harmless on the success path, not dead code.
+
+    Response codes: same 404/500/503 taxonomy and meaning as
+    get_message_media (wrong tenant/conversation, non-image, missing row,
+    unservable file, misconfigured backend, provider outage, object-key
+    tenant-prefix mismatch). 502 additionally covers a confirmed signed-URL
+    generation failure against a provider that did respond.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    _, tenant_id = auth
+
+    _msg, media_file = _resolve_authorized_media(db, conversation_id, msgid, tenant_id)
+    effective_backend, effective_ref = _resolve_servable_backend_and_ref(
+        media_file, "media access route"
+    )
+    content_type = detect_image_content_type_for_ref(effective_ref)
+
+    if effective_backend == "local":
+        return MediaAccessOut(
+            media_id=media_file.id,
+            storage_backend="local",
+            access_type="proxy",
+            url=f"/api/conversations/{conversation_id}/messages/{msgid}/media",
+            expires_at=None,
+            content_type=content_type,
+            size_bytes=media_file.file_size,
+        )
+
+    if effective_backend == "qiniu_kodo":
+        if not object_key_tenant_prefix_matches(effective_ref, tenant_id):
+            logger.error(
+                "media access route: object key tenant prefix mismatch (media_id=%s)",
+                media_file.id,
+            )
+            raise HTTPException(status_code=404, detail="Not found")
+
+        try:
+            ttl_seconds = get_signed_url_ttl_seconds()
+        except MediaStorageConfigurationError:
+            logger.error("media access route: invalid signed url TTL configuration")
+            raise HTTPException(status_code=500, detail="Media storage is misconfigured")
+
+        provider = get_media_storage_provider(effective_backend)
+        try:
+            signed_url = provider.get_download_url(effective_ref, expires_in=ttl_seconds)
+        except MediaObjectNotFound:
+            raise HTTPException(status_code=404, detail="Not found")
+        except MediaStorageConfigurationError:
+            logger.error(
+                "media access route: signed url configuration error (media_id=%s)",
+                media_file.id,
+            )
+            raise HTTPException(status_code=500, detail="Media storage is misconfigured")
+        except MediaStorageOperationError:
+            logger.error(
+                "media access route: signed url generation failed (media_id=%s)", media_file.id
+            )
+            raise HTTPException(status_code=502, detail="Media storage operation failed")
+
+        if not signed_url:
+            logger.error(
+                "media access route: signed url generation returned empty (media_id=%s)",
+                media_file.id,
+            )
+            raise HTTPException(status_code=502, detail="Media storage operation failed")
+
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        logger.info(
+            "media access route: signed url issued (media_id=%s, tenant_id=%s, "
+            "backend=qiniu_kodo, ttl=%s)",
+            media_file.id,
+            tenant_id,
+            ttl_seconds,
+        )
+        return MediaAccessOut(
+            media_id=media_file.id,
+            storage_backend="qiniu_kodo",
+            access_type="signed_url",
+            url=signed_url,
+            expires_at=expires_at,
+            content_type=content_type,
+            size_bytes=media_file.file_size,
+        )
+
+    logger.error(
+        "media access route: unsupported backend for access descriptor (backend=%s)",
+        effective_backend,
+    )
+    raise HTTPException(status_code=500, detail="Media storage is misconfigured")

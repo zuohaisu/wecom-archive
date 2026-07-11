@@ -226,13 +226,20 @@ Legacy rows written before this ticket (or migration 0005's backfill) are stampe
 
 Object keys for Qiniu are tenant-scoped and deterministic: `tenants/{tenant_id}/images/{archive_message_id}{ext}`.
 
-**Qiniu bucket must be private.** This app never assumes public-read access and never issues a permanent public object URL; media is always proxied through the authenticated backend route (`GET /api/conversations/{id}/messages/{msgid}/media`). Private object retrieval uses a short-lived (60s) signed download request built from `QINIU_DOMAIN`, which **must** be a full `https://` base URL — `http://` and bare hostnames are rejected at provider-construction time.
+**Qiniu bucket must be private.** This app never assumes public-read access and never issues a permanent public object URL. Two controlled access paths exist for Qiniu-backed media:
+
+- The always-available backend proxy (`GET /api/conversations/{id}/messages/{msgid}/media`, RND-174): the backend fetches the object server-side using a short-lived (60s) internal signed download request built from `QINIU_DOMAIN`, and streams the bytes back — no Qiniu URL or credential ever reaches the client through this route.
+- The unified media access descriptor (`GET /api/conversations/{id}/messages/{msgid}/media/access`, RND-187 — **implemented locally, developer re-acceptance pending, not yet deployed to production**): after the exact same tenant/ownership authorization as the proxy route, plus an object-key tenant-prefix check, the backend mints a short-lived, single-object Signed URL (official Qiniu SDK) and returns it to the browser, which then fetches the image directly from `media.crowntime.cn` — the image bytes no longer round-trip through this backend. TTL is `MEDIA_SIGNED_URL_TTL_SECONDS` (default 900s, bounded 60–3600s). Local-backed media keeps using the proxy route unchanged (the descriptor's `access_type="proxy"` case). See [API.md](API.md) and [ops/media_storage_ops.md](ops/media_storage_ops.md) for the full contract, TTL config, and logging-redaction rules.
+
+`QINIU_DOMAIN` **must** be a full `https://` base URL — `http://` and bare hostnames are rejected at provider-construction time.
 
 **Before enabling Qiniu**, refresh backend dependencies (`pip install -r requirements.txt` inside the venv) so the `qiniu` SDK package is present — the app does not require it in local mode, but `qiniu_kodo` selection will fail fast if it and/or `QINIU_*` config are missing.
 
 See [research/rnd_185_media_storage_abstraction.md](research/rnd_185_media_storage_abstraction.md) for the base provider contract and [research/rnd_174_qiniu_kodo_provider.md](research/rnd_174_qiniu_kodo_provider.md) for the Qiniu provider, per-row storage model, and rollback details.
 
-Not yet implemented: historical local→Qiniu media migration (RND-186) and client-facing signed URL / CDN delivery (RND-187) — media is always proxied through the backend route, never a direct Qiniu URL.
+Not yet implemented: historical local→Qiniu media migration (RND-186).
+
+Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and passing the full test suite; developer re-acceptance is pending and it has **not** been deployed to production — see the Storage Strategy note above and [API.md](API.md) for the `GET .../media/access` contract.
 
 ---
 

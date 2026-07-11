@@ -1,6 +1,6 @@
 # Current Status — 365 WeCom Archive
 
-**Last updated:** 2026-07-10
+**Last updated:** 2026-07-12
 
 ## Overall Status
 
@@ -37,7 +37,7 @@ Live production state should be verified separately from git.
 | Feature | Priority | Status | Notes |
 |---------|----------|--------|-------|
 | Local → Qiniu historical media migration | P2 | Not started (RND-186) | Migrate existing local-backed rows to Qiniu; out of scope for RND-174 |
-| Media URL / Signed URL / CDN delivery | P2 | Not started (RND-187) | Client-facing signed URL strategy; media is currently always proxied through the authenticated backend route, never a direct/public Qiniu URL |
+| Media URL / Signed URL / CDN delivery | P2 | Implemented locally; developer re-acceptance pending (RND-187) | `GET .../media/access` mints short-lived, single-object Qiniu Signed URLs (official SDK) after full tenant/ownership authorization; browser fetches directly from `media.crowntime.cn`. Local-backed media still proxies unchanged. Not yet deployed to production — see docs/API.md and docs/ops/media_storage_ops.md |
 | Multi-tenant onboarding UI | P3 | Not started | Admin UI for adding tenant configs |
 | App secret encryption | P3 | Not started | Encrypt at rest in tenant_wecom_configs |
 | Conversation export | P3 | Not started | Security approval required |

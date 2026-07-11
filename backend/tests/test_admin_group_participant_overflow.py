@@ -71,6 +71,20 @@ def _extract_render_timeline_bundle() -> str:
     render_message_body_src = _extract(
         r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"
     )
+    # RND-187: renderTimeline() now calls hydrateMediaImages() after every
+    # render — pull those in too so the bundle is self-contained.
+    load_media_image_src = _extract(
+        r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"
+    )
+    on_media_image_error_src = _extract(
+        r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"
+    )
+    show_media_error_src = _extract(
+        r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"
+    )
+    hydrate_media_images_src = _extract(
+        r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"
+    )
     render_timeline_src = _extract(
         r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"
     )
@@ -85,6 +99,10 @@ def _extract_render_timeline_bundle() -> str:
             media_status_labels_src,
             message_type_registry_src,
             render_message_body_src,
+            load_media_image_src,
+            on_media_image_error_src,
+            show_media_error_src,
+            hydrate_media_images_src,
             render_timeline_src,
         ]
     )
@@ -109,6 +127,7 @@ var timelineBodyEl = {{
   set innerHTML(v) {{ capturedHtml = v; }},
   scrollHeight: 0,
   scrollTop: 0,
+  querySelectorAll: function() {{ return []; }},
 }};
 var document = {{
   getElementById: function(id) {{

@@ -98,11 +98,14 @@ class MediaStorageProvider(ABC):
     def size_bytes(self, storage_ref: str) -> int:
         """Return object size in bytes."""
 
-    def get_download_url(self, storage_ref: str) -> Optional[str]:
-        """Return a direct provider URL when one exists.
+    def get_download_url(self, storage_ref: str, expires_in: Optional[int] = None) -> Optional[str]:
+        """Return a direct, browser-usable provider URL when one exists,
+        valid for approximately expires_in seconds (provider-specific;
+        ignored by providers that never return a direct URL).
 
         The local provider intentionally returns None because this app
-        serves local media through the authenticated API route.
+        serves local media through the authenticated API route — there is
+        no direct "provider URL" for the local filesystem.
         """
         return None
 
@@ -256,6 +259,24 @@ def build_tenant_media_key(tenant_id: str, category: str, identifier: str, suffi
     return f"tenants/{safe_tenant}/{safe_category}/{safe_identifier}{suffix}"
 
 
+def object_key_tenant_prefix_matches(storage_ref: Optional[str], tenant_id: str) -> bool:
+    """True iff storage_ref's leading "tenants/{tenant}/" segment (see
+    build_tenant_media_key) matches tenant_id's own sanitized form.
+
+    RND-187 defense-in-depth: a media_files row is already resolved through
+    a tenant-scoped query before a signed URL is ever generated, so this key
+    is never attacker-controlled in production. This check exists so a
+    corrupted/mistagged row (whose storage_ref embeds a different tenant's
+    prefix than its own tenant_id column) can never mint a signed URL for
+    another tenant's object on the strength of tenant_id alone — the object
+    key itself must independently agree.
+    """
+    if not storage_ref or not tenant_id:
+        return False
+    expected_prefix = f"tenants/{_sanitize_key_segment(tenant_id)}/"
+    return storage_ref.startswith(expected_prefix)
+
+
 def _configured_media_root() -> Optional[Path]:
     """Return the configured local media root, or None if unset.
 
@@ -317,6 +338,39 @@ def _build_qiniu_provider() -> MediaStorageProvider:
         region=region,
         timeout=timeout,
     )
+
+
+_SIGNED_URL_TTL_DEFAULT_SECONDS = 900
+_SIGNED_URL_TTL_MIN_SECONDS = 60
+_SIGNED_URL_TTL_MAX_SECONDS = 3600
+
+
+def get_signed_url_ttl_seconds() -> int:
+    """Validated MEDIA_SIGNED_URL_TTL_SECONDS accessor (RND-187).
+
+    Bounds [60, 3600] seconds, default 900 when unset. Reads the env var
+    fresh on every call — matching every other *_env accessor in this
+    module — rather than caching, so tests can monkeypatch os.environ per
+    case without a process restart. An invalid (non-integer) or
+    out-of-bounds value fails loudly (MediaStorageConfigurationError)
+    rather than silently clamping, matching this module's existing
+    QiniuConfigurationError convention for misconfiguration.
+    """
+    raw = os.environ.get("MEDIA_SIGNED_URL_TTL_SECONDS", "").strip()
+    if not raw:
+        return _SIGNED_URL_TTL_DEFAULT_SECONDS
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise MediaStorageConfigurationError(
+            "MEDIA_SIGNED_URL_TTL_SECONDS must be an integer number of seconds"
+        ) from exc
+    if value < _SIGNED_URL_TTL_MIN_SECONDS or value > _SIGNED_URL_TTL_MAX_SECONDS:
+        raise MediaStorageConfigurationError(
+            "MEDIA_SIGNED_URL_TTL_SECONDS must be between "
+            f"{_SIGNED_URL_TTL_MIN_SECONDS} and {_SIGNED_URL_TTL_MAX_SECONDS} seconds"
+        )
+    return value
 
 
 def _resolve_default_provider_name() -> str:

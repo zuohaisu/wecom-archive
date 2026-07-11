@@ -86,6 +86,12 @@ def _bundle() -> str:
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
+        # RND-187: renderTimeline() now calls hydrateMediaImages() after
+        # every render — pull those in too so the bundle is self-contained.
+        _extract(r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"),
+        _extract(r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"),
+        _extract(r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"),
+        _extract(r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
     ]
     return "\n".join(parts)
@@ -205,15 +211,22 @@ def test_text_renderer_empty_text_placeholder_unchanged() -> None:
 
 
 def test_image_renderer_preview_unchanged() -> None:
+    """RND-187: <img src> is no longer set synchronously by
+    renderMessageBody() — see test_unsupported_message_labels.py's
+    test_zh_cn_image_preview_unchanged for the rationale. What must stay
+    unchanged is that a preview element is still produced, carrying both
+    the access-descriptor URL and the proxy fallback URL."""
     msg = _msg(
         "image",
         "image",
         media_status="available",
+        media_access_url="/api/conversations/c1/messages/msg-1/media/access",
         media_url="/api/conversations/c1/messages/msg-1/media",
     )
     html = _render(msg)
     assert '<img class="media-preview"' in html
-    assert 'src="/api/conversations/c1/messages/msg-1/media"' in html
+    assert 'data-access-url="/api/conversations/c1/messages/msg-1/media/access"' in html
+    assert 'data-fallback-url="/api/conversations/c1/messages/msg-1/media"' in html
 
 
 def test_image_renderer_not_downloaded_placeholder_unchanged() -> None:
@@ -355,7 +368,8 @@ var capturedHtml=null;
 var timelineBodyEl={{
   get innerHTML(){{return capturedHtml;}},
   set innerHTML(v){{capturedHtml=v;}},
-  scrollHeight:0, scrollTop:0
+  scrollHeight:0, scrollTop:0,
+  querySelectorAll:function(){{return [];}}
 }};
 var document={{getElementById:function(id){{
   if(id==='timeline-body')return timelineBodyEl;

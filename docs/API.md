@@ -94,9 +94,76 @@ Important behavior:
 | Method | Path | Query | Response |
 |--------|------|-------|----------|
 | `GET` | `/api/conversations/{conversation_id}/messages/{msgid}/media` | none | Image file bytes or HTTP 404 |
+| `GET` | `/api/conversations/{conversation_id}/messages/{msgid}/media/access` | none | Unified media access descriptor (JSON) — see below |
 
-This route only serves already-downloaded image media and applies both tenant
-authorization and safe-path checks before returning a file.
+Both routes only serve already-downloaded image media and apply full tenant
+authorization and safe-path checks before returning anything.
+
+**Status (RND-187): implemented locally, developer re-acceptance pending —
+not yet deployed to production.**
+
+#### `GET .../media/access` — unified media access descriptor (RND-187)
+
+Returns a small JSON descriptor telling the client *how* to load an image,
+instead of proxying the image bytes itself. The frontend calls this first
+for every image message, then loads the actual image from `url` — it never
+needs to know or reason about which storage backend served it, and it never
+constructs a Qiniu/CDN URL itself.
+
+- **Method / path**: `GET /api/conversations/{conversation_id}/messages/{msgid}/media/access`
+- **Authentication**: requires a valid `session_id` cookie, same as every
+  other session-protected route (`get_current_user`). No cookie → `401`.
+- **Tenant requirement**: `tenant_id` comes only from the session — never
+  from a request param. The message must belong to `conversation_id` for
+  the session's tenant, and the resolved `media_files` row must
+  independently belong to that same tenant (defense-in-depth — a row whose
+  `tenant_id` column diverged from its parent message's would still be
+  denied). For Qiniu-backed rows there is one more check before a signed
+  URL is ever minted: the object key's own `tenants/{tenant_id}/` prefix
+  must agree with the authenticated tenant — see `docs/ops/media_storage_ops.md`.
+- **Success response** (`200`), shape shared by both storage backends:
+
+  ```json
+  {
+    "media_id": 207,
+    "storage_backend": "qiniu_kodo",
+    "access_type": "signed_url",
+    "url": "https://media.crowntime.cn/<redacted-path>?e=<redacted>&token=<redacted>",
+    "expires_at": "2026-07-12T10:15:00+00:00",
+    "content_type": "image/jpeg",
+    "size_bytes": 333287
+  }
+  ```
+
+  (The `url` value above is illustrative only — this document never
+  contains a real Signed URL. A real value is a single-object, time-boxed
+  Qiniu URL, valid only until `expires_at`.)
+
+  - **Qiniu-backed media**: `access_type="signed_url"`. `url` is a
+    short-lived signed URL (official Qiniu SDK, `Auth.private_download_url`)
+    scoped to exactly one object; the browser fetches it directly from
+    `media.crowntime.cn` — the image bytes no longer round-trip through
+    this backend. `expires_at` is an ISO-8601 timestamp; the TTL is
+    `MEDIA_SIGNED_URL_TTL_SECONDS` (default 900s, bounded 60–3600s).
+  - **Local-backed media**: `access_type="proxy"`. `url` is the existing
+    `.../media` route, unchanged; `expires_at` is `null` (the URL carries
+    no time-boxed credential of its own — the session cookie authorizes
+    each request to it, exactly as before RND-187).
+- **Cache-Control**: `no-store` on **every** response this endpoint can
+  produce — success or error, any status code (`200`/`401`/`404`/`500`/`502`/`503`).
+  This response is per-user and short-lived and must never be cached by a
+  shared/CDN proxy.
+- **Error responses**: `401` (not authenticated), `404` (wrong tenant,
+  wrong conversation, non-image message, missing/pending media row,
+  unservable file, or a Qiniu object key whose tenant prefix doesn't match
+  — all collapsed to the same generic `404` so a client cannot distinguish
+  "doesn't exist" from "not yours"), `500` (misconfigured storage backend or
+  TTL), `502` (confirmed signed-URL generation failure against a provider
+  that did respond), `503` (storage provider outage — never reported as a
+  plain `404`, an outage must not look like missing media).
+- **Never exposed**: `storage_ref` (the raw Qiniu object key or local
+  filesystem path), `local_path`, `sdkfileid`, Qiniu `AK`/`SK`, or any raw
+  provider/SDK error text — in the response body or in any log line.
 
 ---
 

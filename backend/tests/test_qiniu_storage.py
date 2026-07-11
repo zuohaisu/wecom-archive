@@ -12,16 +12,21 @@ Run (from backend/):
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 
 from app.media_storage import (
     MediaObjectNotFound,
+    MediaStorageConfigurationError,
     MediaStorageOperationError,
     MediaStorageUnavailable,
 )
-from app.qiniu_storage import QiniuConfigurationError, QiniuStorageProvider
+from app.qiniu_storage import (
+    QiniuConfigurationError,
+    QiniuStorageProvider,
+    redact_signed_url_for_log,
+)
 
 _FAKE_ACCESS_KEY = "fake-access-key-should-never-leak"
 _FAKE_SECRET_KEY = "fake-secret-key-should-never-leak"
@@ -78,11 +83,172 @@ def test_get_local_path_always_none() -> None:
     assert provider.get_local_path(None) is None
 
 
-def test_get_download_url_always_none() -> None:
-    """RND-174 scope: no signed/public URL delivery — media stays behind
-    the existing authenticated backend route."""
+def test_get_download_url_none_without_expires_in() -> None:
+    """The provider is deliberately TTL-policy-agnostic: expires_in is
+    required, no implicit default. TTL bounds/defaulting live one layer up
+    in app.media_storage.get_signed_url_ttl_seconds()."""
     provider = _make_provider()
-    assert provider.get_download_url("tenants/t1/images/1.jpg") is None
+    with pytest.raises(MediaStorageConfigurationError):
+        provider.get_download_url("tenants/t1/images/1.jpg")
+
+
+def test_get_download_url_empty_ref_raises_object_not_found() -> None:
+    provider = _make_provider()
+    with pytest.raises(MediaObjectNotFound):
+        provider.get_download_url("", expires_in=900)
+    with pytest.raises(MediaObjectNotFound):
+        provider.get_download_url(None, expires_in=900)
+
+
+# ---------------------------------------------------------------------------
+# get_download_url (RND-187 — client-facing signed URL generation)
+# ---------------------------------------------------------------------------
+
+
+def test_get_download_url_success_uses_media_crowntime_domain(monkeypatch) -> None:
+    provider = _make_provider(domain="https://media.crowntime.cn")
+    seen = {}
+
+    def _fake_private_download_url(url, expires=3600):
+        seen["url"] = url
+        seen["expires"] = expires
+        return "https://media.crowntime.cn/tenants/t1/images/1.jpg?e=1234567890&token=fake-token"
+
+    monkeypatch.setattr(provider._auth, "private_download_url", _fake_private_download_url)
+
+    url = provider.get_download_url("tenants/t1/images/1.jpg", expires_in=900)
+
+    assert seen["url"] == "https://media.crowntime.cn/tenants/t1/images/1.jpg"
+    assert url.startswith("https://media.crowntime.cn/")
+    assert "token=" in url
+
+
+def test_get_download_url_passes_expires_in_through_as_ttl(monkeypatch) -> None:
+    """TTL correctness: the exact expires_in the caller supplies must be
+    forwarded to the SDK's expires= parameter unchanged — this is what
+    determines the URL's real expiry, not a provider-side default."""
+    provider = _make_provider()
+    seen = {}
+
+    def _fake_private_download_url(url, expires=3600):
+        seen["expires"] = expires
+        return "https://cdn.example.com/signed?e=999&token=abc"
+
+    monkeypatch.setattr(provider._auth, "private_download_url", _fake_private_download_url)
+
+    provider.get_download_url("tenants/t1/images/1.jpg", expires_in=123)
+    assert seen["expires"] == 123
+
+    provider.get_download_url("tenants/t1/images/1.jpg", expires_in=3600)
+    assert seen["expires"] == 3600
+
+
+def test_get_download_url_contains_expiry_and_token_query_params(monkeypatch) -> None:
+    provider = _make_provider()
+    monkeypatch.setattr(
+        provider._auth,
+        "private_download_url",
+        lambda url, expires=3600: "https://cdn.example.com/tenants/t1/images/1.jpg?e=1735689600&token=signed-token-value",
+    )
+
+    url = provider.get_download_url("tenants/t1/images/1.jpg", expires_in=900)
+
+    assert "e=1735689600" in url
+    assert "token=signed-token-value" in url
+
+
+def test_get_download_url_never_contains_ak_or_sk(monkeypatch) -> None:
+    provider = _make_provider()
+    monkeypatch.setattr(
+        provider._auth,
+        "private_download_url",
+        lambda url, expires=3600: "https://cdn.example.com/tenants/t1/images/1.jpg?e=1&token=abc123",
+    )
+
+    url = provider.get_download_url("tenants/t1/images/1.jpg", expires_in=900)
+
+    assert _FAKE_ACCESS_KEY not in url
+    assert _FAKE_SECRET_KEY not in url
+
+
+def test_get_download_url_single_object_key_only(monkeypatch) -> None:
+    """The signed URL must be scoped to exactly the object_url built from
+    this single storage_ref — never a bucket-wide or wildcard URL."""
+    provider = _make_provider()
+    seen = {}
+    monkeypatch.setattr(
+        provider._auth,
+        "private_download_url",
+        lambda url, expires=3600: seen.setdefault("url", url) or f"{url}?e=1&token=abc",
+    )
+
+    provider.get_download_url("tenants/t1/images/1.jpg", expires_in=900)
+
+    assert seen["url"] == "https://cdn.example.com/tenants/t1/images/1.jpg"
+
+
+def test_get_download_url_sdk_exception_sanitized(monkeypatch) -> None:
+    """An SDK/signing exception must not leak secrets or raw URLs into the
+    raised error."""
+    provider = _make_provider()
+
+    def _raise(url, expires=3600):
+        raise RuntimeError(f"signing failed for url={url} secret={_FAKE_SECRET_KEY}")
+
+    monkeypatch.setattr(provider._auth, "private_download_url", _raise)
+
+    with pytest.raises(MediaStorageOperationError) as exc_info:
+        provider.get_download_url("tenants/t1/images/1.jpg", expires_in=900)
+
+    assert _FAKE_SECRET_KEY not in str(exc_info.value)
+    assert _FAKE_ACCESS_KEY not in str(exc_info.value)
+
+
+def test_get_download_url_object_key_cannot_alter_host(monkeypatch) -> None:
+    """A storage_ref containing path-traversal-like or otherwise unusual
+    segments must never change the URL's scheme/host away from the
+    validated HTTPS base — same safety property _object_url already
+    guarantees for read_bytes() (proven there by
+    test_read_bytes_passes_https_object_url_to_private_download_url)."""
+    provider = _make_provider()
+    seen = {}
+    monkeypatch.setattr(
+        provider._auth,
+        "private_download_url",
+        lambda url, expires=3600: seen.setdefault("url", url) or f"{url}?e=1&token=abc",
+    )
+
+    provider.get_download_url("../../etc/passwd", expires_in=900)
+
+    parsed = urlsplit(seen["url"])
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "cdn.example.com"
+
+
+# ---------------------------------------------------------------------------
+# redact_signed_url_for_log (RND-187 — log/exception redaction backstop)
+# ---------------------------------------------------------------------------
+
+
+def test_redact_signed_url_for_log_replaces_query_values() -> None:
+    url = "https://media.crowntime.cn/tenants/t1/images/1.jpg?e=1735689600&token=super-secret-token"
+    redacted = redact_signed_url_for_log(url)
+
+    assert "super-secret-token" not in redacted
+    assert "1735689600" not in redacted
+    assert "token=[REDACTED]" in redacted
+    assert "e=[REDACTED]" in redacted
+    assert redacted.startswith("https://media.crowntime.cn/tenants/t1/images/1.jpg?")
+
+
+def test_redact_signed_url_for_log_handles_no_query() -> None:
+    url = "https://media.crowntime.cn/tenants/t1/images/1.jpg"
+    assert redact_signed_url_for_log(url) == url
+
+
+def test_redact_signed_url_for_log_handles_empty() -> None:
+    assert redact_signed_url_for_log(None) == ""
+    assert redact_signed_url_for_log("") == ""
 
 
 # ---------------------------------------------------------------------------

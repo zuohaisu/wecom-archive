@@ -56,6 +56,12 @@ def _bundle() -> str:
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
+        # RND-187: renderTimeline() now calls hydrateMediaImages() after
+        # every render — pull those in too so the bundle is self-contained.
+        _extract(r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"),
+        _extract(r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"),
+        _extract(r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"),
+        _extract(r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
     ]
     return "\n".join(parts)
@@ -191,7 +197,8 @@ var capturedHtml=null;
 var timelineBodyEl={{
   get innerHTML(){{return capturedHtml;}},
   set innerHTML(v){{capturedHtml=v;}},
-  scrollHeight:0, scrollTop:0
+  scrollHeight:0, scrollTop:0,
+  querySelectorAll:function(){{return [];}}
 }};
 var document={{getElementById:function(id){{
   if(id==='timeline-body')return timelineBodyEl;
@@ -254,7 +261,8 @@ var capturedHtml=null;
 var timelineBodyEl={{
   get innerHTML(){{return capturedHtml;}},
   set innerHTML(v){{capturedHtml=v;}},
-  scrollHeight:0, scrollTop:0
+  scrollHeight:0, scrollTop:0,
+  querySelectorAll:function(){{return [];}}
 }};
 var document={{getElementById:function(id){{
   if(id==='timeline-body')return timelineBodyEl;
@@ -285,7 +293,8 @@ var capturedHtml=null;
 var timelineBodyEl={{
   get innerHTML(){{return capturedHtml;}},
   set innerHTML(v){{capturedHtml=v;}},
-  scrollHeight:0, scrollTop:0
+  scrollHeight:0, scrollTop:0,
+  querySelectorAll:function(){{return [];}}
 }};
 var document={{getElementById:function(id){{
   if(id==='timeline-body')return timelineBodyEl;
@@ -311,15 +320,23 @@ def test_zh_cn_text_rendering_unchanged() -> None:
 
 
 def test_zh_cn_image_preview_unchanged() -> None:
+    """RND-187: renderMessageBody() no longer sets <img src> synchronously
+    — the actual URL comes from a post-render fetch of the media access
+    descriptor (see test_message_type_registry.py for hydration coverage).
+    What must stay unchanged here is that an image preview element is
+    still produced, still carries the proxy media_url as its fallback, and
+    still exposes the (now separate) access-descriptor URL for hydration."""
     msg = _msg(
         "image",
         "image",
         media_status="available",
+        media_access_url="/api/conversations/c1/messages/msg-1/media/access",
         media_url="/api/conversations/c1/messages/msg-1/media",
     )
     html = _render("zh-CN", msg)
     assert '<img class="media-preview"' in html
-    assert 'src="/api/conversations/c1/messages/msg-1/media"' in html
+    assert 'data-access-url="/api/conversations/c1/messages/msg-1/media/access"' in html
+    assert 'data-fallback-url="/api/conversations/c1/messages/msg-1/media"' in html
 
 
 def test_zh_cn_image_not_downloaded_placeholder_unchanged() -> None:
