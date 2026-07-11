@@ -204,10 +204,17 @@ staging_flag=""
 is_staging && staging_flag="--staging"
 
 log "[INFO] Running $ACME_SH --renew${staging_flag:+ $staging_flag}"
-if "$ACME_SH" --renew --dns "$DNS_PROVIDER" -d "$DOMAIN" $staging_flag 2>&1 | filter_secrets; then
+set +e
+"$ACME_SH" --renew --dns "$DNS_PROVIDER" -d "$DOMAIN" $staging_flag 2>&1 | filter_secrets
+acme_exit=${PIPESTATUS[0]}
+set -e
+
+if [ "$acme_exit" -eq 0 ]; then
 	log "[INFO] acme.sh --renew completed"
+elif [ "$acme_exit" -eq 2 ]; then
+	log "[INFO] acme.sh --renew skipped (cert not due yet, exit=$acme_exit)"
 else
-	die "acme.sh --renew failed"
+	die "acme.sh --renew failed (exit=$acme_exit)"
 fi
 
 if is_staging; then
