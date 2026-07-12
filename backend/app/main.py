@@ -1,4 +1,6 @@
 import html as _html
+import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -10,7 +12,8 @@ from sqlalchemy.orm import Session
 from app.auth import SESSION_COOKIE, get_current_user
 from app.db.models import AdminSession, ArchiveMessage, ArchiveMessageRecipient
 from app.db.session import get_db
-from app.i18n_assets import I18N_SCRIPT_TAG
+from app.i18n_assets import I18N_JS_SOURCE, I18N_SCRIPT_TAG
+from app.message_type_registry import build_frontend_registry_entries
 from app.routers.auth import router as auth_router
 from app.routers.conversations import MediaAccessNoStoreMiddleware
 from app.routers.conversations import router as conversations_router
@@ -271,6 +274,20 @@ def admin_message_detail(
     return HTMLResponse(content=body)
 
 
+# RND-196 — the embedded MessageTypeRegistry's `entries` object (below,
+# inside _REVIEW_CONSOLE_HTML) is generated from app.message_type_registry
+# instead of hand-duplicated: the backend Registry is now the runtime
+# authority and the frontend consumes its exported metadata. Restricted to
+# placeholder.<type> i18n keys that actually exist in app/assets/i18n.js
+# so this can never emit a placeholderKey with no translation behind it —
+# see build_frontend_registry_entries()'s docstring.
+_KNOWN_PLACEHOLDER_I18N_KEYS = frozenset(
+    re.findall(r'"(placeholder\.[a-zA-Z0-9_]+)"', I18N_JS_SOURCE)
+)
+_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON = json.dumps(
+    build_frontend_registry_entries(known_placeholder_keys=_KNOWN_PLACEHOLDER_I18N_KEYS)
+)
+
 _REVIEW_CONSOLE_HTML = """\
 <!doctype html>
 <html lang="zh-CN">
@@ -356,6 +373,17 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .error-msg{margin:.5rem;padding:.6rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:3px;font-size:.8rem}
 .media-placeholder{background:#fafafa;border:1px dashed #d9d9d9;border-radius:4px;padding:.35rem .6rem;font-size:.8rem;color:#888;font-style:italic}
 .media-preview{max-width:280px;max-height:280px;border-radius:4px;display:block}
+.structured-card{background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:.5rem .65rem;font-size:.8rem;max-width:320px;overflow:hidden}
+.structured-card-title{font-weight:600;margin-bottom:.2rem;word-break:break-word}
+.structured-card-desc{color:#666;font-size:.76rem;margin-bottom:.3rem;word-break:break-word}
+.structured-card-img{max-width:100%;max-height:180px;border-radius:4px;display:block;margin-bottom:.3rem;object-fit:cover}
+.structured-card-meta{color:#999;font-size:.72rem;word-break:break-word}
+.structured-card-degraded{color:#888;font-style:italic;font-size:.78rem}
+.structured-card-type-label{display:inline-block;font-size:.68rem;color:#999;text-transform:uppercase;letter-spacing:.02em;margin-bottom:.25rem}
+.structured-card-news-item{border-top:1px solid #f0f0f0;padding-top:.35rem;margin-top:.35rem}
+.structured-card-news-item:first-child{border-top:none;padding-top:0;margin-top:0}
+.structured-card-markdown ul{margin:.2rem 0 .2rem 1.1rem}
+.structured-card-markdown li{margin-bottom:.1rem}
 .new-msg-indicator{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:#1890ff;color:#fff;border:none;border-radius:999px;padding:.35rem 1rem;font-size:.78rem;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .new-msg-indicator:hover{background:#0958d9}
 .lang-switch{position:relative}
@@ -720,19 +748,7 @@ function rebuildMediaLabels(){
   MEDIA_STATUS_LABELS={not_downloaded:I18N.t('media.status.notDownloaded'),unsupported:I18N.t('media.status.unsupported'),unknown:I18N.t('media.status.unknown'),failed:I18N.t('media.status.failed')};
 }
 var MessageTypeRegistry=(function(){
-  var entries={
-    text:{category:'text'},
-    image:{category:'media',mediaType:'image',previewSupported:true},
-    video:{category:'placeholder',mediaType:'video',previewSupported:false,placeholderKey:'placeholder.video'},
-    voice:{category:'placeholder',mediaType:'voice',previewSupported:false,placeholderKey:'placeholder.voice'},
-    file:{category:'placeholder',mediaType:'file',previewSupported:false,placeholderKey:'placeholder.file'},
-    location:{category:'placeholder',mediaType:'location',previewSupported:false,placeholderKey:'placeholder.location'},
-    link:{category:'placeholder',mediaType:'link',previewSupported:false,placeholderKey:'placeholder.link'},
-    card:{category:'placeholder',mediaType:'card',previewSupported:false,placeholderKey:'placeholder.card'},
-    emotion:{category:'placeholder',mediaType:'emotion',previewSupported:false,placeholderKey:'placeholder.emotion'},
-    miniprogram:{category:'placeholder',mediaType:'miniprogram',previewSupported:false,placeholderKey:'placeholder.miniprogram'},
-    todo:{category:'placeholder',mediaType:'todo',previewSupported:false,placeholderKey:'placeholder.todo'}
-  };
+  var entries=""" + _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON + """;
   var FALLBACK={category:'placeholder',placeholderKey:'placeholder.unsupported'};
   function resolve(msgtype){
     return (msgtype&&Object.prototype.hasOwnProperty.call(entries,msgtype))?entries[msgtype]:null;
@@ -743,6 +759,170 @@ var MessageTypeRegistry=(function(){
   }
   return {entries:entries,resolve:resolve,resolvePlaceholder:resolvePlaceholder,fallback:FALLBACK};
 })();
+// RND-197 — structured card rendering. isSafeUrl mirrors the backend's
+// app.structured_message_parser.safe_url (http/https absolute URLs only)
+// as defense-in-depth: structured_content.fields is already filtered
+// server-side, but nothing here should trust that without re-checking at
+// the point a value becomes an href/src.
+function isSafeUrl(u){
+  if(!u||typeof u!=='string')return false;
+  try{
+    var parsed=new URL(u);
+    return (parsed.protocol==='http:'||parsed.protocol==='https:')&&!!parsed.host;
+  }catch(e){return false;}
+}
+function hostnameOf(u){
+  try{return new URL(u).hostname;}catch(e){return null;}
+}
+function fmtCoord(n){return (typeof n==='number'&&!isNaN(n))?n.toFixed(6):'';}
+// Shared "known type, content unavailable" card — used for card/docmsg/
+// audio_doc (no field extraction attempted at all — see
+// app.structured_message_parser module docstring) and as the terminal
+// fallback for any structured type whose fields failed to parse
+// (malformed/historical dirty data).
+function renderStructuredFallback(m){
+  var extra=(m.normalized_type==='audio_doc')
+    ?I18N.t('card.audioDoc.playbackUnavailable')
+    :I18N.t('card.generic.unavailable');
+  return '<div class="structured-card structured-card-fallback">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t(m.display_label_key))+'</div>'
+    +'<div class="structured-card-degraded">'+esc(extra)+'</div>'
+    +'</div>';
+}
+function renderLinkCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var url=isSafeUrl(f.url)?f.url:null;
+  var title=f.title||(url&&hostnameOf(url))||I18N.t('messageType.link');
+  var html='<div class="structured-card structured-card-link">';
+  if(f.image_url&&isSafeUrl(f.image_url)){
+    html+='<img class="structured-card-img" src="'+esc(f.image_url)+'" alt="" loading="lazy" onerror="this.remove()">';
+  }
+  html+='<div class="structured-card-title">'+esc(title)+'</div>';
+  if(f.description)html+='<div class="structured-card-desc">'+esc(f.description)+'</div>';
+  html+=url
+    ?'<a class="structured-card-meta" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+esc(url)+'</a>'
+    :'<div class="structured-card-degraded">'+esc(I18N.t('card.link.unavailable'))+'</div>';
+  html+='</div>';
+  return html;
+}
+function renderLocationCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var primary=f.name||f.address||null;
+  var hasCoords=typeof f.latitude==='number'&&typeof f.longitude==='number';
+  var html='<div class="structured-card structured-card-location">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.location'))+'</div>';
+  if(primary){
+    html+='<div class="structured-card-title">'+esc(primary)+'</div>';
+    if(f.name&&f.address&&f.address!==f.name)html+='<div class="structured-card-desc">'+esc(f.address)+'</div>';
+    if(hasCoords)html+='<div class="structured-card-meta">'+fmtCoord(f.latitude)+', '+fmtCoord(f.longitude)+'</div>';
+  }else if(hasCoords){
+    html+='<div class="structured-card-title">'+fmtCoord(f.latitude)+', '+fmtCoord(f.longitude)+'</div>';
+  }else{
+    html+='<div class="structured-card-degraded">'+esc(I18N.t('card.location.unknown'))+'</div>';
+  }
+  html+='</div>';
+  return html;
+}
+// Escape-first, fixed-subset sanitizer — no markdown dependency. Link
+// URLs are validated against the raw (pre-escape) value with isSafeUrl
+// and substituted back in after the rest of the text is escaped, so an
+// unsafe/malformed link degrades to its escaped literal text rather than
+// ever reaching innerHTML unescaped.
+function renderSanitizedMarkdown(raw){
+  var text=String(raw);
+  var links=[];
+  text=text.replace(/\\[([^\\]\\n]*)\\]\\(([^)\\n]*)\\)/g,function(whole,label,url){
+    var token=' LINK'+links.length+' ';
+    links.push({label:label||url,url:isSafeUrl(url)?url:null});
+    return token;
+  });
+  text=esc(text);
+  text=text.replace(/\\*\\*([^*\\n]+)\\*\\*/g,'<strong>$1</strong>');
+  var out=[];var inList=false;
+  text.split(/\\n/).forEach(function(line){
+    var bullet=line.match(/^\\s*[-*]\\s+(.*)$/);
+    if(bullet){
+      if(!inList){out.push('<ul>');inList=true;}
+      out.push('<li>'+bullet[1]+'</li>');
+    }else{
+      if(inList){out.push('</ul>');inList=false;}
+      out.push(line+'<br>');
+    }
+  });
+  if(inList)out.push('</ul>');
+  var html=out.join('').replace(/<br>$/,'');
+  links.forEach(function(link,i){
+    var token=' LINK'+i+' ';
+    var replacement=link.url
+      ?'<a href="'+esc(link.url)+'" target="_blank" rel="noopener noreferrer">'+esc(link.label)+'</a>'
+      :esc('['+link.label+']');
+    html=html.split(token).join(replacement);
+  });
+  return html;
+}
+function renderMarkdownCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f||!f.content){
+    return '<div class="structured-card structured-card-markdown"><div class="structured-card-degraded">'+esc(I18N.t('card.markdown.empty'))+'</div></div>';
+  }
+  return '<div class="structured-card structured-card-markdown">'+renderSanitizedMarkdown(f.content)+'</div>';
+}
+function renderNewsCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  var articles=(f&&f.articles)||[];
+  if(!Array.isArray(articles))articles=[];
+  if(!articles.length){
+    return '<div class="structured-card structured-card-news"><div class="structured-card-degraded">'+esc(I18N.t('card.news.empty'))+'</div></div>';
+  }
+  var html='<div class="structured-card structured-card-news">';
+  articles.forEach(function(a){
+    var url=isSafeUrl(a.url)?a.url:null;
+    var title=a.title||I18N.t('card.news.noTitle');
+    html+='<div class="structured-card-news-item">';
+    if(a.image_url&&isSafeUrl(a.image_url)){
+      html+='<img class="structured-card-img" src="'+esc(a.image_url)+'" alt="" loading="lazy" onerror="this.remove()">';
+    }
+    html+=url
+      ?'<a class="structured-card-title" style="color:inherit;text-decoration:none;display:block" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+esc(title)+'</a>'
+      :'<div class="structured-card-title">'+esc(title)+'</div>';
+    if(a.description)html+='<div class="structured-card-desc">'+esc(a.description)+'</div>';
+    html+='</div>';
+  });
+  html+='</div>';
+  return html;
+}
+function renderMiniprogramCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var title=f.title||f.display_name||I18N.t('messageType.miniprogram');
+  var html='<div class="structured-card structured-card-miniprogram">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.miniprogram'))+'</div>';
+  if(f.icon_url&&isSafeUrl(f.icon_url)){
+    html+='<img class="structured-card-img" style="max-height:60px;max-width:60px" src="'+esc(f.icon_url)+'" alt="" loading="lazy" onerror="this.remove()">';
+  }
+  html+='<div class="structured-card-title">'+esc(title)+'</div>';
+  // pagepath is an internal mini-program route, not a browser URL — never
+  // rendered as a clickable link (ticket requirement).
+  if(f.username)html+='<div class="structured-card-meta">'+esc(f.username)+'</div>';
+  html+='</div>';
+  return html;
+}
+var STRUCTURED_CARD_RENDERERS={
+  link:renderLinkCard,
+  location:renderLocationCard,
+  markdown:renderMarkdownCard,
+  news:renderNewsCard,
+  miniprogram:renderMiniprogramCard,
+  card:renderStructuredFallback,
+  docmsg:renderStructuredFallback,
+  audio_doc:renderStructuredFallback
+};
+function renderStructuredCard(m){
+  var fn=STRUCTURED_CARD_RENDERERS[m.normalized_type];
+  return fn?fn(m):renderStructuredFallback(m);
+}
 function renderMessageBody(m){
   var mediaType=m.media_type||'text';
   if(mediaType==='text'){
@@ -769,7 +949,18 @@ function renderMessageBody(m){
   if(mediaType==='unknown'){
     return '<div class="media-placeholder">'+I18N.t('media.unknownType')+'</div>';
   }
-  var typeEntry=MessageTypeRegistry.resolvePlaceholder(m.msgtype)||MessageTypeRegistry.fallback;
+  if(m.renderer_strategy==='structured_card'){
+    return renderStructuredCard(m);
+  }
+  // RND-197 fix: resolvePlaceholder must be keyed by normalized_type, not
+  // raw msgtype — MessageTypeRegistry.entries is keyed by normalized_type
+  // (e.g. "miniprogram"), but msgtype is the raw wire value (e.g.
+  // "weapp"). Looking this up by m.msgtype silently missed every aliased
+  // type and fell through to the generic fallback (see
+  // test_message_type_registry_core.py's documented-divergence test,
+  // now fixed). normalized_type is available on every message row, not
+  // just structured ones, so this is safe unconditionally.
+  var typeEntry=MessageTypeRegistry.resolvePlaceholder(m.normalized_type)||MessageTypeRegistry.fallback;
   return '<div class="media-placeholder">'+I18N.t(typeEntry.placeholderKey)+'</div>';
 }
 // RND-187: fetch each image's unified media access descriptor on demand and

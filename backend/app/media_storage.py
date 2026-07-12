@@ -26,6 +26,8 @@ import re
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 
+from app.message_type_registry import MESSAGE_TYPE_REGISTRY, MessageSupportStatus
+
 _ALLOWED_IMAGE_CONTENT_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -698,12 +700,39 @@ MEDIA_TYPE_KEY_CATEGORIES = {
     "file": "files",
 }
 
-# The media_types a migration/download tool may act on — matches
-# app.media_classification's own recognized msgtype-derived media types
-# (text/unsupported are intentionally excluded: they never have bytes to
-# store). Anything else (None, or a future/unknown value) is not a
-# "supported" media type for storage-migration purposes and must be
-# excluded from candidate selection outright, not merely skipped per-row.
+# The media_types a migration/download tool may act on (text/unsupported
+# are intentionally excluded: they never have bytes to store). Anything
+# else (None, or a future/unknown value) is not a "supported" media type
+# for storage-migration purposes and must be excluded from candidate
+# selection outright, not merely skipped per-row.
+#
+# RND-196: this set no longer independently guesses which media types
+# are real/supported — it is validated against
+# app.message_type_registry.MESSAGE_TYPE_REGISTRY (the single source of
+# truth for support_status) at import time. MEDIA_TYPE_KEY_CATEGORIES
+# above is *not* replaced by the registry: it encodes a storage-specific
+# fact (the RND-186 ticket's exact, non-pluralized object-key path
+# segment) that the registry has no reason to own. Deliberately not
+# derived as "every SUPPORTED/PARTIAL registry entry" either — e.g.
+# audio_archive is PARTIAL in the registry but has no byte-signature
+# detector or ticket-approved path segment here, so it stays out of
+# migration scope until a future ticket adds real support for it; adding
+# it automatically the moment the registry gains that entry would let
+# storage silently start migrating a media type it cannot actually detect.
+_UNREGISTERED_OR_UNSUPPORTED_STORAGE_TYPES = {
+    media_type
+    for media_type in MEDIA_TYPE_KEY_CATEGORIES
+    if media_type not in MESSAGE_TYPE_REGISTRY
+    or MESSAGE_TYPE_REGISTRY[media_type].support_status
+    not in (MessageSupportStatus.SUPPORTED, MessageSupportStatus.PARTIAL)
+}
+if _UNREGISTERED_OR_UNSUPPORTED_STORAGE_TYPES:
+    raise ValueError(
+        "MEDIA_TYPE_KEY_CATEGORIES contains a media_type the "
+        "MessageTypeRegistry does not mark SUPPORTED/PARTIAL — storage "
+        f"and the registry have drifted: {sorted(_UNREGISTERED_OR_UNSUPPORTED_STORAGE_TYPES)!r}"
+    )
+
 SUPPORTED_MIGRATION_MEDIA_TYPES = frozenset(MEDIA_TYPE_KEY_CATEGORIES)
 
 

@@ -55,6 +55,7 @@ CREATE TABLE archive_messages (
     encrypt_chat_msg TEXT NOT NULL,
     decrypt_status TEXT NOT NULL DEFAULT 'pending',
     decrypted_payload TEXT,
+    structured_content TEXT,
     content_text TEXT,
     msgtype TEXT,
     sender TEXT,
@@ -617,8 +618,12 @@ def test_conversation_timeline_endpoint_handles_duplicate_timestamps_and_mixed_t
         assert len(data["messages"]) == 4
 
         by_type = {m["msgtype"]: m for m in data["messages"]}
-        assert by_type["location"]["unsupported_reason"] == "unsupported_msgtype"
-        assert by_type["location"]["media_type"] == "unsupported"
+        # RND-197: location is now a fully-supported structured-card type,
+        # not an unsupported placeholder — classify_media reports the
+        # distinct "structured" media_type with no unsupported_reason
+        # (see app.media_classification's category-aware branch).
+        assert by_type["location"]["unsupported_reason"] is None
+        assert by_type["location"]["media_type"] == "structured"
         assert by_type["voice"]["media_type"] == "voice"
 
         # Force pagination with limit=2 and confirm cursor walks older history

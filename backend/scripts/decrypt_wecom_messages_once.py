@@ -53,7 +53,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
+from app.message_type_registry import ParserStrategy, get_parser_strategy
 from app.sdk import wecom_sdk
+from app.structured_message_parser import parse_structured_content
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +167,13 @@ def _normalise_fields(
 
     For non-text messages, msgtype is a different string and the payload
     field varies (e.g. "image" -> {"image": {"md5sum": ...}}).
+
+    RND-196: which extraction to run is now selected by asking
+    app.message_type_registry which ParserStrategy msgtype maps to,
+    instead of a literal `msgtype == "text"` check — the extraction logic
+    itself (below) is unchanged; only the dispatch is registry-driven, so
+    a future msgtype the registry assigns ParserStrategy.TEXT_CONTENT
+    would be handled here with zero code changes.
     """
     msgtype = decrypted.get("msgtype", "") or ""
     sender = decrypted.get("from", "") or None
@@ -172,18 +181,35 @@ def _normalise_fields(
     msgtime = decrypted.get("msgtime", None)
     tolist = decrypted.get("tolist", [])
 
+    is_text_content = get_parser_strategy(msgtype) == ParserStrategy.TEXT_CONTENT
+
     # Extract content_text only for text messages
     content_text = None
-    if msgtype == "text":
+    if is_text_content:
         text_payload = decrypted.get("text", {}) or {}
         content_text = text_payload.get("content", "") or None
 
     # Extract sdkfileid if present (for media messages)
     sdkfileid = None
-    if msgtype != "text":
-        # media messages store sdkfileid in the msgtype-specific payload
+    if not is_text_content:
+        # media messages store sdkfileid in the msgtype-specific payload.
+        # RND-197 QA fix: a malformed historical row can hold a non-dict
+        # value here (e.g. a bare string) — coerce defensively instead of
+        # letting payload.get() raise and fail the whole decrypt run.
         payload = decrypted.get(msgtype, {}) or {}
+        if not isinstance(payload, dict):
+            payload = {}
         sdkfileid = payload.get("sdkfileid", None)
+
+    # RND-197: structured field extraction (link/location/markdown/news/
+    # weapp) + raw preservation (card/docmsg/audio_doc) for the basic
+    # structured message types. None for msgtypes outside that scope
+    # (text/media/control/composite/unknown) -- see
+    # app.structured_message_parser.parse_structured_content docstring.
+    # Deliberately independent of the SF-1 constraint above: this stores
+    # only the type-specific sub-payload, never the full decrypted
+    # envelope.
+    structured_content = parse_structured_content(msgtype, decrypted)
 
     return {
         "msgtype": msgtype,
@@ -193,6 +219,7 @@ def _normalise_fields(
         "tolist": tolist if tolist else None,
         "content_text": content_text,
         "sdkfileid": sdkfileid,
+        "structured_content": structured_content,
     }
 
 
@@ -519,6 +546,9 @@ def main() -> None:
             record.tolist = normalised["tolist"]
             record.sdkfileid = normalised["sdkfileid"]
             record.content_text = normalised["content_text"]
+            # RND-197: scoped per-type structured payload only (never the
+            # full decrypted envelope) — additive, does not touch SF-1.
+            record.structured_content = normalised["structured_content"]
             record.decrypt_status = "success"
 
             # Upsert recipient rows — inherit tenant_id from the parent message.

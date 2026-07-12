@@ -12,6 +12,17 @@ does the same for the missing/unregistered fallback (media.unknownType /
 placeholder.unsupported). No renderer branching, registry shape, backend,
 schema, or API-contract changes.
 
+RND-197 note: location/link/card/miniprogram were moved off this legacy
+placeholder mechanism onto dedicated structured cards (see
+test_message_type_registry.py's "Structured cards" section) and were
+removed from the exact-label tables below. The broader "no legacy 【】
+garbage text" guard tests below still reference them deliberately — that
+property must hold regardless of which mechanism (placeholder vs
+structured card) ends up rendering a given type; this file's own `_msg()`
+does not set renderer_strategy/structured_content, so those particular
+assertions exercise the legacy generic-fallback path for those four types,
+not their new structured-card rendering.
+
 These tests execute the real embedded JS under Node (same technique as
 test_message_type_registry.py / test_i18n_foundation.py), so assertions
 exercise real behavior rather than only pattern-matching source text.
@@ -96,6 +107,12 @@ def _msg(msgtype, media_type, **overrides) -> dict:
         "media_status": None,
         "unsupported_reason": None,
         "media_url": None,
+        # RND-197: normalized_type defaults to msgtype, matching every
+        # real registry entry except the weapp/miniprogram alias — see
+        # test_message_type_registry.py's _msg() for the full rationale.
+        # renderMessageBody()'s legacy placeholder path now resolves by
+        # normalized_type, not raw msgtype.
+        "normalized_type": msgtype,
     }
     base.update(overrides)
     return base
@@ -114,14 +131,16 @@ process.stdout.write(JSON.stringify(renderMessageBody({json.dumps(msg)})));
 # zh-CN mapping table — the product requirement's exact wording
 # ---------------------------------------------------------------------------
 
+# RND-197: location/link/card/miniprogram moved off this legacy
+# generic-placeholder mechanism onto dedicated structured cards (see
+# test_message_type_registry.py's "Structured cards" section for their
+# label/copy coverage) — they are intentionally no longer in these
+# tables. video/voice/file/emotion/todo remain UNSUPPORTED_PLACEHOLDER,
+# unchanged.
 ZH_CN_LABELS = {
     "video": "不支持视频消息",
-    "miniprogram": "不支持小程序消息",
     "voice": "不支持语音消息",
     "file": "不支持文件消息",
-    "location": "不支持位置消息",
-    "link": "不支持链接消息",
-    "card": "不支持名片消息",
     "emotion": "不支持表情消息",
     "todo": "不支持待办消息",
 }
@@ -349,26 +368,20 @@ def test_zh_cn_image_not_downloaded_placeholder_unchanged() -> None:
 # zh-TW and en must not be left with missing/stale keys
 # ---------------------------------------------------------------------------
 
+# RND-197: see the ZH_CN_LABELS comment above — location/link/card/
+# miniprogram intentionally excluded here too.
 ZH_TW_LABELS = {
     "video": "不支援影片訊息",
-    "miniprogram": "不支援小程式訊息",
     "voice": "不支援語音訊息",
     "file": "不支援檔案訊息",
-    "location": "不支援位置訊息",
-    "link": "不支援連結訊息",
-    "card": "不支援名片訊息",
     "emotion": "不支援表情訊息",
     "todo": "不支援待辦訊息",
 }
 
 EN_LABELS = {
     "video": "Unsupported video message",
-    "miniprogram": "Unsupported mini program message",
     "voice": "Unsupported voice message",
     "file": "Unsupported file message",
-    "location": "Unsupported location message",
-    "link": "Unsupported link message",
-    "card": "Unsupported contact card message",
     "emotion": "Unsupported sticker message",
     "todo": "Unsupported to-do message",
 }
@@ -416,10 +429,10 @@ def test_labels_are_driven_by_registry_placeholder_key_not_hardcoded() -> None:
     out = _run(
         """
 I18N.setLocale('zh-CN');
-var before = renderMessageBody({msgtype:'video', media_type:'unsupported', content_text:null});
+var before = renderMessageBody({msgtype:'video', normalized_type:'video', media_type:'unsupported', content_text:null});
 var originalKey = MessageTypeRegistry.entries.video.placeholderKey;
 MessageTypeRegistry.entries.video.placeholderKey = 'placeholder.todo';
-var after = renderMessageBody({msgtype:'video', media_type:'unsupported', content_text:null});
+var after = renderMessageBody({msgtype:'video', normalized_type:'video', media_type:'unsupported', content_text:null});
 MessageTypeRegistry.entries.video.placeholderKey = originalKey;
 process.stdout.write(JSON.stringify({before:before, after:after}));
 """

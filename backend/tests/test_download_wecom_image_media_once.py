@@ -380,6 +380,7 @@ def _make_sqlite_engine(tmp_path):
                     encrypt_chat_msg TEXT NOT NULL,
                     decrypt_status TEXT NOT NULL DEFAULT 'pending',
                     decrypted_payload TEXT,
+                    structured_content TEXT,
                     content_text TEXT,
                     msgtype TEXT,
                     sender TEXT,

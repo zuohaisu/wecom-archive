@@ -64,6 +64,7 @@ from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Co
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.media_classification import classify_media, resolve_image_media_status
+from app.message_type_registry import describe_message_type
 from app.media_storage import (
     MediaObjectNotFound,
     MediaStorageConfigurationError,
@@ -575,6 +576,21 @@ class TimelineMessageOut(BaseModel):
     unsupported_reason: Optional[str] = None
     media_url: Optional[str] = None
     media_access_url: Optional[str] = None
+    # RND-197: Message Type Registry metadata, exposed so the frontend can
+    # dispatch to a structured card renderer without re-deriving any of
+    # this from msgtype itself (see app.message_type_registry, the single
+    # source of truth for all five fields below).
+    normalized_type: str
+    category: str
+    support_status: str
+    renderer_strategy: str
+    display_label_key: str
+    # Parsed fields only (structured_message_parser.py's "fields" +
+    # "parse_warnings") -- the type-specific raw sub-payload is preserved
+    # server-side (ArchiveMessage.structured_content.raw) but never
+    # serialized here; the raw WeCom payload is not exposed to frontend
+    # users as normal content (ticket security requirement).
+    structured_content: Optional[dict] = None
 
 
 class MediaAccessOut(BaseModel):
@@ -916,6 +932,15 @@ def get_conversation_messages(
     for msg in page:
         recipients = recipients_map.get(msg.id, [])
         media = classify_media(msg.msgtype, bool(getattr(msg, "sdkfileid", None)))
+        type_meta = describe_message_type(msg.msgtype)
+
+        structured_content_out: Optional[dict] = None
+        raw_structured = getattr(msg, "structured_content", None)
+        if isinstance(raw_structured, dict):
+            structured_content_out = {
+                "fields": raw_structured.get("fields"),
+                "parse_warnings": raw_structured.get("parse_warnings", []),
+            }
 
         media_url: Optional[str] = None
         media_access_url: Optional[str] = None
@@ -991,6 +1016,12 @@ def get_conversation_messages(
                 unsupported_reason=media.unsupported_reason,
                 media_url=media_url,
                 media_access_url=media_access_url,
+                normalized_type=type_meta["normalized_type"],
+                category=type_meta["category"],
+                support_status=type_meta["support_status"],
+                renderer_strategy=type_meta["renderer_strategy"],
+                display_label_key=type_meta["display_label_key"],
+                structured_content=structured_content_out,
             )
         )
     return ConversationMessagesOut(

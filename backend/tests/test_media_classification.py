@@ -107,6 +107,32 @@ def test_classify_media_missing_msgtype() -> None:
         assert result.unsupported_reason == "missing_msgtype"
 
 
+@pytest.mark.parametrize(
+    "msgtype", ["link", "location", "markdown", "news", "weapp", "card", "docmsg"]
+)
+def test_classify_media_structured_types_are_not_byte_bearing(msgtype) -> None:
+    """RND-197: link/location/markdown/news/weapp (SUPPORTED) and
+    card/docmsg (PARTIAL) are structured-field types — they must not run
+    the byte-bearing not_downloaded/unknown reasoning built for
+    image/video/voice/file. The frontend dispatches these by
+    TimelineMessageOut.renderer_strategy, not media_type."""
+    from app.media_classification import classify_media
+
+    result = classify_media(msgtype, has_sdkfileid=False)
+    assert result == ("structured", None, None)
+
+
+def test_classify_media_audio_doc_stays_byte_bearing_like_audio_archive() -> None:
+    """audio_doc is category MEDIA (unlike the other RND-197 types) and
+    must keep the not_downloaded/unknown byte-bearing reasoning, distinct
+    from audio_archive (never merged — RND-202 scope)."""
+    from app.media_classification import classify_media
+
+    result = classify_media("audio_doc", has_sdkfileid=True)
+    assert result.media_type == "audio_doc"
+    assert result.media_status == "not_downloaded"
+
+
 # ---------------------------------------------------------------------------
 # /api/conversations/{id}/messages — media fields + no raw identifier leaks
 # ---------------------------------------------------------------------------
@@ -346,6 +372,71 @@ def test_timeline_never_exposes_raw_media_identifiers(client) -> None:
         "decrypted_payload",
     ):
         assert forbidden_field not in msg
+
+
+def test_timeline_exposes_registry_metadata_and_structured_content_fields(client) -> None:
+    """RND-197: TimelineMessageOut must carry the Message Type Registry
+    metadata plus the parsed structured_content.fields — not the raw
+    sub-payload (security requirement, see the "raw" exclusion test
+    below)."""
+    from app.main import app
+
+    msg = _msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="link", content_text=None)
+    msg.structured_content = {
+        "fields": {"title": "Example", "url": "https://example.com", "description": None, "image_url": None},
+        "raw": {"title": "Example", "link_url": "https://example.com"},
+        "parse_warnings": [],
+    }
+    resp = _run_messages_query(client, app, [msg])
+    assert resp.status_code == 200
+    out = resp.json()["messages"][0]
+    assert out["normalized_type"] == "link"
+    assert out["category"] == "structured"
+    assert out["support_status"] == "supported"
+    assert out["renderer_strategy"] == "structured_card"
+    assert out["display_label_key"] == "messageType.link"
+    assert out["structured_content"]["fields"]["title"] == "Example"
+    assert out["structured_content"]["parse_warnings"] == []
+    assert "raw" not in out["structured_content"]
+
+
+def test_timeline_structured_content_null_for_historical_rows_without_it(client) -> None:
+    from app.main import app
+
+    msg = _msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="link")
+    # No structured_content attribute set at all — mirrors a historical
+    # row from before this migration existed.
+    resp = _run_messages_query(client, app, [msg])
+    assert resp.status_code == 200
+    out = resp.json()["messages"][0]
+    assert out["structured_content"] is None
+    assert out["normalized_type"] == "link"
+
+
+def test_timeline_never_exposes_structured_content_raw_sub_payload(client) -> None:
+    """Security requirement: the type-specific raw sub-payload preserved
+    server-side must never reach the API response."""
+    from app.main import app
+
+    msg = _msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="location")
+    msg.structured_content = {
+        "fields": {"name": "Office", "address": None, "latitude": 1.0, "longitude": 2.0, "zoom": None},
+        "raw": {"latitude": 1.0, "longitude": 2.0, "title": "Office", "some_internal_field": "secret-raw-value"},
+        "parse_warnings": [],
+    }
+    resp = _run_messages_query(client, app, [msg])
+    assert resp.status_code == 200
+    assert "secret-raw-value" not in resp.text
+    assert "raw" not in resp.json()["messages"][0]["structured_content"]
+
+
+def test_timeline_docmsg_and_audio_doc_report_partial_structured_card() -> None:
+    from app.message_type_registry import describe_message_type
+
+    for msgtype in ("docmsg", "audio_doc", "card"):
+        meta = describe_message_type(msgtype)
+        assert meta["support_status"] == "partial"
+        assert meta["renderer_strategy"] == "structured_card"
 
 
 def test_timeline_voice_never_exposes_raw_media_identifiers(client) -> None:

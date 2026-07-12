@@ -251,6 +251,11 @@ class ArchiveMessage(Base):
             text("to_tsvector('simple', coalesce(content_text, ''))"),
             postgresql_using="gin",
         ),
+        Index(
+            "ix_archive_messages_structured_content_gin",
+            "structured_content",
+            postgresql_using="gin",
+        ),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -266,6 +271,13 @@ class ArchiveMessage(Base):
     # --- Decryption state ---
     decrypt_status = Column(String(16), nullable=False, default="pending")
     decrypted_payload = Column(JSONB, nullable=True)
+
+    # --- Structured content (RND-197) ---
+    # Type-specific normalized fields + scoped raw sub-payload for the
+    # basic structured message types (link/location/markdown/news/
+    # miniprogram/card/docmsg/audio_doc). Deliberately separate from
+    # decrypted_payload above -- see migration 0008 docstring for why.
+    structured_content = Column(JSONB, nullable=True)
 
     # --- Fields extracted from decrypted_payload ---
     content_text = Column(Text, nullable=True)

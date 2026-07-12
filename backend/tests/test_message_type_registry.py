@@ -85,6 +85,20 @@ def _bundle() -> str:
         _extract(
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),
+        # RND-197 — structured card rendering, pulled in ahead of
+        # renderMessageBody() since it calls renderStructuredCard().
+        _extract(r"function isSafeUrl\(u\)\{.*?\n\}", "isSafeUrl()"),
+        _extract(r"function hostnameOf\(u\)\{.*?\n\}", "hostnameOf()"),
+        _extract(r"function fmtCoord\(n\)\{.*?\}", "fmtCoord()"),
+        _extract(r"function renderStructuredFallback\(m\)\{.*?\n\}", "renderStructuredFallback()"),
+        _extract(r"function renderLinkCard\(m\)\{.*?\n\}", "renderLinkCard()"),
+        _extract(r"function renderLocationCard\(m\)\{.*?\n\}", "renderLocationCard()"),
+        _extract(r"function renderSanitizedMarkdown\(raw\)\{.*?\n\}", "renderSanitizedMarkdown()"),
+        _extract(r"function renderMarkdownCard\(m\)\{.*?\n\}", "renderMarkdownCard()"),
+        _extract(r"function renderNewsCard\(m\)\{.*?\n\}", "renderNewsCard()"),
+        _extract(r"function renderMiniprogramCard\(m\)\{.*?\n\}", "renderMiniprogramCard()"),
+        _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
+        _extract(r"function renderStructuredCard\(m\)\{.*?\n\}", "renderStructuredCard()"),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
         # RND-187: renderTimeline() now calls hydrateMediaImages() after
         # every render — pull those in too so the bundle is self-contained.
@@ -126,6 +140,18 @@ def _msg(msgtype: str, media_type: str, **overrides) -> dict:
         "media_status": None,
         "unsupported_reason": None,
         "media_url": None,
+        # RND-197 — Message Type Registry metadata + structured content.
+        # normalized_type defaults to msgtype: true for every real
+        # registry entry except weapp (normalized "miniprogram") — tests
+        # exercising that alias pass normalized_type explicitly, exactly
+        # as the real Timeline API does (see conversations.py's
+        # describe_message_type()).
+        "normalized_type": msgtype,
+        "category": None,
+        "support_status": None,
+        "renderer_strategy": None,
+        "display_label_key": "messageType.unknown",
+        "structured_content": None,
     }
     base.update(overrides)
     return base
@@ -163,6 +189,11 @@ def test_registry_has_entries_for_every_documented_msgtype() -> None:
             "emotion",
             "miniprogram",
             "todo",
+            # RND-197
+            "markdown",
+            "news",
+            "docmsg",
+            "audio_doc",
         ]
     )
 
@@ -186,13 +217,19 @@ def test_resolve_placeholder_only_matches_placeholder_category_entries() -> None
 process.stdout.write(JSON.stringify({
   text: MessageTypeRegistry.resolvePlaceholder('text'),
   image: MessageTypeRegistry.resolvePlaceholder('image'),
-  video: MessageTypeRegistry.resolvePlaceholder('video') && MessageTypeRegistry.resolvePlaceholder('video').placeholderKey
+  video: MessageTypeRegistry.resolvePlaceholder('video') && MessageTypeRegistry.resolvePlaceholder('video').placeholderKey,
+  location: MessageTypeRegistry.resolvePlaceholder('location')
 }));
 """
     )
     assert out["text"] is None
     assert out["image"] is None
     assert out["video"] == "placeholder.video"
+    # RND-197: location is now category "structured", not "placeholder" —
+    # resolvePlaceholder must not match it (structured cards don't go
+    # through this legacy lookup at all, see renderMessageBody's
+    # structured_card branch, checked first).
+    assert out["location"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -243,15 +280,15 @@ def test_image_renderer_not_downloaded_placeholder_unchanged() -> None:
 @pytest.mark.parametrize(
     "msgtype,expected_text",
     [
-        ("location", "Unsupported location message"),
-        ("link", "Unsupported link message"),
-        ("card", "Unsupported contact card message"),
         ("emotion", "Unsupported sticker message"),
-        ("miniprogram", "Unsupported mini program message"),
         ("todo", "Unsupported to-do message"),
     ],
 )
 def test_new_type_shows_distinct_placeholder(msgtype: str, expected_text: str) -> None:
+    """RND-197: location/link/card/miniprogram moved off this legacy
+    generic-placeholder path onto dedicated structured cards — see the
+    "Structured cards (RND-197)" section below for their coverage.
+    emotion/todo remain UNSUPPORTED_PLACEHOLDER, unchanged."""
     msg = _msg(msgtype, "unsupported")
     html = _render(msg)
     assert html == f'<div class="media-placeholder">{expected_text}</div>'
@@ -276,10 +313,9 @@ def test_file_placeholder_is_distinct_and_readable() -> None:
 
 
 def test_different_unsupported_types_render_different_text() -> None:
-    location_html = _render(_msg("location", "unsupported"))
-    link_html = _render(_msg("link", "unsupported"))
-    card_html = _render(_msg("card", "unsupported"))
-    assert len({location_html, link_html, card_html}) == 3
+    emotion_html = _render(_msg("emotion", "unsupported"))
+    todo_html = _render(_msg("todo", "unsupported"))
+    assert len({emotion_html, todo_html}) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +466,9 @@ def test_adding_a_registry_entry_changes_rendering_with_no_renderer_code_change(
     out = _run(
         """
 I18N.setLocale('en');
-var before = renderMessageBody({msgtype:'weapp_vote', media_type:'unsupported', content_text:null});
+var before = renderMessageBody({msgtype:'weapp_vote', normalized_type:'weapp_vote', media_type:'unsupported', content_text:null});
 MessageTypeRegistry.entries.weapp_vote = {category:'placeholder', placeholderKey:'placeholder.card'};
-var after = renderMessageBody({msgtype:'weapp_vote', media_type:'unsupported', content_text:null});
+var after = renderMessageBody({msgtype:'weapp_vote', normalized_type:'weapp_vote', media_type:'unsupported', content_text:null});
 process.stdout.write(JSON.stringify({before:before, after:after}));
 """
     )
@@ -447,3 +483,274 @@ process.stdout.write(JSON.stringify(MessageTypeRegistry.fallback.placeholderKey)
 """
     )
     assert out == "placeholder.unsupported"
+
+
+# ---------------------------------------------------------------------------
+# Structured cards (RND-197). renderMessageBody() dispatches to
+# renderStructuredCard() whenever m.renderer_strategy === 'structured_card'
+# (checked before the legacy resolvePlaceholder() path) — link/location/
+# markdown/news/miniprogram get full field-based cards; card/docmsg/
+# audio_doc get the shared generic structured fallback (no field
+# extraction attempted — see app.structured_message_parser).
+# ---------------------------------------------------------------------------
+
+
+def _structured_msg(normalized_type: str, fields, warnings=None, **overrides) -> dict:
+    msg = _msg(
+        overrides.pop("msgtype", normalized_type),
+        "structured",
+        renderer_strategy="structured_card",
+        normalized_type=normalized_type,
+        display_label_key=overrides.pop("display_label_key", f"messageType.{normalized_type}"),
+        structured_content=(
+            None if fields is None else {"fields": fields, "parse_warnings": warnings or []}
+        ),
+    )
+    msg.update(overrides)
+    return msg
+
+
+def test_link_card_renders_title_description_url_and_image() -> None:
+    msg = _structured_msg(
+        "link",
+        {
+            "title": "Example",
+            "description": "An example link",
+            "url": "https://example.com/page",
+            "image_url": "https://example.com/thumb.jpg",
+        },
+    )
+    html = _render(msg)
+    assert "structured-card-link" in html
+    assert "Example" in html
+    assert "An example link" in html
+    assert 'href="https://example.com/page"' in html
+    assert 'src="https://example.com/thumb.jpg"' in html
+    assert 'target="_blank"' in html and "noopener" in html
+
+
+def test_link_card_missing_title_falls_back_to_hostname() -> None:
+    msg = _structured_msg(
+        "link", {"title": None, "description": None, "url": "https://example.com/page", "image_url": None}
+    )
+    html = _render(msg)
+    assert "example.com" in html
+
+
+def test_link_card_missing_url_shows_degraded_unavailable_state() -> None:
+    msg = _structured_msg(
+        "link", {"title": "Example", "description": None, "url": None, "image_url": None}
+    )
+    html = _render(msg)
+    assert "Link unavailable" in html
+    assert "href=" not in html
+
+
+def test_link_card_never_renders_raw_json() -> None:
+    msg = _structured_msg(
+        "link", {"title": "Example", "description": None, "url": "https://example.com", "image_url": None}
+    )
+    html = _render(msg)
+    assert "{" not in html and "}" not in html
+
+
+@pytest.mark.parametrize(
+    "fields,expected_substring",
+    [
+        ({"name": "Office", "address": "Beijing", "latitude": 1.0, "longitude": 2.0, "zoom": None}, "Office"),
+        ({"name": None, "address": "Beijing", "latitude": None, "longitude": None, "zoom": None}, "Beijing"),
+        ({"name": None, "address": None, "latitude": 1.0, "longitude": 2.0, "zoom": None}, "1.000000"),
+        ({"name": None, "address": None, "latitude": None, "longitude": None, "zoom": None}, "Unknown location"),
+    ],
+)
+def test_location_card_fallback_ladder(fields, expected_substring) -> None:
+    """name -> address -> coordinates -> localized unknown, per ticket."""
+    msg = _structured_msg("location", fields)
+    html = _render(msg)
+    assert expected_substring in html
+
+
+def test_markdown_card_renders_bold_and_lists() -> None:
+    msg = _structured_msg("markdown", {"content": "**bold** text\n- item1\n- item2"})
+    html = _render(msg)
+    assert "<strong>bold</strong>" in html
+    assert "<ul>" in html and "<li>item1</li>" in html and "<li>item2</li>" in html
+
+
+def test_markdown_card_renders_safe_link() -> None:
+    msg = _structured_msg("markdown", {"content": "[click here](https://example.com)"})
+    html = _render(msg)
+    assert '<a href="https://example.com"' in html
+    assert "click here" in html
+
+
+def test_markdown_card_unsafe_link_never_becomes_an_href() -> None:
+    msg = _structured_msg("markdown", {"content": "[bad](javascript:evil)"})
+    html = _render(msg)
+    assert "javascript:" not in html
+    assert "<a " not in html
+
+
+def test_markdown_card_escapes_raw_html() -> None:
+    msg = _structured_msg("markdown", {"content": "<script>alert(1)</script>"})
+    html = _render(msg)
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_markdown_card_empty_content_shows_degraded_state() -> None:
+    msg = _structured_msg("markdown", {"content": None})
+    html = _render(msg)
+    assert "Empty Markdown message" in html
+
+
+def test_news_card_renders_multiple_articles_in_source_order() -> None:
+    msg = _structured_msg(
+        "news",
+        {
+            "articles": [
+                {"title": "First", "description": "d1", "url": "https://example.com/1", "image_url": None},
+                {"title": "Second", "description": "d2", "url": "https://example.com/2", "image_url": None},
+            ]
+        },
+    )
+    html = _render(msg)
+    assert html.index("First") < html.index("Second")
+
+
+def test_news_card_missing_image_does_not_break_layout() -> None:
+    msg = _structured_msg(
+        "news", {"articles": [{"title": "A", "description": None, "url": None, "image_url": None}]}
+    )
+    html = _render(msg)
+    assert "<img" not in html
+    assert "A" in html
+
+
+def test_news_card_missing_title_uses_localized_fallback() -> None:
+    msg = _structured_msg(
+        "news", {"articles": [{"title": None, "description": None, "url": None, "image_url": None}]}
+    )
+    html = _render(msg)
+    assert "Untitled article" in html
+
+
+def test_news_card_empty_article_list_shows_localized_empty_state() -> None:
+    msg = _structured_msg("news", {"articles": []})
+    html = _render(msg)
+    assert "No articles" in html
+
+
+def test_miniprogram_card_renders_title_and_never_treats_pagepath_as_a_link() -> None:
+    """RND-197 requirement: pagepath is an internal mini-program route,
+    never a clickable browser URL."""
+    msg = _structured_msg(
+        "miniprogram",
+        {
+            "title": "My Mini Program",
+            "display_name": None,
+            "appid": "wx123",
+            "username": "gh_abc",
+            "pagepath": "pages/index/index",
+            "icon_url": None,
+        },
+    )
+    html = _render(msg)
+    assert "My Mini Program" in html
+    assert "pages/index/index" not in html  # pagepath never surfaced as visible/clickable content
+    assert "href=" not in html
+
+
+def test_miniprogram_card_fixes_the_weapp_normalized_type_key_mismatch() -> None:
+    """Regression test for the documented RND-196 bug: the wire msgtype is
+    the raw 'weapp', but MessageTypeRegistry/rendering must key off
+    normalized_type ('miniprogram') — this used to silently miss and fall
+    to the generic fallback."""
+    msg = _structured_msg(
+        "miniprogram",
+        {"title": "MiniApp", "display_name": None, "appid": "wx1", "username": None, "pagepath": None, "icon_url": None},
+        msgtype="weapp",
+    )
+    html = _render(msg)
+    assert "structured-card-miniprogram" in html
+    assert "MiniApp" in html
+
+
+@pytest.mark.parametrize(
+    "normalized_type,display_label_key,expected_label",
+    [
+        ("card", "messageType.card", "Contact card message"),
+        ("docmsg", "messageType.docmsg", "Document message"),
+        ("audio_doc", "messageType.audioDoc", "Audio document message"),
+    ],
+)
+def test_low_confidence_types_render_generic_structured_fallback(
+    normalized_type, display_label_key, expected_label
+) -> None:
+    """card/docmsg/audio_doc never get field extraction (no confirmed
+    schema) — they must show the type label plus a clear unavailable
+    line, never raw JSON."""
+    msg = _structured_msg(normalized_type, None, display_label_key=display_label_key)
+    html = _render(msg)
+    assert "structured-card-fallback" in html
+    assert expected_label in html
+    assert "{" not in html and "}" not in html
+
+
+def test_audio_doc_fallback_uses_the_playback_specific_copy() -> None:
+    msg = _structured_msg("audio_doc", None, display_label_key="messageType.audioDoc")
+    html = _render(msg)
+    assert "Playback not supported" in html
+
+
+def test_structured_content_null_degrades_to_generic_fallback_not_a_crash() -> None:
+    """Malformed/historical row: structured_content itself is null (e.g. a
+    row from before this migration) — must still render a safe card, not
+    raw JSON, not throw. link/location/miniprogram fall through to the
+    shared generic structured fallback; markdown/news have their own
+    dedicated empty-state markup (both are equally safe/non-crashing)."""
+    for normalized_type in ("link", "location", "markdown", "news", "miniprogram"):
+        msg = _structured_msg(normalized_type, None, display_label_key=f"messageType.{normalized_type}")
+        html = _render(msg)
+        assert "structured-card" in html
+        assert "degraded" in html
+        assert "{" not in html and "}" not in html
+
+
+def test_structured_card_dispatch_never_throws_for_any_input() -> None:
+    out = _run(
+        """
+try {
+  var results = [
+    renderMessageBody({media_type:'structured', renderer_strategy:'structured_card', normalized_type:'link', display_label_key:'messageType.link', structured_content:undefined}),
+    renderMessageBody({media_type:'structured', renderer_strategy:'structured_card', normalized_type:'totally_unmapped_type', display_label_key:'messageType.unknown', structured_content:null}),
+    renderMessageBody({media_type:'structured', renderer_strategy:'structured_card', normalized_type:'news', display_label_key:'messageType.news', structured_content:{fields:{articles:'not-a-list'}, parse_warnings:[]}}),
+  ];
+  process.stdout.write(JSON.stringify({ok:true}));
+} catch (e) {
+  process.stdout.write(JSON.stringify({ok:false,error:String(e)}));
+}
+"""
+    )
+    assert out["ok"] is True, out
+
+
+@pytest.mark.parametrize(
+    "locale,expected",
+    [
+        ("zh-CN", "位置未知"),
+        ("zh-TW", "位置未知"),
+        ("en", "Unknown location"),
+    ],
+)
+def test_structured_card_copy_uses_i18n_per_locale(locale: str, expected: str) -> None:
+    msg = _structured_msg(
+        "location", {"name": None, "address": None, "latitude": None, "longitude": None, "zoom": None}
+    )
+    out = _run(
+        f"""
+I18N.setLocale({json.dumps(locale)});
+process.stdout.write(JSON.stringify(renderMessageBody({json.dumps(msg)})));
+"""
+    )
+    assert expected in out
