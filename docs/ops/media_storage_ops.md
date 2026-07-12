@@ -266,16 +266,68 @@ RND-187 是纯新增能力（新路由 `.../media/access`、Provider 新增
 
 ### 与 RND-186 的关系
 
-RND-186（历史 Local → Qiniu 迁移）**未在本轮执行**，也不是 RND-187 的前置
-条件：RND-187 只处理"如何把已经写入 Qiniu 的媒体安全地签发给浏览器"，与
-"是否/何时把历史 Local 媒体迁移到 Qiniu"是两个独立问题。当前 132 条历史
-Local 媒体记录继续通过既有代理路由访问，行为完全不变；RND-186 执行后，这些
-记录一旦 `storage_backend` 变为 `qiniu_kodo`，会自动开始享有 RND-187 的
-Signed URL 直连能力，无需再改代码。
+RND-186（历史 Local → Qiniu 迁移工具）已开发完成（见下方"历史媒体迁移工具"），
+但**尚未在生产环境执行实际迁移**。RND-187 不依赖 RND-186：RND-187 只处理
+"如何把已经写入 Qiniu 的媒体安全地签发给浏览器"，与"是否/何时把历史 Local
+媒体迁移到 Qiniu"是两个独立问题。当前 132 条历史 Local 媒体记录继续通过既有
+代理路由访问，行为完全不变；一旦运维执行 RND-186 迁移工具，被迁移记录的
+`storage_backend` 变为 `qiniu_kodo` 后会自动开始享有 RND-187 的 Signed URL
+直连能力，无需再改代码。
+
+## 历史媒体迁移工具（RND-186）
+
+`scripts/migrate_local_media_to_qiniu.py` — 手动执行、可重复、可恢复的
+Local → Qiniu 历史媒体迁移工具。**迁移范围已从"仅图片"修订为通用媒体**：
+凡是 `media_files.file_type` 属于 `image`/`video`/`voice`/`file`
+（`app.media_storage.SUPPORTED_MIGRATION_MEDIA_TYPES`）、`storage_backend=local`
+且 `download_status=downloaded` 的记录都是候选，字节内容会用
+`detect_media_signature_from_bytes` 二次校验（从不只信任扩展名/`file_type`
+声明）。详细设计见 `docs/research/rnd_186_local_qiniu_migration.md`。
+
+**当前生产实际情况**：目前系统只有图片下载能力
+（`download_wecom_image_media_once.py`），因此现存 132 条历史记录仍然全部是
+`file_type=image`。视频/语音/文件的迁移能力是**面向未来的通用化**——一旦有
+新的下载 worker 开始写入 `file_type=video/voice/file` 的记录，本工具无需改动
+即可迁移它们。
+
+**重要限制**：媒体访问接口（`.../media`、`.../media/access`）目前仍然只服务
+`msgtype=="image"` 的记录——这是 RND-186 的明确非目标（不修改 Media Access
+API / Signed URL）。因此即便未来迁移了视频/语音/文件记录，它们的字节和完整
+元数据（bucket/mime_type/checksum）会安全落地七牛，但**暂时无法通过现有接口
+读取**，需要后续独立 ticket 扩展媒体访问接口。
+
+```bash
+# 仅统计候选数量，不做任何读写
+.venv/bin/python scripts/migrate_local_media_to_qiniu.py --count-only
+
+# 演练：读取本地文件并做字节内容校验，但不上传七牛、不写数据库
+.venv/bin/python scripts/migrate_local_media_to_qiniu.py --dry-run --limit 20
+
+# 正式执行（小批量、可重复运行）
+.venv/bin/python scripts/migrate_local_media_to_qiniu.py --limit 20 --batch-size 10
+
+# 重试此前失败的记录
+.venv/bin/python scripts/migrate_local_media_to_qiniu.py --limit 50 --retry
+```
+
+**安全特性**：单条记录失败不影响其本地可访问性（`storage_backend`/
+`storage_ref` 失败时保持不变）；重复执行对已迁移记录零读写（非幂等覆盖，
+而是真正的 no-op）；执行目标始终是七牛，与 `MEDIA_STORAGE_PROVIDER` 无关；
+迁移成功后完整持久化 `bucket`/`mime_type`/`checksum_sha256`（均从实际上传
+字节重新计算，从不信任历史 `file_size` 字段）；本地文件此阶段**不会被删除**
+（仅迁移工具已预留清理扩展点，未实现删除动作）。
+
+执行前必须确认 `QINIU_*` 全部配置项已就绪（见上方"Qiniu 必填配置"），且
+`STORAGE_LOCAL_PATH` 指向的历史文件仍然可读。
 
 ## 待办任务（未在本部署中执行）
 
-- **RND-186**：历史媒体迁移（local → qiniu_kodo），尚未执行
+- **RND-186 生产执行**：迁移工具已按通用媒体类型（image/video/voice/file）
+  重新开发完成并通过自测，尚未在生产环境实际运行（工具默认建议先
+  `--dry-run` 演练，确认无误后再正式执行）
+- **后续 ticket（未规划）**：Media Access API / Signed URL 扩展到
+  video/voice/file，使已迁移的非图片媒体可被前端读取——RND-186 明确不含此项
 - ~~RND-187：Signed URL 策略~~ 已完成（见上方"RND-187 Signed URL 访问流程"）
 - 当前部署生产配置时间戳: 2026-07-12 01:58 CST
-- 最后更新: 2026-07-12（RND-187 开发完成，尚未部署生产）
+- 最后更新: 2026-07-13（RND-186 迁移工具完成媒体范围修订：image/video/voice/file
+  通用化 + 完整存储元数据持久化，尚未部署生产/尚未执行迁移）

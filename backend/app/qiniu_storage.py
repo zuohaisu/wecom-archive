@@ -204,9 +204,20 @@ class QiniuStorageProvider(MediaStorageProvider):
     # -- write path ---------------------------------------------------
 
     def save_bytes(self, storage_ref: str, data: bytes) -> str:
-        from app.media_storage import detect_image_content_type_for_ref
+        # RND-186 QA fix: this used to call detect_image_content_type_for_ref
+        # (image-only), so uploading a video/voice/file object silently
+        # degraded its Qiniu-side Content-Type to "application/octet-stream"
+        # even when media_files.mime_type had already recorded the correct
+        # value in the database. detect_media_content_type_for_ref() is the
+        # generalized lookup (image/video/voice/file) — see its docstring
+        # in app/media_storage.py for why trusting storage_ref's extension
+        # here is safe. Image uploads are completely unaffected: every
+        # image extension this function ever recognized is still resolved
+        # identically, since the image entries are the same
+        # _ALLOWED_IMAGE_CONTENT_TYPES table, unmodified.
+        from app.media_storage import detect_media_content_type_for_ref
 
-        mime_type = detect_image_content_type_for_ref(storage_ref) or "application/octet-stream"
+        mime_type = detect_media_content_type_for_ref(storage_ref) or "application/octet-stream"
         up_token = self._auth.upload_token(self._bucket, key=storage_ref, expires=3600)
         try:
             _ret, info = self._qiniu.put_data(up_token, storage_ref, data, mime_type=mime_type)
@@ -338,3 +349,12 @@ class QiniuStorageProvider(MediaStorageProvider):
 
     def get_local_path(self, storage_ref: Optional[str]) -> Optional[Path]:
         return None
+
+    @property
+    def bucket(self) -> Optional[str]:
+        """The bucket this provider instance was constructed with (RND-186)
+        — read by a caller (the migration tool) that wants to persist which
+        bucket an upload actually went to, sourced directly from this
+        provider rather than re-reading QINIU_BUCKET independently, so it
+        can never drift from what was actually used for the upload."""
+        return self._bucket

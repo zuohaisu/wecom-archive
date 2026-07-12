@@ -218,13 +218,13 @@ The storage layer is abstracted behind the `MediaStorageProvider` interface (`ba
 
 - **Mixed storage.** Local-backed and Qiniu-backed rows can coexist in the same deployment, even the same conversation timeline — each is served through its own recorded provider.
 - **Cutover.** Setting `MEDIA_STORAGE_PROVIDER=qiniu_kodo` only changes where *new* downloads are written. Every existing row keeps using the provider recorded on it.
-- **Rollback.** Setting `MEDIA_STORAGE_PROVIDER` back to `local` only changes new writes again. Rows already written to Qiniu (`storage_backend=qiniu_kodo`) are **not** reinterpreted as local and are **not** automatically migrated — they remain readable only as long as Qiniu credentials stay configured. A full rollback off Qiniu (no Qiniu access retained at all) requires migrating those rows' bytes back to local storage first — RND-186, not yet implemented. Simply flipping the env var back does not do this.
+- **Rollback.** Setting `MEDIA_STORAGE_PROVIDER` back to `local` only changes new writes again. Rows already written to Qiniu (`storage_backend=qiniu_kodo`) are **not** reinterpreted as local and are **not** automatically migrated — they remain readable only as long as Qiniu credentials stay configured. A full rollback off Qiniu (no Qiniu access retained at all) requires migrating those rows' bytes back to local storage first; RND-186 migrates the other direction (Local → Qiniu) only — a Qiniu → Local reverse-migration tool remains unimplemented. Simply flipping the env var back does not do this.
 
 Legacy rows written before this ticket (or migration 0005's backfill) are stamped `storage_backend="local"`, `storage_ref=<their local_path>`; `local_path` itself is retained as a legacy/local-only compatibility field and is never treated as an authoritative Qiniu reference.
 
 `STORAGE_LOCAL_PATH` applies only to rows with `storage_backend=local` — it has no effect on Qiniu-backed rows, which are resolved entirely through `QINIU_*` configuration instead.
 
-Object keys for Qiniu are tenant-scoped and deterministic: `tenants/{tenant_id}/images/{archive_message_id}{ext}`.
+Object keys for Qiniu are tenant-scoped and deterministic: `tenants/{tenant_id}/{category}/{archive_message_id}{ext}`, where `category` is `images` today (the only media type the download worker produces) and also `videos`/`voice`/`files` for a row migrated by RND-186 with that `file_type` (see below) — same key shape either way, so nothing downstream needs to special-case a migrated row.
 
 **Qiniu bucket must be private.** This app never assumes public-read access and never issues a permanent public object URL. Two controlled access paths exist for Qiniu-backed media:
 
@@ -237,9 +237,11 @@ Object keys for Qiniu are tenant-scoped and deterministic: `tenants/{tenant_id}/
 
 See [research/rnd_185_media_storage_abstraction.md](research/rnd_185_media_storage_abstraction.md) for the base provider contract and [research/rnd_174_qiniu_kodo_provider.md](research/rnd_174_qiniu_kodo_provider.md) for the Qiniu provider, per-row storage model, and rollback details.
 
-Not yet implemented: historical local→Qiniu media migration (RND-186).
+**Historical Local → Qiniu media migration (RND-186)** is implemented and passing the full test suite: `backend/scripts/migrate_local_media_to_qiniu.py` is a manual, repeatable, resumable tool that migrates already-downloaded `media_files` rows from `storage_backend="local"` to `"qiniu_kodo"`, for any content-verified supported media type (`image`/`video`/`voice`/`file` — not images only), with full storage metadata (`bucket`/`mime_type`/`checksum_sha256`) persisted per row. It has **not** been executed in production yet — no historical rows have actually been migrated. Migrating a video/voice/file row does not make it retrievable through the media route yet (see the note below and [research/rnd_186_local_qiniu_migration.md](research/rnd_186_local_qiniu_migration.md)). See [ops/media_storage_ops.md](ops/media_storage_ops.md) for CLI usage.
 
 Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and passing the full test suite; developer re-acceptance is pending and it has **not** been deployed to production — see the Storage Strategy note above and [API.md](API.md) for the `GET .../media/access` contract.
+
+**Media serving remains image-only regardless of RND-186.** `GET /api/conversations/{id}/messages/{msgid}/media` and the `.../media/access` descriptor both still gate on `msgtype == "image"` — this is unchanged by RND-186 on purpose (Media Access API changes are explicitly out of that ticket's scope). A migrated video/voice/file row is durably stored in Qiniu with complete metadata but not yet servable through any existing route; extending media serving to those types is tracked as a suggested follow-up ticket (see [research/rnd_186_local_qiniu_migration.md](research/rnd_186_local_qiniu_migration.md)), not implemented here.
 
 ---
 

@@ -277,6 +277,97 @@ def test_save_bytes_success(monkeypatch) -> None:
     assert calls["data"] == b"image-bytes"
 
 
+# ---------------------------------------------------------------------------
+# RND-186 QA fix: save_bytes() must set the correct Content-Type in
+# Qiniu's own object metadata for every supported media category — not
+# just images. Before this fix, save_bytes() called
+# detect_image_content_type_for_ref() (image-only), so any video/voice/
+# file upload's Content-Type silently degraded to
+# "application/octet-stream" even though media_files.mime_type had
+# already recorded the correct value in the database — the two disagreed.
+# These tests assert on the exact mime_type argument passed to the Qiniu
+# SDK's put_data() call, i.e. what actually becomes the object's
+# Content-Type in Qiniu.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "storage_ref,expected_content_type",
+    [
+        ("tenants/t1/images/1.jpg", "image/jpeg"),
+        ("tenants/t1/images/2.png", "image/png"),
+        ("tenants/t1/images/3.gif", "image/gif"),
+        ("tenants/t1/images/4.webp", "image/webp"),
+        ("tenants/t1/videos/5.mp4", "video/mp4"),
+        ("tenants/t1/voice/6.amr", "audio/amr"),
+        ("tenants/t1/voice/7.silk", "audio/silk"),
+        ("tenants/t1/voice/8.wav", "audio/wav"),
+        ("tenants/t1/voice/9.mp3", "audio/mpeg"),
+        ("tenants/t1/files/10.pdf", "application/pdf"),
+        ("tenants/t1/files/11.zip", "application/zip"),
+    ],
+)
+def test_save_bytes_sets_correct_content_type_per_media_category(
+    monkeypatch, storage_ref, expected_content_type
+) -> None:
+    provider = _make_provider()
+    calls = {}
+
+    def _fake_put_data(up_token, key, data, mime_type=None, **kwargs):
+        calls["mime_type"] = mime_type
+        return {"key": key}, _FakeInfo(200)
+
+    monkeypatch.setattr(provider._qiniu, "put_data", _fake_put_data)
+
+    provider.save_bytes(storage_ref, b"payload")
+
+    assert calls["mime_type"] == expected_content_type
+
+
+def test_save_bytes_unrecognized_extension_falls_back_to_octet_stream(monkeypatch) -> None:
+    """An extension outside every known allow-list (image/video/voice/
+    file) must still fall back to "application/octet-stream" — never a
+    guess, and never a crash — matching the pre-existing fallback
+    behavior for a genuinely unrecognized object key."""
+    provider = _make_provider()
+    calls = {}
+
+    def _fake_put_data(up_token, key, data, mime_type=None, **kwargs):
+        calls["mime_type"] = mime_type
+        return {"key": key}, _FakeInfo(200)
+
+    monkeypatch.setattr(provider._qiniu, "put_data", _fake_put_data)
+
+    provider.save_bytes("tenants/t1/images/1.part", b"payload")  # .part: no allow-listed ext
+
+    assert calls["mime_type"] == "application/octet-stream"
+
+
+def test_save_bytes_image_content_type_unchanged_by_generalization(monkeypatch) -> None:
+    """Regression proof: every image extension resolves to the exact same
+    Content-Type as before this fix — the image entries in the combined
+    lookup table are the unmodified _ALLOWED_IMAGE_CONTENT_TYPES table."""
+    from app.media_storage import detect_image_content_type_for_ref
+
+    provider = _make_provider()
+    calls = {}
+
+    def _fake_put_data(up_token, key, data, mime_type=None, **kwargs):
+        calls["mime_type"] = mime_type
+        return {"key": key}, _FakeInfo(200)
+
+    monkeypatch.setattr(provider._qiniu, "put_data", _fake_put_data)
+
+    for ref in [
+        "tenants/t1/images/1.jpg",
+        "tenants/t1/images/2.png",
+        "tenants/t1/images/3.gif",
+        "tenants/t1/images/4.webp",
+    ]:
+        provider.save_bytes(ref, b"payload")
+        assert calls["mime_type"] == detect_image_content_type_for_ref(ref)
+
+
 def test_save_bytes_failure_raises_operation_error(monkeypatch) -> None:
     provider = _make_provider()
     monkeypatch.setattr(

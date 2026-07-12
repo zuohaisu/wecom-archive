@@ -338,6 +338,32 @@ class MediaFile(Base):
     should read storage_backend/storage_ref, falling back to a populated
     legacy local_path only when storage_backend was never backfilled (see
     app.media_storage.resolve_effective_storage_reference).
+
+    migration_status / migration_attempted_at / migration_error (RND-186,
+    migration 0006): bookkeeping for scripts/migrate_local_media_to_qiniu.py
+    only — no serving/timeline code path reads these. "Already migrated" is
+    fully determined by storage_backend=="qiniu_kodo" alone (a migrated row
+    is naturally excluded from any future migration candidate scan); these
+    columns exist only to distinguish "never attempted" (migration_status
+    IS NULL) from "attempted and failed" (migration_status="failed"), since
+    a failed attempt must leave storage_backend/storage_ref completely
+    untouched (still "local", still fully servable) rather than encoding
+    failure there. migration_error is a short, sanitized diagnostic tag —
+    never a raw path, sdkfileid, or exception string.
+
+    bucket / mime_type / checksum_sha256 (RND-186 QA fix, migration 0007):
+    full storage metadata for a migrated row, populated by
+    scripts/migrate_local_media_to_qiniu.py at the moment of a successful
+    upload — computed from the exact bytes uploaded, never re-derived from
+    a remote round-trip. bucket is NULL for storage_backend="local" (no
+    bucket concept) and is read from the provider that performed the
+    upload (never re-read from config independently, so it can never drift
+    from what was actually used). mime_type is content-sniffed (see
+    app.media_storage.detect_media_signature_from_bytes) — never inferred
+    from a file extension alone. checksum_sha256 is a fixed algorithm
+    (SHA-256), hex-encoded. storage_ref remains the sole authoritative
+    object key / local path reference — deliberately not duplicated into a
+    second "object_key" column.
     """
 
     __tablename__ = "media_files"
@@ -362,6 +388,12 @@ class MediaFile(Base):
     storage_ref = Column(Text, nullable=True)
     file_size = Column(BigInteger, nullable=True)
     download_status = Column(String(16), nullable=False, default="pending")
+    migration_status = Column(String(16), nullable=True, index=True)
+    migration_attempted_at = Column(DateTime(timezone=True), nullable=True)
+    migration_error = Column(Text, nullable=True)
+    bucket = Column(String(128), nullable=True)
+    mime_type = Column(String(128), nullable=True)
+    checksum_sha256 = Column(String(64), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

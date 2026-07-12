@@ -344,5 +344,6 @@ while Qiniu-backed rows exist, those specific rows become unavailable
 it can no longer construct a provider for) — existing local rows are
 completely unaffected either way. A full rollback that also stops
 depending on Qiniu requires migrating those rows' bytes back to local
-storage first (RND-186, not yet implemented) before removing Qiniu
-credentials.
+storage first — RND-186 ships a Local → Qiniu migration tool only; a
+Qiniu → Local reverse-migration tool remains unimplemented — before
+removing Qiniu credentials.

@@ -20,10 +20,11 @@ only for internal compatibility paths such as FastAPI FileResponse.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import hashlib
 import os
 import re
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 _ALLOWED_IMAGE_CONTENT_TYPES = {
     ".jpg": "image/jpeg",
@@ -113,6 +114,17 @@ class MediaStorageProvider(ABC):
         return False
 
     def get_local_path(self, storage_ref: Optional[str]) -> Optional[Path]:
+        return None
+
+    @property
+    def bucket(self) -> Optional[str]:
+        """The provider's bucket/container name, when the concept applies
+        (object-storage providers); None for a provider with no bucket
+        concept (e.g. the local filesystem). RND-186: read by a caller that
+        wants to persist which bucket a given upload actually went to,
+        sourced from the provider that performed the upload — never
+        re-derived independently from environment/config, so it can never
+        drift from what was actually used."""
         return None
 
 
@@ -641,3 +653,167 @@ def resolve_servable_image_path(
     if detect_image_content_type(resolved) is None:
         return None
     return resolved
+
+
+# ---------------------------------------------------------------------------
+# Generalized media-type signature detection (RND-186 fix — was image-only)
+#
+# The image-serving route/timeline (resolve_image_file_state and friends,
+# above) are deliberately UNCHANGED by this section — this codebase does not
+# yet download or serve video/voice/file media at all (see
+# app.media_classification), so generalizing the *serving* path is out of
+# scope here. This section exists solely for
+# scripts/migrate_local_media_to_qiniu.py (and any future non-image download
+# worker) to classify an already-local file's bytes without hardcoding
+# "image" — MediaFile.file_type is already a generic column ("image",
+# "video", "voice", "file"), this just gives it a matching, generic,
+# content-verified detector instead of trusting the extension alone.
+# ---------------------------------------------------------------------------
+
+_ALLOWED_VIDEO_CONTENT_TYPES = {".mp4": "video/mp4"}
+_ALLOWED_VOICE_CONTENT_TYPES = {
+    ".amr": "audio/amr",
+    ".silk": "audio/silk",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+}
+# Deliberately conservative: "file" covers arbitrary WeCom attachments, and
+# there is no universal byte signature for "any file type". Only formats we
+# can identify with high confidence are allow-listed; anything else is
+# reported as unrecognized (never guessed from extension) — callers must
+# treat that as "cannot safely identify type" and skip, per RND-186 scope.
+_ALLOWED_FILE_CONTENT_TYPES = {
+    ".pdf": "application/pdf",
+    ".zip": "application/zip",  # also covers docx/xlsx/pptx (zip containers)
+}
+
+# media_type -> object-key path segment (RND-186). Deliberately an explicit
+# mapping rather than a pluralization rule, matching the exact paths named
+# in the RND-186 ticket (tenants/{tenant}/{videos,voice,...}/...) — "voice"
+# is intentionally singular, not "voices".
+MEDIA_TYPE_KEY_CATEGORIES = {
+    "image": "images",
+    "video": "videos",
+    "voice": "voice",
+    "file": "files",
+}
+
+# The media_types a migration/download tool may act on — matches
+# app.media_classification's own recognized msgtype-derived media types
+# (text/unsupported are intentionally excluded: they never have bytes to
+# store). Anything else (None, or a future/unknown value) is not a
+# "supported" media type for storage-migration purposes and must be
+# excluded from candidate selection outright, not merely skipped per-row.
+SUPPORTED_MIGRATION_MEDIA_TYPES = frozenset(MEDIA_TYPE_KEY_CATEGORIES)
+
+
+class MediaSignatureMatch(NamedTuple):
+    media_type: str
+    extension: str
+    mime_type: str
+
+
+def media_key_category(media_type: str) -> str:
+    """Object-key path segment for media_type. Raises KeyError for an
+    unsupported media_type — callers must only invoke this after already
+    confirming media_type is in SUPPORTED_MIGRATION_MEDIA_TYPES."""
+    return MEDIA_TYPE_KEY_CATEGORIES[media_type]
+
+
+def detect_media_signature_from_bytes(data: bytes) -> Optional[MediaSignatureMatch]:
+    """Generalized version of detect_image_type_from_bytes: identify
+    media_type/extension/mime_type from *data*'s own byte content — never
+    from a caller-supplied extension, msgtype, or file_type hint. Returns
+    None when the bytes don't match any known, allow-listed signature —
+    callers must treat that as "cannot safely identify type" (RND-186
+    explicit exclusion), not fall back to guessing.
+
+    Checked in a fixed order: image, then video (MP4-family "ftyp" box),
+    then voice/audio (AMR / SILK v3 / WAV / MP3-with-ID3), then a
+    conservative "file" allow-list (PDF, ZIP-family). This intentionally
+    does not attempt to cover every possible container/format — video
+    detection is MP4-family only (a "ftyp" box; not e.g. legacy AVI), and
+    "file" detection only recognizes PDF/ZIP — anything else legitimately
+    returns None rather than a false positive.
+    """
+    ext = detect_image_type_from_bytes(data)
+    if ext is not None:
+        return MediaSignatureMatch("image", ext, _ALLOWED_IMAGE_CONTENT_TYPES[ext])
+
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        return MediaSignatureMatch("video", ".mp4", _ALLOWED_VIDEO_CONTENT_TYPES[".mp4"])
+
+    if data.startswith(b"#!AMR"):
+        return MediaSignatureMatch("voice", ".amr", _ALLOWED_VOICE_CONTENT_TYPES[".amr"])
+    if data.startswith(b"#!SILK_V3"):
+        return MediaSignatureMatch("voice", ".silk", _ALLOWED_VOICE_CONTENT_TYPES[".silk"])
+    if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return MediaSignatureMatch("voice", ".wav", _ALLOWED_VOICE_CONTENT_TYPES[".wav"])
+    if data.startswith(b"ID3"):
+        return MediaSignatureMatch("voice", ".mp3", _ALLOWED_VOICE_CONTENT_TYPES[".mp3"])
+
+    if data.startswith(b"%PDF-"):
+        return MediaSignatureMatch("file", ".pdf", _ALLOWED_FILE_CONTENT_TYPES[".pdf"])
+    if data.startswith(b"PK\x03\x04"):
+        return MediaSignatureMatch("file", ".zip", _ALLOWED_FILE_CONTENT_TYPES[".zip"])
+
+    return None
+
+
+# Combined extension -> Content-Type lookup across every RND-186 supported
+# media category. Deliberately a SEPARATE table from
+# _ALLOWED_IMAGE_CONTENT_TYPES (never merged into it) — the image-only
+# table backs detect_image_content_type(_for_ref), which the media route /
+# resolve_image_file_state rely on to stay image-only by scope; this
+# combined table backs only detect_media_content_type_for_ref(), a
+# different, RND-186-specific consumer (QiniuStorageProvider.save_bytes).
+_ALL_MEDIA_CONTENT_TYPES_BY_EXTENSION = {
+    **_ALLOWED_IMAGE_CONTENT_TYPES,
+    **_ALLOWED_VIDEO_CONTENT_TYPES,
+    **_ALLOWED_VOICE_CONTENT_TYPES,
+    **_ALLOWED_FILE_CONTENT_TYPES,
+}
+
+
+def detect_media_content_type_for_ref(storage_ref: Optional[str]) -> Optional[str]:
+    """Generalized Content-Type lookup for a provider-opaque storage
+    reference, covering every RND-186 supported media category (image/
+    video/voice/file) — not images only.
+
+    RND-186 QA fix: QiniuStorageProvider.save_bytes() previously called
+    detect_image_content_type_for_ref() (image-only) to set the uploaded
+    object's Content-Type, so any video/voice/file upload silently
+    degraded to "application/octet-stream" in Qiniu's own object metadata
+    even though media_files.mime_type was already correctly recorded in
+    the database — the two disagreed. This function is the fix: the same
+    kind of extension-keyed lookup, generalized across all four supported
+    categories.
+
+    Trusting storage_ref's extension here is safe, not a regression to
+    "trust the extension": every caller that builds a storage_ref for a
+    RND-186-migrated or newly-downloaded object first derives that
+    extension from the file's own verified byte content
+    (detect_media_signature_from_bytes() / detect_image_type_from_bytes())
+    — the extension in the ref was never taken from an untrusted source,
+    only written here after upstream content verification already
+    happened. This function performs no verification of its own; it is a
+    pure lookup.
+
+    Returns None (never a guess) for an extension outside the combined
+    allow-list — callers must keep their own "application/octet-stream"
+    fallback for that case, matching the pre-existing behavior for a
+    truly unrecognized extension.
+    """
+    if not storage_ref:
+        return None
+    return _ALL_MEDIA_CONTENT_TYPES_BY_EXTENSION.get(Path(storage_ref).suffix.lower())
+
+
+def compute_sha256_checksum(data: bytes) -> str:
+    """Hex-encoded SHA-256 digest of *data*. Fixed algorithm (SHA-256,
+    per RND-186) — computed once from the same in-memory bytes that get
+    uploaded, never re-derived from a remote round-trip, matching this
+    module's existing "compute from the trusted in-memory payload, not a
+    post-publish stat/fetch" discipline (see qiniu_storage.py's
+    file_size docstring)."""
+    return hashlib.sha256(data).hexdigest()
