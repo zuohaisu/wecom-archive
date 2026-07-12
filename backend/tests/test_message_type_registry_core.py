@@ -234,7 +234,7 @@ def test_registry_is_immutable() -> None:
             MessageSupportStatus.PARTIAL,
             MediaCapability.CONDITIONAL,
         ),
-        ("todo", MessageCategory.INTERACTIVE, MessageSupportStatus.UNSUPPORTED, MediaCapability.NONE),
+        ("todo", MessageCategory.INTERACTIVE, MessageSupportStatus.SUPPORTED, MediaCapability.NONE),
         ("revoke", MessageCategory.CONTROL, MessageSupportStatus.UNSUPPORTED, MediaCapability.NONE),
         (
             "mixed",
@@ -248,7 +248,7 @@ def test_registry_is_immutable() -> None:
             MessageSupportStatus.UNSUPPORTED,
             MediaCapability.NESTED,
         ),
-        ("sys", MessageCategory.SYSTEM, MessageSupportStatus.UNSUPPORTED, MediaCapability.NONE),
+        ("sys", MessageCategory.SYSTEM, MessageSupportStatus.SUPPORTED, MediaCapability.NONE),
     ],
 )
 def test_known_message_type_resolves_correctly(
@@ -486,7 +486,7 @@ def test_registry_structured_types_get_the_structured_media_classification(msgty
 
 @pytest.mark.parametrize(
     "msgtype",
-    ["emotion", "todo", "revoke", "mixed", "chatrecord", "sys"],
+    ["emotion", "revoke", "mixed", "chatrecord"],
 )
 def test_registry_unsupported_types_fall_into_classify_medias_generic_bucket(msgtype) -> None:
     definition = resolve(msgtype)

@@ -97,6 +97,15 @@ def _bundle() -> str:
         _extract(r"function renderMarkdownCard\(m\)\{.*?\n\}", "renderMarkdownCard()"),
         _extract(r"function renderNewsCard\(m\)\{.*?\n\}", "renderNewsCard()"),
         _extract(r"function renderMiniprogramCard\(m\)\{.*?\n\}", "renderMiniprogramCard()"),
+        # RND-198 — interactive business card renderers
+        _extract(r"function renderVoteCard\(m\)\{.*?\n\}", "renderVoteCard()"),
+        _extract(r"function renderTodoCard\(m\)\{.*?\n\}", "renderTodoCard()"),
+        _extract(r"function renderCollectCard\(m\)\{.*?\n\}", "renderCollectCard()"),
+        _extract(r"function renderMeetingCard\(m\)\{.*?\n\}", "renderMeetingCard()"),
+        _extract(r"function renderScheduleCard\(m\)\{.*?\n\}", "renderScheduleCard()"),
+        _extract(r"function renderRedpacketCard\(m\)\{.*?\n\}", "renderRedpacketCard()"),
+        _extract(r"function renderSwitchCorpCard\(m\)\{.*?\n\}", "renderSwitchCorpCard()"),
+        _extract(r"function renderSystemCard\(m\)\{.*?\n\}", "renderSystemCard()"),
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
         _extract(r"function renderStructuredCard\(m\)\{.*?\n\}", "renderStructuredCard()"),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
@@ -194,6 +203,14 @@ def test_registry_has_entries_for_every_documented_msgtype() -> None:
             "news",
             "docmsg",
             "audio_doc",
+            # RND-198 interactive business types
+            "system",
+            "vote",
+            "collect",
+            "meeting",
+            "schedule",
+            "redpacket",
+            "switch_corp",
         ]
     )
 
@@ -281,14 +298,14 @@ def test_image_renderer_not_downloaded_placeholder_unchanged() -> None:
     "msgtype,expected_text",
     [
         ("emotion", "Unsupported sticker message"),
-        ("todo", "Unsupported to-do message"),
     ],
 )
 def test_new_type_shows_distinct_placeholder(msgtype: str, expected_text: str) -> None:
     """RND-197: location/link/card/miniprogram moved off this legacy
     generic-placeholder path onto dedicated structured cards — see the
     "Structured cards (RND-197)" section below for their coverage.
-    emotion/todo remain UNSUPPORTED_PLACEHOLDER, unchanged."""
+    RND-198: todo is now SUPPORTED (structured card), removed from
+    this legacy placeholder test. emotion remains UNSUPPORTED."""
     msg = _msg(msgtype, "unsupported")
     html = _render(msg)
     assert html == f'<div class="media-placeholder">{expected_text}</div>'
@@ -314,8 +331,8 @@ def test_file_placeholder_is_distinct_and_readable() -> None:
 
 def test_different_unsupported_types_render_different_text() -> None:
     emotion_html = _render(_msg("emotion", "unsupported"))
-    todo_html = _render(_msg("todo", "unsupported"))
-    assert len({emotion_html, todo_html}) == 2
+    video_html = _render(_msg("video", "unsupported"))
+    assert len({emotion_html, video_html}) == 2
 
 
 # ---------------------------------------------------------------------------

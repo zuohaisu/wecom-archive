@@ -85,6 +85,12 @@ def classify_media(msgtype: Optional[str], has_sdkfileid: bool) -> MediaClassifi
     if msgtype == "text":
         return MediaClassification("text", None, None)
 
+    if definition.category == MessageCategory.SYSTEM:
+        # RND-198: system events get a distinct media_type so the frontend
+        # can dispatch to system_card rendering instead of a structured
+        # business card or media preview.
+        return MediaClassification("system", None, None)
+
     if definition.support_status in (
         MessageSupportStatus.SUPPORTED,
         MessageSupportStatus.PARTIAL,

@@ -98,6 +98,7 @@ class RendererStrategy(str, Enum):
     PLACEHOLDER = "placeholder"
     UNSUPPORTED_PLACEHOLDER = "unsupported_placeholder"
     UNKNOWN_PLACEHOLDER = "unknown_placeholder"
+    SYSTEM_CARD = "system_card"
 
 
 @dataclass(frozen=True)
@@ -321,13 +322,15 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.CONDITIONAL,
     ),
     MessageTypeDefinition(
+        # RND-198: promoted to SUPPORTED with structured field extraction
+        # and structured-card rendering.
         raw_type="todo",
         normalized_type="todo",
         category=MessageCategory.INTERACTIVE,
-        support_status=MessageSupportStatus.UNSUPPORTED,
+        support_status=MessageSupportStatus.SUPPORTED,
         display_label_key="messageType.todo",
         parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
-        renderer_strategy=RendererStrategy.UNSUPPORTED_PLACEHOLDER,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
         media_capability=MediaCapability.NONE,
     ),
     MessageTypeDefinition(
@@ -365,13 +368,85 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         is_composite=True,
     ),
     MessageTypeDefinition(
+        # RND-198: promoted to SUPPORTED with action-subtype extraction
+        # and system-card rendering.
         raw_type="sys",
         normalized_type="system",
         category=MessageCategory.SYSTEM,
-        support_status=MessageSupportStatus.UNSUPPORTED,
+        support_status=MessageSupportStatus.SUPPORTED,
         display_label_key="messageType.system",
         parser_strategy=ParserStrategy.CONTROL_SIGNAL,
-        renderer_strategy=RendererStrategy.UNSUPPORTED_PLACEHOLDER,
+        renderer_strategy=RendererStrategy.SYSTEM_CARD,
+        media_capability=MediaCapability.NONE,
+    ),
+    MessageTypeDefinition(
+        # RND-198: interactive poll message with structured field extraction.
+        raw_type="vote",
+        normalized_type="vote",
+        category=MessageCategory.INTERACTIVE,
+        support_status=MessageSupportStatus.SUPPORTED,
+        display_label_key="messageType.vote",
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
+        media_capability=MediaCapability.NONE,
+    ),
+    MessageTypeDefinition(
+        # RND-198: interactive collect/form message with structured field extraction.
+        raw_type="collect",
+        normalized_type="collect",
+        category=MessageCategory.INTERACTIVE,
+        support_status=MessageSupportStatus.SUPPORTED,
+        display_label_key="messageType.collect",
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
+        media_capability=MediaCapability.NONE,
+    ),
+    MessageTypeDefinition(
+        # RND-198: interactive meeting invitation with structured field extraction.
+        raw_type="meeting",
+        normalized_type="meeting",
+        category=MessageCategory.INTERACTIVE,
+        support_status=MessageSupportStatus.SUPPORTED,
+        display_label_key="messageType.meeting",
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
+        media_capability=MediaCapability.NONE,
+    ),
+    MessageTypeDefinition(
+        # RND-198: interactive schedule message with structured field extraction.
+        raw_type="schedule",
+        normalized_type="schedule",
+        category=MessageCategory.INTERACTIVE,
+        support_status=MessageSupportStatus.SUPPORTED,
+        display_label_key="messageType.schedule",
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
+        media_capability=MediaCapability.NONE,
+    ),
+    MessageTypeDefinition(
+        # RND-198: red packet (hongbao) message — monetary amount is NEVER
+        # extracted into fields (security), only raw-payload preserved.
+        raw_type="redpacket",
+        normalized_type="redpacket",
+        category=MessageCategory.INTERACTIVE,
+        support_status=MessageSupportStatus.SUPPORTED,
+        display_label_key="messageType.redpacket",
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
+        media_capability=MediaCapability.NONE,
+    ),
+    MessageTypeDefinition(
+        # RND-198: use this interactive business type msgtype for "user has
+        # been switched to a different corp" — distinct from the sys action
+        # subtype of the same name (see sys above). Field extraction
+        # preserves corp_name only; corpid is preserved in raw only.
+        raw_type="switch_corp",
+        normalized_type="switch_corp",
+        category=MessageCategory.INTERACTIVE,
+        support_status=MessageSupportStatus.SUPPORTED,
+        display_label_key="messageType.switchCorp",
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
         media_capability=MediaCapability.NONE,
     ),
 )
@@ -557,6 +632,13 @@ def build_frontend_registry_entries(
         if d.renderer_strategy == RendererStrategy.STRUCTURED_CARD:
             entries[d.normalized_type] = {
                 "category": "structured",
+                "normalizedType": d.normalized_type,
+                "supportStatus": d.support_status.value,
+            }
+            continue
+        if d.renderer_strategy == RendererStrategy.SYSTEM_CARD:
+            entries[d.normalized_type] = {
+                "category": "system",
                 "normalizedType": d.normalized_type,
                 "supportStatus": d.support_status.value,
             }

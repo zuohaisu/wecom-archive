@@ -757,7 +757,13 @@ var MessageTypeRegistry=(function(){
     var entry=resolve(msgtype);
     return (entry&&entry.category==='placeholder')?entry:null;
   }
-  return {entries:entries,resolve:resolve,resolvePlaceholder:resolvePlaceholder,fallback:FALLBACK};
+  // RND-198: resolveSystem() returns the entry if it is a "system" category
+  // entry (used by the system card renderer dispatch). Returns null otherwise.
+  function resolveSystem(msgtype){
+    var entry=resolve(msgtype);
+    return (entry&&entry.category==='system')?entry:null;
+  }
+  return {entries:entries,resolve:resolve,resolvePlaceholder:resolvePlaceholder,resolveSystem:resolveSystem,fallback:FALLBACK};
 })();
 // RND-197 — structured card rendering. isSafeUrl mirrors the backend's
 // app.structured_message_parser.safe_url (http/https absolute URLs only)
@@ -909,6 +915,131 @@ function renderMiniprogramCard(m){
   html+='</div>';
   return html;
 }
+// RND-198: business card renderers for interactive message types.
+function renderVoteCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var title=f.title||I18N.t('messageType.vote');
+  var html='<div class="structured-card structured-card-vote">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.vote'))+'</div>'
+    +'<div class="structured-card-title">'+esc(title)+'</div>';
+  if(f.type)html+='<div class="structured-card-meta">'+esc(I18N.t('card.vote.type'))+esc(f.type)+'</div>';
+  if(Array.isArray(f.items)&&f.items.length){
+    html+='<ul style="margin:.2rem 0 .2rem 1.1rem">';
+    f.items.forEach(function(item){
+      var name=item.name||I18N.t('card.vote.unnamed');
+      var count=(typeof item.count==='number')?' ('+item.count+')':'';
+      html+='<li>'+esc(name)+count+'</li>';
+    });
+    html+='</ul>';
+  }else{
+    html+='<div class="structured-card-degraded">'+esc(I18N.t('card.vote.noItems'))+'</div>';
+  }
+  html+='</div>';
+  return html;
+}
+function renderTodoCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var title=f.title||I18N.t('messageType.todo');
+  var html='<div class="structured-card structured-card-todo">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.todo'))+'</div>'
+    +'<div class="structured-card-title">'+esc(title)+'</div>';
+  if(f.content)html+='<div class="structured-card-desc">'+esc(f.content)+'</div>';
+  html+='</div>';
+  return html;
+}
+function renderCollectCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var title=f.title||I18N.t('messageType.collect');
+  var html='<div class="structured-card structured-card-collect">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.collect'))+'</div>'
+    +'<div class="structured-card-title">'+esc(title)+'</div>';
+  if(Array.isArray(f.details)&&f.details.length){
+    html+='<div class="structured-card-meta">'+esc(f.details.length+' '+I18N.t('card.collect.entries'))+'</div>';
+  }
+  html+='</div>';
+  return html;
+}
+function renderMeetingCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var title=f.title||I18N.t('messageType.meeting');
+  var html='<div class="structured-card structured-card-meeting">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.meeting'))+'</div>'
+    +'<div class="structured-card-title">'+esc(title)+'</div>';
+  if(f.time)html+='<div class="structured-card-meta">'+esc(I18N.t('card.meeting.time'))+fmtTime(f.time)+'</div>';
+  if(f.place)html+='<div class="structured-card-meta">'+esc(I18N.t('card.meeting.place'))+esc(f.place)+'</div>';
+  if(f.agenda)html+='<div class="structured-card-desc">'+esc(f.agenda)+'</div>';
+  html+='</div>';
+  return html;
+}
+function renderScheduleCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var title=f.title||I18N.t('messageType.schedule');
+  var html='<div class="structured-card structured-card-schedule">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.schedule'))+'</div>'
+    +'<div class="structured-card-title">'+esc(title)+'</div>';
+  if(f.starttime)html+='<div class="structured-card-meta">'+esc(I18N.t('card.schedule.start'))+fmtTime(f.starttime)+'</div>';
+  if(f.endtime)html+='<div class="structured-card-meta">'+esc(I18N.t('card.schedule.end'))+fmtTime(f.endtime)+'</div>';
+  if(f.place)html+='<div class="structured-card-meta">'+esc(I18N.t('card.schedule.place'))+esc(f.place)+'</div>';
+  if(f.description)html+='<div class="structured-card-desc">'+esc(f.description)+'</div>';
+  html+='</div>';
+  return html;
+}
+function renderRedpacketCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  // Redpacket card never shows monetary amounts (security).
+  var label=I18N.t('card.redpacket.label');
+  var wishing=f&&f.wishing||null;
+  var html='<div class="structured-card structured-card-redpacket">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.redpacket'))+'</div>'
+    +'<div class="structured-card-title">'+esc(label)+'</div>';
+  if(wishing)html+='<div class="structured-card-desc">'+esc(wishing)+'</div>';
+  if(f&&typeof f.totalnum==='number')html+='<div class="structured-card-meta">'+esc(f.totalnum+' '+I18N.t('card.redpacket.nPackets'))+'</div>';
+  html+='</div>';
+  return html;
+}
+function renderSwitchCorpCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var corpName=f.corp_name||'';
+  var html='<div class="structured-card structured-card-switchcorp">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.switchCorp'))+'</div>';
+  if(corpName)html+='<div class="structured-card-title">'+esc(I18N.t('card.switchCorp.switchedTo'))+esc(corpName)+'</div>';
+  html+='</div>';
+  return html;
+}
+// RND-198: system event card renderer — dispatches by action subtype,
+// renders a distinct (non-bubble) card visually separate from chat messages.
+// QA fix: unknown subtypes must never render raw i18n keys (e.g.
+// "system.event.future_action"). If I18N.t() returns the key itself
+// (no translation exists), fall back to the generic localized label.
+function renderSystemCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  var subtype=f&&f.subtype||null;
+  var displayText=f&&f.display_text||null;
+  var html='<div class="system-card" style="text-align:center;font-size:.78rem;color:#999;padding:.25rem .5rem;">';
+  if(displayText){
+    html+=esc(displayText);
+  }else if(subtype){
+    var key='system.event.'+subtype;
+    var translated=I18N.t(key);
+    // I18N.t() returns the key itself when no translation exists —
+    // detect this and fall back to the generic system event label.
+    if(translated===key){
+      html+=esc(I18N.t('system.event.unknown'));
+    }else{
+      html+=esc(translated);
+    }
+  }else{
+    html+=esc(I18N.t('system.event.unknown'));
+  }
+  html+='</div>';
+  return html;
+}
 var STRUCTURED_CARD_RENDERERS={
   link:renderLinkCard,
   location:renderLocationCard,
@@ -917,7 +1048,15 @@ var STRUCTURED_CARD_RENDERERS={
   miniprogram:renderMiniprogramCard,
   card:renderStructuredFallback,
   docmsg:renderStructuredFallback,
-  audio_doc:renderStructuredFallback
+  audio_doc:renderStructuredFallback,
+  // RND-198 interactive business types
+  vote:renderVoteCard,
+  todo:renderTodoCard,
+  collect:renderCollectCard,
+  meeting:renderMeetingCard,
+  schedule:renderScheduleCard,
+  redpacket:renderRedpacketCard,
+  switch_corp:renderSwitchCorpCard
 };
 function renderStructuredCard(m){
   var fn=STRUCTURED_CARD_RENDERERS[m.normalized_type];
@@ -951,6 +1090,10 @@ function renderMessageBody(m){
   }
   if(m.renderer_strategy==='structured_card'){
     return renderStructuredCard(m);
+  }
+  // RND-198: system events rendered as centered non-bubble cards.
+  if(m.renderer_strategy==='system_card'){
+    return renderSystemCard(m);
   }
   // RND-197 fix: resolvePlaceholder must be keyed by normalized_type, not
   // raw msgtype — MessageTypeRegistry.entries is keyed by normalized_type

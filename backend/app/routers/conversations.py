@@ -560,6 +560,7 @@ class ConversationOut(BaseModel):
 
 class TimelineMessageOut(BaseModel):
     msgid: str
+    action: Optional[str] = None  # RND-198: WeCom ChatData action field (used for sys msgtype)
     sender: Optional[str] = None
     sender_display_name: Optional[str] = None
     sender_raw_id: Optional[str] = None
@@ -991,9 +992,14 @@ def get_conversation_messages(
                     f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media/access"
                 )
 
+        action: Optional[str] = None
+        if msg.msgtype == "sys":
+            action = getattr(msg, "action", None)
+
         result.append(
             TimelineMessageOut(
                 msgid=msg.msgid,
+                action=action,
                 sender=msg.sender,
                 sender_display_name=(
                     resolve_person_display_name(msg.sender, display_names.get(msg.sender))

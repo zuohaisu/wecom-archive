@@ -1,4 +1,4 @@
-"""Structured message field extraction (RND-197).
+"""Structured message field extraction (RND-197, RND-198).
 
 RND-196's message_type_registry catalogs *which* parsing approach each
 msgtype needs (ParserStrategy) without implementing it. This module is
@@ -7,12 +7,21 @@ that implementation for the "basic structured message types" ticket
 own extraction paths elsewhere (content_text, sdkfileid) and are untouched
 here.
 
+RND-198 extends the same pattern to interactive business message types
+(vote, todo, collect, meeting, schedule, redpacket, switch_corp) and
+system events (sys with action-subtype dispatch).
+
 Coverage split, and why it isn't uniform:
 
   STRUCTURED_FIELDS (real field extraction) -- link, location, markdown,
   news, weapp (miniprogram). These have stable, well-documented WeCom
   archive-SDK payload shapes; parse_structured_content() dispatches to a
   dedicated parser per type below.
+
+  RND-198 types: vote, todo, collect, meeting, schedule, redpacket,
+  switch_corp also use STRUCTURED_FIELDS. Field names are the best-known
+  WeCom Conversation Archive API payload shapes (no fixtures exist in this
+  repo); all parsers degrade gracefully.
 
   RAW_PASSTHROUGH (raw preservation only, no field extraction) -- card
   (the ticket's "contact"), docmsg, audio_doc. No fixture, sample payload,
@@ -25,6 +34,10 @@ Coverage split, and why it isn't uniform:
   frontend. Confirming their real schema against WeCom's official
   Finance/Conversation-Archive SDK docs is a recommended follow-up, not
   attempted here.
+
+  CONTROL_SIGNAL (action-subtype dispatch) -- sys (system events). The
+  action field is extracted from the decrypted payload envelope and the
+  sys sub-payload is preserved raw.
 
 Every parser in this module is a pure function: it takes the
 msgtype-specific sub-payload dict (i.e. decrypted.get(msgtype, {})) and
@@ -52,6 +65,13 @@ _SAFE_URL_SCHEMES = frozenset({"http", "https"})
 # response size or render time. Excess items are dropped with a warning,
 # never silently truncated without a trace (ticket requirement).
 _NEWS_ITEM_CAP = 20
+
+# Defensive upper bound on vote items — a malformed payload with an
+# enormous item list must not blow up response size.
+_VOTE_ITEM_CAP = 50
+
+# Defensive upper bound on collect details — same rationale as above.
+_COLLECT_DETAIL_CAP = 50
 
 
 def safe_url(url: Any) -> Optional[str]:
@@ -87,6 +107,43 @@ def _clean_str(value: Any) -> Optional[str]:
         value = str(value)
     value = value.strip()
     return value or None
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    """Coerce a payload value to int, or None."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    """Coerce a payload value to float, or None."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_item_list(raw_items: Any, item_cap: int) -> tuple[list[dict], list[str]]:
+    """Parse an array of dict items, returning (parsed_items, warnings).
+
+    Each item is independently degraded (not-a-dict → empty fields) so a
+    single malformed entry cannot drop the entire list.
+    """
+    warnings: list[str] = []
+    if not isinstance(raw_items, list):
+        if raw_items is not None:
+            warnings.append("malformed_item_list")
+        raw_items = []
+    truncated = len(raw_items) > item_cap
+    if truncated:
+        warnings.append(f"item_list_truncated_at_{item_cap}")
+    return raw_items[:item_cap], warnings
 
 
 def parse_link_message(payload: dict) -> tuple[dict, list[str]]:
@@ -261,12 +318,272 @@ def parse_miniprogram_message(payload: dict) -> tuple[dict, list[str]]:
     return fields, warnings
 
 
+def parse_vote_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-198: WeCom vote/poll message.
+
+    Expected fields: votetitle, voteitem (list of {itemname, count}),
+    votetype, votestatus. No voter userids are extracted — only aggregate
+    item names and counts.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    title = _clean_str(payload.get("votetitle"))
+    if not title:
+        warnings.append("missing_title")
+
+    raw_items = payload.get("voteitem")
+    items, item_warnings = _parse_item_list(raw_items, _VOTE_ITEM_CAP)
+    warnings.extend(item_warnings)
+
+    parsed_items = []
+    for raw_item in items:
+        if isinstance(raw_item, dict):
+            parsed_items.append({
+                "name": _clean_str(raw_item.get("itemname")),
+                "count": _safe_int(raw_item.get("count")),
+            })
+        else:
+            parsed_items.append({"name": None, "count": None})
+
+    vote_type = _clean_str(payload.get("votetype"))
+    status = _clean_str(payload.get("votestatus"))
+
+    fields = {
+        "title": title,
+        "items": parsed_items,
+        "type": vote_type,
+        "status": status,
+    }
+    return fields, warnings
+
+
+def parse_todo_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-198: WeCom todo message.
+
+    Expected fields: title, content.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    title = _clean_str(payload.get("title"))
+    content = _clean_str(payload.get("content"))
+    if not title:
+        warnings.append("missing_title")
+
+    fields = {
+        "title": title,
+        "content": content,
+    }
+    return fields, warnings
+
+
+def parse_collect_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-198: WeCom collect (form/collection) message.
+
+    Expected fields: title, details (list of items), type.
+    Participant identifiers in details are intentionally not extracted.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    title = _clean_str(payload.get("title"))
+    if not title:
+        warnings.append("missing_title")
+
+    raw_details = payload.get("details")
+    details, detail_warnings = _parse_item_list(raw_details, _COLLECT_DETAIL_CAP)
+    warnings.extend(detail_warnings)
+
+    parsed_details = []
+    for raw_item in details:
+        # Privacy: collect details[].id is a participant/entry identifier
+        # and must not be extracted into fields (exposed via API).
+        # Only the display value is extracted.
+        if isinstance(raw_item, dict):
+            parsed_details.append({
+                "value": _clean_str(raw_item.get("value")),
+            })
+        else:
+            parsed_details.append({"value": None})
+
+    collect_type = _clean_str(payload.get("type"))
+
+    fields = {
+        "title": title,
+        "details": parsed_details,
+        "type": collect_type,
+    }
+    return fields, warnings
+
+
+def parse_meeting_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-198: WeCom meeting invitation message.
+
+    Expected fields: title, meetingtime, place, agenda.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    title = _clean_str(payload.get("title"))
+    if not title:
+        warnings.append("missing_title")
+
+    meeting_time = _safe_int(payload.get("meetingtime"))
+    place = _clean_str(payload.get("place"))
+    agenda = _clean_str(payload.get("agenda"))
+
+    fields = {
+        "title": title,
+        "time": meeting_time,
+        "place": place,
+        "agenda": agenda,
+    }
+    return fields, warnings
+
+
+def parse_schedule_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-198: WeCom schedule message.
+
+    Expected fields: title, starttime, endtime, place, description.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    title = _clean_str(payload.get("title"))
+    if not title:
+        warnings.append("missing_title")
+
+    starttime = _safe_int(payload.get("starttime"))
+    endtime = _safe_int(payload.get("endtime"))
+    place = _clean_str(payload.get("place"))
+    description = _clean_str(payload.get("description"))
+
+    fields = {
+        "title": title,
+        "starttime": starttime,
+        "endtime": endtime,
+        "place": place,
+        "description": description,
+    }
+    return fields, warnings
+
+
+def parse_redpacket_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-198: WeCom red packet (hongbao) message.
+
+    Expected fields: type (hbtype), wishing, totalnum.
+    Monetary amount (totalamount) is INTENTIONALLY NOT EXTRACTED into
+    fields for security reasons — preserved only in the raw sub-payload.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    red_type = _clean_str(payload.get("type"))
+    wishing = _clean_str(payload.get("wishing"))
+    totalnum = _safe_int(payload.get("totalnum"))
+
+    fields = {
+        "type": red_type,
+        "wishing": wishing,
+        "totalnum": totalnum,
+    }
+    return fields, warnings
+
+
+def parse_switch_corp_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-198: WeCom switch_corp message.
+
+    Expected fields: corpid, corp_name.
+    corpid is INTENTIONALLY NOT EXTRACTED into fields for security reasons
+    — preserved only in the raw sub-payload. Only corp_name is surfaced.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    corp_name = _clean_str(payload.get("corp_name"))
+    if not corp_name:
+        warnings.append("missing_corp_name")
+
+    fields = {
+        "corp_name": corp_name,
+    }
+    return fields, warnings
+
+
+def parse_system_event_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-198: WeCom sys (system event) message.
+
+    The action subtype is extracted from the decrypted payload envelope's
+    "action" field. The sys sub-payload itself typically contains
+    structured fields about the event (e.g. member userids for room
+    changes, corp info for switch_corp).
+
+    Expected action subtypes (from WeCom ChatData action field):
+      - "switch_corp": user switched to a different corp
+      - "create_room" / "update_room": group member join/leave/removal
+      - "conv_archive_auth": conversation archive authorization event
+      - unknown: any other action value is treated as unknown subtype
+
+    Participant userids in sys events are NOT extracted into fields —
+    only display-text context is surfaced.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    subtype = _clean_str(payload.get("subtype"))
+    if not subtype:
+        warnings.append("missing_subtype")
+
+    if subtype in ("create_room", "update_room"):
+        # Privacy: member_userid is a raw identifier and must not be
+        # extracted into fields (exposed via API).
+        member_count = _safe_int(payload.get("member_count"))
+        display_text = payload.get("display_text")
+
+        fields = {
+            "subtype": subtype,
+            "display_text": display_text if isinstance(display_text, str) else None,
+            "member_count": member_count,
+        }
+    elif subtype == "switch_corp":
+        corp_name = _clean_str(payload.get("corp_name"))
+        display_text = payload.get("display_text")
+        fields = {
+            "subtype": subtype,
+            "display_text": display_text if isinstance(display_text, str) else None,
+            "corp_name": corp_name,
+        }
+    elif subtype == "conv_archive_auth":
+        display_text = payload.get("display_text")
+        fields = {
+            "subtype": subtype,
+            "display_text": display_text if isinstance(display_text, str) else None,
+        }
+    else:
+        display_text = payload.get("display_text")
+        fields = {
+            "subtype": subtype,
+            "display_text": display_text if isinstance(display_text, str) else None,
+        }
+
+    return fields, warnings
+
+
 _STRUCTURED_FIELD_PARSERS = {
     "link": parse_link_message,
     "location": parse_location_message,
     "markdown": parse_markdown_message,
     "news": parse_news_message,
     "weapp": parse_miniprogram_message,
+    # RND-198 interactive business types
+    "vote": parse_vote_message,
+    "todo": parse_todo_message,
+    "collect": parse_collect_message,
+    "meeting": parse_meeting_message,
+    "schedule": parse_schedule_message,
+    "redpacket": parse_redpacket_message,
+    "switch_corp": parse_switch_corp_message,
 }
 
 
@@ -312,5 +629,37 @@ def parse_structured_content(msgtype: Optional[str], decrypted: dict) -> Optiona
         "audio_doc",
     ):
         return {"fields": None, "raw": sub_payload, "parse_warnings": ["unconfirmed_schema"]}
+
+    if definition.parser_strategy == ParserStrategy.CONTROL_SIGNAL and msgtype == "sys":
+        # Extract the action field from the decrypted payload envelope.
+        # The sys sub-payload typically contains structured event data
+        # under decrypted["sys"].
+        action = _clean_str(decrypted.get("action") if isinstance(decrypted, dict) else None)
+        display_text = _clean_str(sub_payload.get("display_text"))
+
+        # Build a synthetic payload for the system event parser
+        sys_payload: dict = {"subtype": action, "display_text": display_text}
+
+        # Extract known sub-payload fields based on common WeCom sys patterns
+        member_userid = _clean_str(sub_payload.get("member_userid"))
+        if member_userid:
+            sys_payload["member_userid"] = member_userid
+
+        member_count = _safe_int(sub_payload.get("member_count"))
+        if member_count is not None:
+            sys_payload["member_count"] = member_count
+
+        corp_name = _clean_str(sub_payload.get("corp_name"))
+        if corp_name:
+            sys_payload["corp_name"] = corp_name
+
+        if not action:
+            return {"fields": None, "raw": sub_payload, "parse_warnings": ["missing_action"]}
+
+        try:
+            fields, warnings = parse_system_event_message(sys_payload)
+        except Exception:
+            return {"fields": None, "raw": sub_payload, "parse_warnings": ["parse_failed"]}
+        return {"fields": fields, "raw": sub_payload, "parse_warnings": warnings}
 
     return None

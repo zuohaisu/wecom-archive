@@ -142,7 +142,6 @@ ZH_CN_LABELS = {
     "voice": "不支持语音消息",
     "file": "不支持文件消息",
     "emotion": "不支持表情消息",
-    "todo": "不支持待办消息",
 }
 
 
@@ -375,7 +374,6 @@ ZH_TW_LABELS = {
     "voice": "不支援語音訊息",
     "file": "不支援檔案訊息",
     "emotion": "不支援表情訊息",
-    "todo": "不支援待辦訊息",
 }
 
 EN_LABELS = {
@@ -383,7 +381,6 @@ EN_LABELS = {
     "voice": "Unsupported voice message",
     "file": "Unsupported file message",
     "emotion": "Unsupported sticker message",
-    "todo": "Unsupported to-do message",
 }
 
 
@@ -431,14 +428,14 @@ def test_labels_are_driven_by_registry_placeholder_key_not_hardcoded() -> None:
 I18N.setLocale('zh-CN');
 var before = renderMessageBody({msgtype:'video', normalized_type:'video', media_type:'unsupported', content_text:null});
 var originalKey = MessageTypeRegistry.entries.video.placeholderKey;
-MessageTypeRegistry.entries.video.placeholderKey = 'placeholder.todo';
+MessageTypeRegistry.entries.video.placeholderKey = 'placeholder.card';
 var after = renderMessageBody({msgtype:'video', normalized_type:'video', media_type:'unsupported', content_text:null});
 MessageTypeRegistry.entries.video.placeholderKey = originalKey;
 process.stdout.write(JSON.stringify({before:before, after:after}));
 """
     )
     assert out["before"] == '<div class="media-placeholder">不支持视频消息</div>'
-    assert out["after"] == '<div class="media-placeholder">不支持待办消息</div>'
+    assert out["after"] == '<div class="media-placeholder">不支持名片消息</div>'
 
 
 # ---------------------------------------------------------------------------
