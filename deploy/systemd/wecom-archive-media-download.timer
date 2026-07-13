@@ -1,5 +1,5 @@
 [Unit]
-Description=WeCom Archive Recent Image Media Download Timer — runs every 5 minutes
+Description=WeCom Archive Recent Media Download Timer — runs every 5 minutes
 
 [Timer]
 OnBootSec=5min

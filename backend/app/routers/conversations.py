@@ -63,22 +63,26 @@ from app.auth import get_current_user
 from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
-from app.media_classification import classify_media, resolve_image_media_status
+from app.media_classification import (
+    classify_media,
+    resolve_downloadable_media_status,
+)
 from app.message_type_registry import describe_message_type
 from app.media_storage import (
+    SERVABLE_MEDIA_MSGTYPES,
+    SUPPORTED_MIGRATION_MEDIA_TYPES,
     MediaObjectNotFound,
     MediaStorageConfigurationError,
     MediaStorageOperationError,
     MediaStorageUnavailable,
-    detect_image_content_type,
-    detect_image_content_type_for_ref,
+    detect_media_content_type_for_ref,
     get_media_storage_provider,
     get_signed_url_ttl_seconds,
     object_key_tenant_prefix_matches,
+    resolve_downloadable_media_file_state,
+    resolve_downloadable_media_state,
     resolve_effective_storage_reference,
-    resolve_image_file_state,
-    resolve_media_file_state,
-    resolve_servable_image_path,
+    resolve_servable_downloadable_media_path,
 )
 
 router = APIRouter()
@@ -945,7 +949,16 @@ def get_conversation_messages(
 
         media_url: Optional[str] = None
         media_access_url: Optional[str] = None
-        if media.media_type == "image":
+        if media.media_type in SUPPORTED_MIGRATION_MEDIA_TYPES:
+            # RND-199: generalized from "== 'image'" to every media_type
+            # classify_media() preserves as media_type — image/video/voice/
+            # file (see app.media_storage.SUPPORTED_MIGRATION_MEDIA_TYPES).
+            # emotion is deliberately excluded here: classify_media()
+            # collapses it into the generic UNSUPPORTED bucket
+            # (media_type="unsupported"), which is never a member of that
+            # set, so the timeline's rendering contract for emotion is
+            # unchanged — only the dedicated media route additionally
+            # serves emotion (see SERVABLE_MEDIA_MSGTYPES).
             media_file = media_files_map.get(msg.id)
             file_state = "missing"
             if media_file and media_file.download_status == "downloaded":
@@ -965,12 +978,13 @@ def get_conversation_messages(
                 # response for every message in the page — the conversation
                 # still loads. MediaObjectNotFound (surfaced internally as a
                 # "missing" tri-state result, not an exception here — see
-                # resolve_image_file_state) is the only case mapped to
-                # "missing". The dedicated media route (get_message_media)
-                # independently returns 503 for the same outage, for a
-                # request that is actually about this one object.
+                # resolve_downloadable_media_file_state) is the only case
+                # mapped to "missing". The dedicated media route
+                # (get_message_media) independently returns 503 for the
+                # same outage, for a request that is actually about this
+                # one object.
                 try:
-                    file_state = resolve_media_file_state(media_file)
+                    file_state = resolve_downloadable_media_state(media_file)
                 except MediaStorageUnavailable:
                     file_state = "unavailable"
                 except MediaStorageConfigurationError:
@@ -981,7 +995,7 @@ def get_conversation_messages(
                     # rather than a 500. The dedicated media route keeps its
                     # own, unchanged 500 behavior for the latter case.
                     file_state = "unavailable"
-            media = resolve_image_media_status(
+            media = resolve_downloadable_media_status(
                 media,
                 media_file.download_status if media_file else None,
                 file_state,
@@ -1063,7 +1077,7 @@ def _resolve_authorized_media(
     if msg is None:
         raise HTTPException(status_code=404, detail="Not found")
 
-    if msg.msgtype != "image":
+    if msg.msgtype not in SERVABLE_MEDIA_MSGTYPES:
         raise HTTPException(status_code=404, detail="Not found")
 
     media_file = (
@@ -1102,7 +1116,7 @@ def _resolve_servable_backend_and_ref(media_file: MediaFile, route_label: str) -
         raise HTTPException(status_code=404, detail="Not found")
 
     try:
-        file_state = resolve_image_file_state(effective_ref, effective_backend)
+        file_state = resolve_downloadable_media_file_state(effective_ref, effective_backend)
     except MediaStorageConfigurationError:
         logger.error(
             "%s: storage configuration error (backend=%s)", route_label, effective_backend
@@ -1175,18 +1189,20 @@ def get_message_media(
     provider = get_media_storage_provider(effective_backend)
 
     if provider.supports_local_path():
-        safe_path = resolve_servable_image_path(effective_ref, effective_backend)
+        safe_path = resolve_servable_downloadable_media_path(effective_ref, effective_backend)
         if safe_path is None:
             raise HTTPException(status_code=404, detail="Not found")
-        content_type = detect_image_content_type(safe_path)
+        content_type = detect_media_content_type_for_ref(str(safe_path))
         return FileResponse(path=str(safe_path), media_type=content_type)
 
     # Cloud-backed media (RND-174): still a valid controlled access path —
     # fetch the bytes through the provider and proxy them back. The
-    # response shape (raw image bytes, same URL, same content-type
-    # behavior) is unchanged. No Qiniu URL or credential ever reaches the
-    # client through this route.
-    content_type = detect_image_content_type_for_ref(effective_ref)
+    # response shape (raw bytes, same URL, same content-type behavior) is
+    # unchanged. No Qiniu URL or credential ever reaches the client
+    # through this route. detect_media_content_type_for_ref covers every
+    # RND-199 supported media category (image/video/voice/file), not
+    # image only.
+    content_type = detect_media_content_type_for_ref(effective_ref)
     try:
         data = provider.read_bytes(effective_ref)
     except MediaObjectNotFound:
@@ -1264,7 +1280,7 @@ def get_message_media_access(
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         media_file, "media access route"
     )
-    content_type = detect_image_content_type_for_ref(effective_ref)
+    content_type = detect_media_content_type_for_ref(effective_ref)
 
     if effective_backend == "local":
         return MediaAccessOut(

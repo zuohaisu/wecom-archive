@@ -109,11 +109,12 @@ Cursor is persisted after each successful batch so restarts are safe and non-dup
 [systemd timer: OnBootSec=5min, OnUnitActiveSec=5min]
          │
          ▼
-download_wecom_image_media_once.py
+download_wecom_media_once.py (unified pipeline: app/media_download.py —
+                               image/voice/video/file/emotion, --types selectable)
   ├── Acquires file lock (MEDIA_DOWNLOAD_LOCK_PATH)
-  ├── Selects candidate image messages (--since-hours 72, --limit 20)
+  ├── Selects candidate messages (--since-hours 72, --limit 20)
   ├── Downloads via WeCom SDK → .part file
-  ├── Validates bytes (magic-byte detection)
+  ├── Validates bytes (magic-byte detection, per-type category)
   └── Publishes → media_files row updated to download_status='downloaded'
 ```
 

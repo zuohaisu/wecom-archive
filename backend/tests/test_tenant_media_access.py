@@ -16,7 +16,7 @@ Validates:
     load-bearing check, not decorative.
   - _load_media_files_map() (the timeline serializer's batch lookup) never
     returns another tenant's media_files row.
-  - get_or_reset_media_file() (scripts/download_wecom_image_media_once.py)
+  - get_or_reset_media_file() (app/media_download.py — RND-199 unified pipeline)
     scopes creation/reset to (tenant_id, sdkfileid): two tenants get
     independent media_files rows even with a colliding sdkfileid, which
     would have hard-failed under the old global UNIQUE(sdkfileid)
@@ -228,7 +228,7 @@ def test_get_or_reset_media_file_scoped_by_tenant_not_just_sdkfileid(db) -> None
     UNIQUE(sdkfileid) constraint, the second tenant's insert would have
     failed outright, or a global lookup would have returned the first
     tenant's row."""
-    from scripts.download_wecom_image_media_once import get_or_reset_media_file
+    from app.media_download import get_or_reset_media_file
 
     msg_a = _insert_message(
         db, msgtype="image", sender="staff_a", sdkfileid="sdk-shared",
@@ -345,7 +345,7 @@ def test_media_files_backfill_does_not_touch_already_tagged_rows(db) -> None:
 # ---------------------------------------------------------------------------
 # Negative tests — stray cross-tenant media_files rows must not affect the
 # download worker's candidate selection, repair selection, or count-only
-# metrics (scripts/download_wecom_image_media_once.py).
+# metrics (app/media_download.py — RND-199 unified pipeline).
 # ---------------------------------------------------------------------------
 
 
@@ -354,7 +354,7 @@ def test_build_candidate_query_ignores_stray_other_tenant_downloaded_row(db) -> 
     other-tenant row (same archive_message_id) marked "downloaded", must
     still be selected as a fresh candidate — the stray row must not make it
     look like this tenant already has a completed download."""
-    from scripts.download_wecom_image_media_once import build_candidate_query
+    from app.media_download import build_candidate_query
 
     msg_a = _insert_message(
         db, msgtype="image", sender="staff_a", sdkfileid="sdk-a",
@@ -362,7 +362,7 @@ def test_build_candidate_query_ignores_stray_other_tenant_downloaded_row(db) -> 
     )
     _insert_media_file(db, msg_a.id, _TENANT_B, "sdk-b-stray", download_status="downloaded")
 
-    candidates = build_candidate_query(db, _TENANT_A, retry=False).all()
+    candidates = build_candidate_query(db, _TENANT_A, {"image"}, retry=False).all()
 
     assert [m.id for m in candidates] == [msg_a.id]
 
@@ -371,7 +371,7 @@ def test_build_candidate_query_ignores_stray_other_tenant_pending_row(db) -> Non
     """A stray other-tenant "pending" row must not affect this tenant's
     candidate selection either — eligibility is judged purely on this
     tenant's own media_files row (or lack thereof)."""
-    from scripts.download_wecom_image_media_once import build_candidate_query
+    from app.media_download import build_candidate_query
 
     msg_a = _insert_message(
         db, msgtype="image", sender="staff_a", sdkfileid="sdk-a2",
@@ -379,7 +379,7 @@ def test_build_candidate_query_ignores_stray_other_tenant_pending_row(db) -> Non
     )
     _insert_media_file(db, msg_a.id, _TENANT_B, "sdk-b-stray2", download_status="pending")
 
-    candidates = build_candidate_query(db, _TENANT_A, retry=False).all()
+    candidates = build_candidate_query(db, _TENANT_A, {"image"}, retry=False).all()
 
     assert [m.id for m in candidates] == [msg_a.id]
 
@@ -389,7 +389,7 @@ def test_build_candidate_query_excludes_message_with_own_tenant_downloaded_row(d
     own media_files row says "downloaded" — proves the stray-row tests
     above are exercising real filtering, not a query that always returns
     everything."""
-    from scripts.download_wecom_image_media_once import build_candidate_query
+    from app.media_download import build_candidate_query
 
     msg_a = _insert_message(
         db, msgtype="image", sender="staff_a", sdkfileid="sdk-a-done",
@@ -397,7 +397,7 @@ def test_build_candidate_query_excludes_message_with_own_tenant_downloaded_row(d
     )
     _insert_media_file(db, msg_a.id, _TENANT_A, "sdk-a-done", download_status="downloaded")
 
-    candidates = build_candidate_query(db, _TENANT_A, retry=False).all()
+    candidates = build_candidate_query(db, _TENANT_A, {"image"}, retry=False).all()
 
     assert candidates == []
 
@@ -407,7 +407,7 @@ def test_build_downloaded_repair_query_excludes_stray_other_tenant_row(db) -> No
     surface in this tenant's stale-repair scan, even when it shares an
     archive_message_id with one of this tenant's own messages and this
     tenant has no media_files row of its own."""
-    from scripts.download_wecom_image_media_once import build_downloaded_repair_query
+    from app.media_download import build_downloaded_repair_query
 
     msg_a = _insert_message(
         db, msgtype="image", sender="staff_a", sdkfileid="sdk-a3",
@@ -415,7 +415,7 @@ def test_build_downloaded_repair_query_excludes_stray_other_tenant_row(db) -> No
     )
     _insert_media_file(db, msg_a.id, _TENANT_B, "sdk-b-stray3", download_status="downloaded")
 
-    results = build_downloaded_repair_query(db, _TENANT_A).all()
+    results = build_downloaded_repair_query(db, _TENANT_A, {"image"}).all()
 
     assert results == []
 
@@ -424,7 +424,7 @@ def test_build_downloaded_repair_query_finds_own_row_despite_stray_other_tenant_
     """Positive counterpart: tenant A's own "downloaded" row must still be
     found for repair scanning even when a stray tenant-B row exists for the
     same archive_message_id."""
-    from scripts.download_wecom_image_media_once import build_downloaded_repair_query
+    from app.media_download import build_downloaded_repair_query
 
     msg_a = _insert_message(
         db, msgtype="image", sender="staff_a", sdkfileid="sdk-a4",
@@ -433,7 +433,7 @@ def test_build_downloaded_repair_query_finds_own_row_despite_stray_other_tenant_
     own_media = _insert_media_file(db, msg_a.id, _TENANT_A, "sdk-a4", download_status="downloaded")
     _insert_media_file(db, msg_a.id, _TENANT_B, "sdk-b-stray4", download_status="downloaded")
 
-    results = build_downloaded_repair_query(db, _TENANT_A).all()
+    results = build_downloaded_repair_query(db, _TENANT_A, {"image"}).all()
 
     assert len(results) == 1
     result_msg, result_media = results[0]
@@ -444,7 +444,7 @@ def test_build_downloaded_repair_query_finds_own_row_despite_stray_other_tenant_
 def test_count_candidates_with_existing_media_row_ignores_stray_other_tenant_row(db) -> None:
     """--count-only metric must not count a message as "already has a media
     row" on the strength of a stray other-tenant media_files row."""
-    from scripts.download_wecom_image_media_once import (
+    from app.media_download import (
         count_candidates_with_existing_media_row,
     )
 
@@ -454,11 +454,11 @@ def test_count_candidates_with_existing_media_row_ignores_stray_other_tenant_row
     )
     _insert_media_file(db, msg_a.id, _TENANT_B, "sdk-b-stray5", download_status="downloaded")
 
-    assert count_candidates_with_existing_media_row(db, _TENANT_A) == 0
+    assert count_candidates_with_existing_media_row(db, _TENANT_A, {"image"}) == 0
 
 
 def test_count_candidates_with_existing_media_row_counts_own_tenant_row(db) -> None:
-    from scripts.download_wecom_image_media_once import (
+    from app.media_download import (
         count_candidates_with_existing_media_row,
     )
 
@@ -468,4 +468,4 @@ def test_count_candidates_with_existing_media_row_counts_own_tenant_row(db) -> N
     )
     _insert_media_file(db, msg_a.id, _TENANT_A, "sdk-a6", download_status="downloaded")
 
-    assert count_candidates_with_existing_media_row(db, _TENANT_A) == 1
+    assert count_candidates_with_existing_media_row(db, _TENANT_A, {"image"}) == 1

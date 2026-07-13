@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from typing import NamedTuple, Optional
 
+from app.media_storage import SUPPORTED_MIGRATION_MEDIA_TYPES
 from app.message_type_registry import (
     MessageCategory,
     MessageSupportStatus,
@@ -193,4 +194,43 @@ def resolve_image_media_status(
     # "pending", or no media_files row at all (None) — base classification
     # (not_downloaded/unknown, media_download_not_implemented) already
     # covers this correctly.
+    return base
+
+
+def resolve_downloadable_media_status(
+    base: MediaClassification,
+    media_file_download_status: Optional[str],
+    file_state: str = "missing",
+) -> MediaClassification:
+    """resolve_image_media_status()'s generalization (RND-199): the exact
+    same downloaded/failed/pending state machine, but applied to every
+    media_type whose classify_media() output preserves msgtype as
+    media_type — image/video/voice/file (see
+    app.media_storage.SUPPORTED_MIGRATION_MEDIA_TYPES) — instead of image
+    only. For media_type == "image" this produces byte-identical results
+    to resolve_image_media_status (same branches, same reason strings).
+
+    Deliberately does not cover "emotion": classify_media() collapses
+    emotion into the generic UNSUPPORTED bucket (media_type="unsupported"),
+    which is never a member of SUPPORTED_MIGRATION_MEDIA_TYPES, so this
+    function is a no-op for it by construction — emotion's timeline
+    media_status/placeholder rendering is intentionally unchanged by this
+    ticket (see app.media_storage.SERVABLE_MEDIA_MSGTYPES's docstring);
+    only the media *route* (not the timeline) exposes emotion media.
+    """
+    if base.media_type not in SUPPORTED_MIGRATION_MEDIA_TYPES:
+        return base
+
+    if media_file_download_status == "downloaded":
+        if file_state == "servable":
+            return MediaClassification(base.media_type, "available", None)
+        if file_state == "unsupported_type":
+            return MediaClassification(base.media_type, "failed", "media_file_type_unsupported")
+        if file_state == "unavailable":
+            return MediaClassification(base.media_type, "unavailable", "media_storage_unavailable")
+        return MediaClassification(base.media_type, "failed", "media_file_missing_on_disk")
+
+    if media_file_download_status == "failed":
+        return MediaClassification(base.media_type, "failed", "media_download_failed")
+
     return base

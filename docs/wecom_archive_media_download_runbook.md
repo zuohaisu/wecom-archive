@@ -1,11 +1,15 @@
-# WeCom Archive Recent Image Media Download Timer — Runbook
+# WeCom Archive Recent Media Download Timer — Runbook
 
 ## Overview
 
-`download_wecom_image_media_once.py` (RND-147/RND-151) is the existing manual
-one-shot image media downloader. RND-168 adds a systemd timer that runs it
-automatically and periodically, so newly ingested image messages become
-previewable without an operator running the script by hand.
+`download_wecom_media_once.py` (RND-147 image support, RND-151 recency/
+ordering, RND-199 voice/video/file/emotion — all unified onto this single
+script) is the sole media downloader for this codebase. RND-168 adds a
+systemd timer that runs it automatically and periodically, so newly
+ingested media messages become previewable without an operator running
+the script by hand. It defaults to every supported type
+(`image,voice,video,file,emotion`); an operator can pass `--types` to
+narrow a given run.
 
 The timer always invokes the script with:
 
@@ -16,7 +20,7 @@ The timer always invokes the script with:
 - `--since-hours 72` restricts candidate selection to recently ingested
   messages, avoiding old candidates whose WeCom media retrieval window has
   likely already expired.
-- `--newest-first` prioritizes the most recently ingested images within that
+- `--newest-first` prioritizes the most recently ingested media within that
   window.
 - `--limit 20` bounds each run to a small batch.
 - `--retry` is intentionally **not** used by the timer — retrying failed
@@ -37,8 +41,8 @@ inside, or block that worker:
 
 ## Overlap prevention
 
-Two layers, per the existing RND-147/RND-151 script behavior
-(`backend/scripts/download_wecom_image_media_once.py`):
+Two layers, per the script's own behavior
+(`backend/scripts/download_wecom_media_once.py`):
 
 1. **systemd**: a `Type=oneshot` service invoked by `OnUnitActiveSec=5min`
    will not be started again by the timer while the previous invocation is
@@ -80,7 +84,7 @@ by the script on first run.
 ## Environment variables
 
 All environment variables required by
-`scripts/download_wecom_image_media_once.py` must already be set in the
+`scripts/download_wecom_media_once.py` must already be set in the
 same `.env` used by the archive worker and backend service — see the
 script's module docstring for the full list (`DATABASE_URL`,
 `WECOM_CORP_ID`, `WECOM_SDK_LIB_PATH`, `WECOM_ARCHIVE_SECRET`,
@@ -108,13 +112,13 @@ source .venv/bin/activate
 set -a
 source .env
 set +a
-python scripts/download_wecom_image_media_once.py --since-hours 72 --newest-first --limit 20
+python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 20
 ```
 
 Successful output ends with:
 
 ```
-[PASS] download_wecom_image_media_once completed
+[PASS] download_wecom_media_once completed
 ```
 
 ---
@@ -182,10 +186,10 @@ message bodies, or other internal identifiers — see the script's own
 - `sudo systemctl list-timers --all | grep wecom-archive` shows both the
   worker timer and this timer scheduled independently.
 - `sudo journalctl -u wecom-archive-media-download.service -n 50 --no-pager`
-  shows `[PASS] download_wecom_image_media_once completed` (or the safe
+  shows `[PASS] download_wecom_media_once completed` (or the safe
   "another instance already holds the run lock" no-op) after each fire.
 - Capture before/after aggregate media counts to confirm the timer is
-  making progress: run `python scripts/download_wecom_image_media_once.py
+  making progress: run `python scripts/download_wecom_media_once.py
   --count-only` (see "Manual script run" above for environment setup)
   once before enabling the timer and again after a few fires, and confirm
   `candidates_with_existing_media_row` increases while `candidate_total`
@@ -197,7 +201,8 @@ message bodies, or other internal identifiers — see the script's own
   (`curl http://127.0.0.1:8035/health`) still report normally.
 - Admin timeline continues to show inline previews for newly downloaded
   images without a manual script run (RND-144/RND-151 behavior, now
-  automatic).
+  automatic), and `/media`+`/media/access` serve voice/video/file/emotion
+  once downloaded (RND-199).
 
 ---
 

@@ -1,11 +1,13 @@
 """
 Tests for RND-174 — download worker writing through QiniuStorageProvider.
 
-Scope: scripts/download_wecom_image_media_once.py's download_one(), proving
-it writes through the storage-provider boundary unchanged (the worker never
-calls the qiniu SDK directly) whether the provider is Local or Qiniu.
-Mocks the Qiniu SDK boundary with an in-memory dict standing in for bucket
-contents; never calls the real Qiniu service.
+Scope: app/media_download.py's download_one() (the unified pipeline —
+RND-199 folded image into it; see that module's docstring), proving it
+writes through the storage-provider boundary unchanged (the worker never
+calls the qiniu SDK directly) whether the provider is Local or Qiniu, for
+the image message type specifically. Mocks the Qiniu SDK boundary with an
+in-memory dict standing in for bucket contents; never calls the real Qiniu
+service.
 
 Run (from backend/):
     pytest tests/test_qiniu_worker_integration.py -v
@@ -74,7 +76,7 @@ def _wire_success(provider: QiniuStorageProvider, monkeypatch, store: dict) -> N
 
 
 def test_qiniu_mode_download_one_writes_through_provider(monkeypatch) -> None:
-    import scripts.download_wecom_image_media_once as script
+    import app.media_download as media_download
 
     provider = _make_qiniu_provider()
     store: dict = {}
@@ -82,11 +84,11 @@ def test_qiniu_mode_download_one_writes_through_provider(monkeypatch) -> None:
 
     jpeg_bytes = b"\xff\xd8\xff" + b"jpeg-body"
     monkeypatch.setattr(
-        script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
+        media_download.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
     )
 
-    outcome, detail, file_size = script.download_one(
-        MagicMock(), MagicMock(), provider, "tenant-a", 42, "sdk-1", timeout=5
+    outcome, detail, file_size = media_download.download_one(
+        MagicMock(), MagicMock(), provider, "tenant-a", 42, "image", "sdk-1", timeout=5
     )
 
     assert outcome == "downloaded"
@@ -101,7 +103,7 @@ def test_qiniu_mode_download_one_writes_through_provider(monkeypatch) -> None:
 
 
 def test_qiniu_mode_upload_failure_does_not_mark_downloaded(monkeypatch) -> None:
-    import scripts.download_wecom_image_media_once as script
+    import app.media_download as media_download
 
     provider = _make_qiniu_provider()
     monkeypatch.setattr(provider._qiniu, "put_data", lambda *a, **k: (None, _FakeInfo(579)))
@@ -111,11 +113,11 @@ def test_qiniu_mode_upload_failure_does_not_mark_downloaded(monkeypatch) -> None
 
     jpeg_bytes = b"\xff\xd8\xff" + b"jpeg-body"
     monkeypatch.setattr(
-        script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
+        media_download.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
     )
 
-    outcome, detail, file_size = script.download_one(
-        MagicMock(), MagicMock(), provider, "tenant-a", 43, "sdk-2", timeout=5
+    outcome, detail, file_size = media_download.download_one(
+        MagicMock(), MagicMock(), provider, "tenant-a", 43, "image", "sdk-2", timeout=5
     )
 
     assert outcome == "failed"
@@ -124,17 +126,17 @@ def test_qiniu_mode_upload_failure_does_not_mark_downloaded(monkeypatch) -> None
 
 
 def test_qiniu_mode_unsupported_type_cleans_up_part_object(monkeypatch) -> None:
-    import scripts.download_wecom_image_media_once as script
+    import app.media_download as media_download
 
     provider = _make_qiniu_provider()
     store: dict = {}
     _wire_success(provider, monkeypatch, store)
 
     garbage = b"not-an-image-at-all"
-    monkeypatch.setattr(script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([garbage]))
+    monkeypatch.setattr(media_download.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([garbage]))
 
-    outcome, detail, file_size = script.download_one(
-        MagicMock(), MagicMock(), provider, "tenant-a", 44, "sdk-3", timeout=5
+    outcome, detail, file_size = media_download.download_one(
+        MagicMock(), MagicMock(), provider, "tenant-a", 44, "image", "sdk-3", timeout=5
     )
 
     assert outcome == "failed"
@@ -146,7 +148,7 @@ def test_qiniu_mode_unsupported_type_cleans_up_part_object(monkeypatch) -> None:
 def test_qiniu_mode_retry_is_idempotent_and_overwrites_final_key(monkeypatch) -> None:
     """A retried download of the same message must overwrite the same
     deterministic object key, not accumulate duplicate objects."""
-    import scripts.download_wecom_image_media_once as script
+    import app.media_download as media_download
 
     provider = _make_qiniu_provider()
     store: dict = {}
@@ -154,20 +156,20 @@ def test_qiniu_mode_retry_is_idempotent_and_overwrites_final_key(monkeypatch) ->
 
     first_bytes = b"\xff\xd8\xff" + b"first-body"
     monkeypatch.setattr(
-        script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([first_bytes])
+        media_download.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([first_bytes])
     )
-    outcome1, detail1, file_size1 = script.download_one(
-        MagicMock(), MagicMock(), provider, "tenant-a", 45, "sdk-4", timeout=5
+    outcome1, detail1, file_size1 = media_download.download_one(
+        MagicMock(), MagicMock(), provider, "tenant-a", 45, "image", "sdk-4", timeout=5
     )
     assert outcome1 == "downloaded"
     assert file_size1 == len(first_bytes)
 
     second_bytes = b"\xff\xd8\xff" + b"retried-body"
     monkeypatch.setattr(
-        script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([second_bytes])
+        media_download.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([second_bytes])
     )
-    outcome2, detail2, file_size2 = script.download_one(
-        MagicMock(), MagicMock(), provider, "tenant-a", 45, "sdk-4", timeout=5
+    outcome2, detail2, file_size2 = media_download.download_one(
+        MagicMock(), MagicMock(), provider, "tenant-a", 45, "image", "sdk-4", timeout=5
     )
     assert outcome2 == "downloaded"
     assert detail1 == detail2  # same deterministic final key
@@ -179,15 +181,15 @@ def test_qiniu_mode_retry_is_idempotent_and_overwrites_final_key(monkeypatch) ->
 def test_local_mode_unchanged_by_qiniu_addition(tmp_path, monkeypatch) -> None:
     """Regression: local mode (a Path passed as `storage`) behaves exactly
     as it did before the Qiniu provider was added."""
-    import scripts.download_wecom_image_media_once as script
+    import app.media_download as media_download
 
     jpeg_bytes = b"\xff\xd8\xff" + b"jpeg-body"
     monkeypatch.setattr(
-        script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
+        media_download.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
     )
 
-    outcome, detail, file_size = script.download_one(
-        MagicMock(), MagicMock(), tmp_path, "tenant-a", 46, "sdk-5", timeout=5
+    outcome, detail, file_size = media_download.download_one(
+        MagicMock(), MagicMock(), tmp_path, "tenant-a", 46, "image", "sdk-5", timeout=5
     )
 
     assert outcome == "downloaded"
@@ -209,7 +211,7 @@ def test_local_mode_unchanged_by_qiniu_addition(tmp_path, monkeypatch) -> None:
 
 
 def test_download_one_success_path_never_calls_size_bytes_or_exists(monkeypatch) -> None:
-    import scripts.download_wecom_image_media_once as script
+    import app.media_download as media_download
 
     provider = _make_qiniu_provider()
     store: dict = {}
@@ -226,10 +228,10 @@ def test_download_one_success_path_never_calls_size_bytes_or_exists(monkeypatch)
     monkeypatch.setattr(provider, "exists", _raise_if_called)
 
     jpeg_bytes = b"\xff\xd8\xff" + b"jpeg-body"
-    monkeypatch.setattr(script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes]))
+    monkeypatch.setattr(media_download.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes]))
 
-    outcome, detail, file_size = script.download_one(
-        MagicMock(), MagicMock(), provider, "tenant-a", 50, "sdk-6", timeout=5
+    outcome, detail, file_size = media_download.download_one(
+        MagicMock(), MagicMock(), provider, "tenant-a", 50, "image", "sdk-6", timeout=5
     )
 
     assert outcome == "downloaded"
@@ -251,12 +253,13 @@ def _query_mock(all_result=None, count_result=0, first_result=None):
 
 def _run_qiniu_main_with_one_candidate(monkeypatch, tmp_path, provider, jpeg_or_garbage_chunks):
     """Same scaffolding as
-    test_download_wecom_image_media_once.py::_run_main_with_one_candidate,
+    tests/test_download_wecom_media_once.py::_run_main_with_one_candidate,
     but wires script.get_media_storage_provider to hand back a
     pre-configured fake-SDK-boundary QiniuStorageProvider instead of
     reading STORAGE_LOCAL_PATH, so the full _run() flow (including the
-    media_files persistence step) exercises the Qiniu path end to end."""
-    import scripts.download_wecom_image_media_once as script
+    media_files persistence step) exercises the Qiniu path end to end for
+    an "image" candidate through the unified script."""
+    import scripts.download_wecom_media_once as script
     from app.db.models import MediaFile
 
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download.lock"))
@@ -267,13 +270,13 @@ def _run_qiniu_main_with_one_candidate(monkeypatch, tmp_path, provider, jpeg_or_
     monkeypatch.setenv("MEDIA_STORAGE_PROVIDER", "qiniu_kodo")
 
     tenant_row = SimpleNamespace(tenant_id="tenant-a")
-    candidate_msg = SimpleNamespace(id=1, sdkfileid="sdk-secret-1")
+    candidate_msg = SimpleNamespace(id=1, sdkfileid="sdk-secret-1", msgtype="image")
     media_file_row = MediaFile(sdkfileid="sdk-secret-1", archive_message_id=1, download_status="pending")
 
     def _query(model):
         if model is script.TenantWecomConfig:
             return _query_mock(first_result=tenant_row)
-        if model is script.MediaFile:
+        if model is MediaFile:
             return _query_mock(first_result=media_file_row)
         raise AssertionError(f"unexpected model queried: {model}")
 
@@ -308,7 +311,9 @@ def test_run_qiniu_success_persists_storage_backend_and_ref_without_stat(
     """End-to-end (main()) proof of the QA fix: a successful Qiniu upload
     marks the row downloaded, with storage_backend/storage_ref/file_size
     persisted from the download itself — never from a post-publish
-    size_bytes() call, which is monkeypatched here to raise if invoked."""
+    size_bytes() call, which is monkeypatched here to raise if invoked —
+    driven through scripts/download_wecom_media_once.py, the sole
+    downloader (RND-199), for an "image" candidate."""
     provider = _make_qiniu_provider()
     store: dict = {}
     _wire_success(provider, monkeypatch, store)
@@ -328,6 +333,7 @@ def test_run_qiniu_success_persists_storage_backend_and_ref_without_stat(
     assert exc.value.code == 0
 
     assert media_file_row.download_status == "downloaded"
+    assert media_file_row.file_type == "image"
     assert media_file_row.storage_backend == "qiniu_kodo"
     assert media_file_row.storage_ref == "tenants/tenant-a/images/1.jpg"
     assert media_file_row.file_size == len(jpeg_bytes)

@@ -22,7 +22,7 @@ Scope:
     this is the audit verifying the fix, not a parallel check.
 
 Reuses the sqlite-backed schema/fixtures from test_reachability_audit.py
-(same technique test_download_wecom_image_media_once.py uses to reuse
+(same technique test_download_wecom_media_once.py uses to reuse
 test_staff_seats._msg) so this exercises the real ORM models and the real
 audit rather than a hand-rolled substitute.
 

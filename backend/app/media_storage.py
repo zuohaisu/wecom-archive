@@ -846,3 +846,94 @@ def compute_sha256_checksum(data: bytes) -> str:
     post-publish stat/fetch" discipline (see qiniu_storage.py's
     file_size docstring)."""
     return hashlib.sha256(data).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Generic media serving (RND-199)
+#
+# The image-only route/timeline helpers above (resolve_image_file_state,
+# resolve_servable_image_path, detect_image_content_type(_for_ref)) stay
+# exactly as they were — every existing caller of those keeps identical
+# behavior. The functions below are new, separate counterparts that widen
+# the same tri-state predicate to every media extension this pipeline can
+# serve (image/video/voice/file — the combined table behind
+# detect_media_content_type_for_ref), for callers (the media route,
+# timeline) that now also serve voice/video/file. Every image extension
+# the image-only functions accept is a strict subset of that combined
+# table, so a row already "servable" under the image-only predicate is
+# "servable" under this one too — image behavior is unchanged.
+# ---------------------------------------------------------------------------
+
+
+def resolve_downloadable_media_file_state(
+    storage_ref: Optional[str], storage_backend: Optional[str] = None
+) -> str:
+    """resolve_image_file_state()'s generic counterpart (RND-199): the same
+    servable/unsupported_type/missing tri-state, allow-listed against every
+    RND-186-supported media extension instead of image extensions only."""
+    provider = get_media_storage_provider(storage_backend)
+
+    if provider.supports_local_path():
+        resolved = resolve_safe_media_path(storage_ref, storage_backend)
+        if resolved is None:
+            return "missing"
+        if detect_media_content_type_for_ref(str(resolved)) is None:
+            return "unsupported_type"
+        return "servable"
+
+    if not storage_ref:
+        return "missing"
+    # See resolve_image_file_state's docstring: provider.exists() raises
+    # MediaStorageUnavailable/MediaStorageConfigurationError for anything
+    # ambiguous rather than returning False, deliberately left uncaught.
+    if not provider.exists(storage_ref):
+        return "missing"
+    if detect_media_content_type_for_ref(storage_ref) is None:
+        return "unsupported_type"
+    return "servable"
+
+
+def resolve_downloadable_media_state(media_file) -> str:
+    """resolve_media_file_state()'s generic counterpart (RND-199): driven
+    entirely by a media_files row's own storage fields (falling back to
+    legacy local_path per resolve_effective_storage_reference), resolved
+    against resolve_downloadable_media_file_state instead of the image-only
+    predicate. Duck-typed like resolve_media_file_state."""
+    effective_backend, effective_ref = resolve_effective_storage_reference(
+        getattr(media_file, "storage_backend", None),
+        getattr(media_file, "storage_ref", None),
+        getattr(media_file, "local_path", None),
+    )
+    if effective_backend is None:
+        return "missing"
+    return resolve_downloadable_media_file_state(effective_ref, effective_backend)
+
+
+def resolve_servable_downloadable_media_path(
+    local_path: Optional[str], storage_backend: Optional[str] = None
+) -> Optional[Path]:
+    """resolve_servable_image_path()'s generic counterpart (RND-199):
+    returns the resolved Path only when
+    resolve_downloadable_media_file_state(local_path) == "servable"."""
+    resolved = resolve_safe_media_path(local_path, storage_backend)
+    if resolved is None:
+        return None
+    if detect_media_content_type_for_ref(str(resolved)) is None:
+        return None
+    return resolved
+
+
+# RND-199: every WeCom message type the media pipeline can download,
+# store, and serve through the media routes. A superset of
+# SUPPORTED_MIGRATION_MEDIA_TYPES (which stays registry-gated to
+# SUPPORTED/PARTIAL types only — see that constant's own guard, above —
+# for the Qiniu migration tool's separate purpose): it additionally
+# includes "emotion", which is UNSUPPORTED in MessageTypeRegistry (an
+# intentional, tested rendering/classification contract — see
+# app.message_type_registry and
+# tests/test_media_classification.py::test_classify_media_unsupported_msgtype
+# — this ticket does not change it) even though its bytes are ordinary
+# downloadable/storable images. Deliberately defined here rather than by
+# extending MEDIA_TYPE_KEY_CATEGORIES/SUPPORTED_MIGRATION_MEDIA_TYPES,
+# so "emotion" is never fed into that registry-validated guard.
+SERVABLE_MEDIA_MSGTYPES = SUPPORTED_MIGRATION_MEDIA_TYPES | frozenset({"emotion"})

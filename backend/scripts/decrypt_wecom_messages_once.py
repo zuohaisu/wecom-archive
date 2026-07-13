@@ -287,8 +287,9 @@ def _upsert_recipients(
 # loop rather than a parallel implementation.
 #
 # Mirrors the established build_downloaded_repair_query /
-# build_candidate_query pattern in scripts/download_wecom_image_media_once.py
-# (RND-147): a pure query-construction function plus a thin driver.
+# build_candidate_query pattern in app/media_download.py (RND-147/RND-199,
+# the unified media download pipeline): a pure query-construction function
+# plus a thin driver.
 # ---------------------------------------------------------------------------
 
 
@@ -316,7 +317,7 @@ def build_missing_recipient_repair_query(session: Session, tenant_id: "str | Non
     `tolist.isnot(None)` cannot reliably distinguish "no tolist" from "a
     JSON-null tolist" across backends. Same coarse-SQL-then-precise-Python
     split used by build_downloaded_repair_query() in
-    download_wecom_image_media_once.py — repair_missing_recipients() below
+    app/media_download.py — repair_missing_recipients() below
     does the exact, per-row tolist check.
     """
     has_recipient = (

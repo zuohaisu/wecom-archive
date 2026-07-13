@@ -94,7 +94,7 @@ paths, a valid `WECOM_SDK_LIB_PATH`:
 - `AUTH_MODE=wecom`
 - `sync_wecom_archive_once.py`
 - `decrypt_wecom_messages_once.py`
-- `download_wecom_image_media_once.py`
+- `download_wecom_media_once.py`
 - `sync_contact_display_names_once.py`
 
 ---
@@ -212,7 +212,7 @@ wecom-archive-365/
 │   │   ├── run_archive_worker_once.py     # Worker entrypoint (sync + decrypt)
 │   │   ├── sync_wecom_archive_once.py     # Archive pull
 │   │   ├── decrypt_wecom_messages_once.py # Decryption pipeline
-│   │   ├── download_wecom_image_media_once.py  # Image media download
+│   │   ├── download_wecom_media_once.py   # Unified media download (image/voice/video/file/emotion)
 │   │   ├── bootstrap_default_tenant.py    # First-time tenant setup
 │   │   ├── backfill_missing_seqs_once.py  # Data repair
 │   │   ├── sync_contact_display_names_once.py  # Contact name sync

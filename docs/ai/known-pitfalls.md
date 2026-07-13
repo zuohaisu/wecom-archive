@@ -95,7 +95,7 @@ The archive worker runs sync **then** decrypt. If only sync runs (decrypt fails)
 - Check `journalctl -u wecom-archive-media-download.service` for media download failures.
 - The `/health` endpoint is the first thing to check when deployment seems broken.
 - Use `alembic upgrade head --sql` to preview migration SQL before applying.
-- Run `python scripts/download_wecom_image_media_once.py --count-only` to see media download progress without downloading.
+- Run `python scripts/download_wecom_media_once.py --count-only` to see media download progress without downloading (unified pipeline: image/voice/video/file/emotion; use `--types` to narrow).
 
 ---
 

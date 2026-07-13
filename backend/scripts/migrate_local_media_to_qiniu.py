@@ -8,27 +8,27 @@ recognized, content-verified media type — image, video, voice, or file —
 not images only. A row's own MediaFile.file_type (already a generic column,
 set by whichever download worker created the row) selects candidates;
 app.media_storage.detect_media_signature_from_bytes() content-verifies the
-actual bytes against that claim before anything is uploaded. Today the only
-download worker in this codebase (download_wecom_image_media_once.py) ever
-produces file_type="image" rows — this script does not change that, and
-does not gain the ability to serve video/voice/file media (the media route
-still only serves images; see app/media_storage.py's module docstring and
-the RND-186 fix report's "Remaining Limitations") — it is forward-compatible
-scaffolding: the moment a future download worker starts writing
-file_type="video"/"voice"/"file" rows, this script migrates them with zero
-further changes.
+actual bytes against that claim before anything is uploaded. At the time of
+RND-186 the only download worker in this codebase produced file_type="image"
+rows and the media route only served images; RND-199 has since unified media
+download (scripts/download_wecom_media_once.py / app/media_download.py) and
+the media route (app/routers/conversations.py) across image/voice/video/file
+(plus emotion at the route layer) — this script itself needed zero changes
+for that, exactly as designed: it was forward-compatible scaffolding for
+whatever download worker eventually wrote file_type="video"/"voice"/"file"
+rows.
 
 This is a migration TOOL, not a one-time migration event: it is designed to
 be run manually, repeatedly, in small batches, safely interrupted, and
 resumed, without ever risking the media a user is actively viewing. It does
-not change how NEW media is downloaded (scripts/download_wecom_image_media_once.py
-is untouched) and it does not change how media is served (app/media_storage.py's
-serving-side functions, the media route, and the RND-187 signed-URL route
-are untouched) — it only copies bytes for already-downloaded rows and, on
-confirmed success, flips that row's storage_backend/storage_ref (migration
-0005's columns) from "local" to "qiniu_kodo" so every existing read path
-resolves it through QiniuStorageProvider from then on with no code change
-required.
+not change how NEW media is downloaded (scripts/download_wecom_media_once.py
+is untouched by this tool) and it does not change how media is served
+(app/media_storage.py's serving-side functions, the media route, and the
+RND-187 signed-URL route are untouched by this tool) — it only copies bytes
+for already-downloaded rows and, on confirmed success, flips that row's
+storage_backend/storage_ref (migration 0005's columns) from "local" to
+"qiniu_kodo" so every existing read path resolves it through
+QiniuStorageProvider from then on with no code change required.
 
 Usage (from backend/):
     python scripts/migrate_local_media_to_qiniu.py --count-only
@@ -56,7 +56,7 @@ Optional environment variables:
 
 Tenant scoping: resolved server-side from WECOM_CORP_ID via
 tenant_wecom_configs, exactly like every other one-shot script in this
-codebase (sync_wecom_archive_once.py, download_wecom_image_media_once.py).
+codebase (sync_wecom_archive_once.py, download_wecom_media_once.py).
 There is no --tenant-id flag — tenant_id is never accepted from
 caller-supplied input, and every query/write in this script is scoped by
 that resolved tenant_id (tenant isolation).
@@ -156,7 +156,7 @@ Failure and Resumability:
       immediately with the same flags.
 
 Concurrency: acquires a non-blocking process-level file lock (same
-fcntl.flock pattern as download_wecom_image_media_once.py /
+fcntl.flock pattern as download_wecom_media_once.py /
 run_archive_worker_once.py) before touching the database. If another
 instance already holds the lock, this exits 0 immediately without
 selecting candidates or uploading anything.
@@ -178,7 +178,7 @@ Exit codes:
 Safety constraints:
     - Never prints sdkfileid, local_path, storage_ref/object key, or any
       message body/content — only aggregate counts and short diagnostic
-      tags, matching download_wecom_image_media_once.py's discipline.
+      tags, matching download_wecom_media_once.py's discipline.
     - --count-only and --dry-run perform zero writes (DB, local filesystem,
       or Qiniu) and zero Qiniu API calls.
     - --dry-run still reads local bytes and content-verifies the media
@@ -224,7 +224,7 @@ _TARGET_BACKEND = "qiniu_kodo"
 
 
 # ---------------------------------------------------------------------------
-# Env helpers (same shape as download_wecom_image_media_once.py)
+# Env helpers (same shape as download_wecom_media_once.py)
 # ---------------------------------------------------------------------------
 
 
@@ -339,7 +339,7 @@ def _select_candidates(
 ) -> List[MediaFile]:
     """Paginate through build_candidate_query in batch_size-sized pages
     (same cursor-by-id pattern as
-    download_wecom_image_media_once.py's _scan_for_stale_downloaded) until
+    app.media_download's _scan_for_stale_downloaded) until
     `limit` rows are collected or candidates are exhausted. Pagination
     keeps memory bounded independent of how large --limit is; batch_size is
     purely a fetch-chunk size, not a commit-grouping unit (this script
@@ -447,7 +447,7 @@ def target_storage_ref(
 ) -> str:
     """Deterministic Qiniu object key —
     "tenants/{tenant_id}/{images,videos,voice,files}/{id}{ext}" — the SAME
-    format download_wecom_image_media_once.py's target_storage_refs()
+    format app.media_download's target_storage_refs()
     already produces for a fresh Qiniu image download, generalized by
     media_type (app.media_storage.media_key_category) so a migrated row of
     any supported type is indistinguishable in shape from one a future

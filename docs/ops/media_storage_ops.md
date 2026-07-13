@@ -284,17 +284,21 @@ Local → Qiniu 历史媒体迁移工具。**迁移范围已从"仅图片"修订
 `detect_media_signature_from_bytes` 二次校验（从不只信任扩展名/`file_type`
 声明）。详细设计见 `docs/research/rnd_186_local_qiniu_migration.md`。
 
-**当前生产实际情况**：目前系统只有图片下载能力
-（`download_wecom_image_media_once.py`），因此现存 132 条历史记录仍然全部是
-`file_type=image`。视频/语音/文件的迁移能力是**面向未来的通用化**——一旦有
-新的下载 worker 开始写入 `file_type=video/voice/file` 的记录，本工具无需改动
-即可迁移它们。
+**RND-186 撰写时的生产实际情况（历史记录，已被 RND-199 更新）**：当时系统只有
+图片下载能力（`download_wecom_image_media_once.py`），因此现存 132 条历史记录
+仍然全部是 `file_type=image`。视频/语音/文件的迁移能力当时是**面向未来的通用
+化**——一旦有新的下载 worker 开始写入 `file_type=video/voice/file` 的记录，
+本工具无需改动即可迁移它们。
 
-**重要限制**：媒体访问接口（`.../media`、`.../media/access`）目前仍然只服务
-`msgtype=="image"` 的记录——这是 RND-186 的明确非目标（不修改 Media Access
-API / Signed URL）。因此即便未来迁移了视频/语音/文件记录，它们的字节和完整
-元数据（bucket/mime_type/checksum）会安全落地七牛，但**暂时无法通过现有接口
-读取**，需要后续独立 ticket 扩展媒体访问接口。
+**RND-199 更新**：上述"面向未来"的场景已经发生。`download_wecom_image_media_once.py`
+已退役，统一由 `scripts/download_wecom_media_once.py`（`app/media_download.py`
+单一实现）下载 image/voice/video/file/emotion 五种消息类型的媒体，`media_files`
+不再只有 `file_type=image` 的记录。媒体访问接口（`.../media`、`.../media/access`）
+也已同步扩展——不再是 RND-186 时的"仅服务 `msgtype=="image"`"限制，现在
+image/voice/video/file 的记录都能通过这两个接口读取（emotion 记录也可按 msgid
+直接读取，但时间线不会为其展示预览链接，行为对齐既有的"不支持表情消息"占位符，
+不属于本次改动范围）。本迁移工具自身不受影响，仍按
+`app.media_storage.SUPPORTED_MIGRATION_MEDIA_TYPES` 圈定候选范围。
 
 ```bash
 # 仅统计候选数量，不做任何读写

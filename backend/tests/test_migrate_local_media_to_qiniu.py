@@ -215,10 +215,10 @@ def test_find_local_cleanup_candidates_query_shape() -> None:
 
 
 def test_target_storage_ref_matches_download_worker_key_format_for_image() -> None:
-    from scripts.download_wecom_image_media_once import target_storage_refs
+    from app.media_download import target_storage_refs
     from scripts.migrate_local_media_to_qiniu import target_storage_ref
 
-    worker_base, _part = target_storage_refs("tenant-a", 42)
+    worker_base, _part = target_storage_refs("tenant-a", "image", 42)
     migrated_ref = target_storage_ref("tenant-a", 42, "image", ".jpg")
 
     assert migrated_ref == f"{worker_base}.jpg"

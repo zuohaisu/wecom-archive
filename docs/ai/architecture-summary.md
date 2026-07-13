@@ -82,8 +82,8 @@ tenants
                     sync_states                   archive_messages
                     (cursor update)               (decrypted_payload populated)
 
-[separate timer] → download_wecom_image_media_once.py
-                    (download image media via SDK → .part → validate → publish)
+[separate timer] → download_wecom_media_once.py (unified pipeline, app/media_download.py)
+                    (download image/voice/video/file/emotion via SDK → .part → validate → publish)
 ```
 
 ## Auth Flow
