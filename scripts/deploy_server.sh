@@ -74,7 +74,7 @@ fi
 cd "$DEPLOY_DIR"
 
 # ── 2. Pull latest code ────────────────────────────────────────────────────
-echo "[1/5] Pulling latest code from origin/main …"
+echo "[1/6] Pulling latest code from origin/main …"
 
 # Guard: verify .git is readable/writable by the current user.
 # If a previous git operation ran as root (e.g. manual debug pull),
@@ -94,7 +94,7 @@ echo "  Commit: $GIT_SHA"
 echo ""
 
 # ── 3. Install / update Python dependencies ────────────────────────────────
-echo "[2/5] Installing Python dependencies …"
+echo "[2/6] Installing Python dependencies …"
 cd backend
 if [ ! -d .venv ]; then
     echo "ERROR: Virtual environment not found at $PWD/.venv. Run first-time setup." >&2
@@ -104,20 +104,39 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt --quiet
 
 # ── 4. Compile-check Python code ───────────────────────────────────────────
-echo "[3/5] Checking Python code compilation …"
+echo "[3/6] Checking Python code compilation …"
 python -m compileall app scripts
 
 # ── 5. Restart systemd service ─────────────────────────────────────────────
-echo "[4/5] Restarting systemd service ($SERVICE) …"
+echo "[4/6] Restarting systemd service ($SERVICE) …"
 sudo /usr/bin/systemctl restart "$SERVICE"
 if ! systemctl is-active "$SERVICE" >/dev/null 2>&1; then
     echo "ERROR: Service $SERVICE is not active after restart." >&2
     exit 1
 fi
 
+# ── 6. Deploy static site (company homepage) ───────────────────────────────
+echo "[5/6] Deploying company homepage static files …"
+STATIC_SRC="$DEPLOY_DIR/static_site/company_homepage"
+SHARED_DST="/srv/apps/wecom-archive-365/shared/www/crowntime"
+NGINX_DST="/var/www/crowntime"
 
-# ── 6. Verify health endpoints ─────────────────────────────────────────────
-echo "[5/5] Verifying health …"
+if [ -d "$STATIC_SRC" ]; then
+    # Copy to shared (wecomarchive-owned) first
+    cp "$STATIC_SRC/index.html" "$SHARED_DST/index.html"
+    cp "$STATIC_SRC/style.css" "$SHARED_DST/style.css"
+    echo "  → shared OK ($SHARED_DST)"
+
+    # Then copy to nginx root (needs sudo)
+    sudo cp "$SHARED_DST/index.html" "$NGINX_DST/index.html"
+    sudo cp "$SHARED_DST/style.css" "$NGINX_DST/style.css"
+    echo "  → nginx root OK ($NGINX_DST)"
+else
+    echo "  WARN: static site source not found at $STATIC_SRC — skipping"
+fi
+
+# ── 7. Verify health endpoints ─────────────────────────────────────────────
+echo "[6/6] Verifying health …"
 
 # Retry internal health up to 10 times with 2-second interval
 echo "  → Internal: $INTERNAL_HEALTH (up to 10 retries, 2s apart)"
