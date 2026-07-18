@@ -346,13 +346,43 @@ def test_dispatch_raw_passthrough_types_preserve_raw_without_field_extraction(ms
     assert result["parse_warnings"] == ["unconfirmed_schema"]
 
 
-@pytest.mark.parametrize("msgtype", ["text", "image", "video", "voice", "file", "revoke"])
+@pytest.mark.parametrize("msgtype", ["text", "image", "video", "voice", "file"])
 def test_dispatch_returns_none_for_out_of_scope_types(msgtype) -> None:
     assert parse_structured_content(msgtype, {"msgtype": msgtype}) is None
 
 
 def test_dispatch_returns_none_for_unregistered_msgtype() -> None:
     assert parse_structured_content("totally_unknown_future_type", {}) is None
+
+
+# --- revoke (RND-201) -------------------------------------------------------
+
+
+def test_dispatch_revoke_extracts_pre_msgid() -> None:
+    decrypted = {
+        "msgid": "revoke-event-msgid",
+        "action": "recall",
+        "msgtype": "revoke",
+        "revoke": {"pre_msgid": "original-msgid-123"},
+    }
+    result = parse_structured_content("revoke", decrypted)
+    assert result["fields"] == {"pre_msgid": "original-msgid-123"}
+    assert result["raw"] == {"pre_msgid": "original-msgid-123"}
+    assert result["parse_warnings"] == []
+
+
+def test_dispatch_revoke_missing_pre_msgid_is_flagged_not_fabricated() -> None:
+    decrypted = {"msgid": "revoke-event-msgid", "action": "recall", "msgtype": "revoke", "revoke": {}}
+    result = parse_structured_content("revoke", decrypted)
+    assert result["fields"] is None
+    assert result["parse_warnings"] == ["missing_pre_msgid"]
+
+
+def test_dispatch_revoke_missing_sub_payload_is_flagged() -> None:
+    decrypted = {"msgid": "revoke-event-msgid", "action": "recall", "msgtype": "revoke"}
+    result = parse_structured_content("revoke", decrypted)
+    assert result["fields"] is None
+    assert result["parse_warnings"] == ["missing_pre_msgid"]
 
 
 def test_dispatch_handles_missing_sub_payload_without_raising() -> None:

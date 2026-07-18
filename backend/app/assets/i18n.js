@@ -67,6 +67,10 @@
         "timeline.participants": "人",
         "timeline.groupBadge": "群",
         "timeline.emptyText": "空文本消息",
+        "timeline.revokedBadge": "已撤回",
+        "revoke.pending": "撤回关联中",
+        "revoke.originalMissing": "原始消息不可用",
+        "revoke.malformed": "撤回事件异常",
 
         "convList.groupBadge": "群聊",
         "convList.directBadge": "单聊",
@@ -263,6 +267,10 @@
         "timeline.participants": "人",
         "timeline.groupBadge": "群",
         "timeline.emptyText": "空白文字訊息",
+        "timeline.revokedBadge": "已撤回",
+        "revoke.pending": "撤回關聯中",
+        "revoke.originalMissing": "原始訊息不可用",
+        "revoke.malformed": "撤回事件異常",
 
         "convList.groupBadge": "群組",
         "convList.directBadge": "單聊",
@@ -459,6 +467,10 @@
         "timeline.participants": "participants",
         "timeline.groupBadge": "group",
         "timeline.emptyText": "Empty text message",
+        "timeline.revokedBadge": "Revoked",
+        "revoke.pending": "Revoke pending",
+        "revoke.originalMissing": "Original message unavailable",
+        "revoke.malformed": "Malformed revoke event",
 
         "convList.groupBadge": "group",
         "convList.directBadge": "direct",

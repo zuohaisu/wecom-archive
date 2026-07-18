@@ -198,7 +198,7 @@ def client():
 
 
 def _override_db_for_media_route(all_msgs, media_files):
-    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile
+    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile, MessageRevocation
 
     def _override_db():
         mock = MagicMock()
@@ -223,6 +223,8 @@ def _override_db_for_media_route(all_msgs, media_files):
                 return empty_q
             if model is MediaFile:
                 return media_q
+            if model is MessageRevocation:
+                return empty_q
             return msg_q
 
         mock.query.side_effect = _query

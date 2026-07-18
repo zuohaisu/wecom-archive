@@ -345,6 +345,7 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .badge-group{background:#e6f7ff;color:#0958d9;border:1px solid #91caff}
 .badge-count{background:#f5f5f5;color:#999;border:1px solid #e8e8e8}
 .badge-account{font-size:.68rem;color:#888}
+.badge-revoked{background:#fafafa;color:#aaa;border:1px solid #eee;font-style:italic}
 .timeline{padding:.6rem .75rem;display:flex;flex-direction:column;gap:.65rem}
 .tl-msg{display:flex;flex-direction:column;gap:.12rem}
 .tl-row{display:flex;flex-direction:column;gap:.12rem;max-width:100%}
@@ -1062,7 +1063,24 @@ function renderStructuredCard(m){
   var fn=STRUCTURED_CARD_RENDERERS[m.normalized_type];
   return fn?fn(m):renderStructuredFallback(m);
 }
+function renderRevokePlaceholder(m){
+  // RND-201: a standalone "revoke" event row that could not be linked to
+  // its original (target not archived yet, or the event's own payload
+  // was malformed) — the only content ever shown here is a stable,
+  // i18n-driven status label; the original message's content is never
+  // fabricated or guessed. A LINKED revoke event never reaches this
+  // function — it is folded into the original message, which renders
+  // through its own normal path below with an "already revoked" badge
+  // instead (see renderTimeline's revokedBadge).
+  var key='revoke.pending';
+  if(m.revoke_association_status==='original_missing')key='revoke.originalMissing';
+  else if(m.revoke_association_status==='malformed')key='revoke.malformed';
+  return '<div class="media-placeholder">'+esc(I18N.t(key))+'</div>';
+}
 function renderMessageBody(m){
+  if(m.revoke_association_status&&m.revoke_association_status!=='linked'){
+    return renderRevokePlaceholder(m);
+  }
   var mediaType=m.media_type||'text';
   if(mediaType==='text'){
     return m.content_text?esc(m.content_text):'<div class="media-placeholder">'+I18N.t('timeline.emptyText')+'</div>';
@@ -1180,6 +1198,11 @@ function renderTimeline(scrollToBottom){
     var text=renderMessageBody(m);
     var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
     var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">'+esc(I18N.t('timeline.groupBadge'))+'</span>':'';
+    // RND-201: secondary "已撤回" indicator on an original message that a
+    // linked revoke event targets — deliberately visually secondary (a
+    // small badge next to the existing type/group badges), never
+    // replacing the message body rendered by renderMessageBody(m) above.
+    var revokedBadge=m.is_revoked?' <span class="badge badge-revoked" style="font-size:.65rem">'+esc(I18N.t('timeline.revokedBadge'))+'</span>':'';
     var senderName=m.sender_display_name||m.sender||'?';
     var senderRaw=m.sender_raw_id||m.sender;
     var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
@@ -1194,7 +1217,7 @@ function renderTimeline(scrollToBottom){
     }
     html+='<div class="'+rowCls+'">'
       +'<div class="tl-meta"><span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
-      +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+'</div>'
+      +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+revokedBadge+'</div>'
       +'<div class="'+bc+'">'+text+'</div>'
       +rcpt+'</div>';
   });

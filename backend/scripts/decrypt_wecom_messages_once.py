@@ -49,11 +49,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.message_type_registry import ParserStrategy, get_parser_strategy
+from app.revoke_reconciliation import (
+    reconcile_pending_revocations,
+    reconcile_revoke_event,
+)
 from app.sdk import wecom_sdk
 from app.structured_message_parser import parse_structured_content
 
@@ -69,6 +73,29 @@ def _require_env(name: str) -> str:
         print(f"[FAIL] Environment variable not set or empty: {name}", flush=True)
         sys.exit(1)
     return value
+
+
+def _configure_sqlite_for_savepoints_if_needed(engine) -> None:
+    """app.revoke_reconciliation.reconcile_revoke_event() uses
+    Session.begin_nested() (a SAVEPOINT) for conflict-safe inserts.
+    Production always runs this against Postgres, which needs no special
+    handling -- but pysqlite's own implicit transaction management can
+    make a SAVEPOINT RELEASE behave like a premature commit of the outer
+    transaction unless SQLAlchemy's documented sqlite recipe is applied.
+    A no-op for every other dialect (see
+    scripts/backfill_revoke_associations_once.py for the identical
+    helper -- kept duplicated rather than shared to avoid adding an
+    import-time dependency between the two standalone scripts)."""
+    if engine.dialect.name != "sqlite":
+        return
+
+    @event.listens_for(engine, "connect")
+    def _do_connect(dbapi_connection, connection_record):
+        dbapi_connection.isolation_level = None
+
+    @event.listens_for(engine, "begin")
+    def _do_begin(conn):
+        conn.exec_driver_sql("BEGIN")
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +489,7 @@ def main() -> None:
 
     # --- 4. Read pending/failed records ---
     engine = create_engine(database_url)
+    _configure_sqlite_for_savepoints_if_needed(engine)
 
     scanned = 0
     success = 0
@@ -472,6 +500,9 @@ def main() -> None:
     rsa_failed = 0
     recipient_upsert_failed = 0
     recipients_repaired = 0
+    revoke_event_seen = 0
+    revoke_reconcile_failed = 0
+    revocations_reconciled = 0
     return_codes: dict[int, int] = {}
 
     with Session(engine) as session:
@@ -564,6 +595,18 @@ def main() -> None:
             except Exception:
                 recipient_upsert_failed += 1
 
+            # RND-201: process this row's revoke association immediately
+            # (links to its original right away if that row already
+            # exists in this tenant; otherwise persists a pending
+            # association for the repair scan below to pick up later).
+            # No-op (returns None) for every non-revoke msgtype.
+            if msgtype == "revoke":
+                try:
+                    revoke_event_seen += 1
+                    reconcile_revoke_event(session, record)
+                except Exception:
+                    revoke_reconcile_failed += 1
+
             if msgtype == "text":
                 success += 1
             else:
@@ -574,6 +617,18 @@ def main() -> None:
         # Must happen in the same session/commit as the loop above so a
         # single script run leaves the database fully consistent.
         recipients_repaired = repair_missing_recipients(session)
+
+        # --- 4c. Repair pending revoke associations (RND-201) —
+        # self-healing scan covering "original arrived in an earlier
+        # sweep, revoke arrived just now" (already handled by the
+        # immediate reconcile_revoke_event() call above) as well as
+        # "revoke arrived in an earlier sweep/worker run, original just
+        # decrypted in THIS sweep" — the case the per-row call above
+        # cannot see, since it only runs at the moment the revoke row
+        # itself is processed. Tenant-agnostic, same as
+        # repair_missing_recipients above and the main query at the top
+        # of this function.
+        revocations_reconciled = reconcile_pending_revocations(session)
 
         # --- 5. Commit all changes ---
         try:
@@ -617,6 +672,18 @@ def main() -> None:
     if recipients_repaired:
         print(
             f"[INFO] decrypt recipients_repaired: {recipients_repaired}",
+            flush=True,
+        )
+    if revoke_event_seen:
+        print(f"[INFO] decrypt revoke_events_seen: {revoke_event_seen}", flush=True)
+    if revoke_reconcile_failed:
+        print(
+            f"[INFO] decrypt revoke_reconcile_failed: {revoke_reconcile_failed}",
+            flush=True,
+        )
+    if revocations_reconciled:
+        print(
+            f"[INFO] decrypt revocations_reconciled: {revocations_reconciled}",
             flush=True,
         )
     # Safe return-code diagnostic (e.g. "ret_0=3, ret_90002=1")

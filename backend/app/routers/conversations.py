@@ -61,7 +61,14 @@ from starlette.requests import Request
 from datetime import datetime, timedelta, timezone
 
 from app.auth import get_current_user
-from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
+from app.db.models import (
+    AdminUser,
+    ArchiveMessage,
+    ArchiveMessageRecipient,
+    Contact,
+    MediaFile,
+    MessageRevocation,
+)
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.media_classification import (
@@ -70,6 +77,7 @@ from app.media_classification import (
 )
 from app.media_download import NESTED_MEDIA_MSGTYPES, iter_nested_media_refs
 from app.message_type_registry import describe_message_type
+from app.revoke_reconciliation import display_status as _revoke_display_status
 from app.media_storage import (
     SERVABLE_MEDIA_MSGTYPES,
     SUPPORTED_MIGRATION_MEDIA_TYPES,
@@ -253,6 +261,84 @@ def _load_media_files_map(
         )
         .all()
     }
+
+
+# ---------------------------------------------------------------------------
+# Revoke association (RND-201)
+#
+# The original message's is_revoked/revoked_at live directly on
+# ArchiveMessage (set once by app.revoke_reconciliation and never touched
+# here), so no join is needed to know THAT a page's message was revoked.
+# The MessageRevocation lookup below exists only to (a) recognize and fold
+# a standalone "revoke" event row into the original it targets, and (b)
+# surface the revoke event's own msgid (revoke_event_msgid) for audit
+# purposes on the original's TimelineMessageOut. Status display aging
+# (pending -> original_missing) is centralized in
+# app.revoke_reconciliation.display_status -- not reimplemented here.
+# ---------------------------------------------------------------------------
+
+
+class _RevocationMaps:
+    __slots__ = ("by_revoke_event_message_id", "by_original_message_id")
+
+    def __init__(self) -> None:
+        self.by_revoke_event_message_id: dict[int, MessageRevocation] = {}
+        self.by_original_message_id: dict[int, MessageRevocation] = {}
+
+
+def _load_revocations_map(
+    db: Session, tenant_id: str, msg_ids: list[int]
+) -> _RevocationMaps:
+    """Batch-load MessageRevocation rows relevant to this page, keyed both
+    ways: by the revoke event's own archive_message_id (to detect/fold a
+    standalone revoke row into its original) and by the original
+    message's archive_message_id (to attach revoke metadata to an
+    already-revoked message). Tenant-scoped explicitly -- same
+    defense-in-depth convention as _load_media_files_map: a
+    message_revocations row must never be surfaced on the strength of a
+    matching archive_message_id alone.
+
+    If two linked revocations ever point at the same original_message_id
+    (duplicate/equivalent revoke events, ticket 3.4), the one with the
+    earliest revoke_event_msgtime is preferred for revoke_event_msgid
+    attribution -- consistent with app.revoke_reconciliation's
+    earliest-wins revoked_at rule.
+    """
+    maps = _RevocationMaps()
+    if not msg_ids:
+        return maps
+    rows = (
+        db.query(MessageRevocation)
+        .filter(
+            MessageRevocation.tenant_id == tenant_id,
+            or_(
+                MessageRevocation.revoke_event_message_id.in_(msg_ids),
+                MessageRevocation.original_message_id.in_(msg_ids),
+            ),
+        )
+        .all()
+    )
+    for row in rows:
+        maps.by_revoke_event_message_id[row.revoke_event_message_id] = row
+        if row.original_message_id is not None:
+            current = maps.by_original_message_id.get(row.original_message_id)
+            if current is None or (row.revoke_event_msgtime or 0) < (
+                current.revoke_event_msgtime or 0
+            ):
+                maps.by_original_message_id[row.original_message_id] = row
+    return maps
+
+
+def _ensure_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _datetime_to_epoch_ms(value: Optional[datetime]) -> Optional[int]:
+    if value is None:
+        return None
+    return int(_ensure_aware(value).timestamp() * 1000)
 
 
 # ---------------------------------------------------------------------------
@@ -897,6 +983,27 @@ class TimelineMessageOut(BaseModel):
     # serialized here; the raw WeCom payload is not exposed to frontend
     # users as normal content (ticket security requirement).
     structured_content: Optional[dict] = None
+    # RND-201: revoke association. is_revoked/revoked_at are set ONLY on
+    # an ORIGINAL message row that a matching revoke event has been
+    # linked to -- content_text/structured_content above remain that
+    # message's real, preserved content; nothing about this message's
+    # rendering path changes. revoke_association_status is set on BOTH
+    # kinds of row this can appear on:
+    #   - an original message that has been revoked: "linked" (the only
+    #     value is_revoked=True ever pairs with).
+    #   - a standalone "revoke" event row whose target could not be
+    #     resolved: "pending" (target not archived yet, still being
+    #     retried), "original_missing" (same, but past the display-only
+    #     aging threshold), or "malformed" (the event's own payload had
+    #     no usable target reference). A standalone revoke event that WAS
+    #     successfully linked is never returned as its own row -- it is
+    #     folded into the original above, and revoke_event_msgid there is
+    #     how a client can still discover/audit which event revoked it.
+    # A message untouched by any revoke event has all four None/False.
+    is_revoked: bool = False
+    revoked_at: Optional[int] = None
+    revoke_event_msgid: Optional[str] = None
+    revoke_association_status: Optional[str] = None
 
 
 class MediaAccessOut(BaseModel):
@@ -1267,6 +1374,7 @@ def get_conversation_messages(
     )
 
     media_files_map = _load_media_files_map(db, tenant_id, [m.id for m in page])
+    revocations = _load_revocations_map(db, tenant_id, [m.id for m in page])
 
     # RND-200 QA fix: batch-load every MediaFile a mixed/chatrecord message
     # on this page could reference via a nested item, keyed by sdkfileid
@@ -1283,6 +1391,35 @@ def get_conversation_messages(
 
     result = []
     for msg in page:
+        # RND-201: a "revoke" event row that has been successfully linked
+        # to its original is never returned as its own timeline row --
+        # the original row below carries all the revoke metadata a
+        # client needs (is_revoked/revoked_at/revoke_event_msgid). This
+        # is the only place a message is dropped from `result` (never for
+        # any other msgtype), and it never mutates or deletes the
+        # underlying archive_messages row -- the next page fetch still
+        # sees it via _fetch_conversation_messages.
+        #
+        # Pagination note (round 2 QA finding, reviewed and left as-is):
+        # `page` above is sliced to `limit` BEFORE this fold happens, so
+        # a page containing a linked revoke row can return fewer than
+        # `limit` visible messages -- has_older/next_before are computed
+        # from `page`'s position in `eligible`, not from the post-fold
+        # visible count, and are therefore unaffected and still correct.
+        # This is a deliberate, accepted trade-off, not a bug: no message
+        # is ever duplicated, skipped, or reordered across a full
+        # page-walk (see test_revoke_timeline_api.py's
+        # test_pagination_never_duplicates_or_skips_messages_when_a_page_
+        # boundary_folds_a_revoke_row). Backfilling each page to always
+        # return exactly `limit` visible rows would require turning this
+        # fixed-size slice into an unbounded backward scan over
+        # `eligible` (new worst-case cost, new cursor-computation edge
+        # cases) -- an architectural pagination change judged out of
+        # scope for RND-201.
+        own_revocation = revocations.by_revoke_event_message_id.get(msg.id)
+        if msg.msgtype == "revoke" and own_revocation is not None and own_revocation.status == "linked":
+            continue
+
         recipients = recipients_map.get(msg.id, [])
         media = classify_media(msg.msgtype, bool(getattr(msg, "sdkfileid", None)))
         type_meta = describe_message_type(msg.msgtype)
@@ -1373,6 +1510,31 @@ def get_conversation_messages(
         if msg.msgtype == "sys":
             action = getattr(msg, "action", None)
 
+        # RND-201: revoke association fields. Two, mutually exclusive
+        # cases populate these (see TimelineMessageOut docstring) — every
+        # other message leaves all four at their None/False default.
+        is_revoked = False
+        revoked_at: Optional[int] = None
+        revoke_event_msgid: Optional[str] = None
+        revoke_association_status: Optional[str] = None
+        if getattr(msg, "is_revoked", False):
+            # This row IS the original message, already marked revoked by
+            # app.revoke_reconciliation — content_text/structured_content
+            # above are that message's real, unmodified content.
+            is_revoked = True
+            revoked_at = _datetime_to_epoch_ms(msg.revoked_at)
+            revoke_association_status = "linked"
+            linking_revocation = revocations.by_original_message_id.get(msg.id)
+            if linking_revocation is not None:
+                revoke_event_msgid = linking_revocation.revoke_event_msgid
+        elif msg.msgtype == "revoke" and own_revocation is not None:
+            # This row IS the revoke event itself, surfaced standalone
+            # only because it could not be linked to an original (see the
+            # skip-and-continue above for the successfully-linked case).
+            revoke_event_msgid = msg.msgid
+            revoked_at = msg.msgtime
+            revoke_association_status = _revoke_display_status(own_revocation)
+
         result.append(
             TimelineMessageOut(
                 msgid=msg.msgid,
@@ -1405,6 +1567,10 @@ def get_conversation_messages(
                 renderer_strategy=type_meta["renderer_strategy"],
                 display_label_key=type_meta["display_label_key"],
                 structured_content=structured_content_out,
+                is_revoked=is_revoked,
+                revoked_at=revoked_at,
+                revoke_event_msgid=revoke_event_msgid,
+                revoke_association_status=revoke_association_status,
             )
         )
     return ConversationMessagesOut(

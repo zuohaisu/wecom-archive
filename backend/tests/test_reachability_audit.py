@@ -28,7 +28,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -63,8 +63,23 @@ CREATE TABLE archive_messages (
     msgtime INTEGER,
     tolist TEXT,
     sdkfileid TEXT,
+    is_revoked INTEGER NOT NULL DEFAULT 0,
+    revoked_at TEXT,
     tenant_id TEXT,
     created_at TEXT
+);
+CREATE TABLE message_revocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT,
+    revoke_event_message_id INTEGER NOT NULL,
+    revoke_event_msgid TEXT NOT NULL,
+    revoke_event_msgtime INTEGER,
+    target_msgid TEXT,
+    original_message_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    UNIQUE(tenant_id, revoke_event_message_id)
 );
 CREATE TABLE archive_message_recipients (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,6 +132,30 @@ CREATE TABLE media_files (
 """
 
 
+def configure_sqlite_for_savepoints(engine) -> None:
+    """Apply SQLAlchemy's documented pysqlite recipe for real SAVEPOINT
+    support (see "Serializable isolation / savepoints" in the SQLAlchemy
+    sqlite dialect docs). Without this, pysqlite's own implicit
+    transaction handling can make Session.begin_nested()'s SAVEPOINT
+    RELEASE behave like a premature commit of the outer transaction --
+    harmless for tests that never nest a transaction, but silently wrong
+    for anything that does (RND-201 round 2: app.revoke_reconciliation
+    uses begin_nested() for conflict-safe inserts). Postgres (production)
+    needs no such workaround; this exists purely so sqlite-backed tests
+    accurately reflect real transactional behavior. Exported so any test
+    file building its own ad-hoc sqlite engine can reuse it instead of
+    re-deriving the recipe.
+    """
+
+    @event.listens_for(engine, "connect")
+    def _do_connect(dbapi_connection, connection_record):
+        dbapi_connection.isolation_level = None
+
+    @event.listens_for(engine, "begin")
+    def _do_begin(conn):
+        conn.exec_driver_sql("BEGIN")
+
+
 def _make_session() -> Session:
     # StaticPool + check_same_thread=False: the TestClient dispatches
     # requests to a worker thread (via anyio.to_thread), but a bare
@@ -128,6 +167,7 @@ def _make_session() -> Session:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    configure_sqlite_for_savepoints(engine)
     with engine.begin() as conn:
         for stmt in _SCHEMA_SQL.strip().split(";"):
             stmt = stmt.strip()
@@ -436,7 +476,7 @@ def test_counts_by_status_stays_stable_across_mixed_scenarios(db) -> None:
     reachable = _insert_message(db, msgtype="text", sender="staff_x", msgtime=1100)
     _insert_recipient(db, reachable.id, "contact_x")
 
-    missing_recipient = _insert_message(db, msgtype="text", sender="staff_y", msgtime=1101)
+    _insert_message(db, msgtype="text", sender="staff_y", msgtime=1101)
 
     missing_sender = _insert_message(db, msgtype="text", sender=None, roomid="room_z", msgtime=1102)
     _insert_recipient(db, missing_sender.id, "staff_y")

@@ -149,7 +149,7 @@ def client():
 
 def _run_messages_query(client, app, all_msgs, conversation_id="room1"):
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile
+    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile, MessageRevocation
     from app.db.session import get_db
 
     def _override_db():
@@ -171,6 +171,10 @@ def _run_messages_query(client, app, all_msgs, conversation_id="room1"):
         media_q.filter.return_value = media_q
         media_q.all.return_value = []
 
+        revocation_q = MagicMock()
+        revocation_q.filter.return_value = revocation_q
+        revocation_q.all.return_value = []
+
         def _query(model):
             if model is ArchiveMessageRecipient:
                 return rcpt_q
@@ -178,6 +182,8 @@ def _run_messages_query(client, app, all_msgs, conversation_id="room1"):
                 return contact_q
             if model is MediaFile:
                 return media_q
+            if model is MessageRevocation:
+                return revocation_q
             return msg_q
 
         mock.query.side_effect = _query

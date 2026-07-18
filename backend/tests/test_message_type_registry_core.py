@@ -235,7 +235,7 @@ def test_registry_is_immutable() -> None:
             MediaCapability.CONDITIONAL,
         ),
         ("todo", MessageCategory.INTERACTIVE, MessageSupportStatus.SUPPORTED, MediaCapability.NONE),
-        ("revoke", MessageCategory.CONTROL, MessageSupportStatus.UNSUPPORTED, MediaCapability.NONE),
+        ("revoke", MessageCategory.CONTROL, MessageSupportStatus.SUPPORTED, MediaCapability.NONE),
         (
             # RND-200: promoted to PARTIAL — recursive nested-message
             # extraction is implemented; the composite viewer is not (see
@@ -468,7 +468,7 @@ def test_registry_supported_or_partial_media_types_get_dedicated_classify_media_
 
 @pytest.mark.parametrize(
     "msgtype",
-    ["link", "location", "markdown", "news", "weapp", "card", "docmsg", "mixed", "chatrecord"],
+    ["link", "location", "markdown", "news", "weapp", "card", "docmsg", "mixed", "chatrecord", "revoke"],
 )
 def test_registry_structured_types_get_the_structured_media_classification(msgtype) -> None:
     """RND-197: link/location/markdown/news/weapp (SUPPORTED) and
@@ -490,7 +490,7 @@ def test_registry_structured_types_get_the_structured_media_classification(msgty
 
 @pytest.mark.parametrize(
     "msgtype",
-    ["emotion", "revoke"],
+    ["emotion"],
 )
 def test_registry_unsupported_types_fall_into_classify_medias_generic_bucket(msgtype) -> None:
     definition = resolve(msgtype)
@@ -792,9 +792,17 @@ def test_frontend_export_without_a_filter_returns_the_full_candidate_set() -> No
     """known_placeholder_keys=None (the default) skips the i18n-existence
     gate entirely — every SUPPORTED/PARTIAL/UNSUPPORTED registered type
     gets an entry, including ones the live frontend does not yet surface
-    (revoke/mixed/chatrecord/sys/audio_archive) because those still lack
-    i18n copy. This is the "full candidate set" a caller building a new
-    consumer of the registry would see."""
+    (mixed/chatrecord/sys/audio_archive) because those still lack i18n
+    copy. This is the "full candidate set" a caller building a new
+    consumer of the registry would see.
+
+    CONTROL-category types (currently only "revoke", RND-201) are the one
+    deliberate exception: they never get a per-row frontend entry at all,
+    regardless of the filter, because they never render as their own
+    timeline row — see build_frontend_registry_entries()'s CONTROL guard."""
     entries = build_frontend_registry_entries()
     for definition in MESSAGE_TYPE_DEFINITIONS:
+        if definition.category == MessageCategory.CONTROL:
+            assert definition.normalized_type not in entries
+            continue
         assert definition.normalized_type in entries

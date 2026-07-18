@@ -551,6 +551,7 @@ def _make_sqlite_engine(tmp_path, name):
                     decrypted_payload TEXT, structured_content TEXT,
                     content_text TEXT, msgtype TEXT, sender TEXT, roomid TEXT,
                     msgtime INTEGER, tolist TEXT, sdkfileid TEXT,
+                    is_revoked INTEGER NOT NULL DEFAULT 0, revoked_at TEXT,
                     tenant_id TEXT, created_at TEXT
                 )
                 """

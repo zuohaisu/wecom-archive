@@ -1,9 +1,11 @@
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -240,6 +242,16 @@ class ArchiveMessage(Base):
         UniqueConstraint(
             "tenant_id", "msgid", name="uq_archive_messages_tenant_msgid"
         ),
+        # RND-201 round 3 (B4, migration 0011): supports the composite
+        # foreign keys on message_revocations (tenant_id,
+        # revoke_event_message_id/original_message_id) -> here. id alone
+        # is already globally unique (primary key); this adds the
+        # tenant-scoped pairing Postgres requires as a composite FK
+        # target, proving a referencing row's declared tenant actually
+        # matches the tenant of the archive_messages row it points to.
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_archive_messages_tenant_id_id"
+        ),
         Index("ix_archive_messages_msgtime_msgtype", "msgtime", "msgtype"),
         Index(
             "ix_archive_messages_decrypted_payload_gin",
@@ -287,6 +299,16 @@ class ArchiveMessage(Base):
     msgtime = Column(BigInteger, nullable=True, index=True)
     tolist = Column(JSONB, nullable=True)
     sdkfileid = Column(Text, nullable=True)
+
+    # --- Revoke association (RND-201) ---
+    # Set only by app.revoke_reconciliation, never by the parser/decrypt
+    # self-update above -- a message marks itself revoked only as a side
+    # effect of a *different* row (its matching "revoke" event) being
+    # processed. content_text/structured_content/decrypted_payload and all
+    # media_files rows are never touched when these are set -- see
+    # app.revoke_reconciliation module docstring.
+    is_revoked = Column(Boolean, nullable=False, server_default=text("false"))
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
 
     tenant_id = Column(
         String(36), ForeignKey("tenants.id"), nullable=True, index=True
@@ -406,6 +428,150 @@ class MediaFile(Base):
     bucket = Column(String(128), nullable=True)
     mime_type = Column(String(128), nullable=True)
     checksum_sha256 = Column(String(64), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class MessageRevocation(Base):
+    """One row per WeCom "revoke" (撤回) event, associating it with the
+    original ArchiveMessage it targets (RND-201).
+
+    A revoke event arrives as its own archive_messages row
+    (msgtype="revoke"); its decrypted payload's revoke.pre_msgid field
+    names the msgid of the message being revoked (WeCom session-archive
+    convention: https://developer.work.weixin.qq.com/document/path/91774,
+    e.g. {"msgid":"...","action":"recall","msgtype":"revoke",
+    "revoke":{"pre_msgid":"..."}}). This table is the durable record of
+    that association, independent of which order the two rows arrive in
+    or which worker run processes them -- see app.revoke_reconciliation,
+    the single canonical place this table is written from.
+
+    status:
+      "pending"   -- revoke event decrypted and target_msgid extracted,
+                     but no archive_messages row with msgid=target_msgid
+                     exists yet in this tenant. Retried on every future
+                     decrypt sweep (reconcile_pending_revocations).
+      "linked"    -- original_message_id is set; the original row's
+                     is_revoked/revoked_at have been updated. Terminal.
+      "malformed" -- the revoke event's decrypted payload had no usable
+                     target_msgid. Terminal -- there is nothing to retry,
+                     but the event and its raw payload are retained
+                     rather than dropped.
+
+    original_message_id is set exactly once, on first successful link,
+    and never cleared or reassigned afterwards. If two revoke events ever
+    target the same original message, the second one still links (so it
+    is never left dangling in "pending") but never overwrites the first
+    revoke's revoked_at on the original row -- see
+    app.revoke_reconciliation for the earliest-wins tie-break rule.
+
+    tenant_id is REQUIRED (NOT NULL, RND-201 round 3 / B4, migration
+    0011) -- unlike the nullable-during-migration convention every other
+    archive-adjacent table follows, message_revocations was introduced
+    by this feature (migration 0009) with no legacy pre-tenant-
+    foundation rows possible, so there was never a valid reason for it
+    to be nullable here.
+
+    Two CHECK constraints (migration 0010, RND-201 round 2 QA fix)
+    enforce association consistency at the database level, not just in
+    app.revoke_reconciliation's application logic:
+
+      ck_message_revocations_status_valid -- status can only ever be one
+      of the three values this model's docstring documents. Catches a
+      future typo/regression at write time instead of silently storing
+      an unrecognized status that app.revoke_reconciliation.
+      display_status() and every caller would then mis-handle.
+
+      ck_message_revocations_linked_consistency -- original_message_id
+      is set if and only if status="linked". This is the exact invariant
+      _try_link() maintains by construction (both columns are written
+      together in one statement — see app.revoke_reconciliation), made
+      impossible to violate even by a future bug or an out-of-band
+      manual UPDATE.
+
+    Tenant + uniqueness integrity (migration 0011, RND-201 round 3 / B4
+    QA fix) -- database-enforced, not just application-filtered:
+
+      uq_message_revocations_revoke_event_message_id -- a PLAIN unique
+      constraint on revoke_event_message_id alone (not
+      (tenant_id, revoke_event_message_id)): one revoke event can only
+      ever have exactly one association row, period -- a composite
+      unique constraint would still theoretically allow the same
+      revoke_event_message_id to appear twice under two different
+      tenant_id values, which is exactly the ambiguity this closes.
+
+      fk_message_revocations_tenant_revoke_event /
+      fk_message_revocations_tenant_original -- composite foreign keys
+      (tenant_id, revoke_event_message_id) and
+      (tenant_id, original_message_id), both referencing
+      archive_messages(tenant_id, id) (see ArchiveMessage's
+      uq_archive_messages_tenant_id_id). These replace the old
+      single-column FKs to archive_messages.id: Postgres's default
+      MATCH SIMPLE means a composite FK is skipped entirely when any of
+      its columns is NULL, so original_message_id staying NULL for
+      pending/malformed rows is unaffected -- but whenever
+      original_message_id IS set (or always, for the NOT-NULL
+      revoke_event_message_id side), the constraint now additionally
+      proves the referenced archive_messages row belongs to the SAME
+      tenant this association row declares, not merely that a row with
+      that id exists somewhere.
+    """
+
+    __tablename__ = "message_revocations"
+    __table_args__ = (
+        UniqueConstraint(
+            "revoke_event_message_id",
+            name="uq_message_revocations_revoke_event_message_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "revoke_event_message_id"],
+            ["archive_messages.tenant_id", "archive_messages.id"],
+            name="fk_message_revocations_tenant_revoke_event",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "original_message_id"],
+            ["archive_messages.tenant_id", "archive_messages.id"],
+            name="fk_message_revocations_tenant_original",
+        ),
+        Index(
+            "ix_message_revocations_tenant_target_msgid",
+            "tenant_id",
+            "target_msgid",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'linked', 'malformed')",
+            name="ck_message_revocations_status_valid",
+        ),
+        CheckConstraint(
+            "(status = 'linked') = (original_message_id IS NOT NULL)",
+            name="ck_message_revocations_linked_consistency",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+
+    # No per-column ForeignKey(...) here -- the referential integrity for
+    # both of these (existence AND tenant match) is provided by the
+    # composite ForeignKeyConstraints in __table_args__ above.
+    revoke_event_message_id = Column(BigInteger, nullable=False, index=True)
+    revoke_event_msgid = Column(String(64), nullable=False)
+    revoke_event_msgtime = Column(BigInteger, nullable=True)
+
+    target_msgid = Column(String(64), nullable=True)
+    original_message_id = Column(BigInteger, nullable=True, index=True)
+
+    status = Column(String(16), nullable=False, default="pending")
+
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

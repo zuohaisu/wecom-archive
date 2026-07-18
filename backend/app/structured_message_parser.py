@@ -39,6 +39,18 @@ Coverage split, and why it isn't uniform:
   action field is extracted from the decrypted payload envelope and the
   sys sub-payload is preserved raw.
 
+  CONTROL_SIGNAL (RND-201) -- revoke (message recall/withdrawal). WeCom's
+  archive-SDK payload for a revoke event is
+  {"msgid": ..., "action": "recall", "msgtype": "revoke",
+  "revoke": {"pre_msgid": "<msgid of the message being revoked>"}}
+  (confirmed against https://developer.work.weixin.qq.com/document/path/91774,
+  since no fixture for this existed anywhere in this repo before RND-201).
+  pre_msgid is the only field extracted -- it is the primary key
+  app.revoke_reconciliation uses to associate this event with the original
+  message. This module only extracts the field; it never looks up or
+  mutates the original message itself (see revoke_reconciliation for that,
+  and for what happens when pre_msgid is missing/malformed).
+
   NESTED_MESSAGES (recursive extraction) -- mixed, chatrecord (RND-200).
   Each embeds a list of child messages under payload["item"]; every child
   is normalized to a common node shape (type/text/fields/media/sender/
@@ -1083,6 +1095,18 @@ def parse_structured_content(msgtype: Optional[str], decrypted: dict) -> Optiona
         except Exception:
             return {"fields": None, "raw": sub_payload, "parse_warnings": ["parse_failed"]}
         return {"fields": fields, "raw": sub_payload, "parse_warnings": warnings}
+
+    if definition.parser_strategy == ParserStrategy.CONTROL_SIGNAL and msgtype == "revoke":
+        # RND-201: the only field extracted is pre_msgid (see module
+        # docstring for the confirmed WeCom payload shape). Never fabricate
+        # a target when it is missing -- surface a parse_warning instead so
+        # the reconciler can record the event as "malformed" rather than
+        # guessing.
+        pre_msgid = _clean_str(sub_payload.get("pre_msgid"))
+        if not pre_msgid:
+            return {"fields": None, "raw": sub_payload, "parse_warnings": ["missing_pre_msgid"]}
+        fields = {"pre_msgid": pre_msgid}
+        return {"fields": fields, "raw": sub_payload, "parse_warnings": []}
 
     if definition.parser_strategy == ParserStrategy.NESTED_MESSAGES and msgtype in _NESTED_MESSAGE_PARSERS:
         nested_parser = _NESTED_MESSAGE_PARSERS[msgtype]

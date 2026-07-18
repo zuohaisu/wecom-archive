@@ -334,10 +334,21 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.NONE,
     ),
     MessageTypeDefinition(
+        # RND-201: promoted to SUPPORTED — revoke events are now parsed
+        # (structured_message_parser extracts revoke.pre_msgid) and
+        # reconciled against their original message (app.revoke_
+        # reconciliation), which is marked is_revoked/revoked_at rather
+        # than the revoke event rendering as its own placeholder bubble.
+        # renderer_strategy stays UNSUPPORTED_PLACEHOLDER deliberately: a
+        # revoke-type row is filtered out of the timeline response before
+        # rendering is ever reached (see app.routers.conversations), so
+        # this value is effectively unreachable in the normal timeline; it
+        # is left as a safe, non-fabricated default for any other consumer
+        # that might list raw messages by type.
         raw_type="revoke",
         normalized_type="revoke",
         category=MessageCategory.CONTROL,
-        support_status=MessageSupportStatus.UNSUPPORTED,
+        support_status=MessageSupportStatus.SUPPORTED,
         display_label_key="messageType.revoke",
         parser_strategy=ParserStrategy.CONTROL_SIGNAL,
         renderer_strategy=RendererStrategy.UNSUPPORTED_PLACEHOLDER,
@@ -650,6 +661,17 @@ def build_frontend_registry_entries(
     """
     entries: dict = {}
     for d in _DEFINITIONS:
+        if d.category == MessageCategory.CONTROL:
+            # RND-201: control-signal types (currently only "revoke") are
+            # never rendered as their own timeline row (a revoke event is
+            # folded into the original message it targets, or omitted
+            # entirely if unresolved — see app.routers.conversations), so
+            # they must never appear in the frontend's per-row rendering
+            # registry. Without this guard, revoke's SUPPORTED status would
+            # otherwise fall into the generic "media"/previewSupported=True
+            # bucket below, which is wrong for a type with no bytes and no
+            # standalone row.
+            continue
         if d.category == MessageCategory.TEXT:
             entries[d.normalized_type] = {"category": "text"}
             continue
