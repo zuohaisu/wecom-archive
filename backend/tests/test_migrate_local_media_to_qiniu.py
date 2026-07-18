@@ -241,6 +241,83 @@ def test_target_storage_ref_uses_per_media_type_category(media_type, ext, expect
 
 
 # ---------------------------------------------------------------------------
+# RND-200 QA fix: target_storage_ref/_local_identifier must not collapse
+# two RND-200 nested media items sharing one archive_message_id (whose
+# local identifiers are "{id}_{item_key}", not bare "{id}") onto the same
+# Qiniu key — the bug this fix addresses would silently overwrite the
+# first migrated item with the second in Qiniu.
+# ---------------------------------------------------------------------------
+
+
+def test_local_identifier_recovers_item_key_suffix_from_storage_ref() -> None:
+    from scripts.migrate_local_media_to_qiniu import _local_identifier
+
+    media_file = SimpleNamespace(storage_ref="tenants/tenant-a/images/42_0.jpg", local_path=None)
+    assert _local_identifier(media_file) == "42_0"
+
+
+def test_local_identifier_matches_bare_archive_message_id_for_legacy_rows() -> None:
+    """A pre-RND-200 row's local identifier is just the bare
+    archive_message_id — this must still resolve identically after the
+    fix (no behavior change for non-composite messages)."""
+    from scripts.migrate_local_media_to_qiniu import _local_identifier
+
+    media_file = SimpleNamespace(storage_ref="tenants/tenant-a/images/42.jpg", local_path=None)
+    assert _local_identifier(media_file) == "42"
+
+
+def test_local_identifier_falls_back_to_archive_message_id_when_local_ref_absent() -> None:
+    from scripts.migrate_local_media_to_qiniu import _local_identifier
+
+    media_file = SimpleNamespace(storage_ref=None, local_path=None, archive_message_id=7)
+    assert _local_identifier(media_file) == "7"
+
+
+def test_migrate_one_two_nested_items_sharing_one_message_get_distinct_qiniu_keys(
+    tmp_path, monkeypatch
+) -> None:
+    """The exact collision scenario the fix addresses: two nested images
+    from the SAME mixed message (archive_message_id=42, item_key "0" and
+    "1") must migrate to two different Qiniu object keys — before the
+    fix, both collapsed onto "tenants/tenant-a/images/42.jpg" and the
+    second migrate_one() call would silently overwrite the first's
+    uploaded bytes."""
+    from app.media_storage import LocalStorageProvider
+    from scripts.migrate_local_media_to_qiniu import migrate_one
+
+    local_dir = tmp_path / "tenants" / "tenant-a" / "images"
+    local_dir.mkdir(parents=True)
+    jpeg_a = b"\xff\xd8\xff" + b"first-nested-image"
+    jpeg_b = b"\xff\xd8\xff" + b"second-nested-image"
+    (local_dir / "42_0.jpg").write_bytes(jpeg_a)
+    (local_dir / "42_1.jpg").write_bytes(jpeg_b)
+
+    source = LocalStorageProvider(tmp_path)
+    target = _make_qiniu_provider()
+    store: dict = {}
+    _wire_success(target, monkeypatch, store)
+
+    media_file_a = SimpleNamespace(
+        storage_ref=str(local_dir / "42_0.jpg"), local_path=None,
+        archive_message_id=42, file_type="image",
+    )
+    media_file_b = SimpleNamespace(
+        storage_ref=str(local_dir / "42_1.jpg"), local_path=None,
+        archive_message_id=42, file_type="image",
+    )
+
+    result_a = migrate_one(source, target, "tenant-a", media_file_a)
+    result_b = migrate_one(source, target, "tenant-a", media_file_b)
+
+    assert result_a.storage_ref != result_b.storage_ref
+    assert result_a.storage_ref == "tenants/tenant-a/images/42_0.jpg"
+    assert result_b.storage_ref == "tenants/tenant-a/images/42_1.jpg"
+    # Both objects survive independently in Qiniu -- neither overwrote the other.
+    assert store[result_a.storage_ref] == jpeg_a
+    assert store[result_b.storage_ref] == jpeg_b
+
+
+# ---------------------------------------------------------------------------
 # migrate_one() — per-row migration, no DB writes, all failure classes,
 # ALL supported media types (RND-186 media scope revision)
 # ---------------------------------------------------------------------------

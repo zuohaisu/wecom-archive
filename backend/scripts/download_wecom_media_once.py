@@ -89,6 +89,7 @@ from app.media_download import (
     download_one,
     get_or_reset_media_file,
     select_candidates,
+    select_nested_media_candidates,
 )
 from app.media_storage import (
     LocalStorageProvider,
@@ -258,6 +259,20 @@ def main() -> None:
     )
     parser.add_argument("--since-hours", type=float, default=None, help="Only select candidates with msgtime within the last N hours")
     parser.add_argument("--newest-first", action="store_true", help="Order candidates by msgtime descending instead of oldest-first")
+    parser.add_argument(
+        "--skip-nested",
+        action="store_true",
+        help=(
+            "Skip mixed/chatrecord nested media items (RND-200). By default, "
+            "after processing --types candidates, this script also downloads "
+            "media referenced by nested items inside mixed/chatrecord "
+            "messages (its own --limit/--retry/--since-hours-budgeted pass, "
+            "reusing the same SDK session/storage provider) — pass this "
+            "flag to disable that and process --types candidates only, as "
+            "before RND-200. Note: --newest-first has no effect on the "
+            "nested pass, which is always oldest-first regardless."
+        ),
+    )
     args = parser.parse_args()
 
     if args.limit <= 0:
@@ -316,6 +331,20 @@ def _run(args: argparse.Namespace, msgtypes: FrozenSet[str]) -> None:
         if stale_repairs:
             print(f"[INFO] stale_downloaded_repair_selected: {len(stale_repairs)}", flush=True)
 
+        nested_item_candidates: List = []
+        nested_messages_scanned = 0
+        if not args.skip_nested:
+            # --retry and --since-hours are honored here exactly as they
+            # are for the --types pass above (RND-200 QA fix — an earlier
+            # revision silently ignored both for nested candidates).
+            # --newest-first has no nested equivalent: see
+            # build_nested_media_candidate_query's docstring for why.
+            nested_item_candidates, nested_messages_scanned = select_nested_media_candidates(
+                session, tenant_id, args.limit, retry=args.retry, since_ms=since_ms
+            )
+            print(f"[INFO] nested_candidate_messages_scanned: {nested_messages_scanned}", flush=True)
+            print(f"[INFO] nested_candidate_items_selected: {len(nested_item_candidates)}", flush=True)
+
         if args.count_only:
             print(
                 f"[INFO] candidate_ordering: {'newest_first' if args.newest_first else 'oldest_first'}",
@@ -331,7 +360,7 @@ def _run(args: argparse.Namespace, msgtypes: FrozenSet[str]) -> None:
             print("[PASS] count-only mode — no writes performed", flush=True)
             sys.exit(0)
 
-        if not candidates:
+        if not candidates and not nested_item_candidates:
             print("[PASS] no candidates to process", flush=True)
             sys.exit(0)
 
@@ -387,33 +416,32 @@ def _run(args: argparse.Namespace, msgtypes: FrozenSet[str]) -> None:
             outcome, detail, file_size = download_one(
                 lib, handle, storage_provider, tenant_id, msg.id, msg.msgtype, msg.sdkfileid, timeout
             )
+            downloaded, failed = _persist_download_outcome(
+                session, storage_provider, media_file, outcome, detail, file_size,
+                write_backend_name, msg.msgtype, downloaded, failed, reason_counts,
+            )
 
-            try:
-                if outcome == "downloaded":
-                    media_file.file_type = msg.msgtype
-                    media_file.download_status = "downloaded"
-                    media_file.storage_backend = write_backend_name
-                    media_file.storage_ref = detail
-                    media_file.local_path = detail if write_backend_name == "local" else None
-                    media_file.file_size = file_size
-                    media_file.oss_key = None
-                    session.commit()
-                    downloaded += 1
-                else:
-                    media_file.download_status = "failed"
-                    media_file.local_path = None
-                    media_file.storage_backend = None
-                    media_file.storage_ref = None
-                    media_file.oss_key = None
-                    session.commit()
-                    failed += 1
-                    reason_counts[detail or "unknown"] = reason_counts.get(detail or "unknown", 0) + 1
-            except Exception:
-                session.rollback()
-                if outcome == "downloaded" and detail:
-                    _safe_delete_after_commit_failure(storage_provider, detail)
-                failed += 1
-                reason_counts["db_commit_error"] = reason_counts.get("db_commit_error", 0) + 1
+        nested_downloaded = 0
+        nested_failed = 0
+        nested_reason_counts: dict[str, int] = {}
+
+        for msg, ref in nested_item_candidates:
+            media_file = get_or_reset_media_file(session, tenant_id, ref["sdkfileid"], msg.id)
+            if media_file is None:
+                nested_failed += 1
+                nested_reason_counts["media_identity_conflict"] = (
+                    nested_reason_counts.get("media_identity_conflict", 0) + 1
+                )
+                continue
+
+            outcome, detail, file_size = download_one(
+                lib, handle, storage_provider, tenant_id, msg.id, ref["type"], ref["sdkfileid"],
+                timeout, item_key=ref["path"],
+            )
+            nested_downloaded, nested_failed = _persist_download_outcome(
+                session, storage_provider, media_file, outcome, detail, file_size,
+                write_backend_name, ref["type"], nested_downloaded, nested_failed, nested_reason_counts,
+            )
 
         try:
             wecom_sdk.destroy_sdk(lib, handle)
@@ -425,8 +453,62 @@ def _run(args: argparse.Namespace, msgtypes: FrozenSet[str]) -> None:
         if reason_counts:
             diag = ", ".join(f"{k}={v}" for k, v in sorted(reason_counts.items()))
             print(f"[INFO] failed_reasons: {diag}", flush=True)
+        if not args.skip_nested:
+            print(f"[INFO] nested_downloaded: {nested_downloaded}", flush=True)
+            print(f"[INFO] nested_failed: {nested_failed}", flush=True)
+            if nested_reason_counts:
+                nested_diag = ", ".join(f"{k}={v}" for k, v in sorted(nested_reason_counts.items()))
+                print(f"[INFO] nested_failed_reasons: {nested_diag}", flush=True)
         print("[PASS] download_wecom_media_once completed", flush=True)
         sys.exit(0)
+
+
+def _persist_download_outcome(
+    session: Session,
+    storage_provider: MediaStorageProvider,
+    media_file,
+    outcome: str,
+    detail: Optional[str],
+    file_size: Optional[int],
+    write_backend_name: str,
+    file_type: str,
+    downloaded: int,
+    failed: int,
+    reason_counts: dict,
+) -> tuple[int, int]:
+    """Persist one download_one() outcome onto its media_files row and
+    return the updated (downloaded, failed) counters.
+
+    Shared by the top-level (--types) loop and the nested mixed/chatrecord
+    item loop in _run() (RND-200) — both need identical persistence
+    semantics (including the rollback-then-best-effort-orphan-cleanup path
+    on a confirmed DB commit failure), so this is the one place that logic
+    lives rather than two copies that could silently drift apart."""
+    try:
+        if outcome == "downloaded":
+            media_file.file_type = file_type
+            media_file.download_status = "downloaded"
+            media_file.storage_backend = write_backend_name
+            media_file.storage_ref = detail
+            media_file.local_path = detail if write_backend_name == "local" else None
+            media_file.file_size = file_size
+            media_file.oss_key = None
+            session.commit()
+            return downloaded + 1, failed
+        media_file.download_status = "failed"
+        media_file.local_path = None
+        media_file.storage_backend = None
+        media_file.storage_ref = None
+        media_file.oss_key = None
+        session.commit()
+        reason_counts[detail or "unknown"] = reason_counts.get(detail or "unknown", 0) + 1
+        return downloaded, failed + 1
+    except Exception:
+        session.rollback()
+        if outcome == "downloaded" and detail:
+            _safe_delete_after_commit_failure(storage_provider, detail)
+        reason_counts["db_commit_error"] = reason_counts.get("db_commit_error", 0) + 1
+        return downloaded, failed + 1
 
 
 def _safe_delete_after_commit_failure(storage_provider: MediaStorageProvider, storage_ref: str) -> None:

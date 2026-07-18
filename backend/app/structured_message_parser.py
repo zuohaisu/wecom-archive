@@ -39,6 +39,26 @@ Coverage split, and why it isn't uniform:
   action field is extracted from the decrypted payload envelope and the
   sys sub-payload is preserved raw.
 
+  NESTED_MESSAGES (recursive extraction) -- mixed, chatrecord (RND-200).
+  Each embeds a list of child messages under payload["item"]; every child
+  is normalized to a common node shape (type/text/fields/media/sender/
+  timestamp/children), recursively, so mixed-in-mixed / chatrecord-in-
+  mixed nesting is preserved rather than flattened. No fixture, sample
+  payload, or authoritative doc exists anywhere in this repository
+  confirming the exact field names WeCom uses inside a nested item's
+  content (or a chatrecord item's sender fields) -- see _parse_nested_item
+  for the defensive multi-key-candidate approach this uses instead of
+  assuming one, mirroring parse_miniprogram_message's icon field lookup
+  and parse_news_message's image field lookup above. A child whose type
+  this module does not recognize is still surfaced (type + best-effort
+  text), never dropped -- ticket requirement. media_refs (a third element
+  these two parsers return, alongside fields/warnings) is a flat,
+  server-internal-only list of {"path","type","sdkfileid"} for every
+  media-bearing nested item, consumed by the download pipeline
+  (app.media_download) to register MediaFile rows via the existing RND-199
+  pipeline; it is never included in the "fields" dict and callers must
+  never serialize it to an API response (same privacy boundary as raw).
+
 Every parser in this module is a pure function: it takes the
 msgtype-specific sub-payload dict (i.e. decrypted.get(msgtype, {})) and
 never raises -- malformed/partial/historical-dirty input degrades to
@@ -49,6 +69,7 @@ bad row can never fail an entire timeline page.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -72,6 +93,67 @@ _VOTE_ITEM_CAP = 50
 
 # Defensive upper bound on collect details — same rationale as above.
 _COLLECT_DETAIL_CAP = 50
+
+# Defensive upper bounds for mixed/chatrecord recursive extraction (RND-200)
+# -- a malformed or adversarial payload must not be able to exhaust memory
+# via an enormous flat item list, nor blow the Python recursion limit via
+# extreme mixed-in-mixed nesting depth. _MIXED_ITEM_CAP counts every node
+# visited across the *entire* tree (not per level), so a wide-but-shallow
+# and a narrow-but-deep payload are both bounded by the same budget.
+# Neither limit is reachable by any real WeCom payload this project has
+# seen documented; both exist purely as a safety backstop (ticket
+# requirement: "do not artificially limit nesting depth unless necessary
+# for safety"). Excess nodes are dropped (never included, never partially
+# parsed) with a parse_warnings entry, same truncation-with-a-trace pattern
+# as _NEWS_ITEM_CAP/_VOTE_ITEM_CAP above.
+_MIXED_ITEM_CAP = 200
+_MIXED_MAX_DEPTH = 8
+
+# WeCom child "type" values that are a bare/plain-text payload.
+_NESTED_TEXT_TYPES = frozenset({"text"})
+
+# Child types whose bytes are downloadable media (reuses the RND-199
+# unified media pipeline's own msgtype vocabulary -- see
+# app.media_download._SIGNATURE_CATEGORY_BY_MSGTYPE, which this set must
+# stay a subset of so every media_refs entry's "type" is one
+# download_one() already knows how to handle).
+_NESTED_MEDIA_TYPES = frozenset({"image", "voice", "video", "file", "emotion"})
+
+# Child types with their own STRUCTURED_FIELDS parser above -- reused
+# as-is for a nested occurrence rather than re-implemented -- PLUS the
+# three RAW_PASSTHROUGH-strategy types (card/docmsg/audio_doc), which have
+# no field parser to call (_STRUCTURED_FIELD_PARSERS.get() returns None
+# for them) but must still resolve to "supported=True, fields=None" here,
+# matching their top-level PARTIAL/RAW_PASSTHROUGH treatment in
+# parse_structured_content -- a nested card/docmsg/audio_doc child is a
+# recognized type this project simply doesn't extract fields for, not an
+# unknown one.
+_NESTED_STRUCTURED_JSON_TYPES = frozenset(
+    {
+        "link",
+        "location",
+        "markdown",
+        "news",
+        "weapp",
+        "vote",
+        "todo",
+        "collect",
+        "meeting",
+        "schedule",
+        "redpacket",
+        "switch_corp",
+        "card",
+        "docmsg",
+        "audio_doc",
+    }
+)
+
+# Child types that are themselves a nested composite -- recursion point.
+_NESTED_COMPOSITE_TYPES = frozenset({"mixed", "chatrecord"})
+
+_NESTED_KNOWN_TYPES = (
+    _NESTED_TEXT_TYPES | _NESTED_MEDIA_TYPES | _NESTED_STRUCTURED_JSON_TYPES | _NESTED_COMPOSITE_TYPES
+)
 
 
 def safe_url(url: Any) -> Optional[str]:
@@ -587,6 +669,336 @@ _STRUCTURED_FIELD_PARSERS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# mixed / chatrecord — recursive nested-message extraction (RND-200).
+# ---------------------------------------------------------------------------
+
+
+def _extract_nested_text(raw_content: Any) -> Optional[str]:
+    """Extract display text from a "text"-type nested item's content field.
+
+    Two plausible WeCom encodings exist and neither is confirmed by any
+    fixture in this repo (see module docstring): a bare string
+    ("hello world"), or the same JSON-wrapped-string-with-a-"content"-key
+    shape every other nested type uses ('{"content":"hello world"}',
+    mirroring the top-level decrypted["text"]["content"] shape). Both are
+    tried defensively rather than assuming one; a string that happens to
+    start with "{" but is not valid JSON (or decodes to something other
+    than a dict with a "content" key) falls back to being treated as the
+    literal text itself, never dropped.
+    """
+    if isinstance(raw_content, dict):
+        return _clean_str(raw_content.get("content"))
+    if not isinstance(raw_content, str):
+        return _clean_str(raw_content) if raw_content is not None else None
+    stripped = raw_content.strip()
+    if stripped.startswith("{"):
+        try:
+            candidate = json.loads(stripped)
+        except (ValueError, TypeError, RecursionError):
+            # RecursionError (e.g. json.loads("[" * 2000)) is a
+            # RuntimeError subclass, NOT a ValueError/TypeError -- a
+            # pathologically deep-nested content string must degrade the
+            # same as any other malformed JSON, never propagate past this
+            # function (see _decode_nested_content's identical guard).
+            candidate = None
+        if isinstance(candidate, dict) and "content" in candidate:
+            return _clean_str(candidate.get("content"))
+    return _clean_str(raw_content)
+
+
+def _decode_nested_content(raw_content: Any) -> tuple[Any, bool]:
+    """Best-effort decode of one nested item's "content" field.
+
+    Every non-text WeCom nested-item shape carries content as a
+    JSON-encoded *string* that needs a second json.loads to reach the same
+    dict shape that type's top-level parser (e.g. parse_link_message)
+    already expects -- unconfirmed against any fixture in this repo (see
+    module docstring), so any decode failure degrades to returning the
+    original raw value with malformed=True rather than raising. A content
+    value that already arrived as a dict (a plausible alternate encoding)
+    is accepted as-is without requiring the JSON-string step. text items
+    never reach this function -- see _extract_nested_text.
+    """
+    if isinstance(raw_content, dict):
+        return raw_content, False
+    if isinstance(raw_content, str):
+        text = raw_content.strip()
+        if not text:
+            return {}, False
+        try:
+            decoded = json.loads(text)
+        except (ValueError, TypeError, RecursionError):
+            # RecursionError is deliberately caught alongside
+            # ValueError/TypeError: json.loads on a string with thousands
+            # of nested brackets/braces raises RecursionError, not
+            # ValueError, and (being a RuntimeError subclass) would
+            # otherwise only be caught by parse_structured_content's
+            # outer `except Exception`, which discards the ENTIRE
+            # message's parse result (all sibling items, all media_refs)
+            # instead of degrading just this one item -- exactly the
+            # "malformed payload must not break parsing" failure mode
+            # this module's per-item degradation exists to prevent.
+            return raw_content, True
+        if isinstance(decoded, dict):
+            return decoded, False
+        return raw_content, True
+    return raw_content, raw_content is not None
+
+
+def _parse_nested_item(
+    raw_item: Any, path: str, depth: int, budget: dict
+) -> Optional[dict]:
+    """Recursively normalize one mixed/chatrecord child item.
+
+    Returns a dict shaped {"path", "type", "supported", "text", "fields",
+    "media", "sender", "sender_name", "timestamp", "children"} (plus a
+    "malformed": True marker when content decoding failed) -- the shared
+    node shape structured_content.fields["items"] is built from, preserving
+    ordering (path is a dot-separated index chain, e.g. "0.2", matching
+    source list order) and hierarchy (children is the same shape,
+    recursively) per the ticket's requirements.
+
+    Returns None once the safety budget (total node count across the
+    whole tree, or recursion depth) is exhausted -- the item is dropped,
+    never partially parsed; callers must check budget["truncated"] /
+    budget["depth_exceeded"] and surface a parse_warnings entry. This is
+    the only case a node is silently dropped -- every other malformed
+    shape (not a dict, unrecognized type, undecodable content) still
+    produces a visible node instead (ticket requirement: unknown/malformed
+    embedded types must remain visible, never discarded).
+
+    A malformed/cyclic *value* cannot literally cycle (json.loads never
+    produces a reference cycle), so the depth+count budget alone is what
+    protects against a pathological payload (extreme nesting depth or an
+    enormous flat item list) -- see _MIXED_ITEM_CAP/_MIXED_MAX_DEPTH.
+    """
+    budget["count"] += 1
+    if budget["count"] > _MIXED_ITEM_CAP:
+        budget["truncated"] = True
+        return None
+    if depth > _MIXED_MAX_DEPTH:
+        budget["depth_exceeded"] = True
+        return None
+
+    node: dict = {
+        "path": path,
+        "type": None,
+        "supported": False,
+        "text": None,
+        "fields": None,
+        "media": None,
+        "sender": None,
+        "sender_name": None,
+        "timestamp": None,
+        "children": None,
+    }
+
+    if not isinstance(raw_item, dict):
+        return node
+
+    item_type = _clean_str(raw_item.get("type"))
+    node["type"] = item_type
+    node["supported"] = item_type in _NESTED_KNOWN_TYPES
+
+    # Sender/timestamp field names are chatrecord-specific and unconfirmed
+    # (see module docstring) -- checked defensively across plausible
+    # candidates, same pattern as parse_news_message's image field lookup.
+    for key in ("from", "fromusername", "sender", "fromuser"):
+        sender = _clean_str(raw_item.get(key))
+        if sender:
+            node["sender"] = sender
+            break
+    for key in ("fromname", "sendername", "display_name", "nickname"):
+        sender_name = _clean_str(raw_item.get(key))
+        if sender_name:
+            node["sender_name"] = sender_name
+            break
+    for key in ("msgtime", "time", "timestamp"):
+        timestamp = _safe_int(raw_item.get(key))
+        if timestamp is not None:
+            node["timestamp"] = timestamp
+            break
+
+    if item_type in _NESTED_TEXT_TYPES:
+        node["text"] = _extract_nested_text(raw_item.get("content"))
+        return node
+
+    if item_type not in _NESTED_KNOWN_TYPES:
+        # Unknown child type -- there is no expected payload shape to
+        # decode against, so a plain string is never "malformed" here
+        # (unlike the known-type branches below); it is simply surfaced
+        # as best-effort literal text via the same dict/str/JSON-wrapped
+        # extraction _extract_nested_text already implements for "text"
+        # items, kept visible rather than discarded (ticket requirement)
+        # without a false malformed marker.
+        node["text"] = _extract_nested_text(raw_item.get("content"))
+        return node
+
+    decoded_content, malformed = _decode_nested_content(raw_item.get("content"))
+    if malformed:
+        node["malformed"] = True
+        return node
+
+    if item_type in _NESTED_MEDIA_TYPES:
+        payload = decoded_content if isinstance(decoded_content, dict) else {}
+        sdkfileid = _clean_str(payload.get("sdkfileid"))
+        node["media"] = {"has_reference": sdkfileid is not None}
+        if sdkfileid:
+            # budget["media_refs"] is always present -- every caller
+            # constructs budget via _parse_nested_item_list's top-level
+            # entry point, which initializes it unconditionally.
+            budget["media_refs"].append({"path": path, "type": item_type, "sdkfileid": sdkfileid})
+
+    elif item_type in _NESTED_STRUCTURED_JSON_TYPES:
+        payload = decoded_content if isinstance(decoded_content, dict) else {}
+        field_parser = _STRUCTURED_FIELD_PARSERS.get(item_type)
+        if field_parser is not None:
+            try:
+                fields, _warnings = field_parser(payload)
+                node["fields"] = fields
+            except Exception:
+                node["malformed"] = True
+        # else: a nested RAW_PASSTHROUGH-strategy type (card/docmsg/
+        # audio_doc) -- no field extraction, fields stays None, matching
+        # the top-level dispatcher's treatment of the same types.
+
+    elif item_type in _NESTED_COMPOSITE_TYPES:
+        payload = decoded_content if isinstance(decoded_content, dict) else {}
+        if item_type == "chatrecord":
+            node["fields"] = {"title": _clean_str(payload.get("title"))}
+        # Reuses _parse_nested_item_list (the same walk the top-level
+        # entry points use) instead of a hand-copied loop, so a nested
+        # composite's own item list gets identical malformed/empty/
+        # truncation/unsupported-type diagnostics as the outermost list --
+        # an earlier revision's inline duplicate silently dropped these
+        # warnings whenever the problem occurred inside a nested
+        # composite's own "item" list (RND-200 QA fix).
+        children, child_warnings = _parse_nested_item_list(payload.get("item"), path, depth + 1, budget)
+        node["children"] = children
+        if child_warnings:
+            budget["nested_warnings"].extend(f"{path}:{w}" for w in child_warnings)
+
+    return node
+
+
+def _parse_nested_item_list(
+    raw_items: Any, path_prefix: str, depth: int, budget: dict
+) -> tuple[list[dict], list[str]]:
+    """Shared item-list walk, used both for the top-level entry point
+    (parse_mixed_message/parse_chatrecord_message, path_prefix="", depth=0)
+    and recursively for a nested mixed/chatrecord child's own "item" list
+    (from _parse_nested_item's composite branch, path_prefix=that child's
+    own path, depth=depth+1) -- the same function at every nesting level,
+    so warnings are computed identically regardless of depth.
+
+    path_prefix is the parent's own dotted path ("" at the top level); each
+    item's path is `path_prefix + "." + idx`, or bare str(idx) when
+    path_prefix is empty. budget is the single shared accumulator for the
+    whole tree — count/truncated/depth_exceeded/media_refs/
+    nested_warnings — created once by the top-level caller and threaded
+    through every recursive call, never re-created partway down.
+
+    Returns (items, warnings) -- items preserves source order (ticket
+    requirement); warnings are local to *this* list only (top-level
+    callers use them directly; _parse_nested_item's composite branch
+    folds them into budget["nested_warnings"], tagged with its own path,
+    since a single node dict has no separate slot to return warnings
+    through).
+    """
+    warnings: list[str] = []
+    if not isinstance(raw_items, list):
+        if raw_items is not None:
+            warnings.append("malformed_item_list")
+        raw_items = []
+    if not raw_items:
+        warnings.append("empty_item_list")
+
+    items = []
+    for idx, raw_item in enumerate(raw_items):
+        if budget["truncated"] or budget["depth_exceeded"]:
+            # Safety budget already exhausted elsewhere in the tree --
+            # stop iterating this list instead of calling
+            # _parse_nested_item (which would immediately return None
+            # anyway) for every remaining entry of a possibly enormous
+            # list. Bounds CPU work, not just output size, against a wide
+            # (not just deep) adversarial payload.
+            break
+        path = str(idx) if not path_prefix else f"{path_prefix}.{idx}"
+        node = _parse_nested_item(raw_item, path, depth, budget)
+        if node is not None:
+            items.append(node)
+
+    if any(item.get("malformed") for item in items):
+        warnings.append("some_items_malformed")
+    if any(not item.get("supported", True) for item in items):
+        warnings.append("some_items_unsupported_type")
+
+    return items, warnings
+
+
+def _new_nested_parse_budget() -> dict:
+    return {
+        "count": 0,
+        "truncated": False,
+        "depth_exceeded": False,
+        "media_refs": [],
+        "nested_warnings": [],
+    }
+
+
+def _finalize_nested_warnings(warnings: list[str], budget: dict) -> list[str]:
+    """Merge the top-level list's own warnings with the safety-budget
+    flags and every nested-level warning collected anywhere in the tree
+    (see _parse_nested_item_list/_parse_nested_item's composite branch)."""
+    if budget["truncated"]:
+        warnings.append(f"item_tree_truncated_at_{_MIXED_ITEM_CAP}")
+    if budget["depth_exceeded"]:
+        warnings.append(f"nesting_depth_truncated_at_{_MIXED_MAX_DEPTH}")
+    warnings.extend(budget["nested_warnings"])
+    return warnings
+
+
+def parse_mixed_message(payload: dict) -> tuple[dict, list[str], list[dict]]:
+    """WeCom mixed (图文混排/composite) message: {"item": [{"type","content"}, ...]}.
+
+    Each item is independently degraded (see _parse_nested_item) so one
+    malformed or unsupported child never drops the rest. Returns (fields,
+    warnings, media_refs) -- a three-tuple, unlike the two-tuple contract
+    every STRUCTURED_FIELDS parser above uses -- see module docstring for
+    why (media_refs is server-internal, feeds app.media_download only).
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    budget = _new_nested_parse_budget()
+    items, warnings = _parse_nested_item_list(payload.get("item"), "", 0, budget)
+    warnings = _finalize_nested_warnings(warnings, budget)
+    fields = {"items": items, "item_count": len(items)}
+    return fields, warnings, budget["media_refs"]
+
+
+def parse_chatrecord_message(payload: dict) -> tuple[dict, list[str], list[dict]]:
+    """WeCom chatrecord (聊天记录/forwarded chat history) message:
+    {"title": "...", "item": [{"type","content",...}, ...]}.
+
+    Same recursive item handling as parse_mixed_message; additionally
+    surfaces the digest title when present.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    title = _clean_str(payload.get("title"))
+    warnings_title = [] if title else ["missing_title"]
+    budget = _new_nested_parse_budget()
+    items, warnings = _parse_nested_item_list(payload.get("item"), "", 0, budget)
+    warnings = _finalize_nested_warnings(warnings_title + warnings, budget)
+    fields = {"title": title, "items": items, "item_count": len(items)}
+    return fields, warnings, budget["media_refs"]
+
+
+_NESTED_MESSAGE_PARSERS = {
+    "mixed": parse_mixed_message,
+    "chatrecord": parse_chatrecord_message,
+}
+
+
 def parse_structured_content(msgtype: Optional[str], decrypted: dict) -> Optional[dict]:
     """Dispatch a decrypted WeCom payload to the right structured parser.
 
@@ -608,6 +1020,16 @@ def parse_structured_content(msgtype: Optional[str], decrypted: dict) -> Optiona
     parser itself raises -- never propagates an exception, so a single
     malformed historical message can never fail an entire decrypt run or
     timeline page.
+
+    For mixed/chatrecord (NESTED_MESSAGES, RND-200) the returned dict
+    carries one additional key, "media_refs" -- a flat, server-internal-
+    only list of {"path","type","sdkfileid"} for every media-bearing
+    nested item, consumed by app.media_download to register MediaFile rows
+    via the existing RND-199 pipeline. Every other in-scope type omits
+    this key entirely; callers must never copy it into an API response
+    (same privacy boundary as "raw" -- see TimelineMessageOut's
+    structured_content serialization, which only ever reads "fields" and
+    "parse_warnings").
     """
     definition = resolve_message_type(msgtype)
     sub_payload = decrypted.get(msgtype, {}) if isinstance(decrypted, dict) else {}
@@ -661,5 +1083,23 @@ def parse_structured_content(msgtype: Optional[str], decrypted: dict) -> Optiona
         except Exception:
             return {"fields": None, "raw": sub_payload, "parse_warnings": ["parse_failed"]}
         return {"fields": fields, "raw": sub_payload, "parse_warnings": warnings}
+
+    if definition.parser_strategy == ParserStrategy.NESTED_MESSAGES and msgtype in _NESTED_MESSAGE_PARSERS:
+        nested_parser = _NESTED_MESSAGE_PARSERS[msgtype]
+        try:
+            fields, warnings, media_refs = nested_parser(sub_payload)
+        except Exception:
+            return {
+                "fields": None,
+                "raw": sub_payload,
+                "parse_warnings": ["parse_failed"],
+                "media_refs": [],
+            }
+        return {
+            "fields": fields,
+            "raw": sub_payload,
+            "parse_warnings": warnings,
+            "media_refs": media_refs,
+        }
 
     return None

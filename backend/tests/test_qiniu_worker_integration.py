@@ -290,6 +290,10 @@ def _run_qiniu_main_with_one_candidate(monkeypatch, tmp_path, provider, jpeg_or_
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([candidate_msg], [], 1))
+    # RND-200: this mock session only models the pre-existing --types
+    # candidate path — the nested mixed/chatrecord candidate scan is a
+    # separate code path covered by its own dedicated tests.
+    monkeypatch.setattr(script, "select_nested_media_candidates", lambda *_a, **_k: ([], 0))
     monkeypatch.setattr(script, "get_media_storage_provider", lambda backend=None: provider)
     monkeypatch.setattr(script.wecom_sdk, "load_sdk", lambda _path: MagicMock())
     monkeypatch.setattr(script.wecom_sdk, "configure_sdk", lambda _lib: None)

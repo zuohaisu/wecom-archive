@@ -194,6 +194,7 @@ import fcntl
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import List, NamedTuple, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -442,21 +443,52 @@ def _resolve_local_ref(media_file: MediaFile) -> Optional[str]:
     return media_file.storage_ref or media_file.local_path
 
 
-def target_storage_ref(
-    tenant_id: str, archive_message_id: int, media_type: str, ext: str
-) -> str:
+def target_storage_ref(tenant_id: str, identifier, media_type: str, ext: str) -> str:
     """Deterministic Qiniu object key —
-    "tenants/{tenant_id}/{images,videos,voice,files}/{id}{ext}" — the SAME
-    format app.media_download's target_storage_refs()
-    already produces for a fresh Qiniu image download, generalized by
-    media_type (app.media_storage.media_key_category) so a migrated row of
-    any supported type is indistinguishable in shape from one a future
+    "tenants/{tenant_id}/{images,videos,voice,files}/{identifier}{ext}" —
+    the SAME format app.media_download's target_storage_refs() already
+    produces for a fresh Qiniu download, generalized by media_type
+    (app.media_storage.media_key_category) so a migrated row of any
+    supported type is indistinguishable in shape from one a future
     type-specific download worker writes straight to Qiniu. Deterministic
-    per (tenant_id, archive_message_id): re-migrating (e.g. after an
-    interrupted run) overwrites the same object, never accumulates
-    duplicates."""
+    per (tenant_id, identifier): re-migrating (e.g. after an interrupted
+    run) overwrites the same object, never accumulates duplicates.
+
+    identifier (RND-200 QA fix): the exact local <identifier> segment this
+    row's storage_ref/local_path already embeds — recovered by
+    _local_identifier(), NOT recomputed from archive_message_id alone.
+    For a legacy/non-composite row this is identical to
+    str(archive_message_id) (byte-for-byte unchanged from before RND-200 —
+    every existing caller/test that passes a bare int here still gets the
+    same key). For an RND-200 mixed/chatrecord nested media item, the
+    local identifier also encodes the item's own path (e.g. "42_0"),
+    matching app.media_download.target_storage_refs' item_key-aware key
+    exactly. Recomputing from archive_message_id alone (the pre-fix
+    behavior) would collapse two different nested items sharing one
+    archive_message_id onto the SAME Qiniu object, silently overwriting
+    one during migration — this parameter exists specifically to prevent
+    that."""
     category = media_key_category(media_type)
-    return build_tenant_media_key(tenant_id, category, str(archive_message_id), suffix=ext)
+    return build_tenant_media_key(tenant_id, category, str(identifier), suffix=ext)
+
+
+def _local_identifier(media_file: MediaFile) -> str:
+    """Recover the exact <identifier> segment app.media_download.
+    target_storage_refs embedded in this row's local storage_ref/
+    local_path — "{archive_message_id}" for a non-composite download, or
+    "{archive_message_id}_{item_key}" for an RND-200 mixed/chatrecord
+    nested media item — instead of assuming it is always the bare
+    archive_message_id (see target_storage_ref's docstring for why that
+    assumption is unsafe post-RND-200).
+
+    Falls back to str(media_file.archive_message_id) if the local
+    reference is absent/unparseable (never raises) — the only identifier
+    shape possible for a row with no usable local reference anyway."""
+    local_ref = _resolve_local_ref(media_file)
+    if not local_ref:
+        return str(media_file.archive_message_id)
+    stem = PurePosixPath(local_ref).stem
+    return stem or str(media_file.archive_message_id)
 
 
 class MigrationSkip(Exception):
@@ -544,7 +576,7 @@ def migrate_one(
     data, match = _read_and_identify(source_provider, media_file)
 
     target_ref = target_storage_ref(
-        tenant_id, media_file.archive_message_id, match.media_type, match.extension
+        tenant_id, _local_identifier(media_file), match.media_type, match.extension
     )
     try:
         target_provider.save_bytes(target_ref, data)

@@ -76,6 +76,14 @@ _KEY_CATEGORY_OVERRIDES = {"emotion": "emotions"}
 # file (already SUPPORTED_MIGRATION_MEDIA_TYPES members) plus emotion.
 GENERIC_DOWNLOAD_MSGTYPES = frozenset(_SIGNATURE_CATEGORY_BY_MSGTYPE)
 
+# RND-200: outer msgtypes whose media lives in *nested* items rather than
+# ArchiveMessage.sdkfileid — see iter_nested_media_refs /
+# build_nested_media_candidate_query below. Never a member of
+# GENERIC_DOWNLOAD_MSGTYPES: a mixed/chatrecord message has no single
+# top-level sdkfileid for build_candidate_query's existing scalar-column
+# filter to match.
+NESTED_MEDIA_MSGTYPES = frozenset({"mixed", "chatrecord"})
+
 _REPAIR_SCAN_BATCH_SIZE = 500
 
 
@@ -291,21 +299,206 @@ def count_candidates_with_existing_media_row(session: Session, tenant_id: str, m
 
 
 # ---------------------------------------------------------------------------
+# Nested media (mixed/chatrecord, RND-200)
+#
+# A mixed/chatrecord ArchiveMessage row has no single sdkfileid — it can
+# embed any number of media-bearing nested items, each with its own
+# sdkfileid, discovered only by walking structured_content (populated by
+# app.structured_message_parser.parse_mixed_message /
+# parse_chatrecord_message at decrypt time). build_candidate_query above
+# cannot select these rows (its ArchiveMessage.sdkfileid.isnot(None)
+# filter is always false for these two msgtypes), so a parallel, item-
+# level candidate path is needed — reusing every other primitive in this
+# module unchanged (get_or_reset_media_file, download_one, the storage
+# provider, the pending/downloaded/failed state machine) rather than a
+# second implementation.
+# ---------------------------------------------------------------------------
+
+
+def iter_nested_media_refs(structured_content) -> List[dict]:
+    """Extract the media_refs list a mixed/chatrecord message's
+    structured_content carries (see parse_mixed_message/
+    parse_chatrecord_message) — a flat list of {"path","type","sdkfileid"}
+    for every media-bearing nested item, regardless of nesting depth.
+
+    Tolerates missing/malformed structured_content (returns []) and
+    silently drops any entry that isn't a well-formed ref with a type this
+    module knows how to download — never raises, since this runs over
+    historical rows a future parser version may have shaped slightly
+    differently."""
+    if not isinstance(structured_content, dict):
+        return []
+    refs = structured_content.get("media_refs")
+    if not isinstance(refs, list):
+        return []
+    out: List[dict] = []
+    for ref in refs:
+        if not isinstance(ref, dict):
+            continue
+        sdkfileid = ref.get("sdkfileid")
+        item_type = ref.get("type")
+        path = ref.get("path")
+        if (
+            isinstance(sdkfileid, str)
+            and sdkfileid
+            and isinstance(path, str)
+            and path
+            and item_type in _SIGNATURE_CATEGORY_BY_MSGTYPE
+        ):
+            out.append({"path": path, "type": item_type, "sdkfileid": sdkfileid})
+    return out
+
+
+def build_nested_media_candidate_query(
+    session: Session, tenant_id: str, since_ms: Optional[int] = None
+) -> Query:
+    """Tenant-scoped coarse candidate query for mixed/chatrecord messages
+    that may still have undownloaded nested media — decrypted successfully,
+    msgtype in NESTED_MEDIA_MSGTYPES, structured_content present. The
+    precise per-item eligibility check (which nested sdkfileids still lack
+    a media_files row) happens in Python via iter_nested_media_refs +
+    get_or_reset_media_file, the same coarse-SQL-then-precise-Python split
+    build_missing_recipient_repair_query uses in
+    scripts/decrypt_wecom_messages_once.py — a JSONB-path SQL query here
+    would need to special-case arbitrary nesting depth, whereas the
+    already-recursive Python parser output does not.
+
+    since_ms mirrors build_candidate_query's own recency filter
+    (ArchiveMessage.msgtime >= since_ms) — unlike that function, there is
+    no newest_first ordering option here: select_nested_media_candidates
+    paginates this query by ascending id for bounded-memory batching (see
+    its docstring), and reordering by msgtime desc would break that
+    cursor. Always ascending-id; a caller that needs newest-first nested
+    processing is not yet supported (--newest-first is a documented no-op
+    for the nested pass — see scripts/download_wecom_media_once.py)."""
+    query = session.query(ArchiveMessage).filter(
+        ArchiveMessage.tenant_id == tenant_id,
+        ArchiveMessage.decrypt_status == "success",
+        ArchiveMessage.msgtype.in_(NESTED_MEDIA_MSGTYPES),
+        ArchiveMessage.structured_content.isnot(None),
+    )
+    if since_ms is not None:
+        query = query.filter(ArchiveMessage.msgtime >= since_ms)
+    return query.order_by(ArchiveMessage.id)
+
+
+def select_nested_media_candidates(
+    session: Session,
+    tenant_id: str,
+    limit: int,
+    retry: bool = False,
+    since_ms: Optional[int] = None,
+    batch_size: int = _REPAIR_SCAN_BATCH_SIZE,
+) -> Tuple[List[Tuple[ArchiveMessage, dict]], int]:
+    """Return (item_candidates, total_messages_scanned).
+
+    item_candidates is a flat list of (message, ref) pairs — one entry per
+    still-eligible nested media item, up to `limit` items (not messages: a
+    single mixed message with 5 images contributes up to 5 entries).
+    "Eligible" mirrors build_candidate_query's own pending/failed
+    semantics exactly: a sdkfileid with no media_files row yet, or an
+    existing "pending" row, is always eligible; an existing "failed" row
+    is eligible only when retry=True; a "downloaded" row is never
+    eligible. Computed in Python since it must be checked per nested
+    sdkfileid, not per message.
+
+    Coarse candidate messages are fetched in ascending-id batches of
+    `batch_size` (mirroring _scan_for_stale_downloaded's own pagination
+    rationale) instead of one unbounded .all() — cost scales with `limit`
+    reached, not with the tenant's total mixed/chatrecord history.
+    total_messages_scanned is a separate, cheap .count() over the same
+    (unpaginated, unlimited) coarse query — for --count-only reporting,
+    matching build_candidate_query/select_candidates' own
+    count()-for-total vs. limit()-for-actionable split.
+
+    Two nested items sharing one sdkfileid (a duplicate reference within
+    one message, or the identical file forwarded into two different
+    messages within the SAME batch) are deduplicated within this call —
+    only the first occurrence is ever returned as a candidate, so a
+    retried/redundant download never overwrites the one media_files row
+    that sdkfileid can have. A cross-message duplicate whose second
+    occurrence falls in a LATER batch, or a later call entirely, still
+    surfaces as get_or_reset_media_file's existing "media_identity_
+    conflict" outcome (archive_message_id mismatch) — a pre-existing,
+    schema-level limit of one archive_message_id owner per
+    (tenant_id, sdkfileid) this function does not attempt to lift."""
+    total_messages_scanned = build_nested_media_candidate_query(session, tenant_id, since_ms).count()
+
+    item_candidates: List[Tuple[ArchiveMessage, dict]] = []
+    seen_sdkfileids: set = set()
+    last_id = 0
+
+    while len(item_candidates) < limit:
+        batch = (
+            build_nested_media_candidate_query(session, tenant_id, since_ms)
+            .filter(ArchiveMessage.id > last_id)
+            .limit(batch_size)
+            .all()
+        )
+        if not batch:
+            break
+
+        batch_refs_by_msg = [(msg, iter_nested_media_refs(msg.structured_content)) for msg in batch]
+        batch_sdkfileids = {
+            ref["sdkfileid"] for _msg, refs in batch_refs_by_msg for ref in refs
+        }
+        existing_status_by_sdkfileid = {}
+        if batch_sdkfileids:
+            existing_status_by_sdkfileid = dict(
+                session.query(MediaFile.sdkfileid, MediaFile.download_status).filter(
+                    MediaFile.tenant_id == tenant_id,
+                    MediaFile.sdkfileid.in_(batch_sdkfileids),
+                )
+            )
+
+        for msg, refs in batch_refs_by_msg:
+            for ref in refs:
+                sdkfileid = ref["sdkfileid"]
+                if sdkfileid in seen_sdkfileids:
+                    continue
+                status = existing_status_by_sdkfileid.get(sdkfileid)
+                if status == "downloaded":
+                    continue
+                if status == "failed" and not retry:
+                    continue
+                seen_sdkfileids.add(sdkfileid)
+                item_candidates.append((msg, ref))
+                if len(item_candidates) >= limit:
+                    return item_candidates, total_messages_scanned
+
+        last_id = batch[-1].id
+        if len(batch) < batch_size:
+            break
+
+    return item_candidates, total_messages_scanned
+
+
+# ---------------------------------------------------------------------------
 # Storage references and media_files state transitions
 # ---------------------------------------------------------------------------
 
 
-def target_storage_refs(tenant_id: str, msgtype: str, archive_message_id: int) -> Tuple[str, str]:
+def target_storage_refs(
+    tenant_id: str, msgtype: str, archive_message_id: int, item_key: Optional[str] = None
+) -> Tuple[str, str]:
     """Return (base_ref_without_extension, part_ref) under
     tenants/<tenant_id>/<category>/ where category is msgtype's own
     key-category segment (see key_category_for_msgtype). Deterministic per
-    (tenant_id, msgtype, archive_message_id): a retried download of the
-    same message overwrites the same objects instead of accumulating
-    duplicates. The .part ref is fixed regardless of the eventual detected
-    extension so on-failure cleanup is unambiguous."""
+    (tenant_id, msgtype, archive_message_id, item_key): a retried download
+    of the same message (and, for a nested item, the same item_key)
+    overwrites the same objects instead of accumulating duplicates. The
+    .part ref is fixed regardless of the eventual detected extension so
+    on-failure cleanup is unambiguous.
+
+    item_key (RND-200) distinguishes multiple nested media items belonging
+    to the same mixed/chatrecord archive_message_id — e.g. two images in
+    one message must not resolve to the same object key. None (every
+    existing non-composite caller) preserves the original identifier
+    exactly, so this is fully backward compatible."""
     category = key_category_for_msgtype(msgtype)
-    base = build_tenant_media_key(tenant_id, category, str(archive_message_id))
-    part_ref = build_tenant_media_key(tenant_id, category, str(archive_message_id), suffix=".part")
+    identifier = str(archive_message_id) if item_key is None else f"{archive_message_id}_{item_key}"
+    base = build_tenant_media_key(tenant_id, category, identifier)
+    part_ref = build_tenant_media_key(tenant_id, category, identifier, suffix=".part")
     return base, part_ref
 
 
@@ -370,8 +563,18 @@ def download_one(
     msgtype: str,
     sdkfileid: str,
     timeout: int,
+    item_key: Optional[str] = None,
 ) -> Tuple[str, Optional[str], Optional[int]]:
     """Download one message's media.
+
+    item_key (RND-200): pass the nested item's path (see
+    iter_nested_media_refs) when downloading a mixed/chatrecord nested
+    media item, so its object key does not collide with a sibling item's —
+    see target_storage_refs. msgtype here must be the nested item's own
+    effective type (e.g. "image"), never the outer "mixed"/"chatrecord" —
+    the byte-signature gate below indexes _SIGNATURE_CATEGORY_BY_MSGTYPE by
+    msgtype and has no entry for either composite type. None (default)
+    preserves existing non-composite callers unchanged.
 
     Returns (outcome, detail, file_size): outcome is "downloaded" or
     "failed"; detail is the final storage reference (string) when
@@ -404,7 +607,7 @@ def download_one(
     else:
         provider = LocalStorageProvider(storage)
 
-    base_ref, part_ref = target_storage_refs(tenant_id, msgtype, archive_message_id)
+    base_ref, part_ref = target_storage_refs(tenant_id, msgtype, archive_message_id, item_key=item_key)
     allowed_category = _SIGNATURE_CATEGORY_BY_MSGTYPE[msgtype]
     outcome = "failed"
     detail: Optional[str] = "unknown_error"

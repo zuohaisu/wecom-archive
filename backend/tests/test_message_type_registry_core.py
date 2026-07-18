@@ -237,15 +237,18 @@ def test_registry_is_immutable() -> None:
         ("todo", MessageCategory.INTERACTIVE, MessageSupportStatus.SUPPORTED, MediaCapability.NONE),
         ("revoke", MessageCategory.CONTROL, MessageSupportStatus.UNSUPPORTED, MediaCapability.NONE),
         (
+            # RND-200: promoted to PARTIAL — recursive nested-message
+            # extraction is implemented; the composite viewer is not (see
+            # message_type_registry.py's mixed entry comment).
             "mixed",
             MessageCategory.COMPOSITE,
-            MessageSupportStatus.UNSUPPORTED,
+            MessageSupportStatus.PARTIAL,
             MediaCapability.MULTIPLE,
         ),
         (
             "chatrecord",
             MessageCategory.COMPOSITE,
-            MessageSupportStatus.UNSUPPORTED,
+            MessageSupportStatus.PARTIAL,
             MediaCapability.NESTED,
         ),
         ("sys", MessageCategory.SYSTEM, MessageSupportStatus.SUPPORTED, MediaCapability.NONE),
@@ -464,7 +467,8 @@ def test_registry_supported_or_partial_media_types_get_dedicated_classify_media_
 
 
 @pytest.mark.parametrize(
-    "msgtype", ["link", "location", "markdown", "news", "weapp", "card", "docmsg"]
+    "msgtype",
+    ["link", "location", "markdown", "news", "weapp", "card", "docmsg", "mixed", "chatrecord"],
 )
 def test_registry_structured_types_get_the_structured_media_classification(msgtype) -> None:
     """RND-197: link/location/markdown/news/weapp (SUPPORTED) and
@@ -486,7 +490,7 @@ def test_registry_structured_types_get_the_structured_media_classification(msgty
 
 @pytest.mark.parametrize(
     "msgtype",
-    ["emotion", "revoke", "mixed", "chatrecord"],
+    ["emotion", "revoke"],
 )
 def test_registry_unsupported_types_fall_into_classify_medias_generic_bucket(msgtype) -> None:
     definition = resolve(msgtype)

@@ -344,10 +344,31 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.NONE,
     ),
     MessageTypeDefinition(
+        # RND-200: promoted from UNSUPPORTED to PARTIAL — recursive nested-
+        # message extraction is now implemented (see
+        # app.structured_message_parser.parse_mixed_message), matching
+        # PARTIAL's definition exactly: recognized, classified, and now
+        # parsed/structured, but not yet renderable (the composite viewer
+        # is RND-206 scope). parser_strategy/renderer_strategy/
+        # media_capability/is_composite are unchanged.
+        #
+        # This DOES have one API-visible side effect worth calling out
+        # explicitly: app.media_classification.classify_media() branches
+        # on (support_status, category), so TimelineMessageOut.media_type
+        # for every mixed/chatrecord message changes from "unsupported"
+        # (media_status="unsupported", unsupported_reason=
+        # "unsupported_msgtype") to "structured" (media_status=None,
+        # unsupported_reason=None) — the same bucket link/location/card
+        # already report. The embedded frontend (app.main) dispatches on
+        # renderer_strategy / normalized_type, never on this media_type
+        # value for these two types, so today's rendering is unaffected;
+        # any other consumer of this API keying off media_type=="unsupported"
+        # for mixed/chatrecord specifically will see "structured" instead
+        # after this change ships.
         raw_type="mixed",
         normalized_type="mixed",
         category=MessageCategory.COMPOSITE,
-        support_status=MessageSupportStatus.UNSUPPORTED,
+        support_status=MessageSupportStatus.PARTIAL,
         display_label_key="messageType.mixed",
         parser_strategy=ParserStrategy.NESTED_MESSAGES,
         renderer_strategy=RendererStrategy.COMPOSITE_VIEW,
@@ -356,10 +377,13 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         is_composite=True,
     ),
     MessageTypeDefinition(
+        # RND-200: promoted from UNSUPPORTED to PARTIAL — see the mixed
+        # entry's comment above; same rationale applies to chatrecord's
+        # recursive extraction (parse_chatrecord_message).
         raw_type="chatrecord",
         normalized_type="chatrecord",
         category=MessageCategory.COMPOSITE,
-        support_status=MessageSupportStatus.UNSUPPORTED,
+        support_status=MessageSupportStatus.PARTIAL,
         display_label_key="messageType.chatrecord",
         parser_strategy=ParserStrategy.NESTED_MESSAGES,
         renderer_strategy=RendererStrategy.COMPOSITE_VIEW,

@@ -791,6 +791,13 @@ def test_count_only_performs_no_writes(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([candidate_msg], [], 3))
+    # RND-200: this test's mock session only stubs TenantWecomConfig/
+    # ArchiveMessage queries for the pre-existing --types candidate path —
+    # the nested mixed/chatrecord candidate scan is a separate, dedicated
+    # code path covered by its own tests (test_media_download.py /
+    # test_download_wecom_media_once.py nested-media sections), so it is
+    # stubbed to a no-op here rather than taught to this mock.
+    monkeypatch.setattr(script, "select_nested_media_candidates", lambda *_a, **_k: ([], 0))
     monkeypatch.setattr(
         script.wecom_sdk,
         "load_sdk",
@@ -839,6 +846,10 @@ def _run_main_with_one_candidate(monkeypatch, tmp_path, msgtype, chunks, extra_a
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([candidate_msg], [], 1))
+    # RND-200: see the identical stub in test_count_only_performs_no_writes
+    # above — this mock session doesn't model the nested mixed/chatrecord
+    # candidate scan, which is covered separately.
+    monkeypatch.setattr(script, "select_nested_media_candidates", lambda *_a, **_k: ([], 0))
     monkeypatch.setattr(script.wecom_sdk, "load_sdk", lambda _path: MagicMock())
     monkeypatch.setattr(script.wecom_sdk, "configure_sdk", lambda _lib: None)
     monkeypatch.setattr(script.wecom_sdk, "configure_sdk_media_data", lambda _lib: None)
@@ -939,3 +950,594 @@ def test_main_unsupported_type_transitions_to_failed(tmp_path, monkeypatch) -> N
 
     assert media_file_row.download_status == "failed"
     assert media_file_row.local_path is None
+
+
+# ---------------------------------------------------------------------------
+# RND-200 — nested mixed/chatrecord media (app.media_download +
+# scripts/download_wecom_media_once.py's --skip-nested-gated pass).
+#
+# A mixed/chatrecord ArchiveMessage has no top-level sdkfileid, so it can
+# never match build_candidate_query's ArchiveMessage.sdkfileid.isnot(None)
+# filter — these cover the parallel item-level candidate path
+# (iter_nested_media_refs / build_nested_media_candidate_query /
+# select_nested_media_candidates) and the item_key extension to
+# target_storage_refs/download_one that lets multiple nested media items
+# belonging to the same message get distinct, non-colliding object keys.
+# ---------------------------------------------------------------------------
+
+
+def test_iter_nested_media_refs_extracts_well_formed_entries() -> None:
+    from app.media_download import iter_nested_media_refs
+
+    structured_content = {
+        "fields": {"items": []},
+        "media_refs": [
+            {"path": "0", "type": "image", "sdkfileid": "sdk-a"},
+            {"path": "1.2", "type": "voice", "sdkfileid": "sdk-b"},
+        ],
+    }
+    refs = iter_nested_media_refs(structured_content)
+    assert refs == [
+        {"path": "0", "type": "image", "sdkfileid": "sdk-a"},
+        {"path": "1.2", "type": "voice", "sdkfileid": "sdk-b"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "structured_content",
+    [
+        None,
+        "not-a-dict",
+        {},
+        {"media_refs": "not-a-list"},
+        {"media_refs": [None, "not-a-dict", 123]},
+        {"media_refs": [{"path": "0", "type": "image"}]},  # missing sdkfileid
+        {"media_refs": [{"path": "0", "sdkfileid": "sdk-a"}]},  # missing type
+        {"media_refs": [{"path": "0", "type": "image", "sdkfileid": ""}]},  # empty sdkfileid
+        {"media_refs": [{"path": "0", "type": "mixed", "sdkfileid": "sdk-a"}]},  # not a downloadable type
+    ],
+)
+def test_iter_nested_media_refs_degrades_safely_for_malformed_input(structured_content) -> None:
+    from app.media_download import iter_nested_media_refs
+
+    assert iter_nested_media_refs(structured_content) == []
+
+
+def test_build_nested_media_candidate_query_shape() -> None:
+    from app.media_download import build_nested_media_candidate_query
+
+    engine = create_engine("sqlite:///:memory:")
+    with RealSession(engine) as session:
+        sql = _compiled_sql(build_nested_media_candidate_query(session, "tenant-a"))
+
+    assert "archive_messages.tenant_id = 'tenant-a'" in sql
+    assert "archive_messages.decrypt_status = 'success'" in sql
+    assert "'mixed'" in sql and "'chatrecord'" in sql
+    assert "structured_content IS NOT NULL" in sql
+
+
+def _insert_nested_message(session, msg_id, msgtype, media_refs, tenant_id="tenant-a"):
+    from app.db.models import ArchiveMessage
+
+    session.add(
+        ArchiveMessage(
+            id=msg_id,
+            msgid=f"m-{msg_id}",
+            seq=msg_id,
+            publickey_ver=1,
+            encrypt_random_key="k",
+            encrypt_chat_msg="c",
+            decrypt_status="success",
+            msgtype=msgtype,
+            tenant_id=tenant_id,
+            structured_content={
+                "fields": {"items": []},
+                "raw": {},
+                "parse_warnings": [],
+                "media_refs": media_refs,
+            },
+        )
+    )
+
+
+def test_select_nested_media_candidates_returns_flat_item_list(tmp_path) -> None:
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-candidates.db")
+    session = RealSession(engine)
+    _insert_nested_message(
+        session,
+        1,
+        "mixed",
+        [
+            {"path": "0", "type": "image", "sdkfileid": "sdk-a"},
+            {"path": "1", "type": "file", "sdkfileid": "sdk-b"},
+        ],
+    )
+    _insert_nested_message(session, 2, "chatrecord", [{"path": "0", "type": "voice", "sdkfileid": "sdk-c"}])
+    session.commit()
+
+    item_candidates, total_scanned = select_nested_media_candidates(session, "tenant-a", limit=10)
+
+    assert total_scanned == 2
+    assert len(item_candidates) == 3
+    sdkfileids = sorted(ref["sdkfileid"] for _msg, ref in item_candidates)
+    assert sdkfileids == ["sdk-a", "sdk-b", "sdk-c"]
+
+
+def test_select_nested_media_candidates_excludes_already_downloaded_sdkfileids(tmp_path) -> None:
+    from app.db.models import MediaFile
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-dedup.db")
+    session = RealSession(engine)
+    _insert_nested_message(
+        session,
+        1,
+        "mixed",
+        [
+            {"path": "0", "type": "image", "sdkfileid": "sdk-already-downloaded"},
+            {"path": "1", "type": "image", "sdkfileid": "sdk-still-pending"},
+        ],
+    )
+    session.add(
+        MediaFile(
+            sdkfileid="sdk-already-downloaded",
+            archive_message_id=1,
+            tenant_id="tenant-a",
+            download_status="downloaded",
+        )
+    )
+    session.commit()
+
+    item_candidates, _total = select_nested_media_candidates(session, "tenant-a", limit=10)
+
+    assert len(item_candidates) == 1
+    assert item_candidates[0][1]["sdkfileid"] == "sdk-still-pending"
+
+
+def test_select_nested_media_candidates_respects_limit_across_messages(tmp_path) -> None:
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-limit.db")
+    session = RealSession(engine)
+    for i in range(5):
+        _insert_nested_message(
+            session, i + 1, "mixed", [{"path": "0", "type": "image", "sdkfileid": f"sdk-{i}"}]
+        )
+    session.commit()
+
+    item_candidates, total_scanned = select_nested_media_candidates(session, "tenant-a", limit=2)
+
+    assert total_scanned == 5  # message-level scan count is not limited
+    assert len(item_candidates) == 2  # but item selection stops at the budget
+
+
+def test_select_nested_media_candidates_is_tenant_scoped(tmp_path) -> None:
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-tenant-scope.db")
+    session = RealSession(engine)
+    _insert_nested_message(
+        session, 1, "mixed", [{"path": "0", "type": "image", "sdkfileid": "sdk-a"}], tenant_id="tenant-a"
+    )
+    _insert_nested_message(
+        session, 2, "mixed", [{"path": "0", "type": "image", "sdkfileid": "sdk-b"}], tenant_id="tenant-b"
+    )
+    session.commit()
+
+    item_candidates, total_scanned = select_nested_media_candidates(session, "tenant-a", limit=10)
+
+    assert total_scanned == 1
+    assert [ref["sdkfileid"] for _msg, ref in item_candidates] == ["sdk-a"]
+
+
+def test_select_nested_media_candidates_ignores_non_composite_messages(tmp_path) -> None:
+    """A plain image message must never be picked up by the nested-media
+    scan even if (implausibly) its structured_content carried a
+    media_refs-shaped key — msgtype must be mixed/chatrecord."""
+    from app.db.models import ArchiveMessage
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-non-composite.db")
+    session = RealSession(engine)
+    session.add(
+        ArchiveMessage(
+            id=1, msgid="m-1", seq=1, publickey_ver=1, encrypt_random_key="k",
+            encrypt_chat_msg="c", decrypt_status="success", msgtype="image",
+            tenant_id="tenant-a", sdkfileid="sdk-a",
+            structured_content={"media_refs": [{"path": "0", "type": "image", "sdkfileid": "sdk-a"}]},
+        )
+    )
+    session.commit()
+
+    item_candidates, total_scanned = select_nested_media_candidates(session, "tenant-a", limit=10)
+    assert total_scanned == 0
+    assert item_candidates == []
+
+
+# ---------------------------------------------------------------------------
+# RND-200 QA fixes — found by adversarial code review after the initial
+# implementation: select_nested_media_candidates silently ignored --retry
+# (a "failed" nested item was retried on every run regardless of the
+# flag) and --since-hours, materialized the tenant's ENTIRE mixed/
+# chatrecord history via one unbounded .all(), and could return the same
+# sdkfileid twice in one batch (wasting a download and orphaning the
+# first upload). These cover the fix.
+# ---------------------------------------------------------------------------
+
+
+def test_select_nested_media_candidates_excludes_failed_without_retry(tmp_path) -> None:
+    from app.db.models import MediaFile
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-retry-off.db")
+    session = RealSession(engine)
+    _insert_nested_message(
+        session, 1, "mixed", [{"path": "0", "type": "image", "sdkfileid": "sdk-failed-before"}]
+    )
+    session.add(
+        MediaFile(
+            sdkfileid="sdk-failed-before", archive_message_id=1, tenant_id="tenant-a",
+            download_status="failed",
+        )
+    )
+    session.commit()
+
+    item_candidates, _total = select_nested_media_candidates(session, "tenant-a", limit=10, retry=False)
+    assert item_candidates == []
+
+
+def test_select_nested_media_candidates_includes_failed_with_retry(tmp_path) -> None:
+    from app.db.models import MediaFile
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-retry-on.db")
+    session = RealSession(engine)
+    _insert_nested_message(
+        session, 1, "mixed", [{"path": "0", "type": "image", "sdkfileid": "sdk-failed-before"}]
+    )
+    session.add(
+        MediaFile(
+            sdkfileid="sdk-failed-before", archive_message_id=1, tenant_id="tenant-a",
+            download_status="failed",
+        )
+    )
+    session.commit()
+
+    item_candidates, _total = select_nested_media_candidates(session, "tenant-a", limit=10, retry=True)
+    assert len(item_candidates) == 1
+    assert item_candidates[0][1]["sdkfileid"] == "sdk-failed-before"
+
+
+def test_select_nested_media_candidates_includes_pending_regardless_of_retry(tmp_path) -> None:
+    """Mirrors build_candidate_query: "pending" is always eligible, only
+    "failed" is retry-gated."""
+    from app.db.models import MediaFile
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-pending-always.db")
+    session = RealSession(engine)
+    _insert_nested_message(session, 1, "mixed", [{"path": "0", "type": "image", "sdkfileid": "sdk-pending"}])
+    session.add(
+        MediaFile(
+            sdkfileid="sdk-pending", archive_message_id=1, tenant_id="tenant-a",
+            download_status="pending",
+        )
+    )
+    session.commit()
+
+    item_candidates, _total = select_nested_media_candidates(session, "tenant-a", limit=10, retry=False)
+    assert len(item_candidates) == 1
+
+
+def test_select_nested_media_candidates_respects_since_ms(tmp_path) -> None:
+    from app.db.models import ArchiveMessage
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-since-ms.db")
+    session = RealSession(engine)
+    _insert_nested_message(session, 1, "mixed", [{"path": "0", "type": "image", "sdkfileid": "sdk-old"}])
+    _insert_nested_message(session, 2, "mixed", [{"path": "0", "type": "image", "sdkfileid": "sdk-new"}])
+    session.query(ArchiveMessage).filter(ArchiveMessage.id == 1).update({"msgtime": 1000})
+    session.query(ArchiveMessage).filter(ArchiveMessage.id == 2).update({"msgtime": 9000})
+    session.commit()
+
+    item_candidates, total_scanned = select_nested_media_candidates(
+        session, "tenant-a", limit=10, since_ms=5000
+    )
+    assert total_scanned == 1
+    assert [ref["sdkfileid"] for _msg, ref in item_candidates] == ["sdk-new"]
+
+
+def test_select_nested_media_candidates_dedupes_same_sdkfileid_within_one_batch(tmp_path) -> None:
+    """The same sdkfileid referenced twice (within one message, or across
+    two messages in the same run) must be returned as a candidate only
+    once — otherwise the second download_one() call would overwrite the
+    first's media_files row and orphan its just-uploaded object."""
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-dedup-batch.db")
+    session = RealSession(engine)
+    _insert_nested_message(
+        session,
+        1,
+        "mixed",
+        [
+            {"path": "0", "type": "image", "sdkfileid": "sdk-shared"},
+            {"path": "1", "type": "image", "sdkfileid": "sdk-shared"},
+        ],
+    )
+    _insert_nested_message(session, 2, "chatrecord", [{"path": "0", "type": "image", "sdkfileid": "sdk-shared"}])
+    session.commit()
+
+    item_candidates, _total = select_nested_media_candidates(session, "tenant-a", limit=10)
+    assert len(item_candidates) == 1
+    assert item_candidates[0][1]["path"] == "0"
+    assert item_candidates[0][1]["sdkfileid"] == "sdk-shared"
+
+
+def test_select_nested_media_candidates_paginates_across_multiple_batches(tmp_path) -> None:
+    """With a small batch_size, the coarse scan must still find candidates
+    that fall in a LATER batch — proving pagination doesn't silently stop
+    after the first page."""
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-pagination.db")
+    session = RealSession(engine)
+    for i in range(10):
+        _insert_nested_message(
+            session, i + 1, "mixed", [{"path": "0", "type": "image", "sdkfileid": f"sdk-{i}"}]
+        )
+    session.commit()
+
+    item_candidates, total_scanned = select_nested_media_candidates(
+        session, "tenant-a", limit=100, batch_size=3
+    )
+    assert total_scanned == 10
+    assert len(item_candidates) == 10
+    assert {ref["sdkfileid"] for _msg, ref in item_candidates} == {f"sdk-{i}" for i in range(10)}
+
+
+def test_select_nested_media_candidates_stops_at_limit_mid_batch(tmp_path) -> None:
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-pagination-limit.db")
+    session = RealSession(engine)
+    for i in range(10):
+        _insert_nested_message(
+            session, i + 1, "mixed", [{"path": "0", "type": "image", "sdkfileid": f"sdk-{i}"}]
+        )
+    session.commit()
+
+    item_candidates, total_scanned = select_nested_media_candidates(
+        session, "tenant-a", limit=4, batch_size=3
+    )
+    assert total_scanned == 10  # total is unaffected by limit
+    assert len(item_candidates) == 4
+
+
+# --- target_storage_refs / download_one item_key extension -----------------
+
+
+def test_target_storage_refs_item_key_none_matches_pre_rnd200_behavior() -> None:
+    from app.media_download import target_storage_refs
+
+    base, part = target_storage_refs("tenant-a", "image", 42)
+    assert base == "tenants/tenant-a/images/42"
+    assert part == "tenants/tenant-a/images/42.part"
+
+
+def test_target_storage_refs_item_key_disambiguates_sibling_nested_items() -> None:
+    from app.media_download import target_storage_refs
+
+    base_0, part_0 = target_storage_refs("tenant-a", "image", 42, item_key="0")
+    base_1, part_1 = target_storage_refs("tenant-a", "image", 42, item_key="1")
+
+    assert base_0 != base_1
+    assert part_0 != part_1
+    assert base_0 == "tenants/tenant-a/images/42_0"
+    assert base_1 == "tenants/tenant-a/images/42_1"
+
+
+def test_target_storage_refs_item_key_is_deterministic() -> None:
+    from app.media_download import target_storage_refs
+
+    first = target_storage_refs("tenant-a", "image", 42, item_key="1.2")
+    second = target_storage_refs("tenant-a", "image", 42, item_key="1.2")
+    assert first == second
+
+
+def test_download_one_with_item_key_produces_distinct_storage_refs(tmp_path, monkeypatch) -> None:
+    import app.media_download as media_download
+
+    jpeg_bytes = b"\xff\xd8\xff" + b"jpeg-body"
+    monkeypatch.setattr(
+        media_download.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes])
+    )
+
+    outcome_0, detail_0, _size_0 = media_download.download_one(
+        MagicMock(), MagicMock(), tmp_path, "tenant-a", 555, "image", "sdk-a", timeout=5, item_key="0"
+    )
+    outcome_1, detail_1, _size_1 = media_download.download_one(
+        MagicMock(), MagicMock(), tmp_path, "tenant-a", 555, "image", "sdk-b", timeout=5, item_key="1"
+    )
+
+    assert outcome_0 == "downloaded"
+    assert outcome_1 == "downloaded"
+    assert detail_0 != detail_1
+    assert Path(detail_0).exists()
+    assert Path(detail_1).exists()
+
+
+# --- CLI script wiring: --skip-nested and end-to-end nested download -------
+
+
+def test_main_nested_mixed_media_downloads_multiple_items_with_distinct_storage_refs(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """End-to-end through the CLI script: a mixed message with two nested
+    images gets both downloaded, each into its own media_files row with a
+    distinct storage_ref — proving the item_key extension actually
+    prevents the collision two sibling nested items would otherwise hit
+    under the pre-RND-200 archive_message_id-only key."""
+    import scripts.download_wecom_media_once as script
+    from app.db.models import ArchiveMessage, MediaFile
+
+    monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download.lock"))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
+    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
+    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "secret")
+    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
+
+    engine = _make_sqlite_engine(tmp_path, "nested-e2e.db")
+    session = RealSession(engine)
+    session.add(
+        ArchiveMessage(
+            id=1, msgid="m-1", seq=1, publickey_ver=1, encrypt_random_key="k",
+            encrypt_chat_msg="c", decrypt_status="success", msgtype="mixed",
+            tenant_id="tenant-a",
+            structured_content={
+                "fields": {"items": []},
+                "raw": {},
+                "parse_warnings": [],
+                "media_refs": [
+                    {"path": "0", "type": "image", "sdkfileid": "sdk-nested-img-a"},
+                    {"path": "1", "type": "image", "sdkfileid": "sdk-nested-img-b"},
+                ],
+            },
+        )
+    )
+    session.commit()
+
+    @contextmanager
+    def _fake_session(_engine):
+        yield session
+
+    jpeg_bytes = b"\xff\xd8\xff" + b"jpeg-body"
+
+    monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
+    monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(script, "_require_tenant_id", lambda _session, _corp_id: "tenant-a")
+    monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([], [], 0))
+    monkeypatch.setattr(script.wecom_sdk, "load_sdk", lambda _path: MagicMock())
+    monkeypatch.setattr(script.wecom_sdk, "configure_sdk", lambda _lib: None)
+    monkeypatch.setattr(script.wecom_sdk, "configure_sdk_media_data", lambda _lib: None)
+    monkeypatch.setattr(script.wecom_sdk, "new_sdk", lambda _lib: 123)
+    monkeypatch.setattr(script.wecom_sdk, "init_sdk", lambda _lib, _h, _c, _s: 0)
+    monkeypatch.setattr(script.wecom_sdk, "destroy_sdk", lambda _lib, _h: None)
+    monkeypatch.setattr(script.wecom_sdk, "iter_media_chunks", lambda *a, **k: iter([jpeg_bytes]))
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as exc:
+        script.main()
+    assert exc.value.code == 0
+
+    rows = (
+        session.query(MediaFile)
+        .filter(MediaFile.tenant_id == "tenant-a")
+        .order_by(MediaFile.sdkfileid)
+        .all()
+    )
+    assert len(rows) == 2
+    assert {r.sdkfileid for r in rows} == {"sdk-nested-img-a", "sdk-nested-img-b"}
+    for row in rows:
+        assert row.download_status == "downloaded"
+        assert row.archive_message_id == 1
+        assert row.file_type == "image"
+    assert rows[0].storage_ref != rows[1].storage_ref
+
+    captured = capsys.readouterr()
+    assert "sdk-nested-img-a" not in captured.out
+    assert "sdk-nested-img-b" not in captured.out
+
+
+def test_main_skip_nested_flag_disables_nested_processing(tmp_path, monkeypatch, capsys) -> None:
+    """--skip-nested must fully bypass the nested candidate scan and
+    download loop — no media_files rows are created for nested items."""
+    import scripts.download_wecom_media_once as script
+    from app.db.models import ArchiveMessage, MediaFile
+
+    monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download.lock"))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
+    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
+
+    engine = _make_sqlite_engine(tmp_path, "nested-skip.db")
+    session = RealSession(engine)
+    session.add(
+        ArchiveMessage(
+            id=1, msgid="m-1", seq=1, publickey_ver=1, encrypt_random_key="k",
+            encrypt_chat_msg="c", decrypt_status="success", msgtype="mixed",
+            tenant_id="tenant-a",
+            structured_content={
+                "media_refs": [{"path": "0", "type": "image", "sdkfileid": "sdk-nested-img-a"}],
+            },
+        )
+    )
+    session.commit()
+
+    @contextmanager
+    def _fake_session(_engine):
+        yield session
+
+    monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
+    monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(script, "_require_tenant_id", lambda _session, _corp_id: "tenant-a")
+    monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([], [], 0))
+    monkeypatch.setattr(sys, "argv", ["prog", "--skip-nested"])
+
+    with pytest.raises(SystemExit) as exc:
+        script.main()
+    assert exc.value.code == 0
+
+    assert session.query(MediaFile).count() == 0
+    captured = capsys.readouterr()
+    assert "nested_candidate_messages_scanned" not in captured.out
+    assert "no candidates to process" in captured.out
+
+
+def test_count_only_reports_nested_candidates_without_writes(tmp_path, monkeypatch, capsys) -> None:
+    import scripts.download_wecom_media_once as script
+    from app.db.models import ArchiveMessage, MediaFile
+
+    monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download-count.lock"))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
+    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+
+    engine = _make_sqlite_engine(tmp_path, "nested-count-only.db")
+    session = RealSession(engine)
+    session.add(
+        ArchiveMessage(
+            id=1, msgid="m-1", seq=1, publickey_ver=1, encrypt_random_key="k",
+            encrypt_chat_msg="c", decrypt_status="success", msgtype="chatrecord",
+            tenant_id="tenant-a",
+            structured_content={
+                "media_refs": [
+                    {"path": "0", "type": "voice", "sdkfileid": "sdk-v1"},
+                    {"path": "1", "type": "voice", "sdkfileid": "sdk-v2"},
+                ],
+            },
+        )
+    )
+    session.commit()
+
+    @contextmanager
+    def _fake_session(_engine):
+        yield session
+
+    monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
+    monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(script, "_require_tenant_id", lambda _session, _corp_id: "tenant-a")
+    monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([], [], 0))
+    monkeypatch.setattr(sys, "argv", ["prog", "--count-only"])
+
+    with pytest.raises(SystemExit) as exc:
+        script.main()
+    assert exc.value.code == 0
+
+    captured = capsys.readouterr()
+    assert "nested_candidate_messages_scanned: 1" in captured.out
+    assert "nested_candidate_items_selected: 2" in captured.out
+    assert session.query(MediaFile).count() == 0

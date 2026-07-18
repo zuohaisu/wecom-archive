@@ -45,6 +45,7 @@ Monitored-account / archive-seat detection (RND-132):
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from typing import Callable, Optional, Tuple
@@ -67,6 +68,7 @@ from app.media_classification import (
     classify_media,
     resolve_downloadable_media_status,
 )
+from app.media_download import NESTED_MEDIA_MSGTYPES, iter_nested_media_refs
 from app.message_type_registry import describe_message_type
 from app.media_storage import (
     SERVABLE_MEDIA_MSGTYPES,
@@ -111,13 +113,18 @@ logger = logging.getLogger(__name__)
 # match so no other endpoint's caching behavior changes.
 # ---------------------------------------------------------------------------
 
-_MEDIA_ACCESS_PATH_RE = re.compile(r"^/api/conversations/[^/]+/messages/[^/]+/media/access$")
+_MEDIA_ACCESS_PATH_RE = re.compile(
+    r"^/api/conversations/[^/]+/messages/[^/]+/(media|nested-media/[^/]+)/access$"
+)
 
 
 class MediaAccessNoStoreMiddleware(BaseHTTPMiddleware):
     """Ensures Cache-Control: no-store on every response — success or error,
-    any status code — for GET .../media/access (RND-187). See the module
-    comment above for why this can't be done from inside the route alone."""
+    any status code — for GET .../media/access and (RND-200/201) GET
+    .../nested-media/{item_path}/access, which shares the exact same
+    no-time-boxed-credential-must-never-be-cached rationale (RND-187). See
+    the module comment above for why this can't be done from inside the
+    route alone."""
 
     async def dispatch(self, request: Request, call_next: Callable):
         response = await call_next(request)
@@ -246,6 +253,300 @@ def _load_media_files_map(
         )
         .all()
     }
+
+
+# ---------------------------------------------------------------------------
+# Nested media (mixed/chatrecord, RND-200 QA fix / RND-201)
+#
+# A mixed/chatrecord message's structured_content.fields tree carries a
+# "media": {"has_reference": bool} placeholder per node (see
+# app.structured_message_parser) — enough to know a nested item HAS
+# downloadable media, but not enough for a consumer to determine its
+# status or actually fetch it. This section attaches a full, safe,
+# request-time-computed media descriptor to the correct node in place
+# (never a second array the frontend must index-correlate), and exposes a
+# tenant-scoped, path-validated nested-media access route reusing every
+# existing RND-199 storage/auth primitive.
+# ---------------------------------------------------------------------------
+
+# Path grammar: a dot-separated chain of small non-negative integers,
+# e.g. "0", "0.1", "3.0.2" — exactly the same value
+# app.structured_message_parser._parse_nested_item already assigns each
+# node as its "path" field (and the same value app.media_download's
+# media_refs entries key on), reused verbatim as the URL identifier
+# rather than inventing a second addressing scheme (e.g. "items.2.
+# children.0") for the same, already-homogeneous tree: every level of a
+# mixed/chatrecord tree is a list of the same node shape, so the
+# "items"/"children" key-name segments the ticket's example grammar uses
+# carry no additional addressing information over a bare index chain.
+#
+# No eval, no arbitrary attribute traversal, no filesystem mapping: this
+# regex is the ENTIRE grammar, and resolution (_find_nested_media_ref)
+# is a single exact-string-equality lookup against the flat, already-
+# computed media_refs list — the path string is never used to index into
+# a live Python structure, walk an object graph, or build a filesystem
+# path.
+#
+# Segment count is capped at _MIXED_MAX_DEPTH + 1 (one segment per
+# recursion level 0..depth, inclusive) and each segment at 6 digits
+# (comfortably above _MIXED_ITEM_CAP=200, the largest index that could
+# ever legitimately appear, while still bounding absurd input) — both
+# constants are mirrored locally (not imported) to avoid a new
+# conversations.py -> structured_message_parser dependency; a dedicated
+# test (test_nested_media_path_segment_cap_matches_parser_max_depth)
+# keeps the two in sync instead.
+_NESTED_MEDIA_MAX_PATH_SEGMENTS = 9  # mirrors structured_message_parser._MIXED_MAX_DEPTH + 1
+_NESTED_MEDIA_MAX_PATH_LENGTH = 64
+_NESTED_MEDIA_PATH_RE = re.compile(
+    r"^\d{1,6}(?:\.\d{1,6}){0,8}$"  # {0,8} = up to 8 additional segments -> 9 total
+)
+
+# resolve_downloadable_media_state()'s tri-state file_state -> the public
+# nested-media status vocabulary. Deliberately reuses the SAME vocabulary
+# app.media_classification already established for top-level media
+# (available/failed/unavailable/not_downloaded) rather than inventing a
+# new pending/downloaded/failed/unavailable set — "if the project already
+# has a status enum, prefer reusing it" (ticket requirement). This is not
+# routed through app.media_classification.resolve_downloadable_media_status
+# itself because that function is a documented no-op for media_type
+# "emotion" (excluded from SUPPORTED_MIGRATION_MEDIA_TYPES by design — see
+# its own docstring) — a nested emotion/sticker reference is just as
+# legitimately downloadable via this ticket's media_download extension as
+# any other nested type, so this local mapping covers all five
+# _NESTED_MEDIA_TYPES-equivalent categories uniformly instead of carrying
+# that top-level-only exclusion into the nested contract.
+_NESTED_MEDIA_STATUS_BY_FILE_STATE = {
+    "servable": "available",
+    "missing": "failed",
+    "unsupported_type": "failed",
+    "unavailable": "unavailable",
+}
+
+
+def _validate_nested_media_path(raw: str) -> Optional[str]:
+    """Validate a caller-supplied nested-media item path (untrusted URL
+    input) against the strict grammar above, returning the path unchanged
+    (it is already canonical — no normalization needed) or None for
+    anything malformed: wrong characters (rejects path traversal — "..",
+    "/", null bytes, letters — since only digits and "." ever match),
+    too many segments (recursion-depth violation), or too long overall
+    (defense in depth on top of the regex's own implicit bound).
+
+    This function alone decides "well-formed enough to attempt a lookup"
+    — it does NOT confirm the path resolves to an actual node (that is
+    _find_nested_media_ref's job, against THIS message's own data only).
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    if len(raw) > _NESTED_MEDIA_MAX_PATH_LENGTH:
+        return None
+    if raw.count(".") > _NESTED_MEDIA_MAX_PATH_SEGMENTS - 1:
+        return None
+    if not _NESTED_MEDIA_PATH_RE.match(raw):
+        return None
+    return raw
+
+
+def _find_nested_media_ref(structured_content, path: str) -> Optional[dict]:
+    """Resolve a validated path to its media_refs entry for THIS message
+    only — {"path", "type", "sdkfileid"} — or None if the path does not
+    exist, is not media-bearing, or belongs to a different message
+    entirely. iter_nested_media_refs (app.media_download) already
+    filters to only well-formed entries whose type is a downloadable
+    category, so a single exact-match lookup here simultaneously
+    satisfies every one of the ticket's "reject: node not found /
+    non-media node / path beyond this message's content" requirements —
+    there is no separate tree-walk needed. Resolution is also
+    structurally unique by construction: _parse_nested_item visits each
+    (recursion level, sibling index) pair at most once, so no two
+    media_refs entries for one message can ever share a path (verified by
+    test, not merely assumed).
+
+    structured_content.media_refs is server-internal only (see
+    app.structured_message_parser's module docstring) — this function's
+    return value must never be serialized into an API response as-is;
+    only sdkfileid-derived, already-authorized lookups (MediaFile status/
+    mime_type/size) may reach the client.
+    """
+    refs = iter_nested_media_refs(structured_content)
+    for ref in refs:
+        if ref["path"] == path:
+            return ref
+    return None
+
+
+def _resolve_authorized_nested_media(
+    db: Session, conversation_id: str, msgid: str, item_path: str, tenant_id: str
+) -> Tuple[ArchiveMessage, dict, MediaFile]:
+    """Shared authorization + lookup for the nested mixed/chatrecord media
+    routes (get_nested_message_media, get_nested_message_media_access) —
+    the nested-item analogue of _resolve_authorized_media, sharing its
+    exact authorization shape: conversation membership -> msgtype gate ->
+    row lookup, all completed before any storage provider is touched.
+
+    Differs from _resolve_authorized_media in one deliberate way: the
+    MediaFile row is resolved by (tenant_id, sdkfileid), NOT by
+    (tenant_id, archive_message_id). This is not a shortcut — it is the
+    correct model for a nested reference: the same physical WeCom media
+    object can be legitimately referenced by more than one logical
+    message/node (e.g. the identical file re-forwarded into a second
+    chatrecord digest), and this route answers "can this tenant read the
+    physical object this logical node refers to", not "does this exact
+    row happen to be owned by this exact message" (that ownership
+    question only matters to the DOWNLOAD/write path — see
+    app.media_download.get_or_reset_media_file — and is deliberately left
+    unchanged here; see the RND-200 QA fix report's association-model
+    section). Tenant isolation is unaffected: sdkfileid is never taken
+    from the request — it is read server-side from THIS message's own
+    already-tenant-scoped structured_content only.
+    """
+    messages = _fetch_conversation_messages(db, conversation_id, tenant_id)
+    msg = next((m for m in messages if m.msgid == msgid), None)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if msg.msgtype not in NESTED_MEDIA_MSGTYPES:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    validated_path = _validate_nested_media_path(item_path)
+    if validated_path is None:
+        raise HTTPException(status_code=400, detail="Malformed nested media path")
+
+    ref = _find_nested_media_ref(getattr(msg, "structured_content", None), validated_path)
+    if ref is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    media_file = (
+        db.query(MediaFile)
+        .filter(MediaFile.tenant_id == tenant_id, MediaFile.sdkfileid == ref["sdkfileid"])
+        .first()
+    )
+    if media_file is None or media_file.download_status != "downloaded":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    return msg, ref, media_file
+
+
+def _load_media_files_by_sdkfileid_map(
+    db: Session, tenant_id: str, sdkfileids: set
+) -> dict:
+    """Return {sdkfileid: MediaFile} for the given sdkfileids, scoped to
+    tenant_id — the nested-media analogue of _load_media_files_map, keyed
+    by sdkfileid (matching how nested media is actually resolved — see
+    _resolve_authorized_nested_media) rather than archive_message_id, so
+    one batch query covers every nested media reference across an entire
+    timeline page regardless of which message(s) they belong to."""
+    if not sdkfileids:
+        return {}
+    return {
+        row.sdkfileid: row
+        for row in db.query(MediaFile)
+        .filter(MediaFile.tenant_id == tenant_id, MediaFile.sdkfileid.in_(sdkfileids))
+        .all()
+    }
+
+
+def _build_nested_media_descriptor(
+    media_type: str, media_file: Optional[MediaFile], conversation_id: str, msgid: str, path: str
+) -> dict:
+    """Build the safe, public per-node media descriptor attached to a
+    mixed/chatrecord structured_content node — {"status", "media_type",
+    "mime_type", "size_bytes", "access_url"}. Never includes sdkfileid,
+    any MediaFile database id, local_path, storage_ref/oss_key, or any
+    storage credential — only a status string, the already-known nested
+    item type, content-sniffed mime_type, byte size, and a same-origin
+    API URL the caller can request an access descriptor from (mirroring
+    TimelineMessageOut.media_access_url, which is null unless the
+    underlying media is actually available).
+    """
+    status = "not_downloaded"
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    access_url: Optional[str] = None
+
+    if media_file is not None:
+        if media_file.download_status == "downloaded":
+            try:
+                file_state = resolve_downloadable_media_state(media_file)
+            except (MediaStorageUnavailable, MediaStorageConfigurationError):
+                file_state = "unavailable"
+            status = _NESTED_MEDIA_STATUS_BY_FILE_STATE.get(file_state, "failed")
+        elif media_file.download_status == "failed":
+            status = "failed"
+        # else: "pending" -- stays "not_downloaded", matching the
+        # top-level media_status convention for a row that exists but
+        # has not completed a download attempt yet.
+
+        if status == "available":
+            _backend, effective_ref = resolve_effective_storage_reference(
+                getattr(media_file, "storage_backend", None),
+                getattr(media_file, "storage_ref", None),
+                getattr(media_file, "local_path", None),
+            )
+            mime_type = detect_media_content_type_for_ref(effective_ref)
+            size_bytes = media_file.file_size
+            access_url = (
+                f"/api/conversations/{conversation_id}/messages/{msgid}"
+                f"/nested-media/{path}/access"
+            )
+
+    return {
+        "status": status,
+        "media_type": media_type,
+        "mime_type": mime_type,
+        "size_bytes": size_bytes,
+        "access_url": access_url,
+    }
+
+
+def _enrich_nested_media_fields(
+    fields: dict, media_refs: list, media_files_by_sdkfileid: dict, conversation_id: str, msgid: str
+) -> dict:
+    """Return a deep copy of a mixed/chatrecord message's structured_content
+    "fields" with every media-bearing node's "media" value replaced by
+    the full descriptor from _build_nested_media_descriptor — preserving
+    hierarchy, sibling order, sender/timestamp/type, and every other
+    per-node key unchanged (never flattened into a second, separately-
+    indexed array the caller must correlate).
+
+    Always operates on a deep copy: the input `fields` value is the SAME
+    object SQLAlchemy deserialized onto the ORM-mapped structured_content
+    JSONB column — mutating it in place risks an unintended write-back on
+    a session that later flushes/commits for an unrelated reason. This
+    function must never mutate its input.
+    """
+    refs_by_path = {r["path"]: r for r in media_refs}
+    fields = copy.deepcopy(fields)
+
+    def _walk(node: dict) -> dict:
+        if isinstance(node.get("media"), dict):
+            # Every media-bearing node is normalized to the full
+            # descriptor shape unconditionally -- even when no matching
+            # media_refs entry exists (e.g. a historical row decrypted
+            # before this ticket's media_refs key existed, or any other
+            # data inconsistency). Gating this on "a ref happens to
+            # match" would leave such nodes on the OLD {"has_reference":
+            # bool} placeholder shape, defeating the point of a stable,
+            # single contract shape for every media-bearing node
+            # regardless of data vintage (RND-200 QA fix regression
+            # guard: test_old_style_structured_content_without_media_
+            # refs_key_degrades_safely).
+            ref = refs_by_path.get(node.get("path"))
+            media_file = (
+                media_files_by_sdkfileid.get(ref["sdkfileid"]) if ref is not None else None
+            )
+            node["media"] = _build_nested_media_descriptor(
+                node.get("type"), media_file, conversation_id, msgid, node.get("path")
+            )
+        children = node.get("children")
+        if isinstance(children, list):
+            node["children"] = [_walk(child) for child in children if isinstance(child, dict)]
+        return node
+
+    items = fields.get("items")
+    if isinstance(items, list):
+        fields["items"] = [_walk(item) for item in items if isinstance(item, dict)]
+    return fields
 
 
 def _latest_own_participation_time(
@@ -622,6 +923,40 @@ class MediaAccessOut(BaseModel):
     size_bytes: Optional[int] = None
 
 
+class NestedMediaAccessOut(BaseModel):
+    """Public access descriptor for a nested mixed/chatrecord media item
+    (RND-200 QA fix — security remediation). Deliberately a SEPARATE model
+    from MediaAccessOut, not that model reused: MediaAccessOut.media_id
+    exposes the internal MediaFile primary key, which was an accepted,
+    pre-existing exposure for the single-media-per-message top-level
+    contract (see get_message_media_access) but is NOT part of the
+    approved nested-media public contract — the parent message + nested
+    node path is the only public handle nested media is ever looked up
+    by, and no internal database identifier may accompany it.
+
+    Every other field mirrors MediaAccessOut's meaning exactly
+    (access_type="proxy" vs "signed_url", expires_at only set for the
+    latter) so nested and top-level media remain trivially similar for
+    any consumer that already understands one of the two shapes — only
+    the internal-id field is omitted, and mime_type/filename are named to
+    match the per-node structured_content descriptor's own field names
+    (see _build_nested_media_descriptor) rather than MediaAccessOut's
+    content_type, for consistency within the nested contract itself.
+    filename is always None today (no media type in this system carries
+    one — see _build_nested_media_descriptor's docstring) but is kept as
+    an explicit, documented field rather than omitted, matching the
+    shape independent QA approved.
+    """
+
+    storage_backend: str
+    access_type: str
+    url: str
+    expires_at: Optional[str] = None
+    mime_type: Optional[str] = None
+    filename: Optional[str] = None
+    size_bytes: Optional[int] = None
+
+
 class PaginationOut(BaseModel):
     has_older: bool
     next_before: Optional[str] = None
@@ -933,6 +1268,19 @@ def get_conversation_messages(
 
     media_files_map = _load_media_files_map(db, tenant_id, [m.id for m in page])
 
+    # RND-200 QA fix: batch-load every MediaFile a mixed/chatrecord message
+    # on this page could reference via a nested item, keyed by sdkfileid
+    # (see _resolve_authorized_nested_media for why sdkfileid, not
+    # archive_message_id, is the correct key) — one query for the whole
+    # page instead of one per nested message.
+    nested_sdkfileids: set = set()
+    for msg in page:
+        if msg.msgtype in NESTED_MEDIA_MSGTYPES:
+            nested_sdkfileids.update(
+                ref["sdkfileid"] for ref in iter_nested_media_refs(getattr(msg, "structured_content", None))
+            )
+    nested_media_files_map = _load_media_files_by_sdkfileid_map(db, tenant_id, nested_sdkfileids)
+
     result = []
     for msg in page:
         recipients = recipients_map.get(msg.id, [])
@@ -942,8 +1290,23 @@ def get_conversation_messages(
         structured_content_out: Optional[dict] = None
         raw_structured = getattr(msg, "structured_content", None)
         if isinstance(raw_structured, dict):
+            out_fields = raw_structured.get("fields")
+            if msg.msgtype in NESTED_MEDIA_MSGTYPES and isinstance(out_fields, dict):
+                # Attach safe, request-time media status/access info to
+                # every nested node with a media reference — replacing
+                # the persisted {"has_reference": bool} placeholder.
+                # raw_structured["media_refs"] (the sdkfileid-bearing
+                # list) is read here, server-side only, and never itself
+                # copied into out_fields/structured_content_out.
+                out_fields = _enrich_nested_media_fields(
+                    out_fields,
+                    raw_structured.get("media_refs") or [],
+                    nested_media_files_map,
+                    conversation_id,
+                    msg.msgid,
+                )
             structured_content_out = {
-                "fields": raw_structured.get("fields"),
+                "fields": out_fields,
                 "parse_warnings": raw_structured.get("parse_warnings", []),
             }
 
@@ -1351,6 +1714,205 @@ def get_message_media_access(
 
     logger.error(
         "media access route: unsupported backend for access descriptor (backend=%s)",
+        effective_backend,
+    )
+    raise HTTPException(status_code=500, detail="Media storage is misconfigured")
+
+
+@router.get("/api/conversations/{conversation_id}/messages/{msgid}/nested-media/{item_path}")
+def get_nested_message_media(
+    conversation_id: str,
+    msgid: str,
+    item_path: str,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
+    """
+    Serve an already-downloaded nested mixed/chatrecord media item's file
+    content (RND-200 QA fix) — the nested-item analogue of
+    get_message_media, reusing every storage/content-type primitive it
+    uses. Not a second implementation: only _resolve_authorized_media is
+    swapped for _resolve_authorized_nested_media (which additionally
+    validates item_path and resolves via sdkfileid instead of
+    archive_message_id — see its docstring); every step after that is
+    identical to get_message_media, including the exact response-code
+    taxonomy and the "never log/return sdkfileid, local_path, storage_ref,
+    oss_key" guarantee.
+
+    item_path is untrusted URL input, strictly validated against a fixed
+    grammar (see _validate_nested_media_path) before ever being used —
+    never eval'd, never used as a filesystem path, never used to index an
+    arbitrary object graph. A malformed path is rejected with 400; a
+    well-formed path that does not resolve to a media-bearing node on
+    THIS message is rejected with 404 — the same 404 as "wrong
+    conversation" or "wrong tenant", so a caller cannot distinguish
+    "path doesn't exist" from "you can't see this message" by response
+    shape alone.
+    """
+    _, tenant_id = auth
+
+    _msg, _ref, media_file = _resolve_authorized_nested_media(
+        db, conversation_id, msgid, item_path, tenant_id
+    )
+    effective_backend, effective_ref = _resolve_servable_backend_and_ref(
+        media_file, "nested media route"
+    )
+
+    provider = get_media_storage_provider(effective_backend)
+
+    if provider.supports_local_path():
+        safe_path = resolve_servable_downloadable_media_path(effective_ref, effective_backend)
+        if safe_path is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        content_type = detect_media_content_type_for_ref(str(safe_path))
+        return FileResponse(path=str(safe_path), media_type=content_type)
+
+    content_type = detect_media_content_type_for_ref(effective_ref)
+    try:
+        data = provider.read_bytes(effective_ref)
+    except MediaObjectNotFound:
+        raise HTTPException(status_code=404, detail="Not found")
+    except MediaStorageUnavailable:
+        logger.warning(
+            "nested media route: storage provider unavailable during read (backend=%s)",
+            effective_backend,
+        )
+        raise HTTPException(status_code=503, detail="Media storage temporarily unavailable")
+    except MediaStorageOperationError:
+        logger.error(
+            "nested media route: storage operation failed during read (backend=%s)",
+            effective_backend,
+        )
+        raise HTTPException(status_code=502, detail="Media storage operation failed")
+    return Response(content=data, media_type=content_type)
+
+
+@router.get(
+    "/api/conversations/{conversation_id}/messages/{msgid}/nested-media/{item_path}/access",
+    response_model=NestedMediaAccessOut,
+)
+def get_nested_message_media_access(
+    conversation_id: str,
+    msgid: str,
+    item_path: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
+    """
+    Return a public access descriptor for one nested mixed/chatrecord
+    media item (RND-200 QA fix) — the nested-item analogue of
+    get_message_media_access, reusing the exact same signed-URL/proxy
+    branching, TTL config, and object-key tenant-prefix check. Not a
+    second storage-access implementation: only the authorization/lookup
+    step differs (_resolve_authorized_nested_media instead of
+    _resolve_authorized_media) — see its docstring for why resolution is
+    keyed by sdkfileid rather than archive_message_id.
+
+    Returns NestedMediaAccessOut, NOT MediaAccessOut (RND-200 QA
+    security fix, second round): MediaAccessOut.media_id exposes the
+    internal MediaFile primary key, which independent QA correctly
+    rejected as a leak for the nested contract — the approved public
+    handle for nested media is (conversation_id, msgid, item_path) only,
+    never a database id. media_file.id is still used locally in this
+    function (log lines only, never returned to a caller) for
+    operator-facing diagnostics, exactly as before.
+
+    access_type="proxy": url is get_nested_message_media (this same
+    conversation_id/msgid/item_path), not the top-level get_message_media
+    route — a nested item's bytes are never served through the single-
+    media parent route, since a mixed/chatrecord message can hold more
+    than one media item and the parent route has no way to disambiguate
+    which one is meant.
+
+    Cache-Control: no-store on every response — see
+    MediaAccessNoStoreMiddleware, whose path pattern covers this route
+    too.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    _, tenant_id = auth
+
+    _msg, _ref, media_file = _resolve_authorized_nested_media(
+        db, conversation_id, msgid, item_path, tenant_id
+    )
+    effective_backend, effective_ref = _resolve_servable_backend_and_ref(
+        media_file, "nested media access route"
+    )
+    content_type = detect_media_content_type_for_ref(effective_ref)
+
+    if effective_backend == "local":
+        return NestedMediaAccessOut(
+            storage_backend="local",
+            access_type="proxy",
+            url=(
+                f"/api/conversations/{conversation_id}/messages/{msgid}"
+                f"/nested-media/{item_path}"
+            ),
+            expires_at=None,
+            mime_type=content_type,
+            filename=None,
+            size_bytes=media_file.file_size,
+        )
+
+    if effective_backend == "qiniu_kodo":
+        if not object_key_tenant_prefix_matches(effective_ref, tenant_id):
+            logger.error(
+                "nested media access route: object key tenant prefix mismatch (media_id=%s)",
+                media_file.id,
+            )
+            raise HTTPException(status_code=404, detail="Not found")
+
+        try:
+            ttl_seconds = get_signed_url_ttl_seconds()
+        except MediaStorageConfigurationError:
+            logger.error("nested media access route: invalid signed url TTL configuration")
+            raise HTTPException(status_code=500, detail="Media storage is misconfigured")
+
+        provider = get_media_storage_provider(effective_backend)
+        try:
+            signed_url = provider.get_download_url(effective_ref, expires_in=ttl_seconds)
+        except MediaObjectNotFound:
+            raise HTTPException(status_code=404, detail="Not found")
+        except MediaStorageConfigurationError:
+            logger.error(
+                "nested media access route: signed url configuration error (media_id=%s)",
+                media_file.id,
+            )
+            raise HTTPException(status_code=500, detail="Media storage is misconfigured")
+        except MediaStorageOperationError:
+            logger.error(
+                "nested media access route: signed url generation failed (media_id=%s)",
+                media_file.id,
+            )
+            raise HTTPException(status_code=502, detail="Media storage operation failed")
+
+        if not signed_url:
+            logger.error(
+                "nested media access route: signed url generation returned empty (media_id=%s)",
+                media_file.id,
+            )
+            raise HTTPException(status_code=502, detail="Media storage operation failed")
+
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        logger.info(
+            "nested media access route: signed url issued (media_id=%s, tenant_id=%s, "
+            "backend=qiniu_kodo, ttl=%s)",
+            media_file.id,
+            tenant_id,
+            ttl_seconds,
+        )
+        return NestedMediaAccessOut(
+            storage_backend="qiniu_kodo",
+            access_type="signed_url",
+            url=signed_url,
+            expires_at=expires_at,
+            mime_type=content_type,
+            filename=None,
+            size_bytes=media_file.file_size,
+        )
+
+    logger.error(
+        "nested media access route: unsupported backend for access descriptor (backend=%s)",
         effective_backend,
     )
     raise HTTPException(status_code=500, detail="Media storage is misconfigured")

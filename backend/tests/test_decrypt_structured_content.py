@@ -106,6 +106,84 @@ def test_normalise_fields_handles_unregistered_msgtype_without_raising() -> None
 
 
 # ---------------------------------------------------------------------------
+# RND-200 — mixed/chatrecord wiring through the same _normalise_fields()
+# entry point (zero decrypt-script code changes were needed: the existing
+# registry-driven dispatch to parse_structured_content already covers
+# NESTED_MESSAGES once app.structured_message_parser implements it — these
+# guard that continuing to be true).
+# ---------------------------------------------------------------------------
+
+
+def test_normalise_fields_returns_structured_content_for_mixed() -> None:
+    decrypted = {
+        "msgtype": "mixed",
+        "mixed": {
+            "item": [
+                {"type": "text", "content": '{"content":"hi"}'},
+                {"type": "image", "content": '{"sdkfileid":"sdk-img-1"}'},
+            ]
+        },
+    }
+    normalised = _normalise_fields(decrypted)
+    structured = normalised["structured_content"]
+    assert structured["fields"]["item_count"] == 2
+    assert structured["raw"] == decrypted["mixed"]
+    assert structured["media_refs"] == [{"path": "1", "type": "image", "sdkfileid": "sdk-img-1"}]
+
+
+def test_normalise_fields_returns_structured_content_for_chatrecord() -> None:
+    decrypted = {
+        "msgtype": "chatrecord",
+        "chatrecord": {
+            "title": "forwarded",
+            "item": [{"type": "voice", "content": '{"sdkfileid":"sdk-voice-1"}'}],
+        },
+    }
+    normalised = _normalise_fields(decrypted)
+    structured = normalised["structured_content"]
+    assert structured["fields"]["title"] == "forwarded"
+    assert structured["media_refs"] == [{"path": "0", "type": "voice", "sdkfileid": "sdk-voice-1"}]
+
+
+def test_normalise_fields_mixed_has_no_top_level_sdkfileid() -> None:
+    """mixed/chatrecord have no single message-level sdkfileid — media
+    lives only inside nested items (structured_content.media_refs),
+    discovered by app.media_download's dedicated nested candidate path,
+    not the scalar ArchiveMessage.sdkfileid column the existing media
+    pipeline reads for every other media-bearing type."""
+    decrypted = {
+        "msgtype": "mixed",
+        "mixed": {"item": [{"type": "image", "content": '{"sdkfileid":"sdk-img-1"}'}]},
+    }
+    normalised = _normalise_fields(decrypted)
+    assert normalised["sdkfileid"] is None
+
+
+def test_normalise_fields_mixed_malformed_payload_never_raises() -> None:
+    decrypted = {"msgtype": "mixed", "mixed": "not-a-dict"}
+    normalised = _normalise_fields(decrypted)
+    assert normalised["structured_content"]["fields"] == {"items": [], "item_count": 0}
+    assert normalised["structured_content"]["media_refs"] == []
+
+
+def test_structured_content_raw_is_scoped_for_mixed_too() -> None:
+    decrypted = {
+        "msgtype": "mixed",
+        "from": "userid1",
+        "roomid": "room1",
+        "msgtime": 123,
+        "tolist": ["userid2"],
+        "mixed": {"item": [{"type": "text", "content": "hi"}]},
+    }
+    normalised = _normalise_fields(decrypted)
+    raw = normalised["structured_content"]["raw"]
+    assert "from" not in raw
+    assert "tolist" not in raw
+    assert "msgtime" not in raw
+    assert raw == decrypted["mixed"]
+
+
+# ---------------------------------------------------------------------------
 # SF-1 regression guard — the decrypt script has a deliberate, documented
 # constraint against ever persisting the full decrypted_payload envelope
 # (data-minimization decision; see the "# SF-1" comment at the row-update
