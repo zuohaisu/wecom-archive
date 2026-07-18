@@ -94,9 +94,9 @@ import sys
 # Allow running from backend/ without installing the package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import create_engine, event, or_
+from sqlalchemy import create_engine, event, or_, cast
+from sqlalchemy import Text
 from sqlalchemy.orm import Session
-from sqlalchemy.types import JSON
 
 from app.db.models import ArchiveMessage, MessageRevocation
 from app.revoke_reconciliation import (
@@ -186,7 +186,7 @@ def find_unreconciled_revoke_events(session: Session, tenant_id: "str | None" = 
         ~has_revocation,
         ~or_(
             ArchiveMessage.structured_content.is_(None),
-            ArchiveMessage.structured_content.is_(JSON.NULL),
+            cast(ArchiveMessage.structured_content, Text) == "null",
         ),
     )
     if tenant_id is not None:
@@ -220,7 +220,7 @@ def find_historical_undecrypted_revoke_events(
         ArchiveMessage.decrypt_status == "success",
         or_(
             ArchiveMessage.structured_content.is_(None),
-            ArchiveMessage.structured_content.is_(JSON.NULL),
+            cast(ArchiveMessage.structured_content, Text) == "null",
         ),
     )
     if tenant_id is not None:
