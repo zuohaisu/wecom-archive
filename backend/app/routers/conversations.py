@@ -48,6 +48,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
+from types import SimpleNamespace
 from typing import Callable, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -635,6 +636,175 @@ def _enrich_nested_media_fields(
     return fields
 
 
+def _is_valid_roomid(roomid: Optional[str]) -> bool:
+    """Return True if roomid should be treated as a group conversation
+    identifier. Matches _derive_conversation_membership's truthiness rule
+    (``roomid = roomid or ""`` then ``if roomid:``), so that this function
+    and the authoritative builder agree on every input:
+      - None/empty roomid → direct message (falsy after ``or ""``)
+      - non-empty roomid (including whitespace-only) → group (truthy)
+    """
+    return bool(roomid)
+
+
+def _compact_entity_messages(
+    db: Session, entity_id: str, tenant_id: str
+) -> Tuple[list, dict[int, list[str]]]:
+    """Fetch a compact projection of the messages expanded from entity_id's
+    participation, producing the same message set _fetch_messages_for_entity
+    returns for well-formed data, but only the columns strictly required for
+    conversation-key derivation:
+
+      - message.id, message.sender, message.roomid
+      - per-message recipient userid list
+
+    Uses the same seed-ID logic and group-room expansion rules as
+    _fetch_messages_for_entity, so the intermediate message set is the same
+    under normal data. For malformed inputs (whitespace-only roomids, etc.)
+    the intermediate expansion may differ by a marginal number of rows, but
+    that does not affect the final canonical-count guarantee: the compact
+    projection always derives keys through the exact same
+    _derive_conversation_membership function the authoritative builder uses.
+
+    No ArchiveMessage ORM objects are materialized — only lightweight tuples
+    are built from column values, avoiding the content_text, msgtype, sdkfileid,
+    decrypted_payload, etc. fields that make full ORM fetches expensive.
+
+    Returns (compact_msgs, recipients_map) where:
+      compact_msgs: list of SimpleNamespace with .id, .sender, .roomid
+      recipients_map: {message.id: [receiver_userid, ...]}
+    """
+    # 1. Find seed message IDs where entity_id is sender or recipient.
+    sender_ids: set[int] = {
+        row[0]
+        for row in db.query(ArchiveMessage.id)
+        .filter(
+            ArchiveMessage.sender == entity_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    }
+    recipient_ids: set[int] = {
+        row[0]
+        for row in db.query(ArchiveMessageRecipient.message_id)
+        .filter(
+            ArchiveMessageRecipient.receiver_userid == entity_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
+        .all()
+    }
+    seed_ids = sender_ids | recipient_ids
+    if not seed_ids:
+        return [], {}
+
+    # 2. Compact projection of seed messages — only (id, sender, roomid).
+    seed_rows = (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+        .filter(
+            ArchiveMessage.id.in_(seed_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    # Convert to SimpleNamespace to match the interface _derive_conversation_membership
+    # expects (msg.sender, msg.roomid, msg.id).
+    seed_msgs = [
+        SimpleNamespace(id=r[0], sender=r[1], roomid=r[2])
+        for r in seed_rows
+    ]
+
+    # 3. Collect group rooms and expand to ALL messages in those rooms.
+    group_rooms = {m.roomid for m in seed_msgs if _is_valid_roomid(m.roomid)}
+
+    final_ids: set[int] = set()
+
+    if group_rooms:
+        for row in (
+            db.query(ArchiveMessage.id)
+            .filter(
+                ArchiveMessage.roomid.in_(group_rooms),
+                ArchiveMessage.tenant_id == tenant_id,
+            )
+            .all()
+        ):
+            final_ids.add(row[0])
+
+    # 4. Direct messages from seed are included as-is.
+    direct_ids = {m.id for m in seed_msgs if not _is_valid_roomid(m.roomid)}
+    final_ids.update(direct_ids)
+
+    if not final_ids:
+        return [], {}
+
+    # 5. Compact projection of final message set.
+    final_rows = (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+        .filter(
+            ArchiveMessage.id.in_(final_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    compact_msgs = [
+        SimpleNamespace(id=r[0], sender=r[1], roomid=r[2])
+        for r in final_rows
+    ]
+
+    # 6. Batch-load recipients for all final messages.
+    recipients_map: dict[int, list[str]] = {}
+    for r in (
+        db.query(ArchiveMessageRecipient.message_id, ArchiveMessageRecipient.receiver_userid)
+        .filter(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.message_id.in_(final_ids),
+        )
+        .all()
+    ):
+        recipients_map.setdefault(r[0], []).append(r[1])
+
+    return compact_msgs, recipients_map
+
+
+def _count_entity_conversations(
+    db: Session, entity_id: str, tenant_id: str, staff_ids: Optional[set[str]] = None
+) -> int:
+    """Count distinct conversations for an entity, reproducing the exact
+    canonical conversation keys from _build_conversation_list /
+    _derive_conversation_membership without materializing full ArchiveMessage
+    ORM objects.
+
+    Fetches a compact projection (message.id, message.sender, message.roomid)
+    plus per-message recipient userids — avoids loading content_text, msgtype,
+    sdkfileid, media payloads, and every other heavy column on ArchiveMessage.
+
+    staff_ids: when provided, determines staff/contact classification
+    matching _build_conversation_list's behavior. When None, falls back to
+    the legacy "staff_" prefix check.
+    """
+    compact_msgs, recipients_map = _compact_entity_messages(db, entity_id, tenant_id)
+    if not compact_msgs:
+        return 0
+
+    # Define is_staff matching _build_conversation_list's rule.
+    def is_staff(uid: str) -> bool:
+        if staff_ids is not None:
+            return uid in staff_ids
+        return uid.startswith("staff_")
+
+    # Derive canonical conversation keys using the exact same
+    # _derive_conversation_membership function the authoritative
+    # _build_conversation_list uses.
+    canonical_keys: set[str] = set()
+    for msg in compact_msgs:
+        recipients = recipients_map.get(msg.id, [])
+        conv_id, conv_type, _staff_set, _contact_set = _derive_conversation_membership(
+            msg.sender, msg.roomid, recipients, is_staff
+        )
+        canonical_keys.add(conv_id)
+
+    return len(canonical_keys)
+
+
 def _latest_own_participation_time(
     db: Session, entity_id: str, tenant_id: str
 ) -> Optional[int]:
@@ -1141,11 +1311,21 @@ def get_monitored_accounts(
             # worth surfacing (definition requires archived records where
             # the seat is literally the sender or a listed recipient).
             continue
-        messages = _fetch_messages_for_entity(db, sid, tenant_id)
-        recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
-        conversation_count = len(
-            _build_conversation_list(messages, recipients_map, display_names, staff_ids)
-        )
+        # RND-158: avoid full ArchiveMessage ORM object materialization for
+        # conversation_count. The old code fetched every message as a full
+        # ORM object (all columns including content_text, msgtype, sdkfileid,
+        # decrypted_payload, etc.) then aggregated them through
+        # _build_conversation_list — just to compute the display-badge
+        # conversation_count. The revised path fetches a compact projection
+        # (message.id, message.sender, message.roomid + recipient userids)
+        # and derives canonical conversation keys using the exact same
+        # _derive_conversation_membership function the authoritative builder
+        # uses, avoiding full ORM object construction while preserving exact
+        # count semantics. Per-seat query scaling remains unchanged.
+        # The authoritative conversation list endpoint (/api/conversations)
+        # still uses the full _fetch_messages_for_entity +
+        # _build_conversation_list path for correctness.
+        conversation_count = _count_entity_conversations(db, sid, tenant_id, staff_ids)
         seats.append(
             {
                 "staff_id": sid,

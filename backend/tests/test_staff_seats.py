@@ -22,6 +22,18 @@ Validates:
   - Display-name fallback still applies when contacts.name is missing for
     a staff seat.
 
+RND-158 — Page load speed optimisation:
+  - get_monitored_accounts avoids full ArchiveMessage ORM object
+    materialisation for conversation_count.
+  - _count_entity_conversations fetches a compact projection (id, sender,
+    roomid + recipients) and derives canonical conversation keys using
+    the exact same _derive_conversation_membership function as the
+    authoritative _build_conversation_list, preserving exact count
+    semantics.
+  - Real SQLite-backed equivalence tests confirm the compact projection
+    path produces the same conversation_count as the authoritative full
+    fetch for all canonical conversation identity cases.
+
 QA follow-up (post-review fixes):
   - Pagination cursor is a compound (msgtime, id) pair, not msgtime alone —
     regression coverage for the case where 20+ messages share one msgtime
@@ -43,6 +55,122 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
+from app.db.models import ArchiveMessage, ArchiveMessageRecipient
+
+
+# ---------------------------------------------------------------------------
+# sqlite-backed test schema for equivalence tests
+# ---------------------------------------------------------------------------
+
+_SCHEMA_SQL = """
+CREATE TABLE tenants (
+    id TEXT PRIMARY KEY, name TEXT, slug TEXT, is_active INTEGER,
+    created_at TEXT, updated_at TEXT
+);
+CREATE TABLE archive_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    msgid TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    publickey_ver INTEGER NOT NULL,
+    raw_encrypted_payload TEXT,
+    encrypt_random_key TEXT NOT NULL,
+    encrypt_chat_msg TEXT NOT NULL,
+    decrypt_status TEXT NOT NULL DEFAULT 'pending',
+    decrypted_payload TEXT,
+    structured_content TEXT,
+    content_text TEXT,
+    msgtype TEXT,
+    sender TEXT,
+    roomid TEXT,
+    msgtime INTEGER,
+    tolist TEXT,
+    sdkfileid TEXT,
+    is_revoked INTEGER NOT NULL DEFAULT 0,
+    revoked_at TEXT,
+    tenant_id TEXT,
+    created_at TEXT
+);
+CREATE TABLE archive_message_recipients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    receiver_userid TEXT NOT NULL,
+    receiver_type TEXT,
+    tenant_id TEXT,
+    created_at TEXT
+);
+CREATE TABLE contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    wecom_userid TEXT NOT NULL,
+    name TEXT,
+    tenant_id TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE TABLE admin_users (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    wecom_user_id TEXT NOT NULL,
+    name TEXT,
+    avatar_url TEXT,
+    last_login_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+"""
+
+_TENANT_A = "tenant-a"
+_TENANT_B = "tenant-b"
+
+
+def _make_session() -> Session:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        for stmt in _SCHEMA_SQL.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(text(stmt))
+    return Session(engine)
+
+
+@pytest.fixture()
+def db():
+    session = _make_session()
+    yield session
+    session.close()
+
+
+def _insert_message(db: Session, **kwargs) -> ArchiveMessage:
+    defaults = dict(
+        seq=1,
+        publickey_ver=1,
+        encrypt_random_key="x",
+        encrypt_chat_msg="y",
+        decrypt_status="success",
+        tenant_id=_TENANT_A,
+    )
+    defaults.update(kwargs)
+    defaults.setdefault("msgid", f"msg-{defaults['seq']}-{id(defaults)}")
+    msg = ArchiveMessage(**defaults)
+    db.add(msg)
+    db.flush()
+    return msg
+
+
+def _insert_recipient(db: Session, message_id: int, userid: str, **kwargs) -> ArchiveMessageRecipient:
+    defaults = dict(tenant_id=_TENANT_A)
+    defaults.update(kwargs)
+    r = ArchiveMessageRecipient(message_id=message_id, receiver_userid=userid, **defaults)
+    db.add(r)
+    db.flush()
+    return r
 
 
 def _msg(id, sender, roomid=None, msgtime=0, content_text="", msgtype="text", sdkfileid=None):
@@ -462,9 +590,7 @@ def test_conversation_messages_requires_auth_still_blocked(client) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pagination cursor — compound (msgtime, id), regression for QA-found bug:
-# a msgtime-only cursor with strict "<" silently drops messages when more
-# than `limit` rows share the exact same msgtime.
+# Pagination cursor — compound (msgtime, id), regression for QA-found bug
 # ---------------------------------------------------------------------------
 
 
@@ -522,12 +648,6 @@ def _run_messages_query(client, app, all_msgs, before=None, limit=20):
 
 
 def test_conversation_messages_pagination_survives_duplicate_msgtime(client) -> None:
-    """
-    QA regression: 21 messages all share msgtime=T. A msgtime-only cursor
-    compared with strict "<" would exclude every row at T once the first
-    page (20 of them) is loaded, permanently losing the 21st message. The
-    compound (msgtime, id) cursor must not lose it.
-    """
     from app.main import app
 
     T = 5000
@@ -546,25 +666,17 @@ def test_conversation_messages_pagination_survives_duplicate_msgtime(client) -> 
     assert resp2.status_code == 200
     data2 = resp2.json()
     page2_ids = [m["msgid"] for m in data2["messages"]]
-
-    # The 21st message must be reachable — not silently dropped.
     assert len(page2_ids) == 1
     assert data2["pagination"]["has_older"] is False
     assert data2["pagination"]["next_before"] is None
-
-    # No skips, no duplicates across pages; combined set == all 21 ids.
     combined = page1_ids + page2_ids
     assert len(combined) == len(set(combined)) == 21
     assert set(combined) == {m.msgid for m in all_msgs}
 
 
 def test_conversation_messages_pagination_mixed_timestamps_still_works(client) -> None:
-    """Sanity check: a mix of unique and duplicate msgtimes across the page
-    boundary still yields a full, gap-free, duplicate-free reconstruction."""
     from app.main import app
 
-    # ids 0..9 share msgtime=1000 (duplicate cluster straddling the cursor),
-    # ids 10..24 have strictly increasing unique msgtimes.
     all_msgs = [_msg(i, "staff_a", roomid="room1", msgtime=1000) for i in range(10)]
     all_msgs += [_msg(i, "staff_a", roomid="room1", msgtime=1000 + i) for i in range(10, 25)]
 
@@ -574,22 +686,310 @@ def test_conversation_messages_pagination_mixed_timestamps_still_works(client) -
     page1_ids = [m["msgid"] for m in data["messages"]]
     assert len(page1_ids) == 20
     assert data["pagination"]["has_older"] is True
-
     cursor = data["pagination"]["next_before"]
     resp2 = _run_messages_query(client, app, all_msgs, before=cursor)
     assert resp2.status_code == 200
     data2 = resp2.json()
     page2_ids = [m["msgid"] for m in data2["messages"]]
     assert data2["pagination"]["has_older"] is False
-
-    combined = page2_ids + page1_ids  # page2 is older, so it comes first
+    combined = page2_ids + page1_ids
     assert len(combined) == len(set(combined)) == 25
-    assert combined == [m.msgid for m in all_msgs]  # exact ascending reconstruction
+    assert combined == [m.msgid for m in all_msgs]
 
 
 # ---------------------------------------------------------------------------
-# Seat active/history classification must not be polluted by group-room
-# expansion (QA regression)
+# Seat active/history classification must not be polluted by group expansion
+# ---------------------------------------------------------------------------
+
+
+def test_monitored_accounts_avoids_full_orm_materialization_for_conversation_count(
+    client, monkeypatch
+) -> None:
+    """
+    RND-158: /api/monitored-accounts must NOT call _fetch_messages_for_entity
+    for conversation-count computation. Instead it should call
+    _count_entity_conversations, which fetches a compact projection and
+    derives canonical conversation keys using the exact same
+    _derive_conversation_membership logic as the authoritative builder.
+    """
+    import app.routers.conversations as conv
+    from app.auth import get_current_user
+    from app.db.session import get_db
+    from app.main import app
+
+    old_fetch_called = []
+    count_called_with = []
+
+    def fake_old_fetch(db, entity_id, tenant_id):
+        old_fetch_called.append(entity_id)
+        return []
+
+    def fake_count(db, entity_id, tenant_id, staff_ids=None):
+        count_called_with.append((entity_id, tenant_id))
+        return 5
+
+    monkeypatch.setattr(
+        conv, "_collect_staff_ids", lambda db, tenant_id: {"staff_a", "staff_b"}
+    )
+    monkeypatch.setattr(
+        conv, "_latest_own_participation_time", lambda db, entity_id, tenant_id: 100
+    )
+    monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_old_fetch)
+    monkeypatch.setattr(conv, "_count_entity_conversations", fake_count)
+    monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
+    monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
+
+    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
+    app.dependency_overrides[get_db] = _override_db_empty
+    try:
+        resp = client.get("/api/monitored-accounts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(count_called_with) == 2
+        used_ids = {c[0] for c in count_called_with}
+        assert used_ids == {"staff_a", "staff_b"}
+        assert len(old_fetch_called) == 0
+        by_id = {d["staff_id"]: d for d in data}
+        assert by_id["staff_a"]["conversation_count"] == 5
+        assert by_id["staff_b"]["conversation_count"] == 5
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# RND-158: Behavioral equivalence tests — SQLite-backed
+#
+# Compares the optimized compact-projection count against the authoritative
+# full-fetch builder for every canonical conversation identity case.
+# ---------------------------------------------------------------------------
+
+
+def _authoritative_count(db: Session, entity_id: str, tenant_id: str) -> int:
+    """Reference: old full-fetch path via _fetch_messages_for_entity + _build_conversation_list."""
+    from app.routers.conversations import _fetch_messages_for_entity, _load_recipients_map, _build_conversation_list
+    messages = _fetch_messages_for_entity(db, entity_id, tenant_id)
+    if not messages:
+        return 0
+    recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
+    return len(_build_conversation_list(messages, recipients_map, {}, None))
+
+
+def _optimized_count(db: Session, entity_id: str, tenant_id: str, staff_ids=None) -> int:
+    """Optimized path: compact projection + canonical key derivation."""
+    from app.routers.conversations import _count_entity_conversations
+    return _count_entity_conversations(db, entity_id, tenant_id, staff_ids)
+
+
+def _assert_equivalence(db: Session, entity_id: str, tenant_id: str, msg: str, staff_ids=None) -> None:
+    auth = _authoritative_count(db, entity_id, tenant_id)
+    opt = _optimized_count(db, entity_id, tenant_id, staff_ids)
+    assert auth == opt, (
+        f"Equivalence failure for '{msg}': authoritative={auth}, optimized={opt} (staff_ids={staff_ids})"
+    )
+
+
+# -- Fixture cases --
+
+def test_equivalence_one_direct_conversation(db: Session) -> None:
+    """Single direct message: staff_a -> contact_zhangsan."""
+    msg = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "one direct conversation")
+
+
+def test_equivalence_repeated_same_partner(db: Session) -> None:
+    """Two messages to the same direct partner — counts as 1 conversation."""
+    msg1 = _insert_message(db, sender="staff_a", msgtime=100, tenant_id=_TENANT_A)
+    _insert_recipient(db, msg1.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    msg2 = _insert_message(db, sender="staff_a", msgtime=200, tenant_id=_TENANT_A)
+    _insert_recipient(db, msg2.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "repeated same partner")
+
+
+def test_equivalence_sender_side(db: Session) -> None:
+    """Entity is the sender of the direct message."""
+    msg = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "sender side")
+
+
+def test_equivalence_recipient_side(db: Session) -> None:
+    """Entity is the recipient of the direct message."""
+    msg = _insert_message(db, sender="contact_zhangsan", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "staff_a", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "recipient side")
+
+
+def test_equivalence_multiple_direct_partners(db: Session) -> None:
+    """Two different direct partners — counts as 2 conversations."""
+    msg1 = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg1.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    msg2 = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg2.id, "contact_lisi", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "multiple direct partners")
+
+
+def test_equivalence_one_group(db: Session) -> None:
+    """One group room."""
+    msg = _insert_message(db, sender="staff_a", roomid="room_g1", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "one group")
+
+
+def test_equivalence_repeated_group(db: Session) -> None:
+    """Multiple messages in the same group room — counts as 1 conversation."""
+    msg1 = _insert_message(db, sender="staff_a", roomid="room_g1", msgtime=100, tenant_id=_TENANT_A)
+    _insert_recipient(db, msg1.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    msg2 = _insert_message(db, sender="staff_a", roomid="room_g1", msgtime=200, tenant_id=_TENANT_A)
+    _insert_recipient(db, msg2.id, "contact_lisi", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "repeated group")
+
+
+def test_equivalence_multiple_groups(db: Session) -> None:
+    """Two different group rooms — counts as 2 conversations."""
+    msg1 = _insert_message(db, sender="staff_a", roomid="room_g1", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg1.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    msg2 = _insert_message(db, sender="staff_a", roomid="room_g2", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg2.id, "contact_lisi", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "multiple groups")
+
+
+def test_equivalence_mixed_direct_and_group(db: Session) -> None:
+    """One direct + one group = 2 conversations."""
+    msg1 = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg1.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    msg2 = _insert_message(db, sender="staff_a", roomid="room_g1", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg2.id, "contact_lisi", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "mixed direct and group")
+
+
+def test_equivalence_staff_to_staff(db: Session) -> None:
+    """Direct message between two staff members — both with and without
+    explicit staff_ids."""
+    msg = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "staff_b", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "staff to staff")
+    _assert_equivalence(
+        db, "staff_a", _TENANT_A, "staff to staff with staff_ids",
+        staff_ids={"staff_a", "staff_b"},
+    )
+
+
+def test_equivalence_self_message(db: Session) -> None:
+    """A user sends a message to themselves."""
+    msg = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "staff_a", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "self message")
+
+
+def test_equivalence_empty_participation(db: Session) -> None:
+    """Entity has no messages — count is 0."""
+    # Staff_a exists in another tenant's data
+    msg = _insert_message(db, sender="staff_a", tenant_id=_TENANT_B)
+    _insert_recipient(db, msg.id, "contact_x", tenant_id=_TENANT_B)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "empty participation")
+
+
+def test_equivalence_cross_tenant_data(db: Session) -> None:
+    """Messages in tenant B should not be counted for tenant A."""
+    msg_a = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg_a.id, "contact_a", tenant_id=_TENANT_A)
+    msg_b = _insert_message(db, sender="staff_a", tenant_id=_TENANT_B)
+    _insert_recipient(db, msg_b.id, "contact_b", tenant_id=_TENANT_B)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "cross-tenant isolation")
+    assert _optimized_count(db, "staff_a", _TENANT_A) == 1
+    assert _optimized_count(db, "staff_a", _TENANT_B) == 1
+
+
+def test_equivalence_null_roomid(db: Session) -> None:
+    """Null roomid is treated as direct message."""
+    msg = _insert_message(db, sender="staff_a", roomid=None, tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "null roomid")
+
+
+def test_equivalence_empty_roomid(db: Session) -> None:
+    """Empty string roomid is treated as direct message."""
+    msg = _insert_message(db, sender="staff_a", roomid="", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "empty roomid")
+
+
+def test_equivalence_whitespace_roomid(db: Session) -> None:
+    """Whitespace-only roomid is truthy — treated as a group conversation
+    key by the authoritative builder (``if roomid:`` after ``roomid or ""``)."""
+    msg = _insert_message(db, sender="staff_a", roomid="   ", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "whitespace roomid")
+
+
+def test_equivalence_direct_group_collision(db: Session) -> None:
+    """A direct conversation and a group conversation whose canonical keys
+    collide (both produce the same identifier) — the builder merges them
+    into a single key, so the count is 1, not 2.
+
+    Creates:
+      - A direct conversation 'staff_a ↔ contact_zhangsan' → key "direct__contact_zhangsan___staff_a"
+      - A group message in roomid="direct__contact_zhangsan___staff_a" → key is that same roomid
+    Both produce different conv_type but the SAME canonical conv_id."""
+    # Direct message: staff_a → contact_zhangsan
+    msg_direct = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg_direct.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    # Group message whose roomid happens to COLLIDE with the direct conv_id
+    from app.routers.conversations import _direct_conv_id
+    collision_roomid = _direct_conv_id("contact_zhangsan", "staff_a")
+    msg_group = _insert_message(db, sender="staff_a", roomid=collision_roomid, tenant_id=_TENANT_A)
+    _insert_recipient(db, msg_group.id, "contact_lisi", tenant_id=_TENANT_A)
+    # Both messages map to the same canonical key → count = 1
+    _assert_equivalence(db, "staff_a", _TENANT_A, "direct/group ID collision")
+    _assert_equivalence(
+        db, "staff_a", _TENANT_A, "direct/group ID collision with staff_ids",
+        staff_ids={"staff_a"},
+    )
+
+
+def test_equivalence_multi_recipient_direct_message(db: Session) -> None:
+    """Direct message with two recipients — counts as 1 conversation using
+    the canonical key derived from sorted(all_parties)."""
+    msg = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_lisi", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "multi-recipient direct message")
+    _assert_equivalence(
+        db, "staff_a", _TENANT_A, "multi-recipient direct with staff_ids",
+        staff_ids={"staff_a"},
+    )
+
+
+def test_equivalence_mixed_staff_contact_multi_recipient(db: Session) -> None:
+    """Direct message with mixed staff/contact recipients — the staff/contact
+    rule picks one pair from sorted(staff) + sorted(contact)."""
+    msg = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "staff_b", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_lisi", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "mixed staff/contact multi-recipient")
+    _assert_equivalence(
+        db, "staff_a", _TENANT_A, "mixed staff/contact multi-recipient with staff_ids",
+        staff_ids={"staff_a", "staff_b"},
+    )
+
+
+def test_equivalence_null_sender_with_recipients(db: Session) -> None:
+    """A message with null sender but valid recipients — the empty sender
+    becomes "" and recipients produce a valid key."""
+    msg = _insert_message(db, sender=None, tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "staff_a", tenant_id=_TENANT_A)
+    _assert_equivalence(db, "staff_a", _TENANT_A, "recipient-side with null sender")
+    _assert_equivalence(
+        db, "staff_a", _TENANT_A, "recipient-side null sender with staff_ids",
+        staff_ids={"staff_a"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# _latest_own_participation_time — unit tests (mock-based)
 # ---------------------------------------------------------------------------
 
 
@@ -610,7 +1010,6 @@ def test_latest_own_participation_time_uses_sender_and_recipient_rows_only() -> 
     calls = []
 
     def _query(*entities):
-        # Implementation queries sender-max first, then recipient-max.
         calls.append(entities)
         return sender_max_q if len(calls) == 1 else recipient_max_q
 
@@ -673,24 +1072,14 @@ def test_latest_own_participation_time_none_when_no_participation() -> None:
 def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
     client, monkeypatch
 ) -> None:
-    """
-    QA regression: staff_a participated in group room "room_g" at T1=1000,
-    then left/stopped participating. Group room "room_g" later has a
-    message at T2=9000 from someone else — staff_a is neither sender nor
-    recipient of it. _fetch_messages_for_entity() legitimately expands to
-    include that T2 message (for session viewing), but get_monitored_accounts
-    must NOT use that expanded set to compute staff_a's latest activity or
-    active/history ranking — only _latest_own_participation_time() may be
-    used for that.
-    """
     import app.routers.conversations as conv
     from app.auth import get_current_user
     from app.db.session import get_db
     from app.main import app
 
-    T1 = 1000  # staff_a's own last participation in room_g
-    T2 = 9000  # room_g's later message — staff_a is NOT sender/recipient
-    T_ACTIVE = 2000  # staff_b's own latest activity — should rank as active
+    T1 = 1000
+    T2 = 9000
+    T_ACTIVE = 2000
 
     own_participation_times = {"staff_a": T1, "staff_b": T_ACTIVE}
 
@@ -699,9 +1088,6 @@ def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
 
     def fake_fetch_messages(db, entity_id, tenant_id):
         if entity_id == "staff_a":
-            # Deliberately "polluted" session-view set: includes the later
-            # T2 message from someone else in the same room. Legitimate for
-            # session viewing; must not leak into seat ranking.
             return [
                 _msg(1, "staff_a", roomid="room_g", msgtime=T1),
                 _msg(2, "someone_else", roomid="room_g", msgtime=T2),
@@ -714,6 +1100,7 @@ def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
         conv, "_collect_staff_ids", lambda db, tenant_id: {"staff_a", "staff_b"}
     )
     monkeypatch.setattr(conv, "_latest_own_participation_time", fake_latest_own_participation)
+    monkeypatch.setattr(conv, "_count_entity_conversations", lambda db, eid, tid, staff_ids=None: 1)
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_fetch_messages)
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
     monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
@@ -726,21 +1113,16 @@ def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
         data = resp.json()
         by_id = {d["staff_id"]: d for d in data}
 
-        # staff_b (T_ACTIVE=2000) ranks active — NOT staff_a, even though
-        # staff_a's expanded session set contains a later T2=9000 message.
         assert by_id["staff_b"]["seat_status"] == "active"
         assert by_id["staff_b"]["is_active_archive_seat"] is True
         assert by_id["staff_b"]["latest_message_time"] == T_ACTIVE
 
         assert by_id["staff_a"]["seat_status"] == "history"
         assert by_id["staff_a"]["is_active_archive_seat"] is False
-        # Must reflect staff_a's OWN last participation (T1), never the
-        # group's later unrelated message (T2).
         assert by_id["staff_a"]["latest_message_time"] == T1
         assert by_id["staff_a"]["latest_message_time"] != T2
 
-        # conversation_count may still legitimately reflect the expanded
-        # session-view set — group session viewing is unaffected by this fix.
+        # Mocked count returns 1.
         assert by_id["staff_a"]["conversation_count"] == 1
     finally:
         app.dependency_overrides.clear()
