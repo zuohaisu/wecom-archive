@@ -68,22 +68,23 @@ def _extract_render_timeline_bundle() -> str:
     message_type_registry_src = _extract(
         r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
     )
+    # RND-206: renderMessageBody()/renderTimeline() now also depend on the
+    # MediaAccessCache/Viewer/rich-media/composite renderer block — pull the
+    # whole contiguous block in so the bundle is self-contained (none of
+    # these functions actually execute for text/image/unsupported messages,
+    # but they must exist to be referenced).
+    rnd206_block_src = _extract(
+        r"var MediaAccessCache=\(function\(\)\{.*?\nfunction renderCompositeMessage\(m\)\{.*?\n\}",
+        "RND-206 rich-media/composite block",
+    )
     render_message_body_src = _extract(
         r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"
     )
-    # RND-187: renderTimeline() now calls hydrateMediaImages() after every
-    # render — pull those in too so the bundle is self-contained.
-    load_media_image_src = _extract(
-        r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"
+    safe_render_message_body_src = _extract(
+        r"function safeRenderMessageBody\(m\)\{.*?\n\}", "safeRenderMessageBody()"
     )
-    on_media_image_error_src = _extract(
-        r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"
-    )
-    show_media_error_src = _extract(
-        r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"
-    )
-    hydrate_media_images_src = _extract(
-        r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"
+    timeline_signature_src = _extract(
+        r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"
     )
     render_timeline_src = _extract(
         r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"
@@ -98,11 +99,10 @@ def _extract_render_timeline_bundle() -> str:
             media_labels_src,
             media_status_labels_src,
             message_type_registry_src,
+            rnd206_block_src,
             render_message_body_src,
-            load_media_image_src,
-            on_media_image_error_src,
-            show_media_error_src,
-            hydrate_media_images_src,
+            safe_render_message_body_src,
+            timeline_signature_src,
             render_timeline_src,
         ]
     )

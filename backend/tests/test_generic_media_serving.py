@@ -381,12 +381,15 @@ def test_timeline_exposes_media_url_for_downloaded_voice_message(client, monkeyp
     assert "sdk-1" not in resp.text
 
 
-def test_timeline_does_not_expose_media_url_for_emotion_message(client, monkeypatch, tmp_path) -> None:
-    """Unchanged rendering contract (RND-199 out of scope: frontend
-    rendering) — even with a downloaded, servable media_files row, the
-    timeline never sets media_url/media_access_url for emotion, and
-    media_type/media_status stay exactly what they were before this
-    ticket."""
+def test_timeline_exposes_media_url_for_servable_emotion_message(client, monkeypatch, tmp_path) -> None:
+    """RND-206: the timeline now wires media_url/media_access_url for a
+    servable emotion message (the bytes were already reachable through
+    SERVABLE_MEDIA_MSGTYPES — only the timeline pointer was withheld,
+    deferred by RND-199 explicitly to this ticket's frontend rendering
+    work). classify_media()'s media_type/media_status contract for
+    emotion is unchanged ("unsupported"/"unsupported") — only
+    media_url/media_access_url are newly populated, keyed off actual
+    download/storage state rather than that classification."""
     from app.main import app
 
     media_root = tmp_path / "media"
@@ -418,8 +421,9 @@ def test_timeline_does_not_expose_media_url_for_emotion_message(client, monkeypa
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "unsupported"
     assert msg["media_status"] == "unsupported"
-    assert msg["media_url"] is None
-    assert msg["media_access_url"] is None
+    assert msg["media_url"] == "/api/conversations/room1/messages/m-1/media"
+    assert msg["media_access_url"] == "/api/conversations/room1/messages/m-1/media/access"
+    assert "sdk-1" not in resp.text
 
 
 def test_media_access_route_returns_proxy_descriptor_for_local_voice(client, monkeypatch, tmp_path) -> None:

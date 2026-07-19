@@ -64,9 +64,15 @@ lint:
 ## diff) — the practical "did my change introduce any new lint findings"
 ## signal, unaffected by the repo's pre-existing baseline. Passes trivially
 ## (prints a message, exit 0) when there are no changed .py files.
+## --diff-filter=d excludes deleted paths from `git diff --name-only` —
+## without it, a file removed (but not yet staged) in the working tree
+## still shows up here, and ruff fails with E902 "No such file or
+## directory" trying to open a path that no longer exists. Renamed/added/
+## modified files are unaffected; a genuinely deleted file has nothing
+## left to lint.
 lint-diff:
 	@set -e; \
-	files="$$(git diff --name-only -- '*.py'; git ls-files --others --exclude-standard -- '*.py')"; \
+	files="$$(git diff --name-only --diff-filter=d -- '*.py'; git ls-files --others --exclude-standard -- '*.py')"; \
 	files="$$(echo "$$files" | sort -u | grep -v '^$$' || true)"; \
 	if [ -z "$$files" ]; then \
 		echo "lint-diff: no changed .py files — OK"; \

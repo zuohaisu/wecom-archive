@@ -131,8 +131,26 @@ class MessageTypeDefinition:
 # Registry contents.
 #
 # Coverage note: text/image are SUPPORTED today (full parse + render
-# pipeline). video/voice/file/audio_archive are PARTIAL — classify_media
-# already tracks their download state, but there is no playback/render.
+# pipeline). video/voice/file are PARTIAL: classify_media already tracks
+# their download state, AND the frontend now renders real playback (RND-206)
+# -- renderer_strategy=MEDIA_PREVIEW reflects that; support_status stays
+# PARTIAL rather than SUPPORTED because file metadata (filename) is still
+# an acknowledged backend-contract gap (see NestedMediaAccessOut's
+# docstring) and there is no dedicated automated coverage yet at the level
+# image's SUPPORTED status implies. audio_archive remains PLACEHOLDER (no
+# frontend renderer exists for it). emotion is UNSUPPORTED overall (its
+# per-message availability is conditional on a servable download, not a
+# guaranteed capability of the type) but ALSO renderer_strategy=MEDIA_PREVIEW
+# with media_capability=CONDITIONAL: the frontend previews it when a
+# message's own media_access_url is present (see app.main's renderMessageBody,
+# which gates strictly on renderer_strategy=="media_preview" AND
+# media_access_url — never on renderer_strategy alone). This is the fix for
+# the RND-206 QA finding "the registry still describes video/voice/file as
+# placeholder and emotion as unsupported while new frontend code bypasses
+# the registry" — renderer_strategy is now the single source of truth the
+# frontend actually branches on for these four types (see
+# MEDIA_PREVIEW_KINDS / the emotion normalized_type check in
+# app.main.renderMessageBody), not a stale, disconnected label.
 # Everything else below is a real, named WeCom message type this project
 # has not built rendering for yet (UNSUPPORTED) — as opposed to a msgtype
 # absent from this table entirely, which resolve() reports as UNKNOWN (see
@@ -161,33 +179,39 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.SINGLE,
     ),
     MessageTypeDefinition(
+        # RND-206: renderer_strategy promoted PLACEHOLDER -> MEDIA_PREVIEW —
+        # app.main now renders real HTML5 <video> playback (lazily hydrated,
+        # no autoplay) once a message's own media_status=="available". See
+        # the coverage note above for why support_status stays PARTIAL.
         raw_type="video",
         normalized_type="video",
         category=MessageCategory.MEDIA,
         support_status=MessageSupportStatus.PARTIAL,
         display_label_key="messageType.video",
         parser_strategy=ParserStrategy.MEDIA_REFERENCE,
-        renderer_strategy=RendererStrategy.PLACEHOLDER,
+        renderer_strategy=RendererStrategy.MEDIA_PREVIEW,
         media_capability=MediaCapability.SINGLE,
     ),
     MessageTypeDefinition(
+        # RND-206: same promotion as video — real HTML5 <audio> playback.
         raw_type="voice",
         normalized_type="voice",
         category=MessageCategory.MEDIA,
         support_status=MessageSupportStatus.PARTIAL,
         display_label_key="messageType.voice",
         parser_strategy=ParserStrategy.MEDIA_REFERENCE,
-        renderer_strategy=RendererStrategy.PLACEHOLDER,
+        renderer_strategy=RendererStrategy.MEDIA_PREVIEW,
         media_capability=MediaCapability.SINGLE,
     ),
     MessageTypeDefinition(
+        # RND-206: same promotion — filename/type/size + download action.
         raw_type="file",
         normalized_type="file",
         category=MessageCategory.MEDIA,
         support_status=MessageSupportStatus.PARTIAL,
         display_label_key="messageType.file",
         parser_strategy=ParserStrategy.MEDIA_REFERENCE,
-        renderer_strategy=RendererStrategy.PLACEHOLDER,
+        renderer_strategy=RendererStrategy.MEDIA_PREVIEW,
         media_capability=MediaCapability.SINGLE,
     ),
     MessageTypeDefinition(
@@ -241,14 +265,28 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.NONE,
     ),
     MessageTypeDefinition(
+        # RND-206: renderer_strategy promoted UNSUPPORTED_PLACEHOLDER ->
+        # MEDIA_PREVIEW, media_capability SINGLE -> CONDITIONAL — app.main
+        # previews emotion (sticker/GIF) images once a message's own
+        # media_access_url is populated (conversations.py wires it whenever
+        # the underlying bytes are actually servable — see
+        # SERVABLE_MEDIA_MSGTYPES), falling back to the standard
+        # "placeholder.emotion" copy otherwise. support_status stays
+        # UNSUPPORTED: classify_media() deliberately still reports
+        # media_type/media_status "unsupported" for every emotion message
+        # (see app.media_classification's module docstring and
+        # resolve_downloadable_media_status's emotion no-op) — that
+        # classification contract is unchanged by this ticket, only the
+        # frontend's rendering capability is.
         raw_type="emotion",
         normalized_type="emotion",
         category=MessageCategory.MEDIA,
         support_status=MessageSupportStatus.UNSUPPORTED,
         display_label_key="messageType.emotion",
         parser_strategy=ParserStrategy.MEDIA_REFERENCE,
-        renderer_strategy=RendererStrategy.UNSUPPORTED_PLACEHOLDER,
-        media_capability=MediaCapability.SINGLE,
+        renderer_strategy=RendererStrategy.MEDIA_PREVIEW,
+        media_capability=MediaCapability.CONDITIONAL,
+        fallback_renderer_strategy=RendererStrategy.UNSUPPORTED_PLACEHOLDER,
     ),
     MessageTypeDefinition(
         # raw_type is the real WeCom protocol value (see module docstring);
@@ -688,6 +726,43 @@ def build_frontend_registry_entries(
                 "normalizedType": d.normalized_type,
                 "supportStatus": d.support_status.value,
             }
+            continue
+        if d.renderer_strategy == RendererStrategy.MEDIA_PREVIEW:
+            # RND-206: renderer_strategy, not support_status, is the
+            # capability signal the frontend actually branches on for
+            # image/video/voice/file/emotion (see app.main's
+            # MEDIA_PREVIEW_KINDS / emotion normalized_type check) — this
+            # branch is checked before the generic SUPPORTED/PARTIAL
+            # buckets below so a MEDIA_PREVIEW type can never be
+            # miscategorized back into the stale "placeholder" shape.
+            # media_capability==CONDITIONAL (currently only emotion) means
+            # preview depends on a given message's own media_access_url,
+            # not a blanket per-type guarantee — reported as the string
+            # "conditional" instead of a bare boolean so a frontend/QA
+            # consumer of this exported map cannot mistake it for an
+            # unconditional True the way emotion's old UNSUPPORTED_PLACEHOLDER
+            # entry could never have been confused with SUPPORTED media.
+            entry = {
+                "category": "media",
+                "mediaType": d.normalized_type,
+                "previewSupported": (
+                    "conditional" if d.media_capability == MediaCapability.CONDITIONAL else True
+                ),
+            }
+            # RND-206 QA fix: even a MEDIA_PREVIEW type still carries its
+            # placeholderKey (when translated) so a message that reaches
+            # renderMessageBody's terminal fallback in some unexpected shape
+            # (e.g. renderer_strategy missing/stale on an old cached
+            # payload) still gets its OWN readable label instead of
+            # collapsing into the generic "unknown message type" bucket —
+            # see app.main's renderMessageBody, which reads this field via
+            # MessageTypeRegistry.resolve() (not the narrower
+            # resolvePlaceholder(), which intentionally still only matches
+            # category=="placeholder").
+            placeholder_key = f"placeholder.{d.normalized_type}"
+            if known_placeholder_keys is None or placeholder_key in known_placeholder_keys:
+                entry["placeholderKey"] = placeholder_key
+            entries[d.normalized_type] = entry
             continue
         if d.support_status == MessageSupportStatus.SUPPORTED:
             entries[d.normalized_type] = {

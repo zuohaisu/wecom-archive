@@ -373,12 +373,16 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .loading{padding:1rem;text-align:center;color:#bbb;font-size:.82rem}
 .error-msg{margin:.5rem;padding:.6rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:3px;font-size:.8rem}
 .media-placeholder{background:#fafafa;border:1px dashed #d9d9d9;border-radius:4px;padding:.35rem .6rem;font-size:.8rem;color:#888;font-style:italic}
+.revoke-time{font-size:.7rem;color:#bbb;margin-top:.2rem}
 .media-preview{max-width:280px;max-height:280px;border-radius:4px;display:block}
 .structured-card{background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:.5rem .65rem;font-size:.8rem;max-width:320px;overflow:hidden}
 .structured-card-title{font-weight:600;margin-bottom:.2rem;word-break:break-word}
 .structured-card-desc{color:#666;font-size:.76rem;margin-bottom:.3rem;word-break:break-word}
 .structured-card-img{max-width:100%;max-height:180px;border-radius:4px;display:block;margin-bottom:.3rem;object-fit:cover}
 .structured-card-meta{color:#999;font-size:.72rem;word-break:break-word}
+.structured-card-hostname{color:#999;font-size:.72rem;word-break:break-word;margin-bottom:.2rem}
+.structured-card-link-action{display:inline-block;font-size:.76rem;color:var(--link-color);text-decoration:none;border:1px solid currentColor;border-radius:3px;padding:.1rem .5rem}
+.structured-card-link-disabled{color:#bbb;border-color:#eee;cursor:not-allowed}
 .structured-card-degraded{color:#888;font-style:italic;font-size:.78rem}
 .structured-card-type-label{display:inline-block;font-size:.68rem;color:#999;text-transform:uppercase;letter-spacing:.02em;margin-bottom:.25rem}
 .structured-card-news-item{border-top:1px solid #f0f0f0;padding-top:.35rem;margin-top:.35rem}
@@ -394,6 +398,43 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .lang-option{padding:.4rem .7rem;font-size:.8rem;color:#333;cursor:pointer;white-space:nowrap}
 .lang-option:hover{background:#f5f5f5}
 .lang-option.active{color:#1890ff;font-weight:600;background:#e6f4ff}
+.media-video{max-width:320px;max-height:320px;border-radius:4px;display:block;background:#000}
+.media-audio{width:260px;display:block}
+.media-rich-loading{background:#fafafa;border:1px dashed #d9d9d9;border-radius:4px;padding:.35rem .6rem;font-size:.8rem;color:#888}
+.file-card{display:flex;align-items:center;gap:.5rem;background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:.5rem .65rem;max-width:280px;text-decoration:none;color:inherit}
+.file-card:hover{background:#f5f8ff}
+.file-card-icon{font-size:1.3rem;flex-shrink:0}
+.file-card-info{flex:1;min-width:0}
+.file-card-type{font-size:.8rem;font-weight:600;word-break:break-word}
+.file-card-meta{font-size:.72rem;color:#999}
+.file-card-download{font-size:.72rem;color:#417ce8;flex-shrink:0}
+.emotion-preview{max-width:150px;max-height:150px;border-radius:4px;display:block;cursor:zoom-in}
+.chatrecord-card{background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:.5rem .65rem;max-width:300px;cursor:pointer}
+.chatrecord-card:hover{background:#f5f8ff}
+.chatrecord-card-title{font-weight:600;font-size:.83rem;margin-bottom:.15rem}
+.chatrecord-card-summary{font-size:.78rem;color:#888;margin-bottom:.15rem;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.chatrecord-card-count{font-size:.72rem;color:#aaa}
+.composite-wrap{display:flex;flex-direction:column;gap:.3rem;max-width:400px}
+.composite-node{}
+.composite-node-text{white-space:pre-wrap;word-break:break-word}
+.composite-node-meta{font-size:.7rem;color:#aaa;margin-bottom:.1rem}
+.composite-unknown{font-size:.78rem;color:#999;font-style:italic}
+.v-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center}
+.v-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.82)}
+.v-close{position:absolute;top:16px;right:20px;z-index:2;background:transparent;border:none;color:#fff;font-size:2rem;line-height:1;cursor:pointer}
+.v-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:2;background:rgba(255,255,255,.12);border:none;color:#fff;font-size:2rem;width:2.6rem;height:2.6rem;border-radius:50%;cursor:pointer}
+.v-prev{left:16px}
+.v-next{right:16px}
+.v-nav:hover{background:rgba(255,255,255,.25)}
+.v-body{position:relative;z-index:1;max-width:90vw;max-height:88vh;display:flex;align-items:center;justify-content:center}
+.v-media{max-width:90vw;max-height:88vh;object-fit:contain;border-radius:4px}
+.v-loading,.v-error{color:#fff;font-size:.9rem;padding:2rem}
+.v-chatrecord{background:#fff;border-radius:8px;padding:1rem 1.25rem;max-width:520px;max-height:80vh;overflow-y:auto}
+.v-chatrecord-title{font-weight:700;font-size:1rem;margin-bottom:.6rem}
+.v-chatrecord-node{border-bottom:1px solid #f0f0f0;padding:.5rem 0}
+.v-chatrecord-node:last-child{border-bottom:none}
+.v-chatrecord-sender{font-size:.78rem;font-weight:600;color:#555}
+.v-chatrecord-time{font-size:.7rem;color:#bbb;margin-left:.4rem}
 </style>
 </head>
 <body>
@@ -440,6 +481,19 @@ var mode='staff',selEntityId=null,selConvId=null,selEntityName=null,selConvName=
 var lastEntityItems=null,lastConvItems=null;
 var timelineConvId=null,timelineMsgs=[],timelineHasOlder=false,timelineNextBefore=null,timelineLoadingOlder=false;
 var timelineHistoryError=null,timelineTopObserver=null;
+// RND-206 QA fix: a monotonically increasing generation token bumped every
+// time the active conversation changes (loadTimeline). Every in-flight
+// timeline request captures its own requestConvId+gen at send time and
+// re-checks both before applying its response -- a response that arrives
+// after the user has switched (or switched back to) a conversation is
+// silently dropped rather than clobbering newer state. See fetchTimelinePage/
+// refreshTimelineIfSelected/fetchOlderMessages.
+var timelineRequestGen=0;
+// Signature of the exact array renderTimeline() last painted, used only to
+// detect a semantically-unchanged auto-refresh (RND-206 QA fix #6) so an
+// unchanged refresh can skip the DOM rebuild entirely and preserve live
+// <video>/<audio> playback state instead of tearing it down and rebuilding.
+var lastRenderedTimelineSignature=null;
 var REFRESH_INTERVAL_SEC=30;
 var refreshCountdownSec=REFRESH_INTERVAL_SEC;
 var refreshTickTimer=null;
@@ -640,25 +694,36 @@ function onConvClick(el){
 function loadTimeline(convId){
   timelineConvId=convId; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   timelineLoadingOlder=false; timelineHistoryError=null;
+  timelineRequestGen++;
   stopHistoryObserver();
   hideNewMessageIndicator();
   document.getElementById('timeline-body').innerHTML='<div class="loading">'+I18N.t('console.loading')+'</div>';
   fetchTimelinePage(null, true);
 }
+// RND-206 QA fix: captures requestConvId+gen at send time (not at resolve
+// time, when the user may have already switched conversations) and drops
+// the response if either no longer matches current state -- fixes "a slow
+// response from the previous conversation overwrote the current
+// conversation" (confirmed browser defect).
 function fetchTimelinePage(before, isInitial){
-  var url='/api/conversations/'+encodeURIComponent(timelineConvId)+'/messages?limit=20';
+  var requestConvId=timelineConvId, gen=timelineRequestGen;
+  var url='/api/conversations/'+encodeURIComponent(requestConvId)+'/messages?limit=20';
   if(before)url+='&before='+encodeURIComponent(before);
   return fetch(url)
     .then(function(r){if(handleUnauth(r))return null;if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
     .then(function(data){
       if(!data)return;
+      if(timelineConvId!==requestConvId||timelineRequestGen!==gen)return;
       timelineMsgs=before?data.messages.concat(timelineMsgs):data.messages;
       timelineHasOlder=data.pagination.has_older;
       timelineNextBefore=data.pagination.next_before;
       renderTimeline(isInitial);
       startHistoryObserver();
     })
-    .catch(function(e){document.getElementById('timeline-body').innerHTML='<div class="error-msg">'+I18N.t('console.failedToLoadPrefix')+esc(e.message)+'</div>';});
+    .catch(function(e){
+      if(timelineConvId!==requestConvId||timelineRequestGen!==gen)return;
+      document.getElementById('timeline-body').innerHTML='<div class="error-msg">'+I18N.t('console.failedToLoadPrefix')+esc(e.message)+'</div>';
+    });
 }
 function isNearTop(){
   var body=document.getElementById('timeline-body');
@@ -687,13 +752,19 @@ function showHistoryRetry(){
   if(el)el.innerHTML=historyRetryHtml();
 }
 function fetchOlderMessages(convId,before){
+  // RND-206 QA fix: captures the generation token at call time (this is
+  // always invoked synchronously from loadOlderAutomatically, right when
+  // the request starts, same guarantee as requestConvId below) rather than
+  // taking a third parameter, so the tested two-argument signature stays
+  // unchanged.
+  var gen=timelineRequestGen;
   var url='/api/conversations/'+encodeURIComponent(convId)+'/messages?limit=20&before='+encodeURIComponent(before);
   return fetch(url).then(function(r){
     if(handleUnauth(r)){var e=new Error('unauthorized');e.handled=true;throw e;}
     if(!r.ok)throw new Error('HTTP '+r.status);
     return r.json();
   }).then(function(data){
-    if(timelineConvId!==convId)return;
+    if(timelineConvId!==convId||timelineRequestGen!==gen)return;
     timelineMsgs=data.messages.concat(timelineMsgs);
     timelineHasOlder=data.pagination.has_older;
     timelineNextBefore=data.pagination.next_before;
@@ -701,7 +772,7 @@ function fetchOlderMessages(convId,before){
 }
 function loadOlderAutomatically(){
   if(timelineLoadingOlder||!timelineHasOlder||timelineHistoryError)return;
-  var requestConvId=timelineConvId;
+  var requestConvId=timelineConvId, requestGen=timelineRequestGen;
   var body=document.getElementById('timeline-body');
   var beforeHeight=body?body.scrollHeight:0;
   timelineLoadingOlder=true;
@@ -709,13 +780,13 @@ function loadOlderAutomatically(){
   preserveScrollPosition(body,beforeHeight);
   var beforeHeight2=body?body.scrollHeight:0;
   fetchOlderMessages(requestConvId,timelineNextBefore).then(function(){
-    if(timelineConvId!==requestConvId)return;
+    if(timelineConvId!==requestConvId||timelineRequestGen!==requestGen)return;
     timelineLoadingOlder=false;
     renderTimeline(false);
     startHistoryObserver();
     preserveScrollPosition(body,beforeHeight2);
   }).catch(function(e){
-    if(timelineConvId!==requestConvId)return;
+    if(timelineConvId!==requestConvId||timelineRequestGen!==requestGen)return;
     timelineLoadingOlder=false;
     if(e&&e.handled)return;
     timelineHistoryError=(e&&e.message)?e.message:'load failed';
@@ -800,16 +871,25 @@ function renderLinkCard(m){
   var f=m.structured_content&&m.structured_content.fields;
   if(!f)return renderStructuredFallback(m);
   var url=isSafeUrl(f.url)?f.url:null;
-  var title=f.title||(url&&hostnameOf(url))||I18N.t('messageType.link');
+  var host=url?hostnameOf(url):null;
+  var title=f.title||host||I18N.t('messageType.link');
   var html='<div class="structured-card structured-card-link">';
   if(f.image_url&&isSafeUrl(f.image_url)){
     html+='<img class="structured-card-img" src="'+esc(f.image_url)+'" alt="" loading="lazy" onerror="this.remove()">';
   }
   html+='<div class="structured-card-title">'+esc(title)+'</div>';
   if(f.description)html+='<div class="structured-card-desc">'+esc(f.description)+'</div>';
+  // RND-206 QA fix #14: hostname shown as its own line (distinct from the
+  // title, which may equal it as a fallback above) and a localized
+  // "open link" action instead of duplicating the full raw URL as the
+  // link's visible text. href/target/rel and the http(s)-only safety
+  // check (isSafeUrl) are unchanged; an unsafe/missing URL renders a
+  // disabled, non-navigable action instead of ever falling back to an
+  // unvalidated href.
+  if(host)html+='<div class="structured-card-hostname">'+esc(host)+'</div>';
   html+=url
-    ?'<a class="structured-card-meta" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+esc(url)+'</a>'
-    :'<div class="structured-card-degraded">'+esc(I18N.t('card.link.unavailable'))+'</div>';
+    ?'<a class="structured-card-link-action" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+esc(I18N.t('link.openLink'))+'</a>'
+    :'<span class="structured-card-link-action structured-card-link-disabled" aria-disabled="true">'+esc(I18N.t('card.link.unavailable'))+'</span>';
   html+='</div>';
   return html;
 }
@@ -1063,6 +1143,600 @@ function renderStructuredCard(m){
   var fn=STRUCTURED_CARD_RENDERERS[m.normalized_type];
   return fn?fn(m):renderStructuredFallback(m);
 }
+// ---------------------------------------------------------------------------
+// RND-206 — unified rich-media rendering: MediaAccessCache, the shared
+// Viewer, and video/voice/file/emotion/composite (mixed/chatrecord)
+// renderers. Every renderer here consumes already-normalized data (a
+// TimelineMessageOut row, or a composite node's {type,text,fields,media,
+// children} shape from structured_content.fields) -- never a raw backend
+// payload, storage path, media_id, or sdkfileid.
+// ---------------------------------------------------------------------------
+
+// In-memory only (no localStorage/sessionStorage) media access descriptor
+// cache, keyed by access-url. Reused by every lazy media renderer below
+// (video/voice/file/emotion + nested/composite media + the Viewer) so a
+// re-render (composite re-render, refresh poll) does not re-mint a Qiniu
+// signed URL unnecessarily. Refreshes automatically once the cached
+// descriptor's expires_at has passed (or is within 5s of expiring) --
+// access_type="proxy" descriptors have no expiry and are cached forever
+// for the page lifetime.
+// RND-206 QA fix: malformed/unparseable expires_at must never be treated as
+// "cache forever" -- it is treated as already-expired (non-cacheable), the
+// opposite of the pre-fix behavior. Descriptor fetch failures carry a
+// numeric `.status` (HTTP status) or `.network=true` so callers can
+// classify the failure (401/403/404/network) instead of a single generic
+// error bucket.
+var MediaAccessCache=(function(){
+  var store={};
+  function isFresh(entry){
+    if(!entry)return false;
+    if(!entry.expires_at)return true;
+    var expiresMs=Date.parse(entry.expires_at);
+    if(isNaN(expiresMs))return false;
+    return expiresMs-Date.now()>5000;
+  }
+  function get(accessUrl){
+    if(!accessUrl){var e0=new Error('no access url');e0.status=0;return Promise.reject(e0);}
+    var cached=store[accessUrl];
+    if(isFresh(cached))return Promise.resolve(cached);
+    return fetch(accessUrl,{credentials:'same-origin'}).then(function(r){
+      if(!r.ok){var e=new Error('HTTP '+r.status);e.status=r.status;throw e;}
+      return r.json();
+    }).then(function(desc){
+      store[accessUrl]=desc;
+      return desc;
+    }).catch(function(err){
+      if(typeof err.status!=='number')err.network=true;
+      throw err;
+    });
+  }
+  function invalidate(accessUrl){delete store[accessUrl];}
+  return {get:get,invalidate:invalidate};
+})();
+
+// Classifies a MediaAccessCache error into one of the required buckets
+// (RND-206 QA fix #8): auth (401) / forbidden-or-expired (403) / missing
+// (404) / network (no HTTP status at all, e.g. offline) / generic error.
+function classifyMediaError(e){
+  if(e&&e.status===401)return 'auth';
+  if(e&&e.status===403)return 'forbidden';
+  if(e&&e.status===404)return 'missing';
+  if(e&&e.network)return 'network';
+  return 'error';
+}
+function redirectToLogin(){
+  if(typeof window!=='undefined'&&window.location)window.location.href='/admin/login';
+}
+// Controlled, bounded refresh: on a 403 (permission denied or an access
+// grant that expired between mint and use) invalidate the cached
+// descriptor and request exactly one fresh one. `retried` prevents any
+// possibility of an infinite retry loop -- a second failure of any kind is
+// surfaced to the caller as-is.
+function fetchDescriptorWithRecovery(accessUrl,retried){
+  return MediaAccessCache.get(accessUrl).catch(function(e){
+    if(!retried&&e&&e.status===403){
+      MediaAccessCache.invalidate(accessUrl);
+      return fetchDescriptorWithRecovery(accessUrl,true);
+    }
+    if(e&&e.status===401)redirectToLogin();
+    throw e;
+  });
+}
+
+function fmtBytes(n){
+  if(typeof n!=='number'||isNaN(n))return I18N.t('file.sizeUnknown');
+  var units=['B','KB','MB','GB'];var i=0;var v=n;
+  while(v>=1024&&i<units.length-1){v/=1024;i++;}
+  return (i===0?String(v):v.toFixed(1))+' '+units[i];
+}
+// RND-206 QA fix #12: display the authorized descriptor's filename when the
+// backend provides one (currently always null -- see NestedMediaAccessOut's
+// docstring, a documented backend-contract gap, not fabricated client-side)
+// with a localized fallback. Never derived from local_path/object_key/URL.
+function fmtFileName(desc){
+  if(desc&&typeof desc.filename==='string'&&desc.filename.trim())return desc.filename;
+  return I18N.t('file.fallbackName');
+}
+
+// Registry of items the Viewer can page through for the CURRENT
+// renderTimeline() pass -- reset at the top of renderTimeline(), populated
+// as each image/emotion/video element is rendered so prev/next navigates
+// every viewable item across the whole visible timeline, not just siblings
+// within one message.
+var timelineViewerItems=[];
+function registerViewerItem(item){
+  timelineViewerItems.push(item);
+  return timelineViewerItems.length-1;
+}
+
+// ---------------------------------------------------------------------------
+// Unified Viewer -- one shared overlay for image/emotion/video preview and
+// chatrecord nested-message browsing, built once and reused for every
+// message (never one popup per message type). Never touches the timeline
+// DOM/scroll position behind it, and is completely independent of the 30s
+// auto-refresh poller / renderTimeline() re-renders. role="dialog"/
+// aria-modal (RND-206 QA fix #11) with focus moved in on open and restored
+// to the triggering element (or a safe fallback) on close.
+// ---------------------------------------------------------------------------
+var viewerItems=[];
+var viewerIndex=-1;
+var viewerKeyHandlerBound=false;
+// Bumped on every open/close so an in-flight descriptor fetch belonging to
+// a viewer session that has since closed (or been reopened with different
+// items) can never apply its result (RND-206 QA fix #5).
+var viewerGen=0;
+var viewerFocusTrigger=null;
+
+function ensureViewerRoot(){
+  var root=document.getElementById('rnd206-viewer');
+  if(root)return root;
+  root=document.createElement('div');
+  root.id='rnd206-viewer';
+  root.className='v-overlay';
+  root.style.display='none';
+  root.setAttribute('role','dialog');
+  root.setAttribute('aria-modal','true');
+  root.setAttribute('aria-label',I18N.t('viewer.dialogLabel'));
+  root.innerHTML=
+    '<div class="v-backdrop" onclick="closeViewer()"></div>'
+    +'<button type="button" class="v-close" onclick="closeViewer()" aria-label="'+esc(I18N.t('viewer.close'))+'">&times;</button>'
+    +'<button type="button" class="v-nav v-prev" onclick="viewerShow(viewerIndex-1)" style="display:none" aria-label="'+esc(I18N.t('viewer.prev'))+'">&#8249;</button>'
+    +'<button type="button" class="v-nav v-next" onclick="viewerShow(viewerIndex+1)" style="display:none" aria-label="'+esc(I18N.t('viewer.next'))+'">&#8250;</button>'
+    +'<div class="v-body" id="rnd206-viewer-body"></div>';
+  document.body.appendChild(root);
+  if(!viewerKeyHandlerBound){
+    document.addEventListener('keydown',function(e){
+      var root2=document.getElementById('rnd206-viewer');
+      if(!root2||root2.style.display==='none')return;
+      if(e.key==='Escape')closeViewer();
+      else if(e.key==='ArrowLeft')viewerShow(viewerIndex-1);
+      else if(e.key==='ArrowRight')viewerShow(viewerIndex+1);
+    });
+    viewerKeyHandlerBound=true;
+  }
+  return root;
+}
+// RND-206 QA fix #11/#15: re-applies I18N labels to the persistent viewer
+// chrome (built once by ensureViewerRoot and never rebuilt otherwise) so a
+// runtime locale switch updates them without a page reload. If the viewer
+// is currently open, also re-renders the current item so any visible
+// loading/error/action copy picks up the new locale immediately.
+function refreshViewerLabels(){
+  var root=typeof document!=='undefined'?document.getElementById('rnd206-viewer'):null;
+  if(!root)return;
+  root.setAttribute('aria-label',I18N.t('viewer.dialogLabel'));
+  var closeBtn=root.querySelector('.v-close');
+  if(closeBtn)closeBtn.setAttribute('aria-label',I18N.t('viewer.close'));
+  var prevBtn=root.querySelector('.v-prev');
+  if(prevBtn)prevBtn.setAttribute('aria-label',I18N.t('viewer.prev'));
+  var nextBtn=root.querySelector('.v-next');
+  if(nextBtn)nextBtn.setAttribute('aria-label',I18N.t('viewer.next'));
+  if(root.style.display!=='none'&&viewerIndex>=0)viewerShow(viewerIndex);
+}
+function openViewer(items,startIndex){
+  viewerItems=items||[];
+  viewerGen++;
+  viewerFocusTrigger=typeof document!=='undefined'?document.activeElement:null;
+  var root=ensureViewerRoot();
+  root.style.display='flex';
+  if(typeof document!=='undefined')document.body.style.overflow='hidden';
+  viewerShow(startIndex||0);
+  var closeBtn=root.querySelector('.v-close');
+  if(closeBtn&&typeof closeBtn.focus==='function')closeBtn.focus();
+}
+function restoreViewerFocus(){
+  var trigger=viewerFocusTrigger;
+  viewerFocusTrigger=null;
+  if(trigger&&typeof trigger.focus==='function'&&typeof document!=='undefined'&&document.body
+     &&typeof document.body.contains==='function'&&document.body.contains(trigger)){
+    trigger.focus();
+    return;
+  }
+  if(typeof document==='undefined')return;
+  var fallback=document.getElementById('timeline-body');
+  if(fallback&&typeof fallback.focus==='function')fallback.focus();
+}
+function closeViewer(){
+  viewerGen++;
+  var root=document.getElementById('rnd206-viewer');
+  if(root)root.style.display='none';
+  if(typeof document!=='undefined')document.body.style.overflow='';
+  viewerItems=[];
+  viewerIndex=-1;
+  restoreViewerFocus();
+}
+function openChatrecordViewer(node,depth){
+  openViewer([{kind:'chatrecord',node:node,depth:depth||0}],0);
+}
+function viewerShow(idx){
+  if(!viewerItems.length||idx<0||idx>=viewerItems.length)return;
+  viewerIndex=idx;
+  var gen=viewerGen;
+  var root=ensureViewerRoot();
+  var body=document.getElementById('rnd206-viewer-body');
+  var item=viewerItems[idx];
+  var multi=viewerItems.length>1&&item.kind!=='chatrecord';
+  root.querySelector('.v-prev').style.display=(multi&&idx>0)?'block':'none';
+  root.querySelector('.v-next').style.display=(multi&&idx<viewerItems.length-1)?'block':'none';
+  if(item.kind==='chatrecord'){
+    body.innerHTML='<div class="v-chatrecord"><div class="v-chatrecord-title">'
+      +esc((item.node.fields&&item.node.fields.title)||I18N.t('chatrecord.title'))+'</div>'
+      +renderCompositeChildren(item.node,item.depth||0)+'</div>';
+    // RND-206 QA fix #3: viewer-mounted content (nested media inside a
+    // chatrecord's expanded view) was never hydrated -- this is the exact
+    // "viewer content is inserted without running the required hydration
+    // flow" defect. hydrateRichMedia is the SAME engine used for the
+    // timeline itself, applied here too.
+    hydrateRichMedia(body);
+    return;
+  }
+  body.innerHTML='<div class="v-loading" role="status">'+esc(I18N.t('viewer.loading'))+'</div>';
+  fetchDescriptorWithRecovery(item.accessUrl).then(function(desc){
+    if(gen!==viewerGen||viewerIndex!==idx)return;
+    if(item.kind==='video'){
+      body.innerHTML='<video class="v-media" src="'+esc(desc.url)+'" controls playsinline></video>';
+    }else{
+      body.innerHTML='<img class="v-media" src="'+esc(desc.url)+'" alt="'+esc(item.label||'')+'">';
+    }
+  }).catch(function(e){
+    if(gen!==viewerGen||viewerIndex!==idx)return;
+    var errKind=classifyMediaError(e);
+    var key=errKind==='auth'?'viewer.unauthorized':errKind==='forbidden'?'media.error.forbidden'
+      :errKind==='missing'?'viewer.missingMedia':errKind==='network'?'media.error.network':'viewer.error';
+    body.innerHTML='<div class="v-error" role="alert">'+esc(I18N.t(key))+'</div>';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lazy rich-media hydration -- ONE shared engine (MediaAccessCache +
+// data-rnd206-kind/data-rnd206-access-url) for every media kind
+// (image/video/voice/file/emotion) in BOTH the top-level timeline and every
+// nested mixed/chatrecord node (RND-206 QA fix #2/#3: no separate
+// access-fetch logic duplicated inside the composite renderers -- they
+// only ever emit a placeholder built by richMediaPlaceholder() below and
+// this same hydrateRichMedia() call resolves it, wherever it was mounted).
+// Called after every DOM insertion point that can contain one of these
+// placeholders: renderTimeline() (top-level + inline mixed children) and
+// viewerShow()'s chatrecord branch (nested chatrecord content).
+// ---------------------------------------------------------------------------
+function hydrateRichMedia(root){
+  root.querySelectorAll('[data-rnd206-access-url]').forEach(function(el){loadRichMedia(el);});
+}
+function loadRichMedia(el){
+  var accessUrl=el.getAttribute('data-rnd206-access-url');
+  var kind=el.getAttribute('data-rnd206-kind');
+  if(!accessUrl){showRichMediaError(el,kind,'missing');return;}
+  fetchDescriptorWithRecovery(accessUrl).then(function(desc){
+    swapRichMediaPlaceholder(el,kind,desc);
+  }).catch(function(e){
+    showRichMediaError(el,kind,classifyMediaError(e));
+  });
+}
+function buildErrorBox(kind,errKind){
+  var box=document.createElement('div');
+  box.className='media-placeholder';
+  box.setAttribute('role','alert');
+  var key;
+  if(errKind==='auth')key='viewer.unauthorized';
+  else if(errKind==='forbidden')key='media.error.forbidden';
+  else if(errKind==='missing')key='viewer.missingMedia';
+  else if(errKind==='network')key='media.error.network';
+  else key=kind==='video'?'video.playbackError':kind==='voice'?'voice.playbackError':kind==='file'?'file.unavailable':'media.loadFailed';
+  box.textContent=I18N.t(key);
+  return box;
+}
+function showRichMediaError(el,kind,errKind){
+  var box=buildErrorBox(kind,errKind||'error');
+  if(el.parentNode)el.parentNode.replaceChild(box,el);
+  else if(el.tagName)el.textContent=box.textContent;
+}
+// RND-206 QA fix #8: a REAL playback/load failure of the mounted element
+// (distinct from a descriptor-fetch failure, already handled by
+// loadRichMedia/showRichMediaError above) invalidates the cached
+// descriptor and retries exactly once, updating the SAME element in place
+// (no DOM replacement, so an unaffected sibling video/audio never
+// reloads). A second failure replaces `outerEl` (the element actually
+// mounted in the timeline/viewer DOM -- may wrap `mediaEl`, e.g. an <img>
+// inside a <button>) with a classified error box.
+function handleRichMediaPlaybackFailure(kind,accessUrl,mediaEl,outerEl){
+  if(mediaEl.getAttribute&&mediaEl.getAttribute('data-rnd206-retried')==='1'){
+    var box=buildErrorBox(kind,'error');
+    if(outerEl.parentNode)outerEl.parentNode.replaceChild(box,outerEl);
+    return;
+  }
+  if(mediaEl.setAttribute)mediaEl.setAttribute('data-rnd206-retried','1');
+  MediaAccessCache.invalidate(accessUrl);
+  fetchDescriptorWithRecovery(accessUrl,true).then(function(desc){
+    if(kind==='file'){mediaEl.href=desc.url;}else{mediaEl.src=desc.url;}
+  }).catch(function(e){
+    var box2=buildErrorBox(kind,classifyMediaError(e));
+    if(outerEl.parentNode)outerEl.parentNode.replaceChild(box2,outerEl);
+  });
+}
+function swapRichMediaPlaceholder(el,kind,desc){
+  var accessUrl=el.getAttribute('data-rnd206-access-url');
+  var viewerIdxAttr=el.getAttribute('data-rnd206-viewer-idx');
+  var replacement;
+  if(kind==='video'){
+    var video=document.createElement('video');
+    video.className='media-video';
+    video.controls=true;
+    video.preload='metadata';
+    video.src=desc.url;
+    if(viewerIdxAttr!==null){
+      var vwrap=document.createElement('div');
+      vwrap.className='media-video-wrap';
+      video.onerror=function(){handleRichMediaPlaybackFailure('video',accessUrl,video,vwrap);};
+      var expandBtn=document.createElement('button');
+      expandBtn.type='button';
+      expandBtn.className='media-video-expand';
+      expandBtn.setAttribute('aria-label',I18N.t('viewer.expand'));
+      expandBtn.textContent='⤢';
+      expandBtn.onclick=(function(idx){return function(){openViewer(timelineViewerItems,idx);};})(parseInt(viewerIdxAttr,10));
+      vwrap.appendChild(video);
+      vwrap.appendChild(expandBtn);
+      replacement=vwrap;
+    }else{
+      video.onerror=function(){handleRichMediaPlaybackFailure('video',accessUrl,video,video);};
+      replacement=video;
+    }
+  }else if(kind==='voice'){
+    var audio=document.createElement('audio');
+    audio.className='media-audio';
+    audio.controls=true;
+    audio.preload='metadata';
+    audio.src=desc.url;
+    audio.onerror=function(){handleRichMediaPlaybackFailure('voice',accessUrl,audio,audio);};
+    replacement=audio;
+  }else if(kind==='file'){
+    var link=document.createElement('a');
+    link.className='file-card';
+    link.href=desc.url;
+    link.target='_blank';
+    link.rel='noopener noreferrer';
+    var icon=document.createElement('span');
+    icon.className='file-card-icon';
+    icon.setAttribute('aria-hidden','true');
+    icon.textContent='📄';
+    var info=document.createElement('span');
+    info.className='file-card-info';
+    var nameLine=document.createElement('div');
+    nameLine.className='file-card-name';
+    nameLine.textContent=fmtFileName(desc);
+    var typeLine=document.createElement('div');
+    typeLine.className='file-card-type';
+    typeLine.textContent=desc.content_type||I18N.t('media.file');
+    var metaLine=document.createElement('div');
+    metaLine.className='file-card-meta';
+    metaLine.textContent=fmtBytes(desc.size_bytes);
+    info.appendChild(nameLine);
+    info.appendChild(typeLine);
+    info.appendChild(metaLine);
+    var dl=document.createElement('span');
+    dl.className='file-card-download';
+    dl.textContent=I18N.t('file.download');
+    link.appendChild(icon);
+    link.appendChild(info);
+    link.appendChild(dl);
+    replacement=link;
+  }else if(kind==='image'||kind==='emotion'){
+    var img=document.createElement('img');
+    img.className=kind==='emotion'?'emotion-preview':'media-preview';
+    img.src=desc.url;
+    img.alt=kind==='emotion'?I18N.t('emotion.alt'):I18N.t('media.image');
+    img.loading='lazy';
+    if(viewerIdxAttr!==null){
+      var btn=document.createElement('button');
+      btn.type='button';
+      btn.className='media-preview-btn';
+      btn.setAttribute('aria-label',img.alt);
+      img.onerror=function(){handleRichMediaPlaybackFailure(kind,accessUrl,img,btn);};
+      btn.appendChild(img);
+      btn.onclick=(function(idx){return function(){openViewer(timelineViewerItems,idx);};})(parseInt(viewerIdxAttr,10));
+      replacement=btn;
+    }else{
+      img.onerror=function(){handleRichMediaPlaybackFailure(kind,accessUrl,img,img);};
+      replacement=img;
+    }
+  }else{
+    return;
+  }
+  if(el.parentNode)el.parentNode.replaceChild(replacement,el);
+}
+// One placeholder builder for every media kind (image/video/voice/file/
+// emotion), top-level or nested -- the single "hydration contract": every
+// consumer emits exactly this markup and nothing else, and hydrateRichMedia
+// is the only code that ever resolves it into a live element.
+function richMediaPlaceholder(kind,accessUrl,loadingKey,extraAttrs){
+  var attrs='';
+  if(extraAttrs){
+    for(var k in extraAttrs){
+      if(Object.prototype.hasOwnProperty.call(extraAttrs,k))attrs+=' '+k+'="'+esc(String(extraAttrs[k]))+'"';
+    }
+  }
+  return '<div class="media-rich-loading" role="status" data-rnd206-kind="'+esc(kind)+'" data-rnd206-access-url="'+esc(accessUrl||'')+'"'+attrs+'>'
+    +esc(I18N.t(loadingKey))+'</div>';
+}
+// Eagerly registers a Viewer slot at render time (not after the descriptor
+// resolves) so top-level and nested image/emotion/video items behave
+// identically and register in stable document order.
+function renderViewableMediaSlot(kind,accessUrl,label,loadingKey){
+  var idx=registerViewerItem({kind:kind==='emotion'?'image':kind,accessUrl:accessUrl,label:label});
+  return richMediaPlaceholder(kind,accessUrl,loadingKey,{'data-rnd206-viewer-idx':idx});
+}
+function renderVideoPreview(accessUrl){
+  // RND-206 QA fix #7: video is registered with the same shared-viewer
+  // dispatch as image/emotion (an explicit expand action alongside the
+  // inline native-controls player -- see swapRichMediaPlaceholder's video
+  // branch), not a separate independent video modal.
+  return renderViewableMediaSlot('video',accessUrl,I18N.t('media.video'),'video.loading');
+}
+function renderVoicePreview(accessUrl){
+  return richMediaPlaceholder('voice',accessUrl,'voice.loading');
+}
+function renderFilePreview(accessUrl){
+  return richMediaPlaceholder('file',accessUrl,'console.loading');
+}
+function renderEmotionPreview(accessUrl){
+  return renderViewableMediaSlot('emotion',accessUrl,I18N.t('emotion.alt'),'viewer.loading');
+}
+function renderNestedImageSlot(accessUrl){
+  return renderViewableMediaSlot('image',accessUrl,I18N.t('media.image'),'viewer.loading');
+}
+// RND-206 QA fix #2: registry-gated top-level dispatch for the three
+// media-preview kinds whose element choice still needs a small kind->
+// renderer map (same accepted pattern as STRUCTURED_CARD_RENDERERS) --
+// used by renderMessageBody once app.message_type_registry reports
+// renderer_strategy=="media_preview" for the message's type (see
+// message_type_registry.py; the registry, not this list, is what marks a
+// type as preview-capable).
+var MEDIA_PREVIEW_KINDS={video:1,voice:1,file:1};
+function renderMediaPreviewByKind(kind,accessUrl){
+  if(kind==='video')return renderVideoPreview(accessUrl);
+  if(kind==='voice')return renderVoicePreview(accessUrl);
+  if(kind==='file')return renderFilePreview(accessUrl);
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// Composite (mixed/chatrecord) node rendering — RND-200's recursive
+// structured_content.fields.items[...]/.children[...] shape, rendered
+// in-order via the SAME renderer registry used for top-level messages
+// (STRUCTURED_CARD_RENDERERS, renderVideoPreview/etc, nested media
+// descriptors already enriched server-side to {status,media_type,
+// mime_type,size_bytes,access_url} — see _enrich_nested_media_fields).
+// Never displays raw JSON; an unrecognized child degrades to a safe,
+// labeled fallback instead of breaking the whole message. Every node is
+// rendered inside a try/catch (RND-206 QA fix #10) so one malformed child
+// can never take down its siblings.
+// ---------------------------------------------------------------------------
+var COMPOSITE_MAX_DEPTH=8; // ONE documented maximum -- mirrors backend _MIXED_MAX_DEPTH, defense in depth only
+var COMPOSITE_MEDIA_KINDS={image:1,video:1,voice:1,file:1,emotion:1};
+
+function renderCompositeNodeMedia(node){
+  var media=node.media;
+  if(!media||typeof media!=='object')return '<div class="composite-unknown">'+esc(I18N.t('composite.unknownChild'))+'</div>';
+  if(media.status!=='available'||!media.access_url){
+    var label=MEDIA_LABELS[media.media_type]||I18N.t('media.generic');
+    var statusLabel=MEDIA_STATUS_LABELS[media.status]||MEDIA_STATUS_LABELS.unsupported||I18N.t('media.status.unsupported');
+    return '<div class="media-placeholder">'+esc(label)+' · '+esc(statusLabel)+'</div>';
+  }
+  var kind=node.type;
+  if(kind==='image')return renderNestedImageSlot(media.access_url);
+  if(kind==='emotion')return renderEmotionPreview(media.access_url);
+  if(kind==='video')return renderVideoPreview(media.access_url);
+  if(kind==='voice')return renderVoicePreview(media.access_url);
+  if(kind==='file')return renderFilePreview(media.access_url);
+  return '<div class="composite-unknown">'+esc(I18N.t('composite.unknownChild'))+'</div>';
+}
+function renderCompositeStructured(node){
+  var fn=STRUCTURED_CARD_RENDERERS[node.type];
+  var fake={structured_content:{fields:node.fields||null},normalized_type:node.type,display_label_key:'messageType.'+node.type};
+  return fn?fn(fake):renderStructuredFallback(fake);
+}
+// Shared by BOTH the top-level chatrecord card (renderChatrecordMessage)
+// and a chatrecord/mixed node nested inside another composite message
+// (renderCompositeNode) -- ONE dispatch path, not two parallel
+// implementations (RND-206 QA fix #2). data-depth carries the REAL
+// recursion depth this card sits at so opening it in the Viewer resumes
+// counting from there instead of silently restarting at 0 (QA fix #9). A
+// semantic <button> (not a clickable <div>) so it is natively keyboard
+// operable (QA fix #11) -- Enter/Space activation is free.
+function renderChatrecordCard(node,depth,title,summaryText,count){
+  return '<button type="button" class="chatrecord-card" data-depth="'+(depth||0)+'" data-node="'+esc(JSON.stringify(node))+'" '
+    +'onclick="openChatrecordViewer(JSON.parse(this.getAttribute(&quot;data-node&quot;)),parseInt(this.getAttribute(&quot;data-depth&quot;),10))" '
+    +'aria-haspopup="dialog">'
+    +'<div class="chatrecord-card-title">'+esc(title)+'</div>'
+    +(summaryText?'<div class="chatrecord-card-summary">'+esc(summaryText)+'</div>':'')
+    +'<div class="chatrecord-card-count">'+esc(count+' '+I18N.t('chatrecord.itemsSuffix'))+'</div>'
+    +'</button>';
+}
+function renderCompositeNode(node,depth){
+  if(!node||typeof node!=='object')return '';
+  if(depth>COMPOSITE_MAX_DEPTH)return '<div class="composite-unknown">'+esc(I18N.t('composite.depthLimitReached'))+'</div>';
+  try{
+    var metaBits=[];
+    if(node.sender_name||node.sender)metaBits.push(esc(node.sender_name||node.sender));
+    if(node.timestamp)metaBits.push(esc(fmtTime(node.timestamp)));
+    var meta=metaBits.length?'<div class="composite-node-meta">'+metaBits.join(' · ')+'</div>':'';
+    var body;
+    if(node.type==='text'){
+      body=node.text?'<div class="composite-node-text">'+esc(node.text)+'</div>'
+        :'<div class="media-placeholder">'+esc(I18N.t('timeline.emptyText'))+'</div>';
+    }else if(COMPOSITE_MEDIA_KINDS[node.type]){
+      body=renderCompositeNodeMedia(node);
+    }else if(STRUCTURED_CARD_RENDERERS[node.type]){
+      body=renderCompositeStructured(node);
+    }else if(node.type==='chatrecord'||node.type==='mixed'){
+      body=renderChatrecordCard(node,depth,(node.fields&&node.fields.title)||I18N.t('chatrecord.title'),null,
+        Array.isArray(node.children)?node.children.length:0);
+    }else if(node.text){
+      // Unknown/unsupported node type, but the parser still extracted a
+      // best-effort text rendition (see structured_message_parser's
+      // _extract_nested_text) -- show it rather than a bare "unsupported"
+      // label, same spirit as the top-level unknown-type handling.
+      body='<div class="composite-node-text">'+esc(node.text)+'</div>';
+    }else{
+      body='<div class="composite-unknown">'+esc(I18N.t('composite.unknownChild'))+'</div>';
+    }
+    return '<div class="composite-node">'+meta+body+'</div>';
+  }catch(e){
+    // RND-206 QA fix #10: this node's renderer threw -- isolate the
+    // failure to this one node; siblings (already rendered, or rendered
+    // next in the same forEach loop) are unaffected. Never surfaces the
+    // exception message/stack or any node content.
+    return '<div class="composite-node"><div class="composite-unknown">'+esc(I18N.t('composite.unknownChild'))+'</div></div>';
+  }
+}
+function renderCompositeChildren(node,depth){
+  var children=node&&(node.children||(node.fields&&node.fields.items));
+  if(!Array.isArray(children)||!children.length){
+    return '<div class="composite-unknown">'+esc(I18N.t('chatrecord.empty'))+'</div>';
+  }
+  var html='';
+  children.forEach(function(child){
+    html+='<div class="v-chatrecord-node">'+renderCompositeNode(child,(depth||0)+1)+'</div>';
+  });
+  return html;
+}
+// mixed: rendered inline, in order, recursively -- reusing the exact same
+// per-node renderer as chatrecord's viewer (renderCompositeNode). Each
+// item is independently failure-isolated by renderCompositeNode itself, so
+// this loop never needs its own try/catch.
+function renderMixedMessage(m){
+  var fields=m.structured_content&&m.structured_content.fields;
+  var items=fields&&fields.items;
+  if(!Array.isArray(items)||!items.length){
+    return '<div class="composite-unknown">'+esc(I18N.t('composite.unknownChild'))+'</div>';
+  }
+  var html='<div class="composite-wrap">';
+  items.forEach(function(item){html+=renderCompositeNode(item,1);});
+  html+='</div>';
+  return html;
+}
+// chatrecord: a compact summary card in the timeline (depth 0 -- this is
+// the recursion root); full nested content (sender/timestamp/nested media/
+// nested chatrecord, all reusing renderCompositeNode) opens in the shared
+// Viewer on click, via the exact same renderChatrecordCard() a nested
+// chatrecord/mixed node uses.
+function renderChatrecordMessage(m){
+  var fields=m.structured_content&&m.structured_content.fields;
+  var items=(fields&&fields.items)||[];
+  var title=(fields&&fields.title)||I18N.t('chatrecord.title');
+  var firstText='';
+  for(var i=0;i<items.length&&!firstText;i++){
+    if(items[i]&&items[i].text)firstText=items[i].text;
+  }
+  var node={fields:fields,children:items};
+  return renderChatrecordCard(node,0,title,firstText,items.length);
+}
+function renderCompositeMessage(m){
+  if(m.normalized_type==='chatrecord')return renderChatrecordMessage(m);
+  if(m.normalized_type==='mixed')return renderMixedMessage(m);
+  var typeEntry=MessageTypeRegistry.resolvePlaceholder(m.normalized_type)||MessageTypeRegistry.fallback;
+  return '<div class="media-placeholder">'+I18N.t(typeEntry.placeholderKey)+'</div>';
+}
+
 function renderRevokePlaceholder(m){
   // RND-201: a standalone "revoke" event row that could not be linked to
   // its original (target not archived yet, or the event's own payload
@@ -1075,7 +1749,13 @@ function renderRevokePlaceholder(m){
   var key='revoke.pending';
   if(m.revoke_association_status==='original_missing')key='revoke.originalMissing';
   else if(m.revoke_association_status==='malformed')key='revoke.malformed';
-  return '<div class="media-placeholder">'+esc(I18N.t(key))+'</div>';
+  // RND-206 QA fix #13: consumes the existing RND-201 revoked_at field
+  // (already present on TimelineMessageOut for a standalone revoke-event
+  // row -- see app.routers.conversations) when available; never fabricates
+  // a time when it is absent, and never exposes revoke_event_msgid or any
+  // other internal association id here.
+  var timeLine=m.revoked_at?'<div class="revoke-time">'+esc(I18N.t('revoke.time'))+esc(fmtTime(m.revoked_at))+'</div>':'';
+  return '<div class="media-placeholder">'+esc(I18N.t(key))+'</div>'+timeLine;
 }
 function renderMessageBody(m){
   if(m.revoke_association_status&&m.revoke_association_status!=='linked'){
@@ -1085,26 +1765,62 @@ function renderMessageBody(m){
   if(mediaType==='text'){
     return m.content_text?esc(m.content_text):'<div class="media-placeholder">'+I18N.t('timeline.emptyText')+'</div>';
   }
-  if(mediaType==='image'&&m.media_status==='available'&&(m.media_access_url||m.media_url)){
-    // RND-187: no src/href set here — the actual URL (a short-lived Qiniu
-    // signed URL, or the local proxy path) is only known after fetching
-    // the unified media access descriptor, done post-render by
-    // hydrateMediaImages(). This keeps the tenant/permission check +
-    // signed-URL minting on the same request boundary as before, just
-    // moved one step later (per-image, on demand) instead of eagerly
-    // embedding a URL in the timeline payload.
-    return '<a class="media-link" target="_blank" rel="noopener noreferrer">'
-      +'<img class="media-preview" data-access-url="'+esc(m.media_access_url||'')
-      +'" data-fallback-url="'+esc(m.media_url||'')+'" data-retried="0" alt="'
-      +esc(I18N.t('media.image'))+'" loading="lazy"></a>';
+  if(mediaType==='image'&&m.media_status==='available'&&m.media_access_url){
+    // RND-206 QA fix (narrow remediation pass): top-level image now shares
+    // the exact same hydration path as nested/video/voice/file/emotion
+    // (renderViewableMediaSlot -> richMediaPlaceholder -> hydrateRichMedia
+    // -> loadRichMedia -> fetchDescriptorWithRecovery -> MediaAccessCache
+    // -> swapRichMediaPlaceholder) instead of the now-removed standalone
+    // RND-187 loadMediaImage chain. No src/href is set here — the actual
+    // URL (a short-lived Qiniu signed URL, or the local proxy path) is
+    // only known once the descriptor is fetched, on demand, post-render.
+    // Gated on media_access_url alone (no media_url fallback): the
+    // backend always sets both together whenever media_status=="available"
+    // (see app.routers.conversations.get_conversation_messages), the same
+    // invariant video/voice/file already rely on.
+    return renderViewableMediaSlot('image', m.media_access_url, I18N.t('media.image'), 'viewer.loading');
   }
   if(mediaType==='image'){
     var imgLabel=MEDIA_LABELS.image||I18N.t('media.generic');
     var imgStatusLabel=MEDIA_STATUS_LABELS[m.media_status]||I18N.t('media.status.unsupported');
     return '<div class="media-placeholder">'+esc(imgLabel)+' · '+esc(imgStatusLabel)+'</div>';
   }
+  // RND-206 QA fix #2: video/voice/file are gated by renderer_strategy==
+  // "media_preview" -- the authoritative Message Type Registry's own
+  // capability signal (message_type_registry.py), not a hardcoded
+  // mediaType literal list maintained independently of it. media_status/
+  // media_access_url remain the separate, per-message "is THIS message's
+  // media actually available right now" check. Lazily hydrated the same
+  // way image is (see hydrateRichMedia/loadRichMedia below); falls through
+  // to the shared "known type, not available" placeholder when
+  // media_status isn't "available" so a not-yet-downloaded / failed video
+  // still shows a clear, type-specific status instead of a broken player.
+  if(m.renderer_strategy==='media_preview'&&MEDIA_PREVIEW_KINDS[mediaType]){
+    if(m.media_status==='available'&&m.media_access_url)return renderMediaPreviewByKind(mediaType,m.media_access_url);
+    var mLabel=MEDIA_LABELS[mediaType]||I18N.t('media.generic');
+    var mStatusLabel=MEDIA_STATUS_LABELS[m.media_status]||I18N.t('media.status.unsupported');
+    return '<div class="media-placeholder">'+esc(mLabel)+' · '+esc(mStatusLabel)+'</div>';
+  }
+  // RND-206 QA fix #2: emotion (sticker/GIF) preview, gated the same way --
+  // renderer_strategy=="media_preview" is the registry's capability signal
+  // for emotion too (message_type_registry.py). classify_media()
+  // intentionally still reports media_type/media_status "unsupported" for
+  // emotion (see app.media_classification), so this cannot be gated by
+  // mediaType/media_status like video/voice/file above -- media_access_url
+  // presence is the per-message availability signal instead. When no
+  // access URL is available this falls through unchanged to the normal
+  // registry-driven "unsupported" placeholder path below (same as every
+  // other still-unsupported type), rather than a separate hand-written
+  // fallback string.
+  if(m.normalized_type==='emotion'&&m.renderer_strategy==='media_preview'&&m.media_access_url){
+    return renderEmotionPreview(m.media_access_url);
+  }
   if(mediaType==='unknown'){
     return '<div class="media-placeholder">'+I18N.t('media.unknownType')+'</div>';
+  }
+  // RND-206: mixed/chatrecord composite viewer.
+  if(m.renderer_strategy==='composite_view'){
+    return renderCompositeMessage(m);
   }
   if(m.renderer_strategy==='structured_card'){
     return renderStructuredCard(m);
@@ -1113,76 +1829,74 @@ function renderMessageBody(m){
   if(m.renderer_strategy==='system_card'){
     return renderSystemCard(m);
   }
-  // RND-197 fix: resolvePlaceholder must be keyed by normalized_type, not
-  // raw msgtype — MessageTypeRegistry.entries is keyed by normalized_type
-  // (e.g. "miniprogram"), but msgtype is the raw wire value (e.g.
-  // "weapp"). Looking this up by m.msgtype silently missed every aliased
-  // type and fell through to the generic fallback (see
-  // test_message_type_registry_core.py's documented-divergence test,
-  // now fixed). normalized_type is available on every message row, not
-  // just structured ones, so this is safe unconditionally.
-  var typeEntry=MessageTypeRegistry.resolvePlaceholder(m.normalized_type)||MessageTypeRegistry.fallback;
-  return '<div class="media-placeholder">'+I18N.t(typeEntry.placeholderKey)+'</div>';
+  // RND-197 fix: keyed by normalized_type, not raw msgtype —
+  // MessageTypeRegistry.entries is keyed by normalized_type (e.g.
+  // "miniprogram"), but msgtype is the raw wire value (e.g. "weapp").
+  // Looking this up by m.msgtype silently missed every aliased type and
+  // fell through to the generic fallback (see
+  // test_message_type_registry_core.py's documented-divergence test, now
+  // fixed). normalized_type is available on every message row, not just
+  // structured ones, so this is safe unconditionally.
+  //
+  // RND-206 QA fix: this terminal fallback now reads MessageTypeRegistry.
+  // resolve() (every registered entry) instead of the narrower
+  // resolvePlaceholder() (only category=="placeholder" entries) so a
+  // message that reaches here in an unexpected shape (e.g. a stale/missing
+  // renderer_strategy on old cached data) still gets its own type's
+  // specific label via .placeholderKey when the registry carries one
+  // (video/voice/file/emotion still do, even though their normal dispatch
+  // above never reaches this line) instead of collapsing into the generic
+  // "unknown message type" text.
+  var typeEntry=MessageTypeRegistry.resolve(m.normalized_type);
+  var placeholderKey=(typeEntry&&typeEntry.placeholderKey)||MessageTypeRegistry.fallback.placeholderKey;
+  return '<div class="media-placeholder">'+I18N.t(placeholderKey)+'</div>';
 }
-// RND-187: fetch each image's unified media access descriptor on demand and
-// populate its <img src> (and wrapping <a href>) from the returned url —
-// never read/construct a Qiniu or storage_ref URL client-side. Retries the
-// access-descriptor fetch exactly once on load failure (covers a signed URL
-// that expired while scrolled off-screen), then shows an error placeholder.
-// Never persists the resolved URL (no localStorage, no analytics).
-function loadMediaImage(img){
-  var accessUrl=img.getAttribute('data-access-url');
-  if(!accessUrl){
-    var fallback=img.getAttribute('data-fallback-url');
-    img.setAttribute('data-retried','1');
-    if(fallback){
-      img.onerror=function(){onMediaImageError(img);};
-      img.src=fallback;
-      var link0=img.closest('a.media-link');
-      if(link0)link0.href=fallback;
-    }else{
-      showMediaError(img);
-    }
-    return;
+// RND-206 QA fix: per-message failure isolation -- a single message whose
+// renderer throws (malformed structured_content, unexpected field shape,
+// etc.) must never blank the rest of the timeline. Never logs message
+// content/signed URLs, even in the caught-error path (dev diagnostics
+// requirement) -- the error itself is discarded.
+function safeRenderMessageBody(m){
+  try{
+    return renderMessageBody(m);
+  }catch(e){
+    return '<div class="media-placeholder">'+esc(I18N.t('render.messageFailed'))+'</div>';
   }
-  fetch(accessUrl,{credentials:'same-origin'}).then(function(r){
-    if(handleUnauth(r))return null;
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    return r.json();
-  }).then(function(desc){
-    if(!desc)return;
-    img.onerror=function(){onMediaImageError(img);};
-    img.src=desc.url;
-    var link=img.closest('a.media-link');
-    if(link)link.href=desc.url;
-  }).catch(function(){
-    onMediaImageError(img);
-  });
 }
-function onMediaImageError(img){
-  if(img.getAttribute('data-retried')!=='1'){
-    img.setAttribute('data-retried','1');
-    img.onerror=null;
-    loadMediaImage(img);
-    return;
-  }
-  showMediaError(img);
-}
-function showMediaError(img){
-  var link=img.closest('a.media-link');
-  var placeholder=document.createElement('div');
-  placeholder.className='media-placeholder';
-  placeholder.textContent=I18N.t('media.loadFailed');
-  var target=link||img;
-  if(target&&target.parentNode)target.parentNode.replaceChild(placeholder,target);
-}
-function hydrateMediaImages(root){
-  var imgs=root.querySelectorAll('img.media-preview');
-  imgs.forEach(function(img){loadMediaImage(img);});
+// RND-206 QA fix (narrow remediation pass): the standalone RND-187 image
+// hydration chain (loadMediaImage/onMediaImageError/showMediaError/
+// hydrateMediaImages) has been retired. Top-level images now render as a
+// normal viewable media slot (renderViewableMediaSlot, same as nested/
+// video/voice/file/emotion) and are hydrated exclusively by the shared
+// hydrateRichMedia -> loadRichMedia -> fetchDescriptorWithRecovery ->
+// swapRichMediaPlaceholder chain above, so top-level and nested images now
+// share one descriptor cache, one retry policy, and one error
+// classification (401/403/404/network) instead of two independent
+// systems. See test_rnd_206_top_level_image.py for the full behavioral
+// coverage this replaces (the old test_media_hydration.py, which tested
+// the now-removed standalone chain by name, has been retired with it).
+// RND-206 QA fix: a lightweight content signature (NOT a full virtual-DOM
+// diff -- deliberately out of scope, see RND-204) used only to decide
+// whether an auto-refresh's freshly-merged array is semantically identical
+// to what is already painted, so refreshTimelineIfSelected() can skip
+// rebuilding the DOM entirely rather than reconciling node-by-node.
+function timelineSignature(msgs){
+  return JSON.stringify((msgs||[]).map(function(m){
+    return [
+      m.msgid,m.msgtime,m.content_text,m.media_status,m.media_access_url,
+      m.is_revoked,m.revoked_at,m.revoke_association_status,
+      m.structured_content?JSON.stringify(m.structured_content):null
+    ];
+  }));
 }
 function renderTimeline(scrollToBottom){
   var body=document.getElementById('timeline-body');
-  if(!timelineMsgs||!timelineMsgs.length){body.innerHTML='<div class="empty-state">'+I18N.t('console.noMessages')+'</div>';return;}
+  timelineViewerItems=[];
+  if(!timelineMsgs||!timelineMsgs.length){
+    body.innerHTML='<div class="empty-state">'+I18N.t('console.noMessages')+'</div>';
+    lastRenderedTimelineSignature=timelineSignature(timelineMsgs);
+    return;
+  }
   var pendingHistoryError=(typeof timelineHistoryError!=='undefined')&&timelineHistoryError;
   var html='<div id="timeline-history-status">'
     +(pendingHistoryError?historyRetryHtml():(timelineHasOlder?'':'<div class="history-status history-end">'+I18N.t('history.noMore')+'</div>'))
@@ -1195,14 +1909,18 @@ function renderTimeline(scrollToBottom){
     var rowCls='tl-row '+(isSelf?'tl-row-self':'tl-row-other');
     var sc='tl-sender'+(isStaff?' tl-staff':'');
     var bc='tl-bubble '+(isSelf?'tl-bubble-self':(mode==='staff'?'tl-bubble-other':(isStaff?'tl-bubble-staff':'')));
-    var text=renderMessageBody(m);
+    var text=safeRenderMessageBody(m);
     var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
     var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">'+esc(I18N.t('timeline.groupBadge'))+'</span>':'';
     // RND-201: secondary "已撤回" indicator on an original message that a
     // linked revoke event targets — deliberately visually secondary (a
     // small badge next to the existing type/group badges), never
     // replacing the message body rendered by renderMessageBody(m) above.
-    var revokedBadge=m.is_revoked?' <span class="badge badge-revoked" style="font-size:.65rem">'+esc(I18N.t('timeline.revokedBadge'))+'</span>':'';
+    var revokedBadge=m.is_revoked?' <span class="badge badge-revoked" style="font-size:.65rem">'+esc(I18N.t('timeline.revokedBadge'))
+      // RND-206 QA fix #13: revoke time alongside the existing badge, using
+      // the already-present revoked_at field -- omitted (never fabricated)
+      // when absent. Original message content above is unchanged.
+      +(m.revoked_at?' · '+esc(fmtTime(m.revoked_at)):'')+'</span>':'';
     var senderName=m.sender_display_name||m.sender||'?';
     var senderRaw=m.sender_raw_id||m.sender;
     var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
@@ -1223,7 +1941,8 @@ function renderTimeline(scrollToBottom){
   });
   html+='</div>';
   body.innerHTML=html;
-  hydrateMediaImages(body);
+  hydrateRichMedia(body);
+  lastRenderedTimelineSignature=timelineSignature(timelineMsgs);
   if(scrollToBottom){body.scrollTop=body.scrollHeight;}
 }
 function isNearBottom(){
@@ -1283,7 +2002,7 @@ function refreshConversationList(){
 }
 function refreshTimelineIfSelected(){
   if(!timelineConvId||timelineLoadingOlder)return Promise.resolve();
-  var convId=timelineConvId;
+  var convId=timelineConvId, gen=timelineRequestGen;
   var body=document.getElementById('timeline-body');
   var wasNearBottom=isNearBottom();
   var prevScrollTop=body?body.scrollTop:0;
@@ -1293,11 +2012,24 @@ function refreshTimelineIfSelected(){
     if(!r.ok)throw new Error('HTTP '+r.status);
     return r.json();
   }).then(function(data){
-    if(!data||timelineConvId!==convId||timelineLoadingOlder)return;
+    // RND-206 QA fix: re-verify BOTH the selected conversation and the
+    // generation token before applying -- a plain convId check alone is
+    // insufficient because a user can switch away and back to the SAME
+    // conversation while this request is still in flight, which would let
+    // a genuinely stale response through a convId-only guard.
+    if(!data||timelineConvId!==convId||timelineRequestGen!==gen||timelineLoadingOlder)return;
     var existingIds={};
     timelineMsgs.forEach(function(m){existingIds[m.msgid]=true;});
     var hasNew=data.messages.some(function(m){return!existingIds[m.msgid];});
-    timelineMsgs=mergeMessagesByMsgid(timelineMsgs,data.messages);
+    var merged=mergeMessagesByMsgid(timelineMsgs,data.messages);
+    // RND-206 QA fix: an auto-refresh that produces a byte-identical
+    // rendered set (same messages, same content/media/revoke state) must
+    // not rebuild the timeline DOM -- doing so was destroying active
+    // <video>/<audio> playback (currentTime reset to 0, paused, and the
+    // browser re-requesting media bytes) even though nothing changed.
+    var unchanged=lastRenderedTimelineSignature!==null&&timelineSignature(merged)===lastRenderedTimelineSignature;
+    timelineMsgs=merged;
+    if(unchanged)return;
     renderTimeline(false);
     startHistoryObserver();
     var body2=document.getElementById('timeline-body');

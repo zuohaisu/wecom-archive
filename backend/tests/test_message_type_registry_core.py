@@ -755,25 +755,55 @@ def test_frontend_export_is_gated_by_real_i18n_key_presence_not_a_hardcoded_list
     """build_frontend_registry_entries() must derive its filter from
     whatever placeholder.<type> keys it is told exist, not a hardcoded
     allow-list — a registered PARTIAL/UNSUPPORTED *legacy placeholder*
-    type (e.g. "emotion") appears only when its i18n key is present in
-    known_placeholder_keys, and disappears the moment it is not, with no
+    type (e.g. "audio_archive") appears only when its i18n key is present
+    in known_placeholder_keys, and disappears the moment it is not, with no
     code change. (RND-197: STRUCTURED_CARD types like "location" are not
     gated by this filter at all — see build_frontend_registry_entries()'s
-    docstring — so they are not used as examples here anymore.)"""
+    docstring — so they are not used as examples here anymore. RND-206:
+    video/voice/file/emotion are no longer "legacy placeholder" types
+    either — they are MEDIA_PREVIEW now and always present regardless of
+    this filter, exactly like STRUCTURED_CARD types — see
+    test_frontend_export_media_preview_entries_are_never_gated below, so
+    they are not used as examples here anymore. mixed/chatrecord
+    (COMPOSITE_VIEW, PARTIAL) remain genuine legacy-placeholder-bucket
+    members and are used here instead.)"""
     with_key = build_support_matrix()  # sanity: matrix build unaffected by this filter
     assert with_key
 
-    entries_with_emotion = build_frontend_registry_entries(
-        known_placeholder_keys=frozenset({"placeholder.emotion"})
+    entries_with_audio_archive = build_frontend_registry_entries(
+        known_placeholder_keys=frozenset({"placeholder.audio_archive"})
     )
-    assert "emotion" in entries_with_emotion
-    assert "video" not in entries_with_emotion  # gated out: key not supplied
+    assert "audio_archive" in entries_with_audio_archive
+    assert "mixed" not in entries_with_audio_archive  # gated out: key not supplied
 
-    entries_without_emotion = build_frontend_registry_entries(
-        known_placeholder_keys=frozenset({"placeholder.video"})
+    entries_with_mixed = build_frontend_registry_entries(
+        known_placeholder_keys=frozenset({"placeholder.mixed"})
     )
-    assert "emotion" not in entries_without_emotion
-    assert "video" in entries_without_emotion
+    assert "audio_archive" not in entries_with_mixed
+    assert "mixed" in entries_with_mixed
+
+
+def test_frontend_export_media_preview_entries_are_never_gated() -> None:
+    """RND-206: video/voice/file/emotion are MEDIA_PREVIEW, a genuine
+    rendering capability, not a legacy placeholder — they must always be
+    present in the exported entries regardless of known_placeholder_keys
+    (same guarantee STRUCTURED_CARD types already have), even though each
+    still optionally carries its placeholderKey (gated) for the terminal
+    fallback path — see app.main's renderMessageBody."""
+    entries = build_frontend_registry_entries(known_placeholder_keys=frozenset())
+    for normalized_type in ("video", "voice", "file", "emotion", "image"):
+        assert normalized_type in entries
+        assert entries[normalized_type]["category"] == "media"
+        assert "placeholderKey" not in entries[normalized_type]
+
+    entries_with_keys = build_frontend_registry_entries(
+        known_placeholder_keys=frozenset({"placeholder.video", "placeholder.emotion"})
+    )
+    assert entries_with_keys["video"]["placeholderKey"] == "placeholder.video"
+    assert entries_with_keys["emotion"]["placeholderKey"] == "placeholder.emotion"
+    assert "placeholderKey" not in entries_with_keys["voice"]
+    assert entries_with_keys["emotion"]["previewSupported"] == "conditional"
+    assert entries_with_keys["video"]["previewSupported"] is True
 
 
 def test_frontend_export_structured_card_entries_are_never_gated() -> None:

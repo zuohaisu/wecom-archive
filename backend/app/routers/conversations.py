@@ -1453,12 +1453,6 @@ def get_conversation_messages(
             # RND-199: generalized from "== 'image'" to every media_type
             # classify_media() preserves as media_type — image/video/voice/
             # file (see app.media_storage.SUPPORTED_MIGRATION_MEDIA_TYPES).
-            # emotion is deliberately excluded here: classify_media()
-            # collapses it into the generic UNSUPPORTED bucket
-            # (media_type="unsupported"), which is never a member of that
-            # set, so the timeline's rendering contract for emotion is
-            # unchanged — only the dedicated media route additionally
-            # serves emotion (see SERVABLE_MEDIA_MSGTYPES).
             media_file = media_files_map.get(msg.id)
             file_state = "missing"
             if media_file and media_file.download_status == "downloaded":
@@ -1501,6 +1495,32 @@ def get_conversation_messages(
                 file_state,
             )
             if media.media_status == "available":
+                media_url = f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media"
+                media_access_url = (
+                    f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media/access"
+                )
+        elif msg.msgtype == "emotion":
+            # RND-206: emotion bytes are already servable through the same
+            # /media and /media/access routes (see
+            # app.media_storage.SERVABLE_MEDIA_MSGTYPES, which includes
+            # "emotion" precisely so the media routes could serve it once a
+            # renderer existed) — only the timeline response never pointed
+            # a client at them, deferred by RND-199 explicitly to this
+            # ticket. classify_media() intentionally still leaves
+            # media.media_type/media_status as "unsupported" for emotion
+            # (unchanged, still tested by
+            # test_classify_media_unsupported_msgtype) — `media` itself is
+            # not reassigned here. The frontend detects an emotion preview
+            # by msgtype=="emotion" plus media_access_url being present,
+            # not by media_status.
+            media_file = media_files_map.get(msg.id)
+            file_state = "missing"
+            if media_file and media_file.download_status == "downloaded":
+                try:
+                    file_state = resolve_downloadable_media_state(media_file)
+                except (MediaStorageUnavailable, MediaStorageConfigurationError):
+                    file_state = "unavailable"
+            if file_state == "servable":
                 media_url = f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media"
                 media_access_url = (
                     f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media/access"

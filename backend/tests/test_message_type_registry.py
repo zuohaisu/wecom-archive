@@ -108,13 +108,16 @@ def _bundle() -> str:
         _extract(r"function renderSystemCard\(m\)\{.*?\n\}", "renderSystemCard()"),
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
         _extract(r"function renderStructuredCard\(m\)\{.*?\n\}", "renderStructuredCard()"),
+        # RND-206: renderMessageBody()/renderTimeline() now also depend on
+        # the MediaAccessCache/Viewer/rich-media/composite renderer block —
+        # pull the whole contiguous block in so the bundle is self-contained.
+        _extract(
+            r"var MediaAccessCache=\(function\(\)\{.*?\nfunction renderCompositeMessage\(m\)\{.*?\n\}",
+            "RND-206 rich-media/composite block",
+        ),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
-        # RND-187: renderTimeline() now calls hydrateMediaImages() after
-        # every render — pull those in too so the bundle is self-contained.
-        _extract(r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"),
-        _extract(r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"),
-        _extract(r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"),
-        _extract(r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"),
+        _extract(r"function safeRenderMessageBody\(m\)\{.*?\n\}", "safeRenderMessageBody()"),
+        _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
     ]
     return "\n".join(parts)
@@ -229,24 +232,56 @@ process.stdout.write(JSON.stringify({
 
 
 def test_resolve_placeholder_only_matches_placeholder_category_entries() -> None:
+    # RND-206: video is now category "media" (MEDIA_PREVIEW), not
+    # "placeholder" -- it genuinely renders playback now, so
+    # resolvePlaceholder() (which only ever matches category=="placeholder")
+    # correctly no longer matches it. Its placeholderKey is still readable
+    # via the broader MessageTypeRegistry.resolve(...).placeholderKey (used
+    # by renderMessageBody's terminal fallback) -- see
+    # test_resolve_still_exposes_placeholder_key_for_media_preview_types.
     out = _run(
         """
 process.stdout.write(JSON.stringify({
   text: MessageTypeRegistry.resolvePlaceholder('text'),
   image: MessageTypeRegistry.resolvePlaceholder('image'),
-  video: MessageTypeRegistry.resolvePlaceholder('video') && MessageTypeRegistry.resolvePlaceholder('video').placeholderKey,
+  video: MessageTypeRegistry.resolvePlaceholder('video'),
   location: MessageTypeRegistry.resolvePlaceholder('location')
 }));
 """
     )
     assert out["text"] is None
     assert out["image"] is None
-    assert out["video"] == "placeholder.video"
+    assert out["video"] is None
     # RND-197: location is now category "structured", not "placeholder" —
     # resolvePlaceholder must not match it (structured cards don't go
     # through this legacy lookup at all, see renderMessageBody's
     # structured_card branch, checked first).
     assert out["location"] is None
+
+
+def test_resolve_still_exposes_placeholder_key_for_media_preview_types() -> None:
+    # RND-206 QA fix: MessageTypeRegistry.resolve() (unlike the narrower
+    # resolvePlaceholder()) still exposes .placeholderKey for a
+    # MEDIA_PREVIEW type -- this is what renderMessageBody's terminal
+    # fallback reads so a message that reaches that line in an unexpected
+    # shape still gets video/voice/file/emotion's own label instead of the
+    # generic "unknown message type" text.
+    out = _run(
+        """
+process.stdout.write(JSON.stringify({
+  video: MessageTypeRegistry.resolve('video').placeholderKey,
+  voice: MessageTypeRegistry.resolve('voice').placeholderKey,
+  file: MessageTypeRegistry.resolve('file').placeholderKey,
+  emotion: MessageTypeRegistry.resolve('emotion').placeholderKey
+}));
+"""
+    )
+    assert out == {
+        "video": "placeholder.video",
+        "voice": "placeholder.voice",
+        "file": "placeholder.file",
+        "emotion": "placeholder.emotion",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -267,9 +302,14 @@ def test_text_renderer_empty_text_placeholder_unchanged() -> None:
 def test_image_renderer_preview_unchanged() -> None:
     """RND-187: <img src> is no longer set synchronously by
     renderMessageBody() — see test_unsupported_message_labels.py's
-    test_zh_cn_image_preview_unchanged for the rationale. What must stay
-    unchanged is that a preview element is still produced, carrying both
-    the access-descriptor URL and the proxy fallback URL."""
+    test_zh_cn_image_preview_unchanged for the rationale. RND-206 (narrow
+    remediation pass): top-level image now renders through the same
+    hydratable-placeholder contract as nested/video/voice/file/emotion
+    (data-rnd206-kind="image" + data-rnd206-access-url), resolved by the
+    shared hydrateRichMedia/loadRichMedia/MediaAccessCache chain instead of
+    the retired standalone loadMediaImage(). What must stay unchanged is
+    that a real, hydratable preview placeholder carrying the correct
+    access-descriptor URL is still produced."""
     msg = _msg(
         "image",
         "image",
@@ -278,9 +318,8 @@ def test_image_renderer_preview_unchanged() -> None:
         media_url="/api/conversations/c1/messages/msg-1/media",
     )
     html = _render(msg)
-    assert '<img class="media-preview"' in html
-    assert 'data-access-url="/api/conversations/c1/messages/msg-1/media/access"' in html
-    assert 'data-fallback-url="/api/conversations/c1/messages/msg-1/media"' in html
+    assert 'data-rnd206-kind="image"' in html
+    assert 'data-rnd206-access-url="/api/conversations/c1/messages/msg-1/media/access"' in html
 
 
 def test_image_renderer_not_downloaded_placeholder_unchanged() -> None:

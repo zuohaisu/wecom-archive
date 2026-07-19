@@ -66,13 +66,16 @@ def _bundle() -> str:
         _extract(
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),
+        # RND-206: renderMessageBody()/renderTimeline() now also depend on
+        # the MediaAccessCache/Viewer/rich-media/composite renderer block —
+        # pull the whole contiguous block in so the bundle is self-contained.
+        _extract(
+            r"var MediaAccessCache=\(function\(\)\{.*?\nfunction renderCompositeMessage\(m\)\{.*?\n\}",
+            "RND-206 rich-media/composite block",
+        ),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
-        # RND-187: renderTimeline() now calls hydrateMediaImages() after
-        # every render — pull those in too so the bundle is self-contained.
-        _extract(r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"),
-        _extract(r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"),
-        _extract(r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"),
-        _extract(r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"),
+        _extract(r"function safeRenderMessageBody\(m\)\{.*?\n\}", "safeRenderMessageBody()"),
+        _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
     ]
     return "\n".join(parts)
@@ -243,14 +246,23 @@ def test_direct_and_group_timeline_show_the_same_label(msgtype: str) -> None:
 
 
 def test_voice_not_downloaded_status_renders_specific_placeholder() -> None:
+    # RND-206: voice now renders real playback once media_status=="available"
+    # (see render_voice_preview()); a not-yet-downloaded voice message shows
+    # the same type+status placeholder pattern image already used
+    # ("语音消息 · 未下载") instead of the old generic "unsupported" copy.
     msg = _msg(
         "voice",
         "voice",
         media_status="not_downloaded",
         content_text=None,
+        # RND-206: renderer_strategy is now the registry-driven gate for
+        # the media-preview dispatch (message_type_registry.py) — a real
+        # TimelineMessageOut row always carries this; set it explicitly
+        # here since this test hand-builds the message.
+        renderer_strategy="media_preview",
     )
     html = _render("zh-CN", msg)
-    assert html == '<div class="media-placeholder">不支持语音消息</div>'
+    assert html == '<div class="media-placeholder">语音消息 · 未下载</div>'
     assert GENERIC_LEGACY_STRING not in html
 
 
@@ -263,6 +275,7 @@ def test_timeline_continues_rendering_before_and_after_voice() -> None:
         "voice",
         media_status="not_downloaded",
         content_text=None,
+        renderer_strategy="media_preview",
     )
     voice["msgid"] = "m-voice"
     voice["msgtime"] = 2000
@@ -291,7 +304,7 @@ process.stdout.write(JSON.stringify(capturedHtml));
 """
     )
     assert "before" in out
-    assert "不支持语音消息" in out
+    assert "语音消息 · 未下载" in out  # RND-206: see test_voice_not_downloaded_status_renders_specific_placeholder
     assert "after" in out
     assert GENERIC_LEGACY_STRING not in out
     assert "【" not in out and "】" not in out
@@ -340,10 +353,14 @@ def test_zh_cn_text_rendering_unchanged() -> None:
 def test_zh_cn_image_preview_unchanged() -> None:
     """RND-187: renderMessageBody() no longer sets <img src> synchronously
     — the actual URL comes from a post-render fetch of the media access
-    descriptor (see test_message_type_registry.py for hydration coverage).
-    What must stay unchanged here is that an image preview element is
-    still produced, still carries the proxy media_url as its fallback, and
-    still exposes the (now separate) access-descriptor URL for hydration."""
+    descriptor. RND-206 (narrow remediation pass): top-level image now
+    renders through the same shared hydratable-placeholder contract as
+    nested/video/voice/file/emotion (data-rnd206-kind="image" +
+    data-rnd206-access-url), resolved by hydrateRichMedia/loadRichMedia/
+    MediaAccessCache -- see test_rnd_206_top_level_image.py for the full
+    behavioral hydration coverage this replaces. What must stay unchanged
+    here is that a real, hydratable image preview placeholder is still
+    produced and still exposes the access-descriptor URL."""
     msg = _msg(
         "image",
         "image",
@@ -352,9 +369,8 @@ def test_zh_cn_image_preview_unchanged() -> None:
         media_url="/api/conversations/c1/messages/msg-1/media",
     )
     html = _render("zh-CN", msg)
-    assert '<img class="media-preview"' in html
-    assert 'data-access-url="/api/conversations/c1/messages/msg-1/media/access"' in html
-    assert 'data-fallback-url="/api/conversations/c1/messages/msg-1/media"' in html
+    assert 'data-rnd206-kind="image"' in html
+    assert 'data-rnd206-access-url="/api/conversations/c1/messages/msg-1/media/access"' in html
 
 
 def test_zh_cn_image_not_downloaded_placeholder_unchanged() -> None:

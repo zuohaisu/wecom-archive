@@ -50,11 +50,16 @@ def _bundle() -> str:
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),
         _extract(r"function renderRevokePlaceholder\(m\)\{.*?\n\}", "renderRevokePlaceholder()"),
+        # RND-206: renderMessageBody()/renderTimeline() now also depend on
+        # the MediaAccessCache/Viewer/rich-media/composite renderer block —
+        # pull the whole contiguous block in so the bundle is self-contained.
+        _extract(
+            r"var MediaAccessCache=\(function\(\)\{.*?\nfunction renderCompositeMessage\(m\)\{.*?\n\}",
+            "RND-206 rich-media/composite block",
+        ),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
-        _extract(r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"),
-        _extract(r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"),
-        _extract(r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"),
-        _extract(r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"),
+        _extract(r"function safeRenderMessageBody\(m\)\{.*?\n\}", "safeRenderMessageBody()"),
+        _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
     ]
     return "\n".join(parts)

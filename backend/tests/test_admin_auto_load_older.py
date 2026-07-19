@@ -113,18 +113,26 @@ def _bundle() -> str:
         _extract(r"function handleUnauth\(r\)\{.*?\n\}", "handleUnauth()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # RND-206: fetchOlderMessages/fetchTimelinePage/loadTimeline/
+        # refreshTimelineIfSelected all read this generation-token guard now.
+        _extract(r"var timelineRequestGen=0;", "timelineRequestGen"),
         # RND-173: renderMessageBody() now resolves unsupported/placeholder
         # types through MessageTypeRegistry instead of an inline generic string.
         _extract(
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),
+        # RND-206: renderMessageBody()/renderTimeline() now also depend on
+        # the MediaAccessCache/Viewer/rich-media/composite renderer block —
+        # pull the whole contiguous block in so the bundle is self-contained
+        # (none of these functions actually execute for text/image/
+        # unsupported messages, but they must exist to be referenced).
+        _extract(
+            r"var MediaAccessCache=\(function\(\)\{.*?\nfunction renderCompositeMessage\(m\)\{.*?\n\}",
+            "RND-206 rich-media/composite block",
+        ),
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
-        # RND-187: renderTimeline() now calls hydrateMediaImages() after
-        # every render — pull those in too so the bundle is self-contained.
-        _extract(r"function loadMediaImage\(img\)\{.*?\n\}", "loadMediaImage()"),
-        _extract(r"function onMediaImageError\(img\)\{.*?\n\}", "onMediaImageError()"),
-        _extract(r"function showMediaError\(img\)\{.*?\n\}", "showMediaError()"),
-        _extract(r"function hydrateMediaImages\(root\)\{.*?\n\}", "hydrateMediaImages()"),
+        _extract(r"function safeRenderMessageBody\(m\)\{.*?\n\}", "safeRenderMessageBody()"),
+        _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
         _extract(r"function isNearTop\(\)\{.*?\n\}", "isNearTop()"),
         _extract(
@@ -732,6 +740,9 @@ def test_refresh_timeline_rerender_keeps_retry_ui_visible_while_error_pending() 
     )
     refresh_deps = "\n".join(
         [
+            _extract(r"var timelineRequestGen=0;", "timelineRequestGen"),
+            _extract(r"var lastRenderedTimelineSignature=null;", "lastRenderedTimelineSignature"),
+            _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
             _extract(r"function isNearBottom\(\)\{.*?\n\}", "isNearBottom()"),
             _extract(r"function showNewMessageIndicator\(\)\{.*?\n\}", "showNewMessageIndicator()"),
             _extract(r"function hideNewMessageIndicator\(\)\{.*?\n\}", "hideNewMessageIndicator()"),
