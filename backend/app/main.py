@@ -480,6 +480,12 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 var mode='staff',selEntityId=null,selConvId=null,selEntityName=null,selConvName=null;
 var lastEntityItems=null,lastConvItems=null;
 var timelineConvId=null,timelineMsgs=[],timelineHasOlder=false,timelineNextBefore=null,timelineLoadingOlder=false;
+// RND-158 Phase 2 (API-contract round): entity context captured at the
+// moment loadTimeline() is called for the CURRENTLY selected conversation
+// -- not read live from mode/selEntityId at fetch time, since the user can
+// switch entities while a timeline request is in flight. Same
+// capture-at-call-time principle timelineRequestGen already establishes.
+var timelineConvType=null,timelineMode=null,timelineEntityId=null;
 var timelineHistoryError=null,timelineTopObserver=null;
 // RND-206 QA fix: a monotonically increasing generation token bumped every
 // time the active conversation changes (loadTimeline). Every in-flight
@@ -670,7 +676,7 @@ function renderConvList(convs){
     var rawId=c.raw_id||c.room_raw_id||'';
     var secondary=(rawId&&rawId!==c.display_name)
       ?'<div class="conv-secondary" title="'+esc(rawId)+'">'+esc(rawId)+'</div>':'';
-    html+='<div class="conv-card" data-id="'+esc(c.conversation_id)+'" data-name="'+esc(c.display_name)+'" onclick="onConvClick(this)">'
+    html+='<div class="conv-card" data-id="'+esc(c.conversation_id)+'" data-name="'+esc(c.display_name)+'" data-type="'+esc(c.conversation_type)+'" onclick="onConvClick(this)">'
       +'<div class="conv-top"><span class="conv-name" title="'+esc(rawId)+'">'+esc(c.display_name)+'</span><span class="conv-time">'+esc(t)+'</span></div>'
       +secondary
       +(snip?'<div class="conv-snippet">'+snip+'</div>':'')
@@ -689,16 +695,36 @@ function onConvClick(el){
   document.querySelectorAll('.conv-card').forEach(function(e){e.classList.remove('active');});
   el.classList.add('active');
   document.getElementById('timeline-header').textContent=I18N.t('console.timelineHeader')+' — '+el.dataset.name;
-  loadTimeline(selConvId);
+  loadTimeline(selConvId, el.dataset.type);
 }
-function loadTimeline(convId){
+function loadTimeline(convId, convType){
   timelineConvId=convId; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   timelineLoadingOlder=false; timelineHistoryError=null;
+  // RND-158 Phase 2: capture the entity context for THIS timeline
+  // selection now, not read live later -- see the declaration comment on
+  // timelineConvType/timelineMode/timelineEntityId above.
+  timelineConvType=convType||null; timelineMode=mode; timelineEntityId=selEntityId;
   timelineRequestGen++;
   stopHistoryObserver();
   hideNewMessageIndicator();
   document.getElementById('timeline-body').innerHTML='<div class="loading">'+I18N.t('console.loading')+'</div>';
   fetchTimelinePage(null, true);
+}
+// RND-158 Phase 2: builds the '&mode=...&staff_id=/contact_id=...&conversation_type=...'
+// query-string suffix from the entity context captured for the current
+// timeline selection, mirroring refreshConversationList()'s staff/contact
+// URL-building style. Shared by all three timeline URL-building call
+// sites (fetchTimelinePage, fetchOlderMessages, refreshTimelineIfSelected)
+// so they never diverge.
+function timelineEntityQueryParams(){
+  var qs='';
+  if(timelineMode==='staff'&&timelineEntityId){
+    qs+='&mode=staff&staff_id='+encodeURIComponent(timelineEntityId);
+  }else if(timelineMode==='contact'&&timelineEntityId){
+    qs+='&mode=contact&contact_id='+encodeURIComponent(timelineEntityId);
+  }
+  if(timelineConvType)qs+='&conversation_type='+encodeURIComponent(timelineConvType);
+  return qs;
 }
 // RND-206 QA fix: captures requestConvId+gen at send time (not at resolve
 // time, when the user may have already switched conversations) and drops
@@ -709,6 +735,7 @@ function fetchTimelinePage(before, isInitial){
   var requestConvId=timelineConvId, gen=timelineRequestGen;
   var url='/api/conversations/'+encodeURIComponent(requestConvId)+'/messages?limit=20';
   if(before)url+='&before='+encodeURIComponent(before);
+  url+=timelineEntityQueryParams();
   return fetch(url)
     .then(function(r){if(handleUnauth(r))return null;if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
     .then(function(data){
@@ -757,8 +784,14 @@ function fetchOlderMessages(convId,before){
   // the request starts, same guarantee as requestConvId below) rather than
   // taking a third parameter, so the tested two-argument signature stays
   // unchanged.
+  // RND-158 Phase 2: entity context is likewise read synchronously here
+  // (not passed as a new parameter, for the same 2-arg-signature-stability
+  // reason as `gen` above) via timelineEntityQueryParams(), which reads
+  // timelineMode/timelineEntityId/timelineConvType -- captured once at
+  // loadTimeline() time for the conversation this call is already scoped
+  // to via the timelineConvId/timelineRequestGen guard below.
   var gen=timelineRequestGen;
-  var url='/api/conversations/'+encodeURIComponent(convId)+'/messages?limit=20&before='+encodeURIComponent(before);
+  var url='/api/conversations/'+encodeURIComponent(convId)+'/messages?limit=20&before='+encodeURIComponent(before)+timelineEntityQueryParams();
   return fetch(url).then(function(r){
     if(handleUnauth(r)){var e=new Error('unauthorized');e.handled=true;throw e;}
     if(!r.ok)throw new Error('HTTP '+r.status);
@@ -2006,7 +2039,7 @@ function refreshTimelineIfSelected(){
   var body=document.getElementById('timeline-body');
   var wasNearBottom=isNearBottom();
   var prevScrollTop=body?body.scrollTop:0;
-  var url='/api/conversations/'+encodeURIComponent(convId)+'/messages?limit=20';
+  var url='/api/conversations/'+encodeURIComponent(convId)+'/messages?limit=20'+timelineEntityQueryParams();
   return fetch(url).then(function(r){
     if(handleUnauth(r))return null;
     if(!r.ok)throw new Error('HTTP '+r.status);

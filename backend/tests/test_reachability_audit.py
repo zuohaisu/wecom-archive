@@ -992,10 +992,18 @@ def test_self_recipient_message_does_not_crash_full_tenant_audit(db) -> None:
     """
     Without a conversation_id filter there is no candidate-set narrowing —
     this message reaches conversation-membership derivation directly, which
-    (before this fix) produced the single-party id "direct__staff_a" and
-    _fetch_conversation_messages raised HTTPException, aborting the whole
-    audit. It must now be classified unreachable instead, and the rest of
-    the batch must still be classified normally.
+    produces the single-party id "direct__staff_a".
+
+    RND-158 Phase 2 (prefix/null-sender round): _fetch_conversation_messages
+    no longer raises HTTPException for this shape — it resolves it via the
+    candidate-then-verify null-sender path (see
+    _fetch_null_sender_candidate_messages in app.routers.conversations),
+    since this is exactly a real, navigable single-party conversation (a
+    self-recipient message really is reachable at
+    "direct__staff_a" — there is nothing malformed about the archived data
+    itself). So this message must now be classified reachable_direct, and
+    the audit must still complete without crashing and still classify the
+    rest of the batch normally.
     """
     from app.reachability_audit import build_message_reachability_report
 
@@ -1008,10 +1016,7 @@ def test_self_recipient_message_does_not_crash_full_tenant_audit(db) -> None:
 
     assert report["scanned_count"] == 2
     by_id = {s["message_db_id"]: s for s in report["samples"]}
-    assert by_id[malformed.id]["reachability_status"] in (
-        "unreachable_membership",
-        "unreachable_other",
-    )
+    assert by_id[malformed.id]["reachability_status"] == "reachable_direct"
     assert by_id[other.id]["reachability_status"] == "reachable_direct"
 
 

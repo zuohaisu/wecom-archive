@@ -116,6 +116,16 @@ def _bundle() -> str:
         # RND-206: fetchOlderMessages/fetchTimelinePage/loadTimeline/
         # refreshTimelineIfSelected all read this generation-token guard now.
         _extract(r"var timelineRequestGen=0;", "timelineRequestGen"),
+        # RND-158 Phase 2 (API-contract round): fetchOlderMessages() now
+        # builds its URL via timelineEntityQueryParams(), which reads these
+        # entity-context globals -- declared here (default null, matching
+        # source) so the bundle is self-contained even though this file's
+        # scripts never call loadTimeline() to populate them for real.
+        _extract(
+            r"var timelineConvType=null,timelineMode=null,timelineEntityId=null;",
+            "timeline entity-context globals",
+        ),
+        _extract(r"function timelineEntityQueryParams\(\)\{.*?\n\}", "timelineEntityQueryParams()"),
         # RND-173: renderMessageBody() now resolves unsupported/placeholder
         # types through MessageTypeRegistry instead of an inline generic string.
         _extract(
@@ -741,6 +751,11 @@ def test_refresh_timeline_rerender_keeps_retry_ui_visible_while_error_pending() 
     refresh_deps = "\n".join(
         [
             _extract(r"var timelineRequestGen=0;", "timelineRequestGen"),
+            _extract(
+                r"var timelineConvType=null,timelineMode=null,timelineEntityId=null;",
+                "timeline entity-context globals",
+            ),
+            _extract(r"function timelineEntityQueryParams\(\)\{.*?\n\}", "timelineEntityQueryParams()"),
             _extract(r"var lastRenderedTimelineSignature=null;", "lastRenderedTimelineSignature"),
             _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
             _extract(r"function isNearBottom\(\)\{.*?\n\}", "isNearBottom()"),

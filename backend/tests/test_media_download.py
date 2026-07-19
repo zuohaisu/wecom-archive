@@ -513,7 +513,9 @@ def _override_media_route(app, monkeypatch, *, conv_messages, media_file, auth=T
     from app.routers import conversations as conv
 
     monkeypatch.setattr(
-        conv, "_fetch_conversation_messages", lambda db, conversation_id, tenant_id: conv_messages
+        conv,
+        "_fetch_conversation_messages",
+        lambda db, conversation_id, tenant_id, **kwargs: conv_messages,
     )
 
     def _override_db():

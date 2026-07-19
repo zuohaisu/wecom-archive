@@ -272,7 +272,9 @@ def test_timeline_direct_voice_empty_text_still_serialized(client, monkeypatch) 
         msgtype="voice",
         sdkfileid="redacted-media-id",
     )
-    monkeypatch.setattr(conv, "_fetch_conversation_messages", lambda db, cid, tenant_id: [msg])
+    monkeypatch.setattr(
+        conv, "_fetch_conversation_messages", lambda db, cid, tenant_id, **kwargs: [msg]
+    )
     resp = _run_messages_query(client, app, [], conversation_id="direct__contact_a___staff_a")
     assert resp.status_code == 200
     data = resp.json()["messages"]
