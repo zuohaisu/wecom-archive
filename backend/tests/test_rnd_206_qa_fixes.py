@@ -95,6 +95,7 @@ def _bundle(extra=None) -> str:
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
         _extract(r"function safeRenderMessageBody\(m\)\{.*?\n\}", "safeRenderMessageBody()"),
         _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
+        _extract(r"function timelineRowHtml\(m\)\{.*?\n\}", "timelineRowHtml()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
         _extract(r"function isNearTop\(\)\{.*?\n\}", "isNearTop()"),
         _extract(r"function preserveScrollPosition\(body,beforeHeight\)\{.*?\n\}", "preserveScrollPosition()"),
@@ -115,6 +116,11 @@ def _bundle(extra=None) -> str:
         _extract(r"function showNewMessageIndicator\(\)\{.*?\n\}", "showNewMessageIndicator()"),
         _extract(r"function hideNewMessageIndicator\(\)\{.*?\n\}", "hideNewMessageIndicator()"),
         _extract(r"function mergeMessagesByMsgid\(existing,incoming\)\{.*?\n\}", "mergeMessagesByMsgid()"),
+        # RND-204: incremental timeline updater used by refreshTimelineIfSelected().
+        _extract(r"function buildTimelineRowNode\(m\)\{.*?\n\}", "buildTimelineRowNode()"),
+        _extract(r"function syncHistoryStatus\(\)\{.*?\n\}", "syncHistoryStatus()"),
+        _extract(r"function applyRefreshScroll\(prevScrollTop,wasNearBottom,hasNew\)\{.*?\n\}", "applyRefreshScroll()"),
+        _extract(r"function applyTimelineRefresh\(prevScrollTop,wasNearBottom,hasNew\)\{.*?\n\}", "applyTimelineRefresh()"),
         _extract(r"function refreshTimelineIfSelected\(\)\{.*?\n\}", "refreshTimelineIfSelected()"),
     ]
     parts.extend(extra or [])

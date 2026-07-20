@@ -143,8 +143,10 @@ def test_row_alignment_classes_unchanged() -> None:
 
 
 def test_render_timeline_direction_logic_unchanged() -> None:
+    # RND-204: per-row direction/bubble logic now lives in timelineRowHtml(),
+    # which renderTimeline() delegates to.
     match = re.search(
-        r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", _REVIEW_CONSOLE_HTML, re.S
+        r"function timelineRowHtml\(m\)\{.*?\n\}", _REVIEW_CONSOLE_HTML, re.S
     )
     assert match is not None
     src = match.group(0)

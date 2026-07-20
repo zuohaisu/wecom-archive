@@ -479,6 +479,14 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 <script>
 var mode='staff',selEntityId=null,selConvId=null,selEntityName=null,selConvName=null;
 var lastEntityItems=null,lastConvItems=null;
+// RND-204: signatures of the exact entity/conversation lists last painted,
+// used only to skip a full list re-render during a background auto-refresh
+// when nothing changed -- this is what stops the every-cycle whole-list
+// rebuild (and its jitter / active-selection churn) called out in the
+// incremental-refresh redesign. The guard lives ONLY in the refresh path
+// (refreshEntityList/refreshConversationList); the initial-load and
+// locale-switch paths always render.
+var lastEntitySig=null,lastConvSig=null;
 var timelineConvId=null,timelineMsgs=[],timelineHasOlder=false,timelineNextBefore=null,timelineLoadingOlder=false;
 // RND-158 Phase 2 (API-contract round): entity context captured at the
 // moment loadTimeline() is called for the CURRENTLY selected conversation
@@ -610,8 +618,21 @@ function loadEntityList(){
   fetch(url).then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(items){if(items)renderEntityList(items);})
     .catch(function(){document.getElementById('entity-body').innerHTML='<div class="error-msg">'+I18N.t('console.failedToLoadEntities')+'</div>';});
 }
+function entityListSignature(items){
+  return JSON.stringify((items||[]).map(function(it){
+    return [mode==='staff'?it.staff_id:it.contact_id,it.raw_id,it.display_name,it.seat_status];
+  }));
+}
+function convListSignature(convs){
+  return JSON.stringify((convs||[]).map(function(c){
+    return [c.conversation_id,c.conversation_type,c.display_name,c.last_message_text,
+      c.last_message_time,c.message_count,c.raw_id||c.room_raw_id||null,
+      (c.monitored_account_display_names||c.monitored_account_ids||[]).join(',')];
+  }));
+}
 function renderEntityList(items){
   lastEntityItems=items;
+  lastEntitySig=entityListSignature(items);
   var body=document.getElementById('entity-body');
   if(!items||!items.length){body.innerHTML='<div class="empty-state">'+I18N.t('console.noneFound')+'</div>';return;}
   var html='';
@@ -659,6 +680,7 @@ function loadConversations(entityId){
 }
 function renderConvList(convs){
   lastConvItems=convs;
+  lastConvSig=convListSignature(convs);
   var body=document.getElementById('conv-body');
   if(!convs||!convs.length){body.innerHTML='<div class="empty-state">'+I18N.t('console.noConversations')+'</div>';return;}
   var html='';
@@ -1908,19 +1930,82 @@ function safeRenderMessageBody(m){
 // systems. See test_rnd_206_top_level_image.py for the full behavioral
 // coverage this replaces (the old test_media_hydration.py, which tested
 // the now-removed standalone chain by name, has been retired with it).
-// RND-206 QA fix: a lightweight content signature (NOT a full virtual-DOM
-// diff -- deliberately out of scope, see RND-204) used only to decide
+// RND-206 QA fix: a lightweight content signature used only to decide
 // whether an auto-refresh's freshly-merged array is semantically identical
 // to what is already painted, so refreshTimelineIfSelected() can skip
-// rebuilding the DOM entirely rather than reconciling node-by-node.
+// touching the DOM entirely when nothing changed. RND-204 later built the
+// incremental node-by-node reconcile (applyTimelineRefresh) that reuses this
+// same signature per row to rebuild only the rows that actually changed.
 function timelineSignature(msgs){
   return JSON.stringify((msgs||[]).map(function(m){
+    // RND-204: the signature MUST cover every field timelineRowHtml(m)
+    // actually renders, otherwise a change to one of them (e.g. a
+    // backfilled sender/recipient display name, or a corrected msgtype)
+    // would be misread as "unchanged" and the row would keep stale content.
+    // Fields below map 1:1 to what the row emits: msgtype badge, sender
+    // (self/staff class + name/raw fallbacks), roomid (group badge +
+    // recipient line), recipient names, plus the body/media/revoke state.
+    // Recipients are folded to their RENDERED shape, not the raw arrays: a
+    // group row shows only a participant COUNT (RND-150 -- raw participant
+    // ids are never rendered inline), a direct row shows the names. Signing
+    // the rendered shape keeps raw group ids out of the data-msgsig
+    // attribute (which is serialized into the DOM) while still detecting
+    // recipient changes that actually alter what is painted.
+    var rcptNames=(m.recipient_display_names&&m.recipient_display_names.length)?m.recipient_display_names:(m.recipients||[]);
+    var rcptSig=m.roomid?rcptNames.length:rcptNames;
     return [
-      m.msgid,m.msgtime,m.content_text,m.media_status,m.media_access_url,
+      m.msgid,m.msgtime,m.msgtype,m.sender,m.roomid,
+      m.sender_display_name,m.sender_raw_id,rcptSig,
+      m.content_text,m.media_status,m.media_access_url,
       m.is_revoked,m.revoked_at,m.revoke_association_status,
       m.structured_content?JSON.stringify(m.structured_content):null
     ];
   }));
+}
+// RND-204: single-message row builder, extracted from renderTimeline()'s
+// loop so BOTH the full render and the incremental background-refresh
+// updater (applyTimelineRefresh) emit byte-identical markup. Every row
+// carries a stable data-msgid key and a per-message data-msgsig (the same
+// content signature timelineSignature uses, scoped to one message) so the
+// incremental updater can tell, per row, whether anything actually changed
+// and skip rebuilding — and therefore re-requesting the media of — rows
+// that did not. All prior contracts (RND-149 time, RND-150 group recipient
+// overflow, RND-201 revoke badge, direction logic) live here unchanged.
+function timelineRowHtml(m){
+  var isSelf=mode==='staff'&&selEntityId&&m.sender===selEntityId;
+  var isStaff=m.sender&&m.sender.indexOf('staff_')===0;
+  var rowCls='tl-row '+(isSelf?'tl-row-self':'tl-row-other');
+  var sc='tl-sender'+(isStaff?' tl-staff':'');
+  var bc='tl-bubble '+(isSelf?'tl-bubble-self':(mode==='staff'?'tl-bubble-other':(isStaff?'tl-bubble-staff':'')));
+  var text=safeRenderMessageBody(m);
+  var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
+  var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">'+esc(I18N.t('timeline.groupBadge'))+'</span>':'';
+  // RND-201: secondary "已撤回" indicator on an original message that a
+  // linked revoke event targets — deliberately visually secondary (a
+  // small badge next to the existing type/group badges), never
+  // replacing the message body rendered by renderMessageBody(m) above.
+  var revokedBadge=m.is_revoked?' <span class="badge badge-revoked" style="font-size:.65rem">'+esc(I18N.t('timeline.revokedBadge'))
+    // RND-206 QA fix #13: revoke time alongside the existing badge, using
+    // the already-present revoked_at field -- omitted (never fabricated)
+    // when absent. Original message content above is unchanged.
+    +(m.revoked_at?' · '+esc(fmtTime(m.revoked_at)):'')+'</span>':'';
+  var senderName=m.sender_display_name||m.sender||'?';
+  var senderRaw=m.sender_raw_id||m.sender;
+  var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
+  var rcptNames=(m.recipient_display_names&&m.recipient_display_names.length)?m.recipient_display_names:(m.recipients||[]);
+  var rcpt='';
+  if(m.roomid){
+    if(rcptNames.length){
+      rcpt='<div class="tl-rcpt">'+I18N.t('timeline.groupChat')+' · '+rcptNames.length+' '+(rcptNames.length===1?I18N.t('timeline.participant'):I18N.t('timeline.participants'))+'</div>';
+    }
+  }else if(rcptNames.length){
+    rcpt='<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>';
+  }
+  return '<div class="'+rowCls+'" data-msgid="'+esc(m.msgid)+'" data-msgsig="'+esc(timelineSignature([m]))+'">'
+    +'<div class="tl-meta"><span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
+    +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+revokedBadge+'</div>'
+    +'<div class="'+bc+'">'+text+'</div>'
+    +rcpt+'</div>';
 }
 function renderTimeline(scrollToBottom){
   var body=document.getElementById('timeline-body');
@@ -1937,40 +2022,7 @@ function renderTimeline(scrollToBottom){
   html+='<div id="timeline-top-sentinel"></div>';
   html+='<div class="timeline">';
   timelineMsgs.forEach(function(m){
-    var isSelf=mode==='staff'&&selEntityId&&m.sender===selEntityId;
-    var isStaff=m.sender&&m.sender.indexOf('staff_')===0;
-    var rowCls='tl-row '+(isSelf?'tl-row-self':'tl-row-other');
-    var sc='tl-sender'+(isStaff?' tl-staff':'');
-    var bc='tl-bubble '+(isSelf?'tl-bubble-self':(mode==='staff'?'tl-bubble-other':(isStaff?'tl-bubble-staff':'')));
-    var text=safeRenderMessageBody(m);
-    var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
-    var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">'+esc(I18N.t('timeline.groupBadge'))+'</span>':'';
-    // RND-201: secondary "已撤回" indicator on an original message that a
-    // linked revoke event targets — deliberately visually secondary (a
-    // small badge next to the existing type/group badges), never
-    // replacing the message body rendered by renderMessageBody(m) above.
-    var revokedBadge=m.is_revoked?' <span class="badge badge-revoked" style="font-size:.65rem">'+esc(I18N.t('timeline.revokedBadge'))
-      // RND-206 QA fix #13: revoke time alongside the existing badge, using
-      // the already-present revoked_at field -- omitted (never fabricated)
-      // when absent. Original message content above is unchanged.
-      +(m.revoked_at?' · '+esc(fmtTime(m.revoked_at)):'')+'</span>':'';
-    var senderName=m.sender_display_name||m.sender||'?';
-    var senderRaw=m.sender_raw_id||m.sender;
-    var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
-    var rcptNames=(m.recipient_display_names&&m.recipient_display_names.length)?m.recipient_display_names:(m.recipients||[]);
-    var rcpt='';
-    if(m.roomid){
-      if(rcptNames.length){
-        rcpt='<div class="tl-rcpt">'+I18N.t('timeline.groupChat')+' · '+rcptNames.length+' '+(rcptNames.length===1?I18N.t('timeline.participant'):I18N.t('timeline.participants'))+'</div>';
-      }
-    }else if(rcptNames.length){
-      rcpt='<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>';
-    }
-    html+='<div class="'+rowCls+'">'
-      +'<div class="tl-meta"><span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
-      +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+revokedBadge+'</div>'
-      +'<div class="'+bc+'">'+text+'</div>'
-      +rcpt+'</div>';
+    html+=timelineRowHtml(m);
   });
   html+='</div>';
   body.innerHTML=html;
@@ -2011,17 +2063,35 @@ function mergeMessagesByMsgid(existing,incoming){
   return merged;
 }
 function refreshEntityList(){
+  // RND-204: capture-at-call-time mode guard. refreshInFlight only prevents
+  // overlapping refresh *cycles*; it does NOT stop a slow response from this
+  // cycle applying after the user has switched mode (staff<->contact) while
+  // the request was in flight. Mirror the timeline path's convId/gen guard so
+  // a stale entity-list response can never overwrite the list the user has
+  // since switched to.
+  var reqMode=mode;
   var url=mode==='staff'?'/api/monitored-accounts':'/api/contacts';
   return fetch(url).then(function(r){
     if(handleUnauth(r))return null;
     if(!r.ok)throw new Error('HTTP '+r.status);
     return r.json();
   }).then(function(items){
-    if(items)renderEntityList(items);
+    // RND-204: only re-render the entity list when its content actually
+    // changed since the last paint -- an unchanged background refresh must
+    // not rebuild the whole list (avoids jitter / losing the active row).
+    if(!items)return;
+    if(mode!==reqMode)return; // stale: user switched mode mid-flight
+    if(entityListSignature(items)===lastEntitySig)return;
+    renderEntityList(items);
   });
 }
 function refreshConversationList(){
   if(!selEntityId)return Promise.resolve();
+  // RND-204: capture BOTH the mode and the selected entity at request time.
+  // A slow /api/conversations response must not repaint the list after the
+  // user has switched to a different staff/contact (or flipped mode) -- the
+  // convId/gen guard already protects the timeline; this protects the list.
+  var reqMode=mode, reqEntityId=selEntityId;
   var url=mode==='staff'
     ?'/api/conversations?mode=staff&staff_id='+encodeURIComponent(selEntityId)
     :'/api/conversations?mode=contact&contact_id='+encodeURIComponent(selEntityId);
@@ -2030,8 +2100,84 @@ function refreshConversationList(){
     if(!r.ok)throw new Error('HTTP '+r.status);
     return r.json();
   }).then(function(convs){
-    if(convs)renderConvList(convs);
+    // RND-204: skip the full conversation-list rebuild on an unchanged
+    // background refresh (only re-render when a conversation's latest
+    // message, ordering, or count actually changed).
+    if(!convs)return;
+    // stale: the selection this response was scoped to is no longer active.
+    if(mode!==reqMode||selEntityId!==reqEntityId)return;
+    if(convListSignature(convs)===lastConvSig)return;
+    renderConvList(convs);
   });
+}
+// RND-204: build a single detached timeline row node from the same markup
+// contract renderTimeline() uses (timelineRowHtml), so the incremental
+// updater and the full render stay byte-identical per row.
+function buildTimelineRowNode(m){
+  var tmp=document.createElement('div');
+  tmp.innerHTML=timelineRowHtml(m);
+  return tmp.firstChild;
+}
+// RND-204: keep the history-status node (top of the timeline body) in sync
+// during an incremental refresh without touching any message/media DOM.
+function syncHistoryStatus(){
+  var el=historyStatusEl();
+  if(!el)return;
+  if((typeof timelineHistoryError!=='undefined')&&timelineHistoryError){el.innerHTML=historyRetryHtml();}
+  else if(!timelineHasOlder){el.innerHTML='<div class="history-status history-end">'+I18N.t('history.noMore')+'</div>';}
+  else{el.innerHTML='';}
+}
+// RND-204: shared post-refresh scroll behaviour -- stick to the bottom when
+// the user was already near it, otherwise preserve the exact scroll offset
+// and surface the "new messages" pill instead of yanking them down.
+function applyRefreshScroll(prevScrollTop,wasNearBottom,hasNew){
+  var body=document.getElementById('timeline-body');
+  if(!body)return;
+  if(wasNearBottom){body.scrollTop=body.scrollHeight;hideNewMessageIndicator();}
+  else{body.scrollTop=prevScrollTop;if(hasNew)showNewMessageIndicator();}
+}
+// RND-204: incremental timeline reconcile. Instead of replacing the whole
+// timeline innerHTML (which destroyed every already-hydrated <img>/<video>
+// -- forcing a re-request/flicker -- and reset scroll), this diffs the
+// existing rows against timelineMsgs by stable data-msgid. Rows whose
+// data-msgsig is unchanged are left completely untouched (their live media
+// DOM and load state survive); only new/changed rows are built and only
+// those get hydrateRichMedia(). Falls back to a full renderTimeline() when
+// the live .timeline node can't be located (e.g. minimal test DOM) or a
+// history error must be shown.
+function applyTimelineRefresh(prevScrollTop,wasNearBottom,hasNew){
+  var body=document.getElementById('timeline-body');
+  if(!body)return;
+  var timelineEl=body.querySelector?body.querySelector('.timeline'):null;
+  if(!timelineEl||((typeof timelineHistoryError!=='undefined')&&timelineHistoryError)){
+    renderTimeline(false);
+    startHistoryObserver();
+    applyRefreshScroll(prevScrollTop,wasNearBottom,hasNew);
+    return;
+  }
+  var rows=timelineEl.querySelectorAll('[data-msgid]');
+  var existing={},seen={};
+  for(var i=0;i<rows.length;i++){existing[rows[i].getAttribute('data-msgid')]=rows[i];}
+  var cursor=null;
+  timelineMsgs.forEach(function(m){
+    seen[m.msgid]=true;
+    var row=existing[m.msgid];
+    var sig=timelineSignature([m]);
+    if(row&&row.getAttribute('data-msgsig')===sig){cursor=row;return;}
+    var newRow=buildTimelineRowNode(m);
+    if(row){timelineEl.replaceChild(newRow,row);}
+    else if(cursor&&cursor.nextSibling){timelineEl.insertBefore(newRow,cursor.nextSibling);}
+    else if(cursor){timelineEl.appendChild(newRow);}
+    else{timelineEl.insertBefore(newRow,timelineEl.firstChild);}
+    hydrateRichMedia(newRow);
+    cursor=newRow;
+  });
+  for(var j=0;j<rows.length;j++){
+    if(!seen[rows[j].getAttribute('data-msgid')]&&rows[j].parentNode)rows[j].parentNode.removeChild(rows[j]);
+  }
+  lastRenderedTimelineSignature=timelineSignature(timelineMsgs);
+  syncHistoryStatus();
+  applyRefreshScroll(prevScrollTop,wasNearBottom,hasNew);
 }
 function refreshTimelineIfSelected(){
   if(!timelineConvId||timelineLoadingOlder)return Promise.resolve();
@@ -2062,18 +2208,12 @@ function refreshTimelineIfSelected(){
     // browser re-requesting media bytes) even though nothing changed.
     var unchanged=lastRenderedTimelineSignature!==null&&timelineSignature(merged)===lastRenderedTimelineSignature;
     timelineMsgs=merged;
+    // RND-204: an unchanged refresh must not touch the timeline DOM at all
+    // (no re-render, no media re-request, no scroll jump).
     if(unchanged)return;
-    renderTimeline(false);
-    startHistoryObserver();
-    var body2=document.getElementById('timeline-body');
-    if(!body2)return;
-    if(wasNearBottom){
-      body2.scrollTop=body2.scrollHeight;
-      hideNewMessageIndicator();
-    }else{
-      body2.scrollTop=prevScrollTop;
-      if(hasNew)showNewMessageIndicator();
-    }
+    // RND-204: apply only the rows that actually changed, preserving every
+    // untouched message/media node and the current scroll position.
+    applyTimelineRefresh(prevScrollTop,wasNearBottom,hasNew);
   });
 }
 function _refreshErrMsg(e){return(e&&e.message)?e.message:'refresh failed';}

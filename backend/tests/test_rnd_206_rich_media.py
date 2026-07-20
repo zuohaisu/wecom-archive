@@ -81,6 +81,7 @@ def _bundle(extra: list[str] | None = None) -> str:
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
         _extract(r"function safeRenderMessageBody\(m\)\{.*?\n\}", "safeRenderMessageBody()"),
         _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
+        _extract(r"function timelineRowHtml\(m\)\{.*?\n\}", "timelineRowHtml()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
     ]
     parts.extend(extra or [])

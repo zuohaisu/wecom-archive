@@ -233,11 +233,17 @@ def _run_render_conv_list_active(convs: list[dict], sel_conv_id: str) -> list[st
     fmt_time_src = _extract(r"function fmtTime\(ms\)\{.*?\n\}", "fmtTime()")
     pad_src = _extract(r"function pad\(n\)\{.*?\}", "pad()")
     render_conv_list_src = _extract(r"function renderConvList\(convs\)\{.*?\n\}", "renderConvList()")
+    # RND-204: renderConvList() now records a content signature (used to skip
+    # unchanged background refreshes), so pull convListSignature() in too.
+    conv_list_signature_src = _extract(
+        r"function convListSignature\(convs\)\{.*?\n\}", "convListSignature()"
+    )
     harness = f"""
 {i18n_core_src}
 {esc_src}
 {fmt_time_src}
 {pad_src}
+{conv_list_signature_src}
 {render_conv_list_src}
 
 var mode = 'staff';
@@ -323,9 +329,11 @@ def test_review_console_still_has_exactly_one_timezone_label() -> None:
 
 
 def test_render_timeline_group_branch_still_never_joins_raw_recipients() -> None:
-    render_timeline_src = _extract(
-        r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"
+    # RND-204: the per-row group recipient branch now lives in
+    # timelineRowHtml(), which renderTimeline() delegates to.
+    timeline_row_html_src = _extract(
+        r"function timelineRowHtml\(m\)\{.*?\n\}", "timelineRowHtml()"
     )
-    match = re.search(r"if\(m\.roomid\)\{(.*?)\}else if", render_timeline_src, re.S)
+    match = re.search(r"if\(m\.roomid\)\{(.*?)\}else if", timeline_row_html_src, re.S)
     assert match is not None
     assert "join(" not in match.group(1)

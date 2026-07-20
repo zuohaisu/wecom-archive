@@ -143,6 +143,8 @@ def _bundle() -> str:
         _extract(r"function renderMessageBody\(m\)\{.*?\n\}", "renderMessageBody()"),
         _extract(r"function safeRenderMessageBody\(m\)\{.*?\n\}", "safeRenderMessageBody()"),
         _extract(r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"),
+        # RND-204: renderTimeline() now delegates each row to timelineRowHtml().
+        _extract(r"function timelineRowHtml\(m\)\{.*?\n\}", "timelineRowHtml()"),
         _extract(r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"),
         _extract(r"function isNearTop\(\)\{.*?\n\}", "isNearTop()"),
         _extract(
@@ -762,6 +764,12 @@ def test_refresh_timeline_rerender_keeps_retry_ui_visible_while_error_pending() 
             _extract(r"function showNewMessageIndicator\(\)\{.*?\n\}", "showNewMessageIndicator()"),
             _extract(r"function hideNewMessageIndicator\(\)\{.*?\n\}", "hideNewMessageIndicator()"),
             _extract(r"function mergeMessagesByMsgid\(existing,incoming\)\{.*?\n\}", "mergeMessagesByMsgid()"),
+            # RND-204: refreshTimelineIfSelected() now applies changes through
+            # the incremental updater instead of a blind renderTimeline().
+            _extract(r"function buildTimelineRowNode\(m\)\{.*?\n\}", "buildTimelineRowNode()"),
+            _extract(r"function syncHistoryStatus\(\)\{.*?\n\}", "syncHistoryStatus()"),
+            _extract(r"function applyRefreshScroll\(prevScrollTop,wasNearBottom,hasNew\)\{.*?\n\}", "applyRefreshScroll()"),
+            _extract(r"function applyTimelineRefresh\(prevScrollTop,wasNearBottom,hasNew\)\{.*?\n\}", "applyTimelineRefresh()"),
         ]
     )
     refresh_fetch = (

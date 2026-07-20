@@ -86,6 +86,9 @@ def _extract_render_timeline_bundle() -> str:
     timeline_signature_src = _extract(
         r"function timelineSignature\(msgs\)\{.*?\n\}", "timelineSignature()"
     )
+    timeline_row_html_src = _extract(
+        r"function timelineRowHtml\(m\)\{.*?\n\}", "timelineRowHtml()"
+    )
     render_timeline_src = _extract(
         r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"
     )
@@ -103,6 +106,7 @@ def _extract_render_timeline_bundle() -> str:
             render_message_body_src,
             safe_render_message_body_src,
             timeline_signature_src,
+            timeline_row_html_src,
             render_timeline_src,
         ]
     )
@@ -303,10 +307,12 @@ def test_source_group_branch_never_joins_raw_recipients() -> None:
     the `if(m.roomid){...}` branch, this must fail even before Node executes
     it, since that's exactly the overflow/leak bug RND-150 fixes.
     """
-    render_timeline_src = _extract(
-        r"function renderTimeline\(scrollToBottom\)\{.*?\n\}", "renderTimeline()"
+    # RND-204: the per-row markup (incl. the group recipient branch) now
+    # lives in timelineRowHtml(), which renderTimeline() delegates to.
+    timeline_row_html_src = _extract(
+        r"function timelineRowHtml\(m\)\{.*?\n\}", "timelineRowHtml()"
     )
-    match = re.search(r"if\(m\.roomid\)\{(.*?)\}else if", render_timeline_src, re.S)
-    assert match is not None, "expected an if(m.roomid){...}else if(...) branch in renderTimeline()"
+    match = re.search(r"if\(m\.roomid\)\{(.*?)\}else if", timeline_row_html_src, re.S)
+    assert match is not None, "expected an if(m.roomid){...}else if(...) branch in timelineRowHtml()"
     group_branch_src = match.group(1)
     assert "join(" not in group_branch_src
