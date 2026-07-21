@@ -1,0 +1,41 @@
+[Unit]
+# RND-207 historical thumbnail backfill — MANUAL, one-shot.
+#
+# Deliberately ships with NO accompanying .timer: this is a one-time
+# historical backfill of pre-existing images (like the RND-186 Local->Qiniu
+# migration tool), NOT a recurring job. New downloads generate their own
+# thumbnail inline via wecom-archive-media-download.service, so there is
+# nothing for a timer to do on an ongoing basis.
+#
+# Run it by hand in controlled, small batches so CPU stays bounded on the
+# 2C2G box, e.g.:
+#     sudo systemctl start wecom-thumbnail-backfill.service
+# after tuning ExecStart's --limit below, and repeat until --count-only
+# reports zero candidates. --dry-run first is recommended.
+Description=WeCom Archive Historical Thumbnail Backfill (RND-207, manual one-shot)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wecomarchive
+WorkingDirectory=/srv/apps/wecom-archive-365/current/backend
+EnvironmentFile=/srv/apps/wecom-archive-365/current/backend/.env
+# Tune --limit per run to pace CPU/memory on the 2C2G box; add --retry to
+# reconsider previously-failed rows, --dry-run to validate without writing.
+ExecStart=/srv/apps/wecom-archive-365/current/backend/.venv/bin/python scripts/backfill_thumbnails_once.py --limit 50
+
+# Security hardening — same safe subset as wecom-archive-media-download.service.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/apps/wecom-archive-365
+ReadOnlyPaths=/usr /etc
+
+# Do NOT use PrivateTmp=true — the shared backfill lock path lives on the
+# real filesystem (MEDIA_THUMBNAIL_BACKFILL_LOCK_PATH) and must stay visible
+# across invocations.
+PrivateTmp=false
+
+# Intentionally NO [Install] section / no WantedBy: this unit is started
+# manually and must never be enabled to run automatically.

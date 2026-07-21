@@ -99,6 +99,7 @@ from app.media_storage import (
     get_media_storage_provider,
 )
 from app.sdk import wecom_sdk
+from app.thumbnail_pipeline import maybe_generate_after_download
 
 _DEFAULT_LIMIT = 10
 _DEFAULT_TIMEOUT = 30
@@ -494,6 +495,10 @@ def _persist_download_outcome(
             media_file.file_size = file_size
             media_file.oss_key = None
             session.commit()
+            # RND-207: generate a list thumbnail for the freshly-downloaded
+            # image, co-located in the same backend. Fully isolated — a
+            # thumbnail failure never affects the already-committed original.
+            maybe_generate_after_download(session, storage_provider, media_file)
             return downloaded + 1, failed
         media_file.download_status = "failed"
         media_file.local_path = None

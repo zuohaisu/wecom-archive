@@ -1580,6 +1580,12 @@ function swapRichMediaPlaceholder(el,kind,desc){
     img.src=desc.url;
     img.alt=kind==='emotion'?I18N.t('emotion.alt'):I18N.t('media.image');
     img.loading='lazy';
+    // RND-207: async decode keeps a large-ish thumbnail off the main thread;
+    // the reserved w/h (from the placeholder, computed from intrinsic dims)
+    // are carried onto the <img> so the swap-in causes no layout shift.
+    img.decoding='async';
+    var rw=el.getAttribute('data-rnd207-w'),rh=el.getAttribute('data-rnd207-h');
+    if(rw&&rh){img.width=parseInt(rw,10);img.height=parseInt(rh,10);}
     if(viewerIdxAttr!==null){
       var btn=document.createElement('button');
       btn.type='button';
@@ -1615,9 +1621,28 @@ function richMediaPlaceholder(kind,accessUrl,loadingKey,extraAttrs){
 // Eagerly registers a Viewer slot at render time (not after the descriptor
 // resolves) so top-level and nested image/emotion/video items behave
 // identically and register in stable document order.
-function renderViewableMediaSlot(kind,accessUrl,label,loadingKey){
+// opts (RND-207, optional): {thumbUrl,width,height} for image/emotion.
+//  - The VIEWER always registers the ORIGINAL accessUrl (opened full-res).
+//  - The LIST placeholder hydrates from thumbUrl when present (small
+//    thumbnail), falling back to the original when there is no thumbnail.
+//  - width/height (the original's intrinsic pixels) reserve an exact display
+//    box on the placeholder so swapping the <img> in causes no layout shift.
+function renderViewableMediaSlot(kind,accessUrl,label,loadingKey,opts){
   var idx=registerViewerItem({kind:kind==='emotion'?'image':kind,accessUrl:accessUrl,label:label});
-  return richMediaPlaceholder(kind,accessUrl,loadingKey,{'data-rnd206-viewer-idx':idx});
+  var extra={'data-rnd206-viewer-idx':idx};
+  var hydrateUrl=accessUrl;
+  if(opts){
+    if(opts.thumbUrl)hydrateUrl=opts.thumbUrl;
+    var w=parseInt(opts.width,10),h=parseInt(opts.height,10);
+    if(w>0&&h>0){
+      var cap=kind==='emotion'?150:280; // mirrors .emotion-preview / .media-preview CSS caps
+      var scale=Math.min(cap/w,cap/h,1);
+      var dw=Math.max(1,Math.round(w*scale)),dh=Math.max(1,Math.round(h*scale));
+      extra['data-rnd207-w']=dw;extra['data-rnd207-h']=dh;
+      extra['style']='width:'+dw+'px;height:'+dh+'px';
+    }
+  }
+  return richMediaPlaceholder(kind,hydrateUrl,loadingKey,extra);
 }
 function renderVideoPreview(accessUrl){
   // RND-206 QA fix #7: video is registered with the same shared-viewer
@@ -1632,11 +1657,18 @@ function renderVoicePreview(accessUrl){
 function renderFilePreview(accessUrl){
   return richMediaPlaceholder('file',accessUrl,'console.loading');
 }
-function renderEmotionPreview(accessUrl){
-  return renderViewableMediaSlot('emotion',accessUrl,I18N.t('emotion.alt'),'viewer.loading');
+function renderEmotionPreview(accessUrl,opts){
+  return renderViewableMediaSlot('emotion',accessUrl,I18N.t('emotion.alt'),'viewer.loading',opts);
 }
-function renderNestedImageSlot(accessUrl){
-  return renderViewableMediaSlot('image',accessUrl,I18N.t('media.image'),'viewer.loading');
+function renderNestedImageSlot(accessUrl,opts){
+  return renderViewableMediaSlot('image',accessUrl,I18N.t('media.image'),'viewer.loading',opts);
+}
+// RND-207: pack the thumbnail/dimension hints a timeline message (m) or a
+// nested media descriptor (media) carries into the opts renderViewableMediaSlot
+// expects. Both shapes name the fields identically (thumbnail_access_url/
+// image_width/image_height), so one helper serves both.
+function thumbSlotOpts(src){
+  return {thumbUrl:src&&src.thumbnail_access_url,width:src&&src.image_width,height:src&&src.image_height};
 }
 // RND-206 QA fix #2: registry-gated top-level dispatch for the three
 // media-preview kinds whose element choice still needs a small kind->
@@ -1677,8 +1709,8 @@ function renderCompositeNodeMedia(node){
     return '<div class="media-placeholder">'+esc(label)+' · '+esc(statusLabel)+'</div>';
   }
   var kind=node.type;
-  if(kind==='image')return renderNestedImageSlot(media.access_url);
-  if(kind==='emotion')return renderEmotionPreview(media.access_url);
+  if(kind==='image')return renderNestedImageSlot(media.access_url,thumbSlotOpts(media));
+  if(kind==='emotion')return renderEmotionPreview(media.access_url,thumbSlotOpts(media));
   if(kind==='video')return renderVideoPreview(media.access_url);
   if(kind==='voice')return renderVoicePreview(media.access_url);
   if(kind==='file')return renderFilePreview(media.access_url);
@@ -1833,7 +1865,7 @@ function renderMessageBody(m){
     // backend always sets both together whenever media_status=="available"
     // (see app.routers.conversations.get_conversation_messages), the same
     // invariant video/voice/file already rely on.
-    return renderViewableMediaSlot('image', m.media_access_url, I18N.t('media.image'), 'viewer.loading');
+    return renderViewableMediaSlot('image', m.media_access_url, I18N.t('media.image'), 'viewer.loading', thumbSlotOpts(m));
   }
   if(mediaType==='image'){
     var imgLabel=MEDIA_LABELS.image||I18N.t('media.generic');
@@ -1868,7 +1900,7 @@ function renderMessageBody(m){
   // other still-unsupported type), rather than a separate hand-written
   // fallback string.
   if(m.normalized_type==='emotion'&&m.renderer_strategy==='media_preview'&&m.media_access_url){
-    return renderEmotionPreview(m.media_access_url);
+    return renderEmotionPreview(m.media_access_url,thumbSlotOpts(m));
   }
   if(mediaType==='unknown'){
     return '<div class="media-placeholder">'+I18N.t('media.unknownType')+'</div>';
@@ -1957,6 +1989,11 @@ function timelineSignature(msgs){
       m.msgid,m.msgtime,m.msgtype,m.sender,m.roomid,
       m.sender_display_name,m.sender_raw_id,rcptSig,
       m.content_text,m.media_status,m.media_access_url,
+      // RND-207: stable endpoint path + intrinsic dims, NOT the signed URL
+      // (which still never enters the signature). Included so a backfilled
+      // thumbnail becoming available between refreshes re-renders the row to
+      // use it; unchanged rows keep an identical signature and are untouched.
+      m.thumbnail_access_url,m.image_width,m.image_height,
       m.is_revoked,m.revoked_at,m.revoke_association_status,
       m.structured_content?JSON.stringify(m.structured_content):null
     ];

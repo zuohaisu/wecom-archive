@@ -268,6 +268,11 @@ def test_descriptor_no_media_file_row_is_not_downloaded() -> None:
         "mime_type": None,
         "size_bytes": None,
         "access_url": None,
+        # RND-207: thumbnail fields are always present in the shape, null
+        # when there is no media_file / no generated thumbnail.
+        "thumbnail_access_url": None,
+        "image_width": None,
+        "image_height": None,
     }
 
 
@@ -341,7 +346,10 @@ def test_descriptor_never_includes_internal_identifiers() -> None:
         download_status="pending",
     )
     descriptor = _build_nested_media_descriptor("image", media_file, "conv-1", "msg-1", "0")
-    assert set(descriptor.keys()) == {"status", "media_type", "mime_type", "size_bytes", "access_url"}
+    assert set(descriptor.keys()) == {
+        "status", "media_type", "mime_type", "size_bytes", "access_url",
+        "thumbnail_access_url", "image_width", "image_height",
+    }
     assert "sdk-super-secret" not in json.dumps(descriptor)
     assert "42" not in json.dumps(descriptor)
 
@@ -1332,7 +1340,10 @@ def test_nested_media_node_shape_no_longer_uses_bare_has_reference_placeholder(c
 
     media = resp.json()["messages"][0]["structured_content"]["fields"]["items"][0]["media"]
     assert "has_reference" not in media
-    assert set(media.keys()) == {"status", "media_type", "mime_type", "size_bytes", "access_url"}
+    assert set(media.keys()) == {
+        "status", "media_type", "mime_type", "size_bytes", "access_url",
+        "thumbnail_access_url", "image_width", "image_height",
+    }
 
 
 def test_structured_content_top_level_shape_remains_backward_compatible(client, db) -> None:

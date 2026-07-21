@@ -311,38 +311,62 @@ class QiniuStorageProvider(MediaStorageProvider):
             raise MediaObjectNotFound("media object is missing")
         raise MediaStorageUnavailable(f"qiniu stat failed (status={info.status_code})")
 
-    def get_download_url(self, storage_ref: str, expires_in: Optional[int] = None) -> Optional[str]:
+    def get_download_url(
+        self,
+        storage_ref: str,
+        expires_in: Optional[int] = None,
+        deadline: Optional[int] = None,
+    ) -> Optional[str]:
         """Return a short-lived, browser-usable signed URL for storage_ref
         (RND-187), built from the same validated HTTPS base URL and the
-        official SDK's Auth.private_download_url — never a hand-rolled
-        signature.
+        official SDK signer — never a hand-rolled HMAC.
 
-        expires_in is required (seconds) — TTL policy (bounds, default)
-        lives one layer up in app.media_storage.get_signed_url_ttl_seconds(),
-        not here; this method is deliberately TTL-policy-agnostic and just
-        signs for whatever duration the caller, which has already completed
-        tenant/permission authorization, asks for.
+        Callers pass EITHER expires_in (relative TTL seconds) OR deadline (an
+        absolute Unix-epoch expiry). The deadline path is RND-207's
+        fixed-window stabilization: pinning the absolute `e=` value makes the
+        URL byte-for-byte identical for every request in the same window, so
+        the browser reuses its HTTP cache instead of re-downloading on each
+        fresh signature. It reproduces the SDK's private_download_url exactly
+        (append `e={deadline}` then `token=Auth.token(url)`) with only the
+        deadline sourced from the caller instead of int(time.time())+expires,
+        so it stays SDK-signed rather than hand-rolled. TTL/window policy
+        lives one layer up in app.media_storage; this method is
+        policy-agnostic and only signs after the caller has completed
+        tenant/permission authorization.
 
         Raises MediaObjectNotFound for an empty storage_ref,
-        MediaStorageConfigurationError if expires_in is missing, and
-        MediaStorageOperationError (sanitized — never the raw SDK exception
-        text, which could embed the object URL) if the SDK call itself
-        fails. The returned URL is never logged by this method.
+        MediaStorageConfigurationError if neither expires_in nor deadline is
+        given, and MediaStorageOperationError (sanitized — never the raw SDK
+        exception text, which could embed the object URL) if signing fails.
+        The returned URL is never logged by this method.
         """
         if not storage_ref:
             raise MediaObjectNotFound("media object is missing")
-        if not expires_in:
+        if deadline is None and not expires_in:
             raise MediaStorageConfigurationError(
-                "expires_in is required to generate a signed download URL"
+                "expires_in or deadline is required to generate a signed download URL"
             )
 
         object_url = self._object_url(storage_ref)
         try:
+            if deadline is not None:
+                return self._private_download_url_with_deadline(object_url, int(deadline))
             return self._auth.private_download_url(object_url, expires=expires_in)
         except Exception as exc:  # noqa: BLE001 - never re-raised raw (may embed the URL)
             raise MediaStorageOperationError(
                 _sanitized(exc, "qiniu signed url generation failed")
             ) from exc
+
+    def _private_download_url_with_deadline(self, object_url: str, deadline: int) -> str:
+        """SDK-faithful private download URL with a caller-pinned absolute
+        expiry (RND-207). Mirrors qiniu.Auth.private_download_url byte-for-
+        byte — same `e=`/`token=` construction, same public Auth.token
+        signer — but takes deadline directly so the URL is stable within a
+        fixed window instead of shifting every second with int(time.time())."""
+        separator = "&" if "?" in object_url else "?"
+        signed_input = f"{object_url}{separator}e={deadline}"
+        token = self._auth.token(signed_input)
+        return f"{signed_input}&token={token}"
 
     def supports_local_path(self) -> bool:
         return False

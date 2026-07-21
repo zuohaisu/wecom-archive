@@ -317,9 +317,14 @@ def test_raw_media_proxy_route_unaffected_by_no_store_middleware(
     client, db, monkeypatch, tmp_path
 ) -> None:
     """MediaAccessNoStoreMiddleware is scoped to .../media/access only — the
-    existing .../media raw byte-proxy route must keep its prior (absent)
-    Cache-Control behavior, proving the middleware's path-match scoping
-    doesn't leak onto an unrelated endpoint."""
+    existing .../media raw byte-proxy route must NOT receive the middleware's
+    no-store header, proving the middleware's path-match scoping doesn't leak
+    onto an unrelated endpoint.
+
+    RND-207: the proxy route now sets its own ``Cache-Control: private,
+    max-age=...`` so the browser can reuse the immutable, per-user-authorized
+    bytes across reloads. That is deliberately NOT the middleware's no-store —
+    this test asserts the proxy is privately cacheable and never no-store."""
     from app.main import app
 
     media_root = tmp_path / "media"
@@ -341,4 +346,6 @@ def test_raw_media_proxy_route_unaffected_by_no_store_middleware(
         app.dependency_overrides.clear()
 
     assert resp.status_code == 200
-    assert "cache-control" not in resp.headers
+    cache_control = resp.headers.get("cache-control", "")
+    assert "no-store" not in cache_control
+    assert cache_control == "private, max-age=3600"

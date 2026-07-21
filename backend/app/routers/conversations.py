@@ -60,7 +60,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from app.auth import get_current_user
 from app.db.models import (
@@ -87,9 +87,9 @@ from app.media_storage import (
     MediaStorageConfigurationError,
     MediaStorageOperationError,
     MediaStorageUnavailable,
+    compute_signed_url_deadline,
     detect_media_content_type_for_ref,
     get_media_storage_provider,
-    get_signed_url_ttl_seconds,
     object_key_tenant_prefix_matches,
     resolve_downloadable_media_file_state,
     resolve_downloadable_media_state,
@@ -664,18 +664,24 @@ def _build_nested_media_descriptor(
 ) -> dict:
     """Build the safe, public per-node media descriptor attached to a
     mixed/chatrecord structured_content node — {"status", "media_type",
-    "mime_type", "size_bytes", "access_url"}. Never includes sdkfileid,
-    any MediaFile database id, local_path, storage_ref/oss_key, or any
-    storage credential — only a status string, the already-known nested
-    item type, content-sniffed mime_type, byte size, and a same-origin
-    API URL the caller can request an access descriptor from (mirroring
-    TimelineMessageOut.media_access_url, which is null unless the
-    underlying media is actually available).
+    "mime_type", "size_bytes", "access_url", "thumbnail_access_url",
+    "image_width", "image_height"}. Never includes sdkfileid, any MediaFile
+    database id, local_path, storage_ref/oss_key, or any storage credential —
+    only a status string, the already-known nested item type, content-sniffed
+    mime_type, byte size, a same-origin API URL the caller can request an
+    access descriptor from (mirroring TimelineMessageOut.media_access_url,
+    which is null unless the underlying media is actually available), and
+    (RND-207) the nested analogue of the top-level thumbnail fields:
+    thumbnail_access_url is set only when a thumbnail was generated for this
+    nested image, image_width/image_height only for layout reservation.
     """
     status = "not_downloaded"
     mime_type: Optional[str] = None
     size_bytes: Optional[int] = None
     access_url: Optional[str] = None
+    thumbnail_access_url: Optional[str] = None
+    image_width: Optional[int] = None
+    image_height: Optional[int] = None
 
     if media_file is not None:
         if media_file.download_status == "downloaded":
@@ -702,6 +708,13 @@ def _build_nested_media_descriptor(
                 f"/api/conversations/{conversation_id}/messages/{msgid}"
                 f"/nested-media/{path}/access"
             )
+            if (
+                getattr(media_file, "thumbnail_status", None) == "generated"
+                and getattr(media_file, "thumbnail_ref", None)
+            ):
+                thumbnail_access_url = _with_variant_thumb(access_url)
+            image_width = getattr(media_file, "image_width", None)
+            image_height = getattr(media_file, "image_height", None)
 
     return {
         "status": status,
@@ -709,6 +722,9 @@ def _build_nested_media_descriptor(
         "mime_type": mime_type,
         "size_bytes": size_bytes,
         "access_url": access_url,
+        "thumbnail_access_url": thumbnail_access_url,
+        "image_width": image_width,
+        "image_height": image_height,
     }
 
 
@@ -1483,6 +1499,17 @@ class TimelineMessageOut(BaseModel):
     unsupported_reason: Optional[str] = None
     media_url: Optional[str] = None
     media_access_url: Optional[str] = None
+    # RND-207: list/timeline thumbnail. thumbnail_access_url is the same
+    # authenticated /media/access endpoint with ?variant=thumb, present only
+    # when a generated thumbnail exists for this image/emotion row — the
+    # frontend loads it in the list and falls back to media_access_url (the
+    # original) when it is null; the viewer always opens media_access_url.
+    # image_width/image_height are the original's post-EXIF pixel dimensions,
+    # used only to reserve an aspect-ratio box before the thumbnail loads
+    # (layout-shift fix); null on rows with no recorded dimensions.
+    thumbnail_access_url: Optional[str] = None
+    image_width: Optional[int] = None
+    image_height: Optional[int] = None
     # RND-197: Message Type Registry metadata, exposed so the frontend can
     # dispatch to a structured card renderer without re-deriving any of
     # this from msgtype itself (see app.message_type_registry, the single
@@ -2488,6 +2515,12 @@ def get_conversation_messages(
 
         media_url: Optional[str] = None
         media_access_url: Optional[str] = None
+        # RND-207: populated below only for image/emotion rows that have a
+        # generated thumbnail / recorded dimensions; every other message
+        # leaves them None.
+        thumbnail_access_url: Optional[str] = None
+        image_width: Optional[int] = None
+        image_height: Optional[int] = None
         if media.media_type in SUPPORTED_MIGRATION_MEDIA_TYPES:
             # RND-199: generalized from "== 'image'" to every media_type
             # classify_media() preserves as media_type — image/video/voice/
@@ -2542,6 +2575,9 @@ def get_conversation_messages(
                     f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media/access"
                     f"{media_context_qs}"
                 )
+                thumbnail_access_url, image_width, image_height = _thumbnail_timeline_fields(
+                    media_file, media_access_url
+                )
         elif msg.msgtype == "emotion":
             # RND-206: emotion bytes are already servable through the same
             # /media and /media/access routes (see
@@ -2571,6 +2607,9 @@ def get_conversation_messages(
                 media_access_url = (
                     f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media/access"
                     f"{media_context_qs}"
+                )
+                thumbnail_access_url, image_width, image_height = _thumbnail_timeline_fields(
+                    media_file, media_access_url
                 )
 
         action: Optional[str] = None
@@ -2628,6 +2667,9 @@ def get_conversation_messages(
                 unsupported_reason=media.unsupported_reason,
                 media_url=media_url,
                 media_access_url=media_access_url,
+                thumbnail_access_url=thumbnail_access_url,
+                image_width=image_width,
+                image_height=image_height,
                 normalized_type=type_meta["normalized_type"],
                 category=type_meta["category"],
                 support_status=type_meta["support_status"],
@@ -2750,6 +2792,66 @@ def _resolve_authorized_media(
     return msg, media_file
 
 
+# RND-207: private browser-cache lifetime for the authenticated byte-proxy
+# routes (local media, and Qiniu bytes proxied server-side). These bytes are
+# immutable per object key, and each request is independently session-
+# authorized, so a per-user ("private") cache is safe and spares a re-download
+# on reload. The primary Qiniu path is the client-direct signed URL (cached by
+# the browser via its stable windowed URL), not this proxy.
+_MEDIA_PROXY_CACHE_MAX_AGE = 3600
+
+
+def _with_variant_thumb(url: str) -> str:
+    """Append variant=thumb to an access/proxy URL, preserving any existing
+    query string (entity context). RND-207."""
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}variant=thumb"
+
+
+def _thumbnail_timeline_fields(
+    media_file: Optional[MediaFile], media_access_url: str
+) -> Tuple[Optional[str], Optional[int], Optional[int]]:
+    """RND-207: derive (thumbnail_access_url, image_width, image_height) for a
+    timeline image/emotion row. thumbnail_access_url is set only when a
+    thumbnail was actually generated (thumbnail_status="generated" with a
+    thumbnail_ref) — otherwise None, so the frontend falls back to the
+    original. Dimensions are surfaced whenever recorded, independently of
+    thumbnail availability, purely for layout reservation."""
+    if media_file is None:
+        return None, None, None
+    thumbnail_access_url: Optional[str] = None
+    if (
+        getattr(media_file, "thumbnail_status", None) == "generated"
+        and getattr(media_file, "thumbnail_ref", None)
+    ):
+        thumbnail_access_url = _with_variant_thumb(media_access_url)
+    return (
+        thumbnail_access_url,
+        getattr(media_file, "image_width", None),
+        getattr(media_file, "image_height", None),
+    )
+
+
+def _resolve_variant_serve_ref(
+    media_file: MediaFile, variant: Optional[str], original_ref: str
+) -> Tuple[str, bool]:
+    """RND-207: choose the object key/path to actually serve for a requested
+    variant. variant="thumb" serves the generated thumbnail (co-located in
+    the SAME storage backend as the original, under the same
+    tenants/{tenant}/ prefix) when one exists; any other value, or a row
+    without a usable thumbnail, serves the original. Returns
+    (serve_ref, is_thumbnail). The thumbnail is never an independent
+    authorization boundary — it is only reached after the original row has
+    been fully authorized by _resolve_authorized_media."""
+    if (
+        variant == "thumb"
+        and getattr(media_file, "thumbnail_status", None) == "generated"
+        and getattr(media_file, "thumbnail_ref", None)
+    ):
+        return media_file.thumbnail_ref, True
+    return original_ref, False
+
+
 def _resolve_servable_backend_and_ref(media_file: MediaFile, route_label: str) -> Tuple[str, str]:
     """
     Resolve (effective_backend, effective_ref) for an already-authorized
@@ -2812,6 +2914,14 @@ def get_message_media(
             "Optional consistency check, 'direct' or 'group' -- same "
             "validation as GET .../messages. Never used to select or "
             "filter the message itself."
+        ),
+    ),
+    variant: Optional[str] = Query(
+        None,
+        description=(
+            "RND-207: 'thumb' serves the generated list thumbnail instead of "
+            "the original, when one exists for this row; any other value (or "
+            "omitted) serves the original."
         ),
     ),
     db: Session = Depends(get_db),
@@ -2882,15 +2992,21 @@ def get_message_media(
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         media_file, "media route"
     )
+    # RND-207: serve the generated thumbnail when variant=thumb is requested
+    # and one exists; the thumbnail is co-located in the same backend and
+    # under the same tenant prefix as the original (already authorized above).
+    serve_ref, _is_thumbnail = _resolve_variant_serve_ref(media_file, variant, effective_ref)
 
     provider = get_media_storage_provider(effective_backend)
 
     if provider.supports_local_path():
-        safe_path = resolve_servable_downloadable_media_path(effective_ref, effective_backend)
+        safe_path = resolve_servable_downloadable_media_path(serve_ref, effective_backend)
         if safe_path is None:
             raise HTTPException(status_code=404, detail="Not found")
         content_type = detect_media_content_type_for_ref(str(safe_path))
-        return FileResponse(path=str(safe_path), media_type=content_type)
+        proxied = FileResponse(path=str(safe_path), media_type=content_type)
+        proxied.headers["Cache-Control"] = f"private, max-age={_MEDIA_PROXY_CACHE_MAX_AGE}"
+        return proxied
 
     # Cloud-backed media (RND-174): still a valid controlled access path —
     # fetch the bytes through the provider and proxy them back. The
@@ -2899,9 +3015,9 @@ def get_message_media(
     # through this route. detect_media_content_type_for_ref covers every
     # RND-199 supported media category (image/video/voice/file), not
     # image only.
-    content_type = detect_media_content_type_for_ref(effective_ref)
+    content_type = detect_media_content_type_for_ref(serve_ref)
     try:
-        data = provider.read_bytes(effective_ref)
+        data = provider.read_bytes(serve_ref)
     except MediaObjectNotFound:
         raise HTTPException(status_code=404, detail="Not found")
     except MediaStorageUnavailable:
@@ -2915,7 +3031,9 @@ def get_message_media(
             "media route: storage operation failed during read (backend=%s)", effective_backend
         )
         raise HTTPException(status_code=502, detail="Media storage operation failed")
-    return Response(content=data, media_type=content_type)
+    proxied = Response(content=data, media_type=content_type)
+    proxied.headers["Cache-Control"] = f"private, max-age={_MEDIA_PROXY_CACHE_MAX_AGE}"
+    return proxied
 
 
 @router.get(
@@ -2946,6 +3064,15 @@ def get_message_media_access(
             "filter the message itself."
         ),
     ),
+    variant: Optional[str] = Query(
+        None,
+        description=(
+            "RND-207: 'thumb' returns a descriptor for the generated list "
+            "thumbnail (when one exists); any other value (or omitted) "
+            "returns the original. The viewer requests the original; the "
+            "list requests 'thumb'."
+        ),
+    ),
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
@@ -2967,9 +3094,12 @@ def get_message_media_access(
     authorizes each request to it, same as before RND-187.
 
     access_type="signed_url" (Qiniu-backed rows): url is a short-lived
-    Qiniu signed URL, valid for get_signed_url_ttl_seconds() seconds
-    (MEDIA_SIGNED_URL_TTL_SECONDS, default 900, bounded [60, 3600]). Minted
-    only after this route completes the exact same authorization sequence
+    Qiniu signed URL whose absolute expiry is snapped to a fixed window
+    (compute_signed_url_deadline; MEDIA_SIGNED_URL_WINDOW_SECONDS, defaulting
+    to MEDIA_SIGNED_URL_TTL_SECONDS = 900, bounded [60, 3600]) so the URL is
+    byte-identical for every request in that window and the browser reuses
+    its HTTP cache (RND-207). Minted only after this route completes the
+    exact same authorization sequence
     as get_message_media (_resolve_authorized_media /
     _resolve_servable_backend_and_ref) *plus* an explicit check that the
     object key's own "tenants/{tenant_id}/" prefix agrees with this row's
@@ -3016,37 +3146,50 @@ def get_message_media_access(
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         media_file, "media access route"
     )
-    content_type = detect_media_content_type_for_ref(effective_ref)
+    # RND-207: variant=thumb resolves to the generated thumbnail (co-located
+    # in the same backend / tenant prefix); anything else keeps the original.
+    serve_ref, is_thumbnail = _resolve_variant_serve_ref(media_file, variant, effective_ref)
+    content_type = detect_media_content_type_for_ref(serve_ref)
+    # size_bytes tracks only the original object; a thumbnail's byte size is
+    # not persisted, so report None rather than the misleading original size.
+    size_bytes = None if is_thumbnail else media_file.file_size
     proxy_context_qs = _entity_context_query_string(mode, staff_id, contact_id, conversation_type)
 
     if effective_backend == "local":
+        proxy_url = f"/api/conversations/{conversation_id}/messages/{msgid}/media{proxy_context_qs}"
+        if is_thumbnail:
+            proxy_url = _with_variant_thumb(proxy_url)
         return MediaAccessOut(
             media_id=media_file.id,
             storage_backend="local",
             access_type="proxy",
-            url=f"/api/conversations/{conversation_id}/messages/{msgid}/media{proxy_context_qs}",
+            url=proxy_url,
             expires_at=None,
             content_type=content_type,
-            size_bytes=media_file.file_size,
+            size_bytes=size_bytes,
         )
 
     if effective_backend == "qiniu_kodo":
-        if not object_key_tenant_prefix_matches(effective_ref, tenant_id):
+        if not object_key_tenant_prefix_matches(serve_ref, tenant_id):
             logger.error(
                 "media access route: object key tenant prefix mismatch (media_id=%s)",
                 media_file.id,
             )
             raise HTTPException(status_code=404, detail="Not found")
 
+        # RND-207: fixed-window deadline so the signed URL is byte-identical
+        # for every request in the same window -> the browser reuses its HTTP
+        # cache instead of re-downloading on each fresh signature.
         try:
-            ttl_seconds = get_signed_url_ttl_seconds()
+            now_epoch = int(datetime.now(timezone.utc).timestamp())
+            deadline = compute_signed_url_deadline(now_epoch)
         except MediaStorageConfigurationError:
-            logger.error("media access route: invalid signed url TTL configuration")
+            logger.error("media access route: invalid signed url TTL/window configuration")
             raise HTTPException(status_code=500, detail="Media storage is misconfigured")
 
         provider = get_media_storage_provider(effective_backend)
         try:
-            signed_url = provider.get_download_url(effective_ref, expires_in=ttl_seconds)
+            signed_url = provider.get_download_url(serve_ref, deadline=deadline)
         except MediaObjectNotFound:
             raise HTTPException(status_code=404, detail="Not found")
         except MediaStorageConfigurationError:
@@ -3068,13 +3211,13 @@ def get_message_media_access(
             )
             raise HTTPException(status_code=502, detail="Media storage operation failed")
 
-        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        expires_at = datetime.fromtimestamp(deadline, timezone.utc).isoformat()
         logger.info(
             "media access route: signed url issued (media_id=%s, tenant_id=%s, "
-            "backend=qiniu_kodo, ttl=%s)",
+            "backend=qiniu_kodo, is_thumbnail=%s)",
             media_file.id,
             tenant_id,
-            ttl_seconds,
+            is_thumbnail,
         )
         return MediaAccessOut(
             media_id=media_file.id,
@@ -3083,7 +3226,7 @@ def get_message_media_access(
             url=signed_url,
             expires_at=expires_at,
             content_type=content_type,
-            size_bytes=media_file.file_size,
+            size_bytes=size_bytes,
         )
 
     logger.error(
@@ -3098,6 +3241,14 @@ def get_nested_message_media(
     conversation_id: str,
     msgid: str,
     item_path: str,
+    variant: Optional[str] = Query(
+        None,
+        description=(
+            "RND-207: 'thumb' serves the generated thumbnail for this nested "
+            "image when one exists; any other value (or omitted) serves the "
+            "original."
+        ),
+    ),
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
@@ -3131,19 +3282,22 @@ def get_nested_message_media(
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         media_file, "nested media route"
     )
+    serve_ref, _is_thumbnail = _resolve_variant_serve_ref(media_file, variant, effective_ref)
 
     provider = get_media_storage_provider(effective_backend)
 
     if provider.supports_local_path():
-        safe_path = resolve_servable_downloadable_media_path(effective_ref, effective_backend)
+        safe_path = resolve_servable_downloadable_media_path(serve_ref, effective_backend)
         if safe_path is None:
             raise HTTPException(status_code=404, detail="Not found")
         content_type = detect_media_content_type_for_ref(str(safe_path))
-        return FileResponse(path=str(safe_path), media_type=content_type)
+        proxied = FileResponse(path=str(safe_path), media_type=content_type)
+        proxied.headers["Cache-Control"] = f"private, max-age={_MEDIA_PROXY_CACHE_MAX_AGE}"
+        return proxied
 
-    content_type = detect_media_content_type_for_ref(effective_ref)
+    content_type = detect_media_content_type_for_ref(serve_ref)
     try:
-        data = provider.read_bytes(effective_ref)
+        data = provider.read_bytes(serve_ref)
     except MediaObjectNotFound:
         raise HTTPException(status_code=404, detail="Not found")
     except MediaStorageUnavailable:
@@ -3158,7 +3312,9 @@ def get_nested_message_media(
             effective_backend,
         )
         raise HTTPException(status_code=502, detail="Media storage operation failed")
-    return Response(content=data, media_type=content_type)
+    proxied = Response(content=data, media_type=content_type)
+    proxied.headers["Cache-Control"] = f"private, max-age={_MEDIA_PROXY_CACHE_MAX_AGE}"
+    return proxied
 
 
 @router.get(
@@ -3170,6 +3326,14 @@ def get_nested_message_media_access(
     msgid: str,
     item_path: str,
     response: Response,
+    variant: Optional[str] = Query(
+        None,
+        description=(
+            "RND-207: 'thumb' returns a descriptor for this nested image's "
+            "generated thumbnail (when one exists); any other value (or "
+            "omitted) returns the original."
+        ),
+    ),
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
@@ -3212,24 +3376,29 @@ def get_nested_message_media_access(
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         media_file, "nested media access route"
     )
-    content_type = detect_media_content_type_for_ref(effective_ref)
+    serve_ref, is_thumbnail = _resolve_variant_serve_ref(media_file, variant, effective_ref)
+    content_type = detect_media_content_type_for_ref(serve_ref)
+    size_bytes = None if is_thumbnail else media_file.file_size
 
     if effective_backend == "local":
+        proxy_url = (
+            f"/api/conversations/{conversation_id}/messages/{msgid}"
+            f"/nested-media/{item_path}"
+        )
+        if is_thumbnail:
+            proxy_url = _with_variant_thumb(proxy_url)
         return NestedMediaAccessOut(
             storage_backend="local",
             access_type="proxy",
-            url=(
-                f"/api/conversations/{conversation_id}/messages/{msgid}"
-                f"/nested-media/{item_path}"
-            ),
+            url=proxy_url,
             expires_at=None,
             mime_type=content_type,
             filename=None,
-            size_bytes=media_file.file_size,
+            size_bytes=size_bytes,
         )
 
     if effective_backend == "qiniu_kodo":
-        if not object_key_tenant_prefix_matches(effective_ref, tenant_id):
+        if not object_key_tenant_prefix_matches(serve_ref, tenant_id):
             logger.error(
                 "nested media access route: object key tenant prefix mismatch (media_id=%s)",
                 media_file.id,
@@ -3237,14 +3406,15 @@ def get_nested_message_media_access(
             raise HTTPException(status_code=404, detail="Not found")
 
         try:
-            ttl_seconds = get_signed_url_ttl_seconds()
+            now_epoch = int(datetime.now(timezone.utc).timestamp())
+            deadline = compute_signed_url_deadline(now_epoch)
         except MediaStorageConfigurationError:
-            logger.error("nested media access route: invalid signed url TTL configuration")
+            logger.error("nested media access route: invalid signed url TTL/window configuration")
             raise HTTPException(status_code=500, detail="Media storage is misconfigured")
 
         provider = get_media_storage_provider(effective_backend)
         try:
-            signed_url = provider.get_download_url(effective_ref, expires_in=ttl_seconds)
+            signed_url = provider.get_download_url(serve_ref, deadline=deadline)
         except MediaObjectNotFound:
             raise HTTPException(status_code=404, detail="Not found")
         except MediaStorageConfigurationError:
@@ -3267,13 +3437,13 @@ def get_nested_message_media_access(
             )
             raise HTTPException(status_code=502, detail="Media storage operation failed")
 
-        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        expires_at = datetime.fromtimestamp(deadline, timezone.utc).isoformat()
         logger.info(
             "nested media access route: signed url issued (media_id=%s, tenant_id=%s, "
-            "backend=qiniu_kodo, ttl=%s)",
+            "backend=qiniu_kodo, is_thumbnail=%s)",
             media_file.id,
             tenant_id,
-            ttl_seconds,
+            is_thumbnail,
         )
         return NestedMediaAccessOut(
             storage_backend="qiniu_kodo",
@@ -3282,7 +3452,7 @@ def get_nested_message_media_access(
             expires_at=expires_at,
             mime_type=content_type,
             filename=None,
-            size_bytes=media_file.file_size,
+            size_bytes=size_bytes,
         )
 
     logger.error(
