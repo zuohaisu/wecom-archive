@@ -69,6 +69,8 @@ def repo_worktree(tmp_path):
 
 def _run_make(worktree_dir: Path, target: str) -> subprocess.CompletedProcess:
     backend_py = REPO_ROOT / ".venv" / "bin" / "python"
+    if not backend_py.exists():
+        backend_py = Path(shutil.which("python") or "python")
     return subprocess.run(
         [MAKE, f"BACKEND_PY={backend_py}", target],
         cwd=worktree_dir,
