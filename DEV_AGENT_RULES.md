@@ -13,8 +13,8 @@ Core rules:
 
 - One Linear Issue = One Implementation Conversation.
 - Every implementation starts from an approved issue scope.
-- Development is performed directly on the main branch by default.
-- Feature branches are optional and should only be used for high-risk work or when Haisu explicitly requests them.
+- Development is performed directly on the main branch.
+- No task branches are created; Haisu may request a branch explicitly only in rare, high-risk cases.
 - Every agent must preserve project safety, traceability, and reviewability.
 - The smallest correct change is preferred over broad refactors.
 - The original implementing agent owns implementation fixes within the same issue.
@@ -50,7 +50,7 @@ Workflow rules:
 - Start from a Linear issue before implementation.
 - Keep the AI conversation tied to the issue being worked.
 - Plan in ChatGPT when scope, architecture, or sequencing needs clarification.
-- Implement on main by default.
+- Implement directly on main.
 - Use Claude Code as the primary implementation agent unless Haisu assigns Codex.
 - Run Codex QA before committing.
 - Use the original implementing agent for implementation fixes unless Haisu explicitly redirects the work.
@@ -99,8 +99,7 @@ Primary role: main implementation agent.
 Responsibilities:
 
 - Implement approved Linear issue scope.
-- Work directly on main by default.
-- Do not create branches unless Haisu explicitly requests them.
+- Work directly on main. Do not create branches for task work.
 - Keep changes focused and reviewable.
 - Run relevant tests, linting, and formatting checks.
 - Handle implementation fixes for its own work.
@@ -161,7 +160,7 @@ Haisu is the final product owner and scope authority.
 |---|---|---|
 | Project planning | ChatGPT | Long-lived planning context across the project |
 | Product or architecture framing | ChatGPT | Use before implementation when scope is unclear |
-| Main feature implementation | Claude Code | Work directly on main by default |
+| Main feature implementation | Claude Code | Work directly on main |
 | Focused code implementation | Codex | Best for scoped repo edits and verification |
 | QA and code review | Codex | Primary reviewer before commit |
 | Implementation fixes | Original implementing agent | Keep fixes in the same issue conversation |
@@ -193,19 +192,11 @@ Push origin/main
 
 Rules:
 
-- Development happens directly on main by default.
+- Development happens directly on main. No task branches are created.
 - Keep each implementation tied to one Linear issue.
 - Run Codex QA before committing.
 - Do not push `origin/main` unless Haisu explicitly asks.
-- Do not create feature branches unless the work qualifies below or Haisu explicitly requests it.
-
-Feature branches should only be used for:
-
-- Destructive database migrations.
-- Deployment changes.
-- Authentication/security work.
-- Major refactors.
-- When explicitly requested by Haisu.
+- Do not create feature branches for task work. Haisu may request a branch explicitly only in rare, high-risk cases.
 
 ---
 
