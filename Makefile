@@ -28,7 +28,7 @@ PYTHON ?= python3
 # production host.
 # ---------------------------------------------------------------------------
 
-BACKEND_PY := $(CURDIR)/.venv/bin/python
+BACKEND_PY ?= $(CURDIR)/.venv/bin/python
 
 .PHONY: lint lint-diff typecheck build test verify
 

@@ -44,7 +44,7 @@ jobs:
           cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest ruff
 
       - name: Configure Git identity
         run: |
@@ -93,6 +93,8 @@ jobs:
             -p no:warnings
           echo ""
           echo "Offline/SQLite tests passed."
+        env:
+          BACKEND_PY: python
         # DATABASE_URL intentionally unset:
         #   - SQLite & mock tests create their own engines
         #   - PG-only tests self-skip: _postgres_reachable() checks a
