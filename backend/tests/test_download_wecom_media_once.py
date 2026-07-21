@@ -568,7 +568,10 @@ def _make_sqlite_engine(tmp_path, name):
                     download_status TEXT NOT NULL DEFAULT 'pending',
                     migration_status TEXT, migration_attempted_at TEXT,
                     migration_error TEXT, bucket TEXT, mime_type TEXT,
-                    checksum_sha256 TEXT, tenant_id TEXT, created_at TEXT,
+                    checksum_sha256 TEXT, thumbnail_ref TEXT,
+                    image_width INTEGER, image_height INTEGER,
+                    thumbnail_status TEXT, thumbnail_attempted_at TEXT,
+                    thumbnail_error TEXT, tenant_id TEXT, created_at TEXT,
                     updated_at TEXT, UNIQUE(tenant_id, sdkfileid)
                 )
                 """

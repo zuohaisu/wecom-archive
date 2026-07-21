@@ -428,6 +428,21 @@ class MediaFile(Base):
     bucket = Column(String(128), nullable=True)
     mime_type = Column(String(128), nullable=True)
     checksum_sha256 = Column(String(64), nullable=True)
+    # RND-207 (migration 0012): list/timeline thumbnail metadata for image
+    # media. thumbnail_ref is a derived object key / local path held in the
+    # SAME storage backend as the original (storage_backend); NULL means
+    # "serve the original". image_width/image_height are the original's
+    # post-EXIF pixel dimensions, used only to reserve an aspect-ratio box in
+    # the list. thumbnail_status/thumbnail_attempted_at/thumbnail_error are
+    # backfill bookkeeping mirroring the migration_* columns above: no
+    # serving path depends on them, and thumbnail_error is a short sanitized
+    # tag only — never a raw path/key/exception.
+    thumbnail_ref = Column(Text, nullable=True)
+    image_width = Column(Integer, nullable=True)
+    image_height = Column(Integer, nullable=True)
+    thumbnail_status = Column(String(16), nullable=True, index=True)
+    thumbnail_attempted_at = Column(DateTime(timezone=True), nullable=True)
+    thumbnail_error = Column(Text, nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

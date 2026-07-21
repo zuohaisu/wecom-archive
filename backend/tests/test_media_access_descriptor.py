@@ -152,7 +152,7 @@ class _FakeCloudProviderWithSignedUrl:
     def get_local_path(self, storage_ref):
         return None
 
-    def get_download_url(self, storage_ref: str, expires_in=None) -> str:
+    def get_download_url(self, storage_ref: str, expires_in=None, deadline=None) -> str:
         if self._sign_error is not None:
             raise self._sign_error
         if not storage_ref:

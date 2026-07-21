@@ -140,15 +140,29 @@ constructs a Qiniu/CDN URL itself.
   Qiniu URL, valid only until `expires_at`.)
 
   - **Qiniu-backed media**: `access_type="signed_url"`. `url` is a
-    short-lived signed URL (official Qiniu SDK, `Auth.private_download_url`)
-    scoped to exactly one object; the browser fetches it directly from
-    `media.crowntime.cn` — the image bytes no longer round-trip through
-    this backend. `expires_at` is an ISO-8601 timestamp; the TTL is
-    `MEDIA_SIGNED_URL_TTL_SECONDS` (default 900s, bounded 60–3600s).
+    short-lived signed URL (official Qiniu SDK signer) scoped to exactly one
+    object; the browser fetches it directly from `QINIU_DOMAIN` (a CDN or, per
+    RND-207, an origin domain) — the image bytes no longer round-trip through
+    this backend. `expires_at` is an ISO-8601 timestamp. **RND-207**: the
+    absolute expiry is snapped to a fixed window (`MEDIA_SIGNED_URL_WINDOW_SECONDS`,
+    defaulting to the TTL `MEDIA_SIGNED_URL_TTL_SECONDS`, default 900s, bounded
+    60–3600s), so repeated requests for the same object within a window return
+    a byte-identical `url`/`expires_at` and the browser reuses its HTTP cache.
   - **Local-backed media**: `access_type="proxy"`. `url` is the existing
     `.../media` route, unchanged; `expires_at` is `null` (the URL carries
     no time-boxed credential of its own — the session cookie authorizes
     each request to it, exactly as before RND-187).
+- **`variant` query param (RND-207)**: `?variant=thumb` returns a descriptor
+  for the generated **list thumbnail** (a separate stored object) when one
+  exists, else falls back to the original; any other value (or omitted)
+  returns the original. `size_bytes` is `null` for a thumbnail descriptor.
+  The viewer requests the original; the list requests `thumb`. The same
+  object-key tenant-prefix check is applied to the thumbnail object. The
+  timeline (`GET .../messages`) additionally carries `thumbnail_access_url`
+  (the `?variant=thumb` URL, `null` when no thumbnail exists) and
+  `image_width`/`image_height` (the original's intrinsic pixels, for
+  layout-box reservation). Nested mixed/chatrecord media descriptors carry the
+  same three fields.
 - **Cache-Control**: `no-store` on **every** response this endpoint can
   produce — success or error, any status code (`200`/`401`/`404`/`500`/`502`/`503`).
   This response is per-user and short-lived and must never be cached by a

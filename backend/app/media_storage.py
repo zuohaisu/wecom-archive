@@ -101,10 +101,21 @@ class MediaStorageProvider(ABC):
     def size_bytes(self, storage_ref: str) -> int:
         """Return object size in bytes."""
 
-    def get_download_url(self, storage_ref: str, expires_in: Optional[int] = None) -> Optional[str]:
-        """Return a direct, browser-usable provider URL when one exists,
-        valid for approximately expires_in seconds (provider-specific;
-        ignored by providers that never return a direct URL).
+    def get_download_url(
+        self,
+        storage_ref: str,
+        expires_in: Optional[int] = None,
+        deadline: Optional[int] = None,
+    ) -> Optional[str]:
+        """Return a direct, browser-usable provider URL when one exists.
+
+        Callers pass EITHER expires_in (a relative TTL in seconds) OR
+        deadline (an absolute Unix-epoch expiry). deadline is the RND-207
+        fixed-window path: snapping the expiry to a shared window boundary
+        makes the signed URL byte-for-byte identical across requests in that
+        window, so the browser HTTP-caches the bytes instead of re-fetching
+        on every fresh signature. Providers that never return a direct URL
+        ignore both.
 
         The local provider intentionally returns None because this app
         serves local media through the authenticated API route — there is
@@ -273,6 +284,38 @@ def build_tenant_media_key(tenant_id: str, category: str, identifier: str, suffi
     return f"tenants/{safe_tenant}/{safe_category}/{safe_identifier}{suffix}"
 
 
+# RND-207: thumbnail objects live in their own tenant-scoped category next
+# to the originals ("images"), so a thumbnail can never collide with, or be
+# mistaken for, an original object key, and a tenant-prefix check applies to
+# it identically.
+THUMBNAIL_KEY_CATEGORY = "thumbnails"
+# Bumped only if the thumbnail generation parameters change in a way that
+# should invalidate previously generated objects; embedded in the key so a
+# re-generation writes a distinct object rather than silently serving a
+# stale one.
+THUMBNAIL_KEY_VERSION = "v1"
+
+
+def build_thumbnail_storage_ref(original_ref: str, tenant_id: str, output_ext: str) -> str:
+    """Deterministically derive a thumbnail object key from an original
+    media object key (RND-207).
+
+        tenants/{tenant}/thumbnails/{original-basename-no-ext}_thumb_{version}{ext}
+
+    Deterministic per (original_ref, tenant_id, output_ext): the same inputs
+    always produce the same key, so repeated/retried generation overwrites
+    in place instead of accumulating duplicate objects — matching
+    build_tenant_media_key's idempotency contract. The identifier is taken
+    from the original key's final path segment (minus its extension) so a
+    thumbnail is unambiguously traceable to exactly one original, even across
+    two originals that happen to share an sdkfileid-derived stem.
+    """
+    basename = original_ref.rsplit("/", 1)[-1]
+    stem = basename.rsplit(".", 1)[0] if "." in basename else basename
+    suffix = f"_thumb_{THUMBNAIL_KEY_VERSION}{output_ext}"
+    return build_tenant_media_key(tenant_id, THUMBNAIL_KEY_CATEGORY, stem, suffix=suffix)
+
+
 def object_key_tenant_prefix_matches(storage_ref: Optional[str], tenant_id: str) -> bool:
     """True iff storage_ref's leading "tenants/{tenant}/" segment (see
     build_tenant_media_key) matches tenant_id's own sanitized form.
@@ -385,6 +428,51 @@ def get_signed_url_ttl_seconds() -> int:
             f"{_SIGNED_URL_TTL_MIN_SECONDS} and {_SIGNED_URL_TTL_MAX_SECONDS} seconds"
         )
     return value
+
+
+def get_signed_url_window_seconds() -> int:
+    """Validated MEDIA_SIGNED_URL_WINDOW_SECONDS accessor (RND-207).
+
+    The window over which a signed URL's absolute expiry is held constant so
+    that repeated requests for the same object within the window return an
+    identical URL (see compute_signed_url_deadline). Defaults to the TTL when
+    unset — i.e. stabilization is on by default at the TTL granularity.
+    Bounded [60, 3600] and fails loudly on an invalid/out-of-range value,
+    matching get_signed_url_ttl_seconds().
+    """
+    raw = os.environ.get("MEDIA_SIGNED_URL_WINDOW_SECONDS", "").strip()
+    if not raw:
+        return get_signed_url_ttl_seconds()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise MediaStorageConfigurationError(
+            "MEDIA_SIGNED_URL_WINDOW_SECONDS must be an integer number of seconds"
+        ) from exc
+    if value < _SIGNED_URL_TTL_MIN_SECONDS or value > _SIGNED_URL_TTL_MAX_SECONDS:
+        raise MediaStorageConfigurationError(
+            "MEDIA_SIGNED_URL_WINDOW_SECONDS must be between "
+            f"{_SIGNED_URL_TTL_MIN_SECONDS} and {_SIGNED_URL_TTL_MAX_SECONDS} seconds"
+        )
+    return value
+
+
+def compute_signed_url_deadline(now_epoch: int, window_seconds: Optional[int] = None) -> int:
+    """Snap an absolute signed-URL expiry to a fixed window boundary (RND-207).
+
+    Every request whose now_epoch falls in the same window [k*w, (k+1)*w)
+    gets the SAME deadline ((k+2)*w), so the resulting signed URL is
+    byte-for-byte identical and the browser cache is reused instead of
+    re-downloading on each fresh signature. The "+2" guarantees the issued
+    URL always has more than one full window of remaining life (remaining
+    ∈ (window, 2*window]), so a client that receives a URL near the end of a
+    window still has at least `window` seconds before it must refresh — never
+    a sliver-of-a-second URL.
+    """
+    window = window_seconds if window_seconds is not None else get_signed_url_window_seconds()
+    if window <= 0:
+        raise MediaStorageConfigurationError("signed url window must be positive")
+    return ((now_epoch // window) + 2) * window
 
 
 def _resolve_default_provider_name() -> str:
