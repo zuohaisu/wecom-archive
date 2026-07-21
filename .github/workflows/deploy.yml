@@ -6,9 +6,25 @@ on:
       - main
 
 jobs:
-  ci-check:
-    name: CI compile check
+  test:
+    name: CI Test Suite
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: wecom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -18,20 +34,127 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python dependencies
         run: |
           cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest
 
-      - name: Compile-check Python code
+      - name: Configure Git identity
+        run: |
+          git config user.name "CI"
+          git config user.email "ci@localhost"
+        # Required by test_makefile_lint_diff.py which runs git commit
+
+      # ── Gate 1: compile check ──────────────────────────────────
+      - name: "[GATE] Compile-check Python code"
         run: |
           cd backend
-          python -m compileall app scripts
+          echo "=== app ==="
+          python -m compileall -q app \
+            || { echo "::error ::Compile failed in app/"; exit 1; }
+          echo "=== scripts ==="
+          python -m compileall -q scripts \
+            || { echo "::error ::Compile failed in scripts/"; exit 1; }
+          echo "=== tests ==="
+          python -m compileall -q tests \
+            || { echo "::error ::Compile failed in tests/"; exit 1; }
+          echo "Compile check passed."
+
+      # ── Gate 2: app import check ───────────────────────────────
+      - name: "[GATE] App import check"
+        run: |
+          cd backend
+          python -c "
+          import os
+          os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
+          from app.main import app
+          print(f'App import successful ({len(app.routes)} routes)')
+          "
+
+      # ── Round 1: offline / SQLite-compatible tests ─────────────
+      - name: "Offline / SQLite-compatible tests"
+        run: |
+          cd backend
+          echo "=========================================="
+          echo "  Offline & SQLite-compatible Tests"
+          echo "  (no PostgreSQL required)"
+          echo "=========================================="
+          echo ""
+          python -m pytest tests/ -q -rs \
+            --tb=short \
+            --durations=10 \
+            -p no:warnings
+          echo ""
+          echo "Offline/SQLite tests passed."
+        # DATABASE_URL intentionally unset:
+        #   - SQLite & mock tests create their own engines
+        #   - PG-only tests self-skip: _postgres_reachable() checks a
+        #     Unix-socket PG that does not exist on the runner
+        #   - tenant_foundation & auth DB tests self-skip:
+        #     _DB_AVAILABLE is False when DATABASE_URL is unset
+
+      # ── Round 2: PostgreSQL-specific tests ─────────────────────
+      - name: "Run database migrations"
+        run: |
+          cd backend
+          alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/wecom_test
+
+      - name: "PostgreSQL-specific tests"
+        run: |
+          cd backend
+          echo "=========================================="
+          echo "  PostgreSQL-Specific Tests"
+          echo "  (live PostgreSQL service required)"
+          echo "=========================================="
+
+          echo ""
+          echo "--- Migration tests ---"
+          python -m pytest \
+            tests/test_revoke_association_migration.py \
+            tests/test_media_storage_backend_migration.py \
+            tests/test_message_revocations_integrity_migration.py \
+            tests/test_message_revocations_tenant_integrity.py \
+            tests/test_check_message_revocations_integrity.py \
+            -rs -v --tb=short --durations=5
+
+          echo ""
+          echo "--- Revoke concurrency test ---"
+          python -m pytest \
+            tests/test_revoke_concurrency.py \
+            -rs -v --tb=short --durations=5
+
+          echo ""
+          echo "--- Tenant foundation (live DB) ---"
+          python -m pytest \
+            tests/test_tenant_foundation.py \
+            -rs -v --tb=short
+
+          echo ""
+          echo "--- Auth (live DB) ---"
+          python -m pytest \
+            tests/test_auth.py \
+            -k "test_session_cookie_validates_against_db" \
+            -rs -v --tb=short
+
+          echo ""
+          echo "PostgreSQL tests passed."
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/wecom_test
+          RND201_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
+          RND174_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
 
   deploy:
     name: Deploy to ECS
-    needs: ci-check
+    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
