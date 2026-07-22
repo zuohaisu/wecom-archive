@@ -224,19 +224,18 @@ def build_message_reachability_report(
     offset = max(0, offset)
     sample_limit = max(0, min(sample_limit, MAX_SAMPLE_LIMIT))
 
-    # TODO(RND-179/RND-180): _collect_staff_ids / _derive_conversation_membership /
-    # _fetch_conversation_messages / _is_staff are private helpers of
-    # app.routers.conversations, imported here so the audit replays the exact
-    # same membership logic instead of a parallel reimplementation (see
-    # module docstring). Extracting them into a shared, non-router service
-    # module (e.g. app/conversation_membership.py) would remove this
-    # cross-module private import, but conversations.py is a large,
-    # heavily-tested router — that extraction is deliberately deferred to a
-    # follow-up rather than folded into this focused fix patch.
+    # _collect_staff_ids / _derive_conversation_membership /
+    # _fetch_conversation_messages / _is_staff are owned by the shared,
+    # non-router service app.conversation_membership (extracted out of the
+    # router in RND-215), imported here so the audit replays the exact same
+    # membership logic instead of a parallel reimplementation. The router
+    # (app.routers.conversations) re-exports these same objects, so the audit
+    # and the router are guaranteed to reference identical function
+    # implementations -- no behavioral divergence is possible.
     #
-    # Imported lazily (not at module scope) to avoid a circular import: the
-    # router module in turn does not import this module, but keeping this
-    # runtime-local documents the direction of dependency deliberately.
+    # Kept at function scope (runtime-local) to make the one-directional
+    # dependency explicit: reachability_audit -> conversation_membership,
+    # never the reverse.
     from app.conversation_membership import (
         _collect_staff_ids,
         _derive_conversation_membership,
