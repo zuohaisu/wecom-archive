@@ -19,7 +19,9 @@ details, see [DATA_MODEL.md](DATA_MODEL.md).
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/health` | Liveness check |
+| `GET` | `/health` | Readiness check (DB + schema revision) — see `docs/DEPLOYMENT.md` §7.5. Alias of `/health/ready`; use `/health/live` for a dependency-free liveness probe. |
+| `GET` | `/health/live` | Liveness check (process only) |
+| `GET` | `/health/ready` | Readiness check (DB + schema revision) |
 | `GET` | `/admin/login` | Login page shell |
 | `POST` | `/api/auth/password/login` | Password login when `AUTH_MODE=password` |
 | `GET` | `/api/auth/wecom/login` | Start WeCom OAuth flow |

@@ -20,3 +20,10 @@ def _get_engine():
 def get_db() -> Generator[Session, None, None]:
     with Session(_get_engine()) as session:
         yield session
+
+
+def get_engine():
+    """Public accessor for the shared engine — used by readiness checks
+    (app.db.schema_check) that need a raw connection rather than an
+    ORM Session."""
+    return _get_engine()

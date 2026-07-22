@@ -4,14 +4,15 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import SESSION_COOKIE, get_current_user
 from app.db.models import AdminSession, ArchiveMessage, ArchiveMessageRecipient
-from app.db.session import get_db
+from app.db.schema_check import full_readiness_check
+from app.db.session import get_db, get_engine
 from app.i18n_assets import I18N_JS_SOURCE, I18N_SCRIPT_TAG
 from app.message_type_registry import build_frontend_registry_entries
 from app.routers.auth import router as auth_router
@@ -142,9 +143,53 @@ def _resolve_session_tenant_id(request: Request, db: Session) -> Optional[str]:
     return session.tenant_id if session is not None else None
 
 
-@app.get("/health")
-def health():
+@app.get("/health/live")
+def health_live():
+    """Liveness only: the process can respond to HTTP at all. Does not
+    touch the database — a DB outage must not make this fail, or
+    orchestration tooling would kill/restart a process that isn't the
+    actual problem. Use /health/ready (or /health, see below) to gate
+    deploys and load-balancer readiness."""
     return {"status": "ok"}
+
+
+def _readiness_body(response: Response) -> dict:
+    """RND-227: real readiness, not a static ok. A DB outage or a schema
+    that hasn't been migrated to the repository's head must never report
+    HTTP 200 — that was the exact gap that let deploys restart the
+    service ahead of `alembic upgrade head` and serve UndefinedColumn
+    500s. Never exposes exception text, connection strings, or revision
+    ids in the response body (kept generic on purpose for an
+    unauthenticated endpoint) — see app.db.schema_check.full_readiness_check
+    for the detail that stays server-side only."""
+    try:
+        ok, _detail = full_readiness_check(get_engine())
+    except Exception:
+        # get_engine() itself can raise (e.g. DATABASE_URL unset) before
+        # full_readiness_check's own try/except ever starts — caught
+        # here too so this endpoint can never surface a 500/stack trace,
+        # only the documented 200/503 contract.
+        ok = False
+    if not ok:
+        response.status_code = 503
+        return {"status": "unavailable"}
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready(response: Response):
+    return _readiness_body(response)
+
+
+@app.get("/health")
+def health(response: Response):
+    """Kept as an alias for /health/ready (not liveness) for backward
+    compatibility: every existing caller (scripts/deploy_server.sh's
+    public check, external uptime monitoring) already treats this path
+    as "is the service actually usable", and downgrading it to a
+    liveness-only check would silently reintroduce the schema-drift gap
+    this endpoint exists to close."""
+    return _readiness_body(response)
 
 
 @app.get("/admin/messages", response_class=HTMLResponse)

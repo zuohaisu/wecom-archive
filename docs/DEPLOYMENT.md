@@ -16,12 +16,14 @@ Versioned in this repository:
 
 | Asset | Path | Purpose |
 |------|------|---------|
-| Deploy script | `scripts/deploy_server.sh` | Pull latest code, install deps, restart app service, verify health |
+| Deploy script | `scripts/deploy_server.sh` | Pull latest code, install deps, run+verify Alembic migration, restart app service, gate on readiness, auto-rollback on failure (see §7) |
+| Revision verification | `backend/scripts/verify_alembic_head.py` | Non-interactive DB-revision-vs-repo-head check used by the deploy script and independently testable |
+| Deploy integration tests | `scripts/tests/deploy_server.bats` | Mocked end-to-end coverage of the deploy script's ordering and rollback behavior |
 | Worker unit | `deploy/systemd/wecom-archive-worker.service` | One-shot sync + decrypt |
 | Worker timer | `deploy/systemd/wecom-archive-worker.timer` | Runs worker every 5 minutes |
 | Media unit | `deploy/systemd/wecom-archive-media-download.service` | One-shot image download |
 | Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Runs media download every 5 minutes |
-| GitHub Actions workflow | `.github/workflows/deploy.yml` | Triggers deploy script on `main` push |
+| GitHub Actions workflow | `.github/workflows/deploy.yml` | CI tests + migration + schema-drift gate, then triggers deploy script on `main` push (see §7) |
 
 Not versioned in this repository:
 
@@ -105,9 +107,20 @@ uvicorn app.main:app --host 127.0.0.1 --port 8035
 
 Production typically omits `--reload`.
 
-Health endpoint:
+Health endpoints (RND-227):
 
-- internal: `http://127.0.0.1:8035/health`
+- `GET /health/live` — liveness only. Never touches the database; returns
+  `200 {"status":"ok"}` whenever the process can respond at all.
+- `GET /health/ready` — readiness: `SELECT 1` against the database plus a
+  comparison of the database's current Alembic revision(s) against this
+  checkout's migration head(s) (`app/db/schema_check.py`). `200
+  {"status":"ok"}` when healthy, `503 {"status":"unavailable"}` otherwise.
+  Never returns a stack trace, exception text, or connection string.
+- `GET /health` — kept as an alias of `/health/ready` (not liveness) for
+  backward compatibility with every existing caller (this script, uptime
+  monitoring). It is **not** a static "ok" — see §7 below for why that
+  used to be a real production gap.
+- internal, for the deploy gate: `http://127.0.0.1:8035/health/ready`
 
 ---
 
@@ -153,28 +166,390 @@ the trusted domain configured in WeCom Admin.
 
 ---
 
-## 7. GitHub Actions Deploy Path
+## 7. Deployment Flow (RND-227)
 
-Current automation:
+### 7.0 Background: the schema-drift bug this closes
 
-1. Push to `main`
-2. `.github/workflows/deploy.yml` runs compile-check
-3. Same workflow SSHes to the ECS host
-4. Remote host executes `bash /srv/apps/wecom-archive-365/current/scripts/deploy_server.sh`
+Before RND-227, `deploy_server.sh` never ran `alembic upgrade head` and
+`/health` always returned a static `{"status":"ok"}`. The failure mode
+this produced:
 
-`deploy_server.sh` then:
+```
+new code deployed → service restarted (schema NOT migrated)
+  → ORM references a column the database doesn't have yet
+  → UndefinedColumn / HTTP 500 in production
+  → /health still says "ok" (it never checked the database)
+```
 
-1. `git pull --ff-only origin main`
-2. installs Python dependencies
-3. runs `python -m compileall app scripts`
-4. restarts `wecom-archive-365.service`
-5. checks internal and public health endpoints
+Every piece below exists to make that sequence impossible: migration now
+runs *before* restart, its result is independently re-verified, restart
+is gated on a readiness check that actually queries the database, and a
+failure at any of those points automatically protects (or restores) the
+previously-working deployment.
 
-Current public health URL hardcoded in the script:
+### 7.1 End-to-end flow
 
-- `https://qwhhcd.crowntime.cn/health`
+```mermaid
+flowchart TD
+    A[Push to main] --> B["CI: compile check, import check,\nshellcheck + bats, SQLite/offline tests"]
+    B --> C["CI: alembic upgrade head\n(test Postgres)"]
+    C -->|fails| CI_FAIL[["CI FAILS — deploy job never runs"]]
+    C --> D["CI: alembic check\n(schema-drift gate)"]
+    D -->|drift detected| CI_FAIL
+    D --> E["CI: PostgreSQL + SQLite test suites"]
+    E -->|fails| CI_FAIL
+    E --> F_LOCK["deploy job (GH concurrency-serialized):\nSSH to ECS, flock deploy.lock\n(non-blocking) -- BEFORE any checkout"]
+    F_LOCK -->|already held| FAILLOCK[["Deploy FAILS immediately —\nanother deploy in progress,\nnothing pulled, nothing touched"]]
+    F_LOCK --> F0["same SSH session, lock still held:\nclean-tree guard, checkout EXPECTED_SHA=github.sha\n-- in the WORKFLOW itself, not deploy_server.sh"]
+    F0 -->|non-fast-forward / dirty tree| FAIL0[["Deploy FAILS —\nnothing pulled, nothing touched"]]
+    F0 --> F["same SSH session, same held lock\n(inherited via fd 9):\nrun the just-checked-out scripts/deploy_server.sh"]
 
-If the deployed domain changes, update the script in the same change.
+    F --> G["1-3: install deps, compileall"]
+    G -->|fails| ROLLBACK_CODE["Restore working tree to\nprevious commit — NO restart\n(old process still running old code)"]
+    G --> H["4: alembic upgrade head"]
+    H -->|fails| ROLLBACK_CODE
+    H --> I["5: verify DB revision(s)\n== repository head(s)"]
+    I -->|mismatch| ROLLBACK_CODE
+    I --> J["6: systemctl restart"]
+    J -->|fails| ROLLBACK_FULL
+    J --> K["7: readiness gate\n(/health/ready, retried)"]
+    K -->|exhausts retries| ROLLBACK_FULL["Rollback: restore LAST KNOWN-GOOD commit\n(persisted state, not just pre-pull HEAD),\nreinstall deps, restart, re-check health.\nOriginal deploy still exits non-zero."]
+    K --> L["7b: public /health\n(retried)"]
+    L -->|fails| PROXY_FAIL[["Deploy FAILS —\ninvestigate Nginx/DNS/TLS,\nNOT a code rollback"]]
+    L --> M["8: deploy static homepage,\nrecord this commit as last-known-good"]
+    M -->|persist fails| FAILPERSIST[["Deploy FAILS —\nservice IS healthy, but the\nrollback record could not be written"]]
+    M --> N[["Deploy SUCCEEDS"]]
+
+    ROLLBACK_CODE --> FAIL1[["Deploy FAILS (non-zero exit)"]]
+    ROLLBACK_FULL --> FAIL2[["Deploy FAILS (non-zero exit)\neven if rollback itself succeeded"]]
+```
+
+**Why the checkout happens in the workflow, not only in
+`deploy_server.sh`.** A self-pulling deploy script has an inherent
+bootstrap problem: if the checkout logic lives entirely *inside*
+`deploy_server.sh`, then whatever copy is *already on the server* from
+the previous release is what actually runs — a change to that script's
+own logic (e.g. adding SHA pinning in the first place) would only take
+effect starting with the *next* deploy after the one that shipped it.
+This is closed by moving the fetch/checkout step into the GitHub Actions
+workflow's inline SSH script instead (`.github/workflows/deploy.yml`):
+a `push`-triggered workflow is always evaluated from the commit that
+triggered it, so that inline script is *always* the fresh version —
+including on the very deploy that changes it. The checkout and the
+`bash scripts/deploy_server.sh` invocation run in the **same** SSH
+session/script block (not two separate steps) specifically so the
+`PREV_SHA` captured before the checkout stays in that shell's
+environment for `deploy_server.sh` to use, since two separate SSH
+connections would not share state. `deploy_server.sh` still carries its
+own EXPECTED_SHA-aware fetch/checkout as a fallback for direct/manual
+invocation (§7.2), and its own clean-tree guard runs regardless of
+which path reached it. The same session also takes the concurrency
+lock (§7.2 "Concurrency protection") *before* the checkout, not after —
+see that section for why the ordering matters.
+
+### 7.2 Where migration runs
+
+`alembic upgrade head` runs **on the ECS host**, inside
+`scripts/deploy_server.sh`, using the exact same `backend/.venv` and the
+same `DATABASE_URL` (sourced from `backend/.env`, never echoed) as the
+`wecom-archive-365.service` process — step **4 of 8**, after
+dependencies are installed and the code compiles, and strictly *before*
+the service is ever restarted.
+
+CI separately runs `alembic upgrade head` against a disposable test
+Postgres (`.github/workflows/deploy.yml`) — that is a **pre-deploy gate**
+on push to `main` (does this migration even apply cleanly, does the ORM
+match it; this workflow triggers on `push`, not `pull_request`, so it is
+not a pre-*merge* check), not a substitute for the production run.
+Production data is never touched by CI.
+
+**Deploying exactly what CI tested.** The `deploy` job passes
+`EXPECTED_SHA=${{ github.sha }}` into the SSH step's script (§7.1), which
+checks out that exact commit (fast-forward only — refuses and exits
+non-zero otherwise) instead of a floating `git pull --ff-only origin
+main`, then invokes the just-checked-out `deploy_server.sh` in the same
+session. This closes a real race: without SHA pinning, if a second push
+lands on `main` while this deploy's SSH step is still starting up,
+`git pull` would silently deploy that second, not-necessarily-CI-
+passed-by-this-run commit instead of the one this workflow run actually
+tested. `deploy_server.sh` also carries its own EXPECTED_SHA-aware
+fetch/checkout, reached only for direct/manual invocation (when
+`EXPECTED_SHA` is set but the caller has not already checked it out) —
+`EXPECTED_SHA` unset entirely (e.g. the documented manual first-run with
+no pinning at all) falls back to the original floating pull.
+
+**Concurrency protection.** Two layers, matching the two ways a second
+invocation could start:
+
+1. The `deploy` job declares `concurrency: {group: production-deploy,
+   cancel-in-progress: false}` — a second workflow run (e.g. two pushes
+   in quick succession) queues behind the one already running instead of
+   overlapping it. This is the primary guarantee for every CI-triggered
+   deploy.
+2. A non-blocking `flock` on `$DEPLOY_STATE_DIR/deploy.lock` is
+   defense-in-depth for anything GitHub Actions' own concurrency group
+   cannot see — a manual SSH run overlapping a CI-triggered one, for
+   example. **The lock is acquired before the checkout, not inside
+   `deploy_server.sh` after it**: the workflow's inline SSH script (§7.1)
+   takes this same lock itself, on fd 9, *before* its own clean-tree
+   guard and `git checkout`, and holds it for the checkout AND the
+   `bash scripts/deploy_server.sh` invocation that follows in the same
+   session (the child process inherits the open, locked fd 9
+   automatically). `deploy_server.sh` is told not to re-acquire it via
+   `DEPLOY_LOCK_ALREADY_HELD=1` — attempting a second, distinct `flock`
+   on the same path from the same session would self-deadlock against
+   the lock its own caller is still holding. Only a direct/manual
+   invocation (no wrapper, `DEPLOY_LOCK_ALREADY_HELD` unset) takes the
+   lock inside `deploy_server.sh` itself, and does so before any
+   guard/checkout there too — an earlier version of this mechanism took
+   the lock only inside `deploy_server.sh`, which left the CI-driven
+   path's checkout unprotected (a concurrent manual deploy could still
+   have its working tree swapped out from under it before either side
+   noticed the lock was held); this ordering closes that gap.
+
+### 7.3 Migration failure behavior
+
+If `alembic upgrade head` fails on the server:
+
+- the deploy script exits non-zero immediately;
+- `systemctl restart` is **never called** — the previously running
+  process keeps serving traffic on the old code, untouched;
+- the on-disk working tree is restored to the previous commit
+  (`git checkout -B main <previous-sha>`) so the server isn't left
+  holding a half-pulled, half-migrated checkout;
+- static homepage deployment and the health gate are **never reached**.
+
+The database itself is left exactly as `alembic upgrade head` left it
+(mid-migration state depends on what failed and where — each migration
+file is written to be safe to re-run). No automatic `alembic downgrade`
+ever runs — see §7.6.
+
+### 7.4 Revision verification
+
+`alembic upgrade head` exiting `0` is necessary but not sufficient proof
+that the database is actually on the repository's migration head.
+Step **5 of 8** runs `backend/scripts/verify_alembic_head.py`, which
+independently compares:
+
+- the database's current revision(s), read via Alembic's
+  `MigrationContext.get_current_heads()`;
+- the repository's migration head(s), read via Alembic's
+  `ScriptDirectory.get_heads()` from `backend/alembic/versions/` on disk.
+
+The two sets must be **exactly equal** — this covers the normal
+single-head case, a deliberate multi-head branch (both heads must be
+present), and a database that was never migrated at all (empty set never
+matches). Any mismatch exits non-zero and is treated exactly like a
+migration failure (§7.3) — no restart, working tree restored.
+
+The comparison logic lives in `backend/app/db/schema_check.py` and is
+shared with the `/health/ready` endpoint (§7.5), so the two can never
+silently disagree about what "the schema is up to date" means. It is
+unit- and integration-tested in
+`backend/tests/test_verify_alembic_head.py` without needing a real
+production database.
+
+### 7.5 Readiness gate
+
+Step **7 of 8**. The internal check hits `http://127.0.0.1:8035/health/ready`
+directly (bypassing Nginx) — this is the endpoint that actually decides
+whether the restart succeeded, gates before static-site deployment, and
+triggers the rollback in §7.6 on failure. It performs, per request:
+
+1. `SELECT 1` — proves the database is reachable at all;
+2. the same revision comparison as §7.4 — proves the running process's
+   schema expectations match what's actually in the database.
+
+`200 {"status":"ok"}` only when both pass; `503 {"status":"unavailable"}`
+otherwise, with no exception text, stack trace, or connection string in
+the response body (defends against exactly the "status ok but DB is
+actually down" failure mode this ticket exists to close). `/health/live`
+is a separate, dependency-free liveness probe (process-only) — it is
+**not** used to gate deploys, since a DB outage must not look like "the
+process is dead."
+
+Every readiness check (internal, public, and the post-rollback
+re-check) is retried — up to `HEALTH_RETRIES` attempts,
+`HEALTH_RETRY_INTERVAL_SECONDS` apart, each capped at
+`HEALTH_CURL_TIMEOUT_SECONDS` — so a single warm-up tick, DNS blip, or
+TLS handshake hiccup can't fail an otherwise-healthy deploy. All three
+are script variables (defaults: 10 retries, 2s apart, 5s timeout), not
+hardcoded per call site.
+
+After the internal check passes, the script also retries the **public**
+URL (`https://qwhhcd.crowntime.cn/health`, through Nginx/DNS/TLS) as an
+end-to-end confirmation. If the internal check passed but the public
+check still fails, the application itself is proven healthy — that
+points at the reverse proxy / DNS / TLS layer, which a code rollback
+cannot fix, so **no rollback is triggered**; the deploy still fails
+loudly so an operator investigates Nginx/DNS/TLS on the host.
+
+### 7.6 Code rollback
+
+Triggered only when a *verified* migration (§7.3, §7.4 both passed) is
+followed by a `systemctl restart` or internal readiness failure (§7.5).
+Steps **6-7 of 8** in the diagram above:
+
+1. `git checkout -B main <rollback-target>` — restores the working tree.
+2. Reinstall dependencies (`pip install -r requirements.txt`) for the
+   restored commit.
+3. `systemctl restart` the service again, now running the old code.
+4. Re-run the same readiness gate as §7.5 against the rolled-back
+   service.
+5. Print an explicit `ROLLBACK RESULT: SUCCEEDED` or
+   `ROLLBACK RESULT: FAILED` line either way, and on success, record
+   `<rollback-target>` as the new last-known-good commit (§7.6.1).
+6. **Regardless of whether the rollback itself succeeded, the original
+   `deploy_server.sh` invocation exits non-zero.** A rollback recovering
+   the service does not turn a failed deploy into a successful one — it
+   only limits the blast radius while an operator investigates.
+
+If the rollback's own `git checkout`, dependency install, restart, or
+readiness re-check fails, the script prints
+`ROLLBACK RESULT: FAILED — ... Manual intervention required immediately.`
+and still exits non-zero — there is no second automatic attempt.
+
+Covered end-to-end (mocked git/systemctl/curl/python/flock/mv, no real
+server) in `scripts/tests/deploy_server.bats` — all four required
+scenarios (migration success, migration failure, revision mismatch,
+readiness failure + rollback) plus the public-only-failure,
+rollback-also-fails, SHA-pinning, lock-ordering, and
+last-known-good-durability edge cases (26 tests total; re-run
+`bats scripts/tests/deploy_server.bats` after any change to this file
+or its test suite, since this count drifts).
+
+### 7.6.1 Rollback target: last-known-good, not just "whatever HEAD was a moment ago"
+
+The rollback target (`<rollback-target>` above) is read from
+`$DEPLOY_STATE_DIR/last_known_good_sha` (default
+`/srv/apps/wecom-archive-365/shared/deploy_state/last_known_good_sha` —
+deliberately **outside** the git working tree, so it can never trip the
+clean-tree guard in step 1), **not** simply the commit captured right
+before this run's `git pull`/checkout (call that `PREV_SHA`).
+
+Why the distinction matters: `PREV_SHA` is only trustworthy as "known
+good" if the *previous* deploy attempt fully succeeded, or its own
+rollback fully succeeded. If a previous attempt's rollback itself
+failed (`ROLLBACK RESULT: FAILED` — "manual intervention required") and
+someone re-triggers a deploy without that manual intervention, blindly
+trusting `PREV_SHA` again could aim the next rollback at a commit that
+was never actually proven healthy. `last_known_good_sha` is only ever
+written after this script has itself verified a commit is healthy
+(full forward success at the end of step 8, or a successful rollback's
+own re-check) — see `_record_known_good()` in `scripts/deploy_server.sh`.
+
+`PREV_SHA` is still used for the *pre-restart* failure path (§7.3) —
+restoring the working tree to match whatever is actually running right
+now, which is correct there regardless of whether that running process
+is itself known-good, since nothing has been touched yet at that point.
+
+Falls back to `PREV_SHA` when no state file exists yet (the first
+deploy after adopting RND-227, or a fresh server bootstrap).
+
+**Durability of the record itself.** On the forward-success path (end
+of step 8), failing to persist `last_known_good_sha` is treated as a
+**deploy failure** (non-zero exit), even though the service is actually
+healthy at that point — a deploy that cannot durably record its own
+rollback point has not actually delivered the guarantee this mechanism
+exists for, since the *next* deploy's rollback would have nothing
+trustworthy to fall back on. This is deliberately stricter than the
+health check itself: an operator seeing this failure should treat it as
+"the app is fine, but go find out why `$DEPLOY_STATE_DIR` couldn't be
+written to" (disk full, permissions drift), not as an application bug.
+On the rollback path (§7.6), a persist failure is logged but does not
+change the outcome, since the overall deploy already exits non-zero
+there regardless of this file.
+
+The write itself is checked at every step — creating `$DEPLOY_STATE_DIR`,
+writing the temp file, **and** the final atomic `mv` that publishes it —
+not just the first two; an earlier version checked only those and
+treated the rename's own exit status as irrelevant, which could report
+"Deploy complete" on a write that never actually completed.
+
+### 7.6.2 Code Rollback vs Database Rollback — read this before touching a migration
+
+**Code rollback is not database rollback.** `git checkout -B main
+<rollback-target>` only ever moves *files on disk* backward. It never runs
+`alembic downgrade`, and RND-227 deliberately does not implement one:
+
+- After a rollback, the database can be sitting on a schema **newer**
+  than the code now running against it (e.g. a migration added a
+  nullable column, then restart/readiness failed for an unrelated
+  reason — the column stays, the code reverts).
+- This is only safe because **every migration is required to be
+  backward-compatible**: additive (new nullable columns / tables),
+  never a same-deploy rename-or-drop of something the previous code
+  version still reads or writes. The old code must be able to run
+  unmodified against the new schema.
+- A **destructive** migration (drop column/table, tighten a constraint
+  the old code doesn't satisfy, non-additive rename) must **never** ship
+  in the same deploy as the code that depends on it, precisely because
+  this automatic code rollback cannot be paired with an automatic DB
+  rollback. Sequence destructive changes as: (1) deploy code that stops
+  using the old shape while still tolerating it, (2) once that's been
+  running safely, ship a separate migration that removes the old shape.
+  Any genuinely destructive migration requires manual operator approval
+  and a manual runbook (see `docs/rnd-207-migration-runbook.md` for the
+  shape such a runbook takes) — it must not rely on this script's
+  automatic rollback as a safety net.
+- General database-downgrade tooling (a reusable `alembic downgrade`
+  automation, point-in-time restore, etc.) is explicitly **out of
+  scope** for RND-227. If a migration ever does need undoing, that is a
+  deliberate, manual, per-migration operator decision.
+
+### 7.7 CI schema-drift gate
+
+`.github/workflows/deploy.yml`, in the `test` job, against the
+job's disposable `postgres:16` service container (never production):
+
+1. `alembic upgrade head` — fails the build if a migration doesn't apply
+   cleanly against a fresh database.
+2. `alembic check` — fails the build if the SQLAlchemy ORM models
+   (`app/db/models.py`) describe a schema that doesn't match what the
+   migrations actually produce (a model change with no accompanying
+   migration, or vice versa). Runs *after* step 1 so a "pending
+   migration" failure and a "ORM/DB drift" failure are never conflated.
+3. `shellcheck` + `scripts/tests/deploy_server.bats` — the deploy
+   script's own ordering/rollback/SHA-pinning behavior (§7.1-§7.6) is
+   gated in CI too, mocked end-to-end, no real server involved.
+4. The existing SQLite-compatible and PostgreSQL-specific test rounds
+   run as before, plus `tests/test_verify_alembic_head.py` and
+   `tests/test_readiness_health_endpoint.py`'s live-Postgres cases.
+
+The `deploy` job only runs if `test` passes, and only on `main`.
+
+### 7.8 Operational troubleshooting
+
+Run from `/srv/apps/wecom-archive-365/current/backend`, as the
+`wecomarchive` user, with the venv activated. None of these print
+`DATABASE_URL` or its password — do not add `env`/`printenv`/`cat .env`
+to this list without redacting.
+
+```bash
+# Current DB revision vs. repository head (read-only, safe on production)
+python scripts/verify_alembic_head.py; echo "exit: $?"
+
+# Same thing via raw Alembic (verbose, includes INFO logging)
+alembic current
+alembic heads
+
+# Is the service actually up right now?
+curl -fsS http://127.0.0.1:8035/health/ready; echo
+sudo systemctl status wecom-archive-365.service --no-pager
+
+# Manually re-run the full guarded deploy sequence (idempotent; safe to
+# re-run after fixing whatever the last failure reported)
+sudo -u wecomarchive bash scripts/deploy_server.sh
+
+# Inspect what a deploy would restore to if it rolled back right now
+# (the actual rollback target -- see §7.6.1 -- not just current HEAD)
+cat /srv/apps/wecom-archive-365/shared/deploy_state/last_known_good_sha
+git -C /srv/apps/wecom-archive-365/current log -1 --format='%H %s'
+```
+
+If `deploy_server.sh` exits non-zero, its own output already states
+which of §7.3 / §7.5 / §7.6 fired and, for a rollback, whether it
+succeeded — start there before reaching for any command above.
 
 ---
 
@@ -185,5 +560,11 @@ These are documentation truths, not hidden assumptions:
 - the main web service unit is not stored in this repo
 - reverse-proxy config is not stored in this repo
 - live production state cannot be proven from git alone
+- there is no automatic **database** rollback (`alembic downgrade`) —
+  RND-227 only automates a **code** rollback; see §7.6.2 for why that
+  distinction is load-bearing and what it requires of every migration
+- destructive migrations still require a manual runbook and operator
+  approval — they are not, and must not become, something this script
+  drives automatically
 
 Keep this document honest if that boundary changes.

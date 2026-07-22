@@ -194,7 +194,12 @@ def test_admin_messages_redirects_to_login_when_unauth(client) -> None:
 
 
 def test_health_is_public(client) -> None:
-    resp = client.get("/health")
+    # RND-227: /health/live is the dependency-free liveness endpoint —
+    # the right one for an auth-gating assertion. /health and
+    # /health/ready now also require no session (still public), but they
+    # depend on real DB/schema state and are covered separately in
+    # tests/test_readiness_health_endpoint.py.
+    resp = client.get("/health/live")
     assert resp.status_code == 200
 
 

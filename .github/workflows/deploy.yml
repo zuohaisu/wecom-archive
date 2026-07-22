@@ -39,6 +39,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install Bats (deploy_server.sh integration tests)
+        run: sudo apt-get update -qq && sudo apt-get install -yqq bats shellcheck
+
       - name: Install Python dependencies
         run: |
           cd backend
@@ -78,6 +81,18 @@ jobs:
           print(f'App import successful ({len(app.routes)} routes)')
           "
 
+      # ── Gate 3: deploy script safety (RND-227 P0-G) ────────────
+      # Runs the REAL scripts/deploy_server.sh end to end against mocked
+      # git/python/systemctl/curl (scripts/tests/test_helper/mock_*.sh) —
+      # never a real server. Was previously only run locally by hand;
+      # QA round 1 flagged that as a gap (a regression here could land
+      # on main undetected until an actual production deploy failed).
+      - name: "[GATE] Shellcheck deploy scripts"
+        run: shellcheck scripts/deploy_server.sh scripts/tests/test_helper/*.sh
+
+      - name: "[GATE] deploy_server.sh integration tests (bats)"
+        run: bats scripts/tests/deploy_server.bats
+
       # ── Round 1: offline / SQLite-compatible tests ─────────────
       - name: "Offline / SQLite-compatible tests"
         run: |
@@ -103,10 +118,24 @@ jobs:
         #     _DB_AVAILABLE is False when DATABASE_URL is unset
 
       # ── Round 2: PostgreSQL-specific tests ─────────────────────
-      - name: "Run database migrations"
+      - name: "[GATE] Run database migrations (alembic upgrade head)"
         run: |
           cd backend
           alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/wecom_test
+
+      # RND-227 P0-F: schema-drift gate. Must run AFTER upgrade head (a
+      # pending-migrations problem and an ORM/DB drift problem are
+      # different failures — this isolates the second one) and BEFORE
+      # the test suite, so a drifting model fails fast instead of
+      # masquerading as a random downstream test failure. Uses the same
+      # disposable CI Postgres service as every other PG-gated step
+      # here — never production.
+      - name: "[GATE] Alembic schema-drift check (ORM metadata vs migrations)"
+        run: |
+          cd backend
+          python -m alembic check
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/wecom_test
 
@@ -126,6 +155,13 @@ jobs:
             tests/test_message_revocations_integrity_migration.py \
             tests/test_message_revocations_tenant_integrity.py \
             tests/test_check_message_revocations_integrity.py \
+            -rs -v --tb=short --durations=5
+
+          echo ""
+          echo "--- RND-227 revision verification + readiness endpoint (live DB) ---"
+          python -m pytest \
+            tests/test_verify_alembic_head.py \
+            tests/test_readiness_health_endpoint.py \
             -rs -v --tb=short --durations=5
 
           echo ""
@@ -159,17 +195,95 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    # QA round 2 finding: without this, two workflow runs (e.g. two rapid
+    # pushes to main) could both reach this job and SSH in concurrently,
+    # racing deploy_server.sh's own PREV_SHA capture / restart / last-
+    # known-good bookkeeping against each other. `cancel-in-progress:
+    # false` queues a second run rather than cancelling a deploy that's
+    # already mid-flight (never kill a deploy partway through). This is
+    # the primary serialization guarantee; deploy_server.sh's own flock
+    # (docs/DEPLOYMENT.md §7.1) is defense-in-depth for invocations
+    # outside GitHub Actions' visibility (e.g. a manual SSH run).
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # QA round 2 fix: the fetch/checkout-to-EXPECTED_SHA step and the
+      # invocation of deploy_server.sh are ONE SSH session/script block
+      # (not two separate steps) specifically so PREV_SHA, captured
+      # before the checkout, stays in the same shell's environment when
+      # deploy_server.sh runs — two separate appleboy/ssh-action steps
+      # would be two independent SSH connections with no shared shell
+      # state between them.
+      #
+      # Why the checkout happens HERE, in the workflow YAML, rather than
+      # solely inside scripts/deploy_server.sh: this workflow file is
+      # always evaluated at github.sha itself (GitHub Actions reads
+      # `push`-triggered workflows from the commit that triggered them),
+      # so this script block is ALWAYS fresh — unlike the copy of
+      # deploy_server.sh already sitting on the server from the
+      # previous release, which cannot know about logic added in THIS
+      # commit until something checks that commit out. Doing the
+      # checkout here means the very deploy that ships a change to
+      # deploy_server.sh's own logic already runs that new logic,
+      # instead of only taking effect starting with the next deploy.
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
+          envs: EXPECTED_SHA
           script: |
             set -euo pipefail
-            bash /srv/apps/wecom-archive-365/current/scripts/deploy_server.sh
+            cd /srv/apps/wecom-archive-365/current
+
+            # QA round 3 fix: the lock MUST be acquired before the
+            # checkout below, not after (inside deploy_server.sh, as an
+            # earlier version of this workflow had it) -- otherwise a
+            # concurrent manual deploy already mid-flight (holding this
+            # same lock) would still have its working tree silently
+            # swapped out from under it by this checkout before this
+            # script ever finds out the lock is held. DEPLOY_LOCK_FILE
+            # must match scripts/deploy_server.sh's own
+            # $DEPLOY_STATE_DIR/deploy.lock exactly.
+            DEPLOY_LOCK_FILE=/srv/apps/wecom-archive-365/shared/deploy_state/deploy.lock
+            mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
+            exec 9>"$DEPLOY_LOCK_FILE"
+            if ! flock -n 9; then
+              echo "ERROR: another deploy is already in progress (lock held on $DEPLOY_LOCK_FILE). Refusing to run concurrently." >&2
+              exit 1
+            fi
+
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "ERROR: working tree has uncommitted changes; refusing to checkout." >&2
+              exit 1
+            fi
+            PREV_SHA="$(git rev-parse HEAD)"
+            echo "Previous commit: $PREV_SHA"
+            git fetch --quiet origin main
+            if ! git merge-base --is-ancestor "$PREV_SHA" "$EXPECTED_SHA"; then
+              echo "ERROR: EXPECTED_SHA ($EXPECTED_SHA) is not a fast-forward from $PREV_SHA." >&2
+              exit 1
+            fi
+            git checkout -B main "$EXPECTED_SHA"
+            echo "Checked out: $(git rev-parse HEAD)"
+
+            # From here on, this IS the freshly-checked-out
+            # deploy_server.sh -- fd 9 (and the flock on it, acquired
+            # above) is inherited by this child process automatically;
+            # DEPLOY_LOCK_ALREADY_HELD=1 tells it not to re-open fd 9
+            # itself, which would create a second, distinct open file
+            # description and self-deadlock against the lock this
+            # script is still holding. PREV_SHA and EXPECTED_SHA are both
+            # already in this shell's environment, so the script skips
+            # its own (redundant) checkout and uses them directly.
+            export PREV_SHA
+            export DEPLOY_LOCK_ALREADY_HELD=1
+            bash scripts/deploy_server.sh

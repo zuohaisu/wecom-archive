@@ -189,6 +189,14 @@ class KeyVersion(Base):
     """Maps WeCom publickey_ver to the private key used for decryption."""
 
     __tablename__ = "key_versions"
+    # Standalone ix_key_versions_publickey_ver index, matching migration
+    # 0001 exactly: a plain (non-unique) index in addition to the
+    # UniqueConstraint `unique=True` below already implies. Declared
+    # explicitly (not via Column(index=True), which would merge the two
+    # into a single unique index and no longer match the real schema) so
+    # `alembic check` (RND-227 CI schema-drift gate) sees ORM metadata
+    # and the actual database agree. No DB change — model-only fix.
+    __table_args__ = (Index("ix_key_versions_publickey_ver", "publickey_ver"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     publickey_ver = Column(Integer, unique=True, nullable=False)

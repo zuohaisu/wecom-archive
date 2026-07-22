@@ -315,7 +315,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 28
+    assert route_count == 30  # RND-227: +2 for /health/live, /health/ready
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -351,6 +351,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/docs",
             "/docs/oauth2-redirect",
             "/health",
+            "/health/live",
+            "/health/ready",
             "/openapi.json",
             "/redoc",
         ]
@@ -439,6 +441,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/wecom/archive/events", frozenset({"GET"}), "None", "None"),
         ("/api/wecom/archive/events", frozenset({"POST"}), "None", "None"),
         ("/health", frozenset({"GET"}), "None", "None"),
+        ("/health/live", frozenset({"GET"}), "None", "None"),
+        ("/health/ready", frozenset({"GET"}), "None", "None"),
     ]
     assert sorted(actual) == sorted(expected), (
         "Route snapshot mismatch — update expected list if intentional."
@@ -451,11 +455,23 @@ def test_route_snapshot_with_real_model_names() -> None:
 
 
 class TestPublicRoutes:
-    def test_health(self, client: TestClient) -> None:
-        resp = client.get("/health")
+    def test_health_live_always_ok(self, client: TestClient) -> None:
+        resp = client.get("/health/live")
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/json"
         assert resp.json() == {"status": "ok"}
+
+    def test_health(self, client: TestClient) -> None:
+        # RND-227: /health is now a real readiness check (DB connectivity
+        # + schema revision), not a static "ok" — this test file's fixture
+        # never sets DATABASE_URL / runs Alembic, so the honest result
+        # here is 503, not a masked 200. See
+        # tests/test_readiness_health_endpoint.py for the 200-on-a-real-
+        # migrated-database and 503-on-drift live-Postgres coverage.
+        resp = client.get("/health")
+        assert resp.status_code == 503
+        assert resp.headers["content-type"] == "application/json"
+        assert resp.json() == {"status": "unavailable"}
 
     def test_login_page(self, client: TestClient) -> None:
         resp = client.get("/admin/login")

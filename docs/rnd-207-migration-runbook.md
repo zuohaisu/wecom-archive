@@ -4,6 +4,18 @@
 > is a manual operator step. Steps are explicitly assigned to **Haisu**
 > (deploy/app) or **Miss Hermes** (Qiniu console / DNS / billing). Nothing in
 > this runbook is run by CI/CD or by the application.
+>
+> **RND-227 note:** since RND-227, `scripts/deploy_server.sh` runs
+> `alembic upgrade head` automatically on every deploy for *routine,
+> backward-compatible* migrations — see `docs/DEPLOYMENT.md` §7. §4
+> below, written before that, still describes migration 0012 (thumbnails)
+> specifically as a manually-gated production step; that migration is
+> purely additive (nullable columns) and safe under the new automatic
+> flow, so its own manual-approval framing here is historical, not a
+> conflict. The "gated" principle itself is not obsolete — it now applies
+> to **destructive** migrations only, which must still never rely on
+> RND-227's automatic code rollback as a safety net (`docs/DEPLOYMENT.md`
+> §7.6.2).
 
 ## 0. Scope & key facts
 
