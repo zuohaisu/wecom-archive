@@ -13,7 +13,7 @@ def _get_engine():
         url = os.environ.get("DATABASE_URL", "").strip()
         if not url:
             raise RuntimeError("DATABASE_URL environment variable is not set")
-        _engine = create_engine(url)
+        _engine = create_engine(url, pool_size=2, max_overflow=2)
     return _engine
 
 
