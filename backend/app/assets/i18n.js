@@ -209,6 +209,14 @@
 
         "nav.diagnostics": "系统诊断",
 
+        "search.placeholder": "搜索联系人或聊天内容…",
+        "search.noResults": "未找到匹配结果",
+        "search.loading": "搜索中…",
+        "search.error": "搜索失败，请重试",
+        "search.contacts": "联系人",
+        "search.messages": "消息",
+        "search.highlight": "高亮",
+
         "diagnostics.pageTitle": "消息可达性诊断",
         "diagnostics.pageDescription": "本页仅展示消息可达性审计的聚合统计数据，不包含消息内容或原始标识符。",
         "diagnostics.reachabilityTitle": "消息可达性",
@@ -444,6 +452,14 @@
 
         "nav.diagnostics": "系統診斷",
 
+        "search.placeholder": "搜尋聯絡人或聊天內容…",
+        "search.noResults": "未找到匹配結果",
+        "search.loading": "搜尋中…",
+        "search.error": "搜尋失敗，請重試",
+        "search.contacts": "聯絡人",
+        "search.messages": "訊息",
+        "search.highlight": "高亮",
+
         "diagnostics.pageTitle": "訊息可達性診斷",
         "diagnostics.pageDescription": "本頁僅顯示訊息可達性稽核的彙總統計數據，不包含訊息內容或原始識別碼。",
         "diagnostics.reachabilityTitle": "訊息可達性",
@@ -678,6 +694,14 @@
         "login.error.configError": "Server configuration error. Please contact your administrator.",
 
         "nav.diagnostics": "System Diagnostics",
+
+        "search.placeholder": "Search contacts or messages...",
+        "search.noResults": "No results found",
+        "search.loading": "Searching...",
+        "search.error": "Search failed, retry",
+        "search.contacts": "Contacts",
+        "search.messages": "Messages",
+        "search.highlight": "Highlight",
 
         "diagnostics.pageTitle": "Message Reachability Diagnostics",
         "diagnostics.pageDescription": "This page shows aggregate statistics from the message reachability audit only — no message content or raw identifiers are displayed.",

@@ -315,7 +315,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 30  # RND-227: +2 for /health/live, /health/ready
+    assert route_count == 32  # RND-159: +2 for /api/search/contacts, /api/search/messages
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -347,7 +347,9 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/messages",
             "/api/messages/{msgid}",
             "/api/monitored-accounts",
-            "/api/wecom/archive/events",
+                "/api/search/contacts",
+                "/api/search/messages",
+                "/api/wecom/archive/events",
             "/docs",
             "/docs/oauth2-redirect",
             "/health",
@@ -436,6 +438,18 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/monitored-accounts",
             frozenset({"GET"}),
             "list[MonitoredAccountOut]",
+            "None",
+        ),
+        (
+            "/api/search/contacts",
+            frozenset({"GET"}),
+            "list[ContactSearchResult]",
+            "None",
+        ),
+        (
+            "/api/search/messages",
+            frozenset({"GET"}),
+            "MessageSearchResponse",
             "None",
         ),
         ("/api/wecom/archive/events", frozenset({"GET"}), "None", "None"),

@@ -20,6 +20,7 @@ from app.routers.auth import router as auth_router
 from app.routers.conversations import MediaAccessNoStoreMiddleware
 from app.routers.conversations import router as conversations_router
 from app.routers.reachability_audit import router as reachability_audit_router
+from app.routers.search import router as search_router
 from app.routers.wecom_events import router as wecom_events_router
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ app.add_middleware(MediaAccessNoStoreMiddleware)
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(reachability_audit_router)
+app.include_router(search_router)
 app.include_router(wecom_events_router)
 
 _MAX_LIMIT = 100
@@ -518,6 +520,27 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .v-chatrecord-node:last-child{border-bottom:none}
 .v-chatrecord-sender{font-size:.78rem;font-weight:600;color:#555}
 .v-chatrecord-time{font-size:.7rem;color:#bbb;margin-left:.4rem}
+/* RND-159 search */
+.search-bar{position:relative;flex:0 1 300px;min-width:0}
+.search-bar input{width:100%;padding:.22rem .6rem;border:1px solid #3a4a5a;border-radius:4px;background:#0a1a2e;color:#ddd;font-size:.8rem;outline:none;box-sizing:border-box}
+.search-bar input:focus{border-color:#1890ff;background:#0d2137}
+.search-bar input::placeholder{color:#5c7185}
+.search-results{position:absolute;top:115%;left:0;right:0;background:#fff;border:1px solid #e8e8e8;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);max-height:460px;overflow-y:auto;z-index:200;display:none}
+.sr-section{padding:.3rem 0}
+.sr-section-header{padding:.2rem .6rem;font-size:.72rem;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:.03em}
+.sr-item{padding:.35rem .6rem;cursor:pointer;font-size:.8rem;color:#333;display:flex;flex-direction:column;gap:.08rem}
+.sr-item:hover{background:#e6f4ff}
+.sr-item-main{display:flex;align-items:center;gap:.4rem}
+.sr-item-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-item-raw{font-size:.7rem;color:#bbb;flex-shrink:0}
+.sr-item-snippet{font-size:.75rem;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.4}
+.sr-item-time{font-size:.7rem;color:#bbb}
+.sr-item-conv{font-size:.72rem;color:#888}
+.sr-highlight{color:#e00;font-weight:600}
+.sr-empty,.sr-loading,.sr-error{padding:.6rem;text-align:center;font-size:.8rem;color:#ccc}
+.sr-error{color:#cf1322;background:#fff2f0}
+.sr-loading{color:#888}
+.sr-divider{height:1px;background:#f0f0f0;margin:0}
 </style>
 </head>
 <body>
@@ -528,6 +551,10 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
   <div class="refresh-bar">
     <span id="refresh-status" class="refresh-status"></span>
     <button class="btn-refresh" id="btn-refresh" onclick="refreshNow('manual')" data-i18n="refresh.manual">刷新</button>
+  </div>
+  <div class="search-bar" id="search-bar">
+    <input type="text" id="search-input" placeholder="搜索联系人或聊天内容…" autocomplete="off">
+    <div class="search-results" id="search-results"></div>
   </div>
   <div class="top-bar-user">
     <span id="current-user"></span>
@@ -2399,6 +2426,210 @@ setMode('staff');
 lastRefreshAt=Date.now();
 updateRefreshStatus();
 startAutoRefresh();
+
+// RND-159: Search
+var searchTimer=null,searchLastQ='';
+function highlightKeyword(text,keyword){
+  if(!keyword)return text;
+  var re=new RegExp('('+keyword.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');
+  return text.replace(re,'<span class="sr-highlight">$1</span>');
+}
+function doSearch(){
+  var input=document.getElementById('search-input');
+  var results=document.getElementById('search-results');
+  var q=input.value.trim();
+  if(q===searchLastQ)return;
+  searchLastQ=q;
+  if(!q){results.style.display='none';return;}
+  results.innerHTML='<div class="sr-loading">'+I18N.t('search.loading')+'</div>';
+  results.style.display='block';
+  setTimeout(function(){results.style.maxHeight='';},50);
+  var contactUrl='/api/search/contacts?q='+encodeURIComponent(q)+'&limit=5';
+  var msgUrl='/api/search/messages?q='+encodeURIComponent(q)+'&limit=10';
+  var contactDone=false,msgDone=false,contactError=false,msgError=false;
+  var contactData=null,msgData=null;
+  function renderResults(){
+    if(!contactDone||!msgDone)return;
+    if(contactError&&msgError){
+      results.innerHTML='<div class="sr-error">'+I18N.t('search.error')+'</div>';
+      return;
+    }
+    if((!contactData||!contactData.length)&&(!msgData||!msgData.results||!msgData.results.length)){
+      results.innerHTML='<div class="sr-empty">'+I18N.t('search.noResults')+'</div>';
+      return;
+    }
+    var html='';
+    if(contactData&&contactData.length){
+      html+='<div class="sr-section"><div class="sr-section-header">'+I18N.t('search.contacts')+' ('+contactData.length+')</div>';
+      contactData.forEach(function(c){
+        html+='<div class="sr-item" data-search-contact="'+esc(c.wecom_userid)+'"><div class="sr-item-main">'
+          +'<span class="sr-item-name">'+esc(c.display_name)+'</span>'
+          +'<span class="sr-item-raw">'+esc(c.wecom_userid)+'</span>'
+          +'</div></div>';
+      });
+      html+='</div>';
+    }
+    if(contactData&&contactData.length&&msgData&&msgData.results&&msgData.results.length){
+      html+='<div class="sr-divider"></div>';
+    }
+    if(msgData&&msgData.results&&msgData.results.length){
+      html+='<div class="sr-section"><div class="sr-section-header">'+I18N.t('search.messages')+' ('+msgData.results.length+')</div>';
+      msgData.results.forEach(function(m){
+        var sender=esc(m.sender_display_name);
+        var conv=esc(m.conversation_name);
+        var snippet=highlightKeyword(esc(m.content_snippet),q);
+        var t=m.msgtime?fmtTime(m.msgtime):'';
+        html+='<div class="sr-item"'
+          +' data-search-msg="'+esc(m.conversation_id)+'"'
+          +' data-search-msg-type="'+esc(m.conversation_type)+'"'
+          +' data-search-msg-sid="'+esc(m.entity_id||'')+'"'
+          +' data-search-msg-stype="'+esc(m.entity_type||'')+'">'
+          +'<div class="sr-item-main"><span class="sr-item-name">'+sender+'</span><span class="sr-item-conv">'+conv+'</span><span class="sr-item-time">'+t+'</span></div>'
+          +'<div class="sr-item-snippet">'+snippet+'</div>'
+          +'</div>';
+      });
+      html+='</div>';
+    }
+    results.innerHTML=html;
+    attachSearchItemEvents();
+  }
+  contactDone=false;msgDone=false;contactError=false;msgError=false;
+  contactData=null;msgData=null;
+  fetch(contactUrl).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(d){
+    contactData=d;contactDone=true;renderResults();
+  }).catch(function(){
+    contactError=true;contactDone=true;renderResults();
+  });
+  fetch(msgUrl).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(d){
+    msgData=d;msgDone=true;renderResults();
+  }).catch(function(){
+    msgError=true;msgDone=true;renderResults();
+  });
+}
+function attachSearchItemEvents(){
+  document.querySelectorAll('[data-search-contact]').forEach(function(el){
+    el.removeEventListener('click',onSearchContactItemClick);
+    el.addEventListener('click',onSearchContactItemClick);
+  });
+  document.querySelectorAll('[data-search-msg]').forEach(function(el){
+    el.removeEventListener('click',onSearchMsgItemClick);
+    el.addEventListener('click',onSearchMsgItemClick);
+  });
+}
+function onSearchContactItemClick(){
+  var wecomUserId=this.dataset.searchContact;
+  if(!wecomUserId)return;
+  document.getElementById('search-input').value='';
+  document.getElementById('search-results').style.display='none';
+  searchLastQ='';
+  setMode('staff');
+  var foundInStaff=false;
+  if(lastEntityItems){
+    lastEntityItems.forEach(function(it){
+      if(it.staff_id===wecomUserId||it.monitored_account_id===wecomUserId)foundInStaff=true;
+    });
+  }
+  if(foundInStaff){
+    var entityBody=document.getElementById('entity-body');
+    var els=entityBody.querySelectorAll('.entity-item');
+    els.forEach(function(el){
+      if(el.dataset.id===wecomUserId)onEntityClick(el);
+    });
+  }else{
+    setMode('contact');
+    var checkInterval=setInterval(function(){
+      var entityBody=document.getElementById('entity-body');
+      var els=entityBody.querySelectorAll('.entity-item');
+      var found=false;
+      els.forEach(function(el){
+        if(el.dataset.id===wecomUserId){onEntityClick(el);found=true;}
+      });
+      if(found)clearInterval(checkInterval);
+      setTimeout(function(){clearInterval(checkInterval);},5000);
+    },100);
+  }
+}
+function onSearchMsgItemClick(){
+  var convId=this.dataset.searchMsg;
+  var convType=this.dataset.searchMsgType;
+  var entityId=this.dataset.searchMsgSid;
+  var entityType=this.dataset.searchMsgStype;
+  if(!convId)return;
+  document.getElementById('search-input').value='';
+  document.getElementById('search-results').style.display='none';
+  searchLastQ='';
+  // Navigate using API-provided entity context
+  if(entityId&&entityType){
+    // Navigate to the entity first
+    var targetMode=entityType==='staff'?'staff':'contact';
+    setMode(targetMode);
+    var waitForEntity=function(){
+      var entityBody=document.getElementById('entity-body');
+      var els=entityBody.querySelectorAll('.entity-item');
+      var found=false;
+      els.forEach(function(el){
+        if(el.dataset.id===entityId){
+          onEntityClick(el);
+          found=true;
+        }
+      });
+      if(found){
+        // Wait for conv list to load, then select target conversation
+        var waitForConv=setInterval(function(){
+          var convBody=document.getElementById('conv-body');
+          var cards=convBody.querySelectorAll('.conv-card');
+          var cfound=false;
+          cards.forEach(function(card){
+            if(card.dataset.id===convId){
+              onConvClick(card);
+              cfound=true;
+            }
+          });
+          if(cfound)clearInterval(waitForConv);
+          setTimeout(function(){clearInterval(waitForConv);},5000);
+        },100);
+      }else{
+        setTimeout(waitForEntity,200);
+      }
+    };
+    setTimeout(waitForEntity,200);
+    return;
+  }
+  // Fallback: try to find in current conv list
+  if(lastConvItems){
+    for(var i=0;i<lastConvItems.length;i++){
+      if(lastConvItems[i].conversation_id===convId){
+        var convBody=document.getElementById('conv-body');
+        var cards=convBody.querySelectorAll('.conv-card');
+        cards.forEach(function(card){
+          if(card.dataset.id===convId)onConvClick(card);
+        });
+        return;
+      }
+    }
+  }
+}
+function onSearchInput(){
+  var input=document.getElementById('search-input');
+  var results=document.getElementById('search-results');
+  if(searchTimer)clearTimeout(searchTimer);
+  if(!input.value.trim()){
+    searchLastQ='';
+    results.style.display='none';
+    return;
+  }
+  searchTimer=setTimeout(doSearch,300);
+}
+function onSearchBlur(){
+  setTimeout(function(){document.getElementById('search-results').style.display='none';},200);
+}
+function onSearchFocus(){
+  var results=document.getElementById('search-results');
+  if(searchLastQ){results.style.display='block';}
+}
+document.getElementById('search-input').addEventListener('input',onSearchInput);
+document.getElementById('search-input').addEventListener('blur',onSearchBlur);
+document.getElementById('search-input').addEventListener('focus',onSearchFocus);
 </script>
 </body>
 </html>
