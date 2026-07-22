@@ -469,13 +469,38 @@ def _find_nested_media_ref(structured_content, path: str) -> Optional[dict]:
 
 
 def _resolve_authorized_nested_media(
-    db: Session, conversation_id: str, msgid: str, item_path: str, tenant_id: str
+    db: Session,
+    conversation_id: str,
+    msgid: str,
+    item_path: str,
+    tenant_id: str,
+    *,
+    mode: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    conversation_type: Optional[str] = None,
 ) -> Tuple[ArchiveMessage, dict, MediaFile]:
     """Shared authorization + lookup for the nested mixed/chatrecord media
     routes (get_nested_message_media, get_nested_message_media_access) —
     the nested-item analogue of _resolve_authorized_media, sharing its
     exact authorization shape: conversation membership -> msgtype gate ->
     row lookup, all completed before any storage provider is touched.
+
+    mode/entity_id/conversation_type (RND-226): optional entity context,
+    identical in meaning and handling to _resolve_authorized_media — the
+    caller (each nested route) validates it up front (mode without its id,
+    or a conversation_type that is not exactly 'direct'/'group', is a 400
+    there) and forwards it here. mode/entity_id are passed straight into
+    _fetch_conversation_messages so a nested-media request resolves against
+    the SAME entity-scoped message set the timeline used to generate the
+    access_url — an entity that does not participate in the resolved side
+    gets a 404, and a genuine direct/group collision without any entity
+    context raises the same 400 _fetch_conversation_messages already
+    raises for the ID-only timeline case. tenant_id still comes only from
+    the session, never from these params, so entity context never weakens
+    tenant isolation. conversation_type, when supplied, is cross-checked
+    against the message's own actual type once resolved (mismatch -> 400),
+    mirroring the timeline route (get_conversation_messages, ~1728-1736)
+    and _resolve_authorized_media exactly.
 
     Differs from _resolve_authorized_media in one deliberate way: the
     MediaFile row is resolved by (tenant_id, sdkfileid), NOT by
@@ -493,10 +518,31 @@ def _resolve_authorized_nested_media(
     from the request — it is read server-side from THIS message's own
     already-tenant-scoped structured_content only.
     """
-    messages = _fetch_conversation_messages(db, conversation_id, tenant_id)
+    messages = _fetch_conversation_messages(
+        db, conversation_id, tenant_id, mode=mode, entity_id=entity_id
+    )
     msg = next((m for m in messages if m.msgid == msgid), None)
     if msg is None:
         raise HTTPException(status_code=404, detail="Not found")
+
+    # RND-226: conversation_type consistency, mirroring the timeline route
+    # and _resolve_authorized_media exactly -- validated for shape by the
+    # caller already, cross-checked here against this specific message's
+    # own actual type once resolved ("group" if it carries a real roomid,
+    # "direct" otherwise). A mismatch is a 400, never silently served
+    # under the wrong assumption.
+    if conversation_type is not None:
+        resolved_conversation_type = (
+            "group" if _is_valid_roomid(msg.roomid) else "direct"
+        )
+        if conversation_type != resolved_conversation_type:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"conversation_type mismatch: requested '{conversation_type}' but "
+                    f"this conversation resolved to '{resolved_conversation_type}'"
+                ),
+            )
 
     if msg.msgtype not in NESTED_MEDIA_MSGTYPES:
         raise HTTPException(status_code=404, detail="Not found")
@@ -540,7 +586,12 @@ def _load_media_files_by_sdkfileid_map(
 
 
 def _build_nested_media_descriptor(
-    media_type: str, media_file: Optional[MediaFile], conversation_id: str, msgid: str, path: str
+    media_type: str,
+    media_file: Optional[MediaFile],
+    conversation_id: str,
+    msgid: str,
+    path: str,
+    media_context_qs: str = "",
 ) -> dict:
     """Build the safe, public per-node media descriptor attached to a
     mixed/chatrecord structured_content node — {"status", "media_type",
@@ -554,6 +605,19 @@ def _build_nested_media_descriptor(
     (RND-207) the nested analogue of the top-level thumbnail fields:
     thumbnail_access_url is set only when a thumbnail was generated for this
     nested image, image_width/image_height only for layout reservation.
+
+    media_context_qs (RND-226): the entity-context query-string suffix
+    (mode/staff_id/contact_id/conversation_type) the timeline route
+    resolved this conversation with, produced once by
+    _entity_context_query_string. Appended to access_url (and, via
+    _with_variant_thumb, thumbnail_access_url) so a client following a
+    nested access_url preserves the SAME entity context the timeline was
+    resolved with — the nested analogue of what
+    TimelineMessageOut.media_access_url already does for top-level media.
+    Empty ("") for a context-free request, in which case the emitted URLs
+    are byte-identical to the pre-RND-226 shape. Only appended to the
+    access_url once, before the thumbnail variant is derived, so the
+    thumbnail URL correctly ends up as "...?<context>&variant=thumb".
     """
     status = "not_downloaded"
     mime_type: Optional[str] = None
@@ -587,6 +651,7 @@ def _build_nested_media_descriptor(
             access_url = (
                 f"/api/conversations/{conversation_id}/messages/{msgid}"
                 f"/nested-media/{path}/access"
+                f"{media_context_qs}"
             )
             if (
                 getattr(media_file, "thumbnail_status", None) == "generated"
@@ -609,7 +674,15 @@ def _build_nested_media_descriptor(
 
 
 def _enrich_nested_media_fields(
-    fields: dict, media_refs: list, media_files_by_sdkfileid: dict, conversation_id: str, msgid: str
+    fields: dict,
+    media_refs: list,
+    media_files_by_sdkfileid: dict,
+    conversation_id: str,
+    msgid: str,
+    mode: Optional[str] = None,
+    staff_id: Optional[str] = None,
+    contact_id: Optional[str] = None,
+    roomid: Optional[str] = None,
 ) -> dict:
     """Return a deep copy of a mixed/chatrecord message's structured_content
     "fields" with every media-bearing node's "media" value replaced by
@@ -623,7 +696,33 @@ def _enrich_nested_media_fields(
     JSONB column — mutating it in place risks an unintended write-back on
     a session that later flushes/commits for an unrelated reason. This
     function must never mutate its input.
+
+    mode/staff_id/contact_id (RND-226): the entity-context params the
+    timeline request itself was resolved with (bucket/entity-scoped, so
+    identical for every message in the page). Forwarded into the
+    per-node access_url so a client following it resolves against the SAME
+    entity the timeline used.
+
+    conversation_type (RND-226 fix): NOT bucket-level. The timeline's
+    bucket-level conversation_type ("group if any message has a roomid")
+    cannot be stamped onto every node, because a collision bucket can
+    contain BOTH a direct message (no roomid) AND a group message (roomid
+    set) — stamping the bucket-level "group" onto a direct message's
+    nested access_url makes the nested resolver (which validates
+    conversation_type against THAT message's own roomid) correctly reject
+    it. Instead conversation_type is derived PER MESSAGE from this
+    message's own roomid ("group" if _is_valid_roomid(roomid), else
+    "direct") — the exact rule _resolve_authorized_nested_media uses to
+    validate the same param back. So a direct image's URL gets
+    conversation_type=direct and a group video's gets conversation_type=
+    group, both of which the resolver accepts. Computed once per call,
+    not per node, then handed to _build_nested_media_descriptor as a
+    fully-formed query string via _entity_context_query_string.
     """
+    per_message_conversation_type = "group" if _is_valid_roomid(roomid) else "direct"
+    media_context_qs = _entity_context_query_string(
+        mode, staff_id, contact_id, per_message_conversation_type
+    )
     refs_by_path = {r["path"]: r for r in media_refs}
     fields = copy.deepcopy(fields)
 
@@ -645,7 +744,8 @@ def _enrich_nested_media_fields(
                 media_files_by_sdkfileid.get(ref["sdkfileid"]) if ref is not None else None
             )
             node["media"] = _build_nested_media_descriptor(
-                node.get("type"), media_file, conversation_id, msgid, node.get("path")
+                node.get("type"), media_file, conversation_id, msgid, node.get("path"),
+                media_context_qs,
             )
         children = node.get("children")
         if isinstance(children, list):
@@ -1741,16 +1841,23 @@ def get_conversation_messages(
     display_names = _load_display_names(db, tenant_id)
 
     # RND-158 Phase 2 QA round 7 (blocker 3, media context propagation):
-    # precompute the query-string suffix carrying this request's entity
-    # context (mode/staff_id/contact_id/conversation_type), appended to
-    # every media_url/media_access_url this response generates below so a
-    # client following one of those URLs preserves the same context the
-    # timeline itself was resolved with. Empty ("") when no entity context
-    # was supplied on this request -- generated media URLs are then
-    # byte-identical to previous rounds' behavior.
-    media_context_qs = _entity_context_query_string(
-        mode, staff_id, contact_id, conversation_type
-    )
+    # precompute the entity-context query-string suffix (mode/staff_id/
+    # contact_id) carried by every media URL this response generates.
+    # conversation_type is DELIBERATELY NOT included here (RND-226 fix):
+    # it must be derived PER MESSAGE from each message's own roomid
+    # ("group" if _is_valid_roomid(roomid) else "direct"), because a
+    # collision bucket can contain both a direct message and a group
+    # message and stamping the bucket-level value onto every node would
+    # make the resolver (which checks conversation_type against that
+    # specific message's roomid) reject the mismatched side. The per-message
+    # conversation_type is re-attached at each media-URL construction site
+    # below via _entity_context_query_string(mode, staff_id, contact_id,
+    # per_message_type). Empty ("") when no entity context was supplied on
+    # this request -- generated media URLs are then byte-identical to
+    # previous rounds' behavior. The per-message conversation_type is
+    # re-attached at each media-URL construction site below via
+    # _entity_context_query_string(mode, staff_id, contact_id,
+    # per_message_type).
 
     all_sorted_asc = sorted(messages, key=lambda m: (m.msgtime or 0, m.id))
     if before is not None:
@@ -1832,6 +1939,10 @@ def get_conversation_messages(
                     nested_media_files_map,
                     conversation_id,
                     msg.msgid,
+                    mode=mode,
+                    staff_id=staff_id,
+                    contact_id=contact_id,
+                    roomid=getattr(msg, "roomid", None),
                 )
             structured_content_out = {
                 "fields": out_fields,
@@ -1892,13 +2003,17 @@ def get_conversation_messages(
                 file_state,
             )
             if media.media_status == "available":
+                per_message_type = "group" if _is_valid_roomid(getattr(msg, "roomid", None)) else "direct"
+                url_context_qs = _entity_context_query_string(
+                    mode, staff_id, contact_id, per_message_type
+                )
                 media_url = (
                     f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media"
-                    f"{media_context_qs}"
+                    f"{url_context_qs}"
                 )
                 media_access_url = (
                     f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media/access"
-                    f"{media_context_qs}"
+                    f"{url_context_qs}"
                 )
                 thumbnail_access_url, image_width, image_height = _thumbnail_timeline_fields(
                     media_file, media_access_url
@@ -1925,13 +2040,17 @@ def get_conversation_messages(
                 except (MediaStorageUnavailable, MediaStorageConfigurationError):
                     file_state = "unavailable"
             if file_state == "servable":
+                per_message_type = "group" if _is_valid_roomid(getattr(msg, "roomid", None)) else "direct"
+                url_context_qs = _entity_context_query_string(
+                    mode, staff_id, contact_id, per_message_type
+                )
                 media_url = (
                     f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media"
-                    f"{media_context_qs}"
+                    f"{url_context_qs}"
                 )
                 media_access_url = (
                     f"/api/conversations/{conversation_id}/messages/{msg.msgid}/media/access"
-                    f"{media_context_qs}"
+                    f"{url_context_qs}"
                 )
                 thumbnail_access_url, image_width, image_height = _thumbnail_timeline_fields(
                     media_file, media_access_url
@@ -2566,6 +2685,27 @@ def get_nested_message_media(
     conversation_id: str,
     msgid: str,
     item_path: str,
+    mode: Optional[str] = Query(
+        None,
+        description=(
+            "RND-226: optional entity context: 'staff' or 'contact'. Same "
+            "semantics as GET .../messages -- required to unambiguously "
+            "authorize a nested media item on a message that only exists on "
+            "one side of a direct/group conversation-id collision. Without "
+            "it, a genuinely ambiguous conversation_id returns 400, same as "
+            "the timeline route."
+        ),
+    ),
+    staff_id: Optional[str] = Query(None, description="Required when mode=staff"),
+    contact_id: Optional[str] = Query(None, description="Required when mode=contact"),
+    conversation_type: Optional[str] = Query(
+        None,
+        description=(
+            "RND-226: optional consistency check, 'direct' or 'group' -- same "
+            "validation as GET .../messages. Never used to select or filter "
+            "the message itself."
+        ),
+    ),
     variant: Optional[str] = Query(
         None,
         description=(
@@ -2600,9 +2740,21 @@ def get_nested_message_media(
     shape alone.
     """
     _, tenant_id = auth
+    if conversation_type is not None and conversation_type not in ("direct", "group"):
+        raise HTTPException(
+            status_code=400, detail="conversation_type must be 'direct' or 'group'"
+        )
+    entity_id = _resolve_entity_context(mode, staff_id, contact_id)
 
     _msg, _ref, media_file = _resolve_authorized_nested_media(
-        db, conversation_id, msgid, item_path, tenant_id
+        db,
+        conversation_id,
+        msgid,
+        item_path,
+        tenant_id,
+        mode=mode,
+        entity_id=entity_id,
+        conversation_type=conversation_type,
     )
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         media_file, "nested media route"
@@ -2651,6 +2803,27 @@ def get_nested_message_media_access(
     msgid: str,
     item_path: str,
     response: Response,
+    mode: Optional[str] = Query(
+        None,
+        description=(
+            "RND-226: optional entity context: 'staff' or 'contact'. Same "
+            "semantics as GET .../messages -- required to unambiguously "
+            "authorize a nested media item on a message that only exists on "
+            "one side of a direct/group conversation-id collision. Without "
+            "it, a genuinely ambiguous conversation_id returns 400, same as "
+            "the timeline route."
+        ),
+    ),
+    staff_id: Optional[str] = Query(None, description="Required when mode=staff"),
+    contact_id: Optional[str] = Query(None, description="Required when mode=contact"),
+    conversation_type: Optional[str] = Query(
+        None,
+        description=(
+            "RND-226: optional consistency check, 'direct' or 'group' -- same "
+            "validation as GET .../messages. Never used to select or filter "
+            "the message itself."
+        ),
+    ),
     variant: Optional[str] = Query(
         None,
         description=(
@@ -2694,9 +2867,21 @@ def get_nested_message_media_access(
     """
     response.headers["Cache-Control"] = "no-store"
     _, tenant_id = auth
+    if conversation_type is not None and conversation_type not in ("direct", "group"):
+        raise HTTPException(
+            status_code=400, detail="conversation_type must be 'direct' or 'group'"
+        )
+    entity_id = _resolve_entity_context(mode, staff_id, contact_id)
 
     _msg, _ref, media_file = _resolve_authorized_nested_media(
-        db, conversation_id, msgid, item_path, tenant_id
+        db,
+        conversation_id,
+        msgid,
+        item_path,
+        tenant_id,
+        mode=mode,
+        entity_id=entity_id,
+        conversation_type=conversation_type,
     )
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         media_file, "nested media access route"
@@ -2704,11 +2889,13 @@ def get_nested_message_media_access(
     serve_ref, is_thumbnail = _resolve_variant_serve_ref(media_file, variant, effective_ref)
     content_type = detect_media_content_type_for_ref(serve_ref)
     size_bytes = None if is_thumbnail else media_file.file_size
+    proxy_context_qs = _entity_context_query_string(mode, staff_id, contact_id, conversation_type)
 
     if effective_backend == "local":
         proxy_url = (
             f"/api/conversations/{conversation_id}/messages/{msgid}"
             f"/nested-media/{item_path}"
+            f"{proxy_context_qs}"
         )
         if is_thumbnail:
             proxy_url = _with_variant_thumb(proxy_url)
