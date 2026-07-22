@@ -397,14 +397,26 @@ fi
 
 # Guard: this script uses `git checkout -B "$GIT_BRANCH" "$PREV_SHA"` for
 # rollback below. That is only safe to run unconditionally (never
-# clobbering an operator's unreviewed local edit) if the working tree is
-# already known-clean before it starts — enforce that explicitly here.
-if [ -n "$(_git status --porcelain)" ]; then
-    echo "ERROR: Working tree at $DEPLOY_DIR has uncommitted changes." >&2
-    echo "  This script requires the production checkout to be clean before it will" >&2
-    echo "  pull or roll back code. Investigate (git status / git diff) and clean up" >&2
-    echo "  manually, then re-run." >&2
+# clobbering an operator's unreviewed local edit) if tracked files are
+# known-unchanged — enforce that here by checking for modifications to
+# tracked files only. Untracked files (.env.bak.*, qn-py-sdk/, etc.) do
+# not block deployment (git pull --ff-only will still refuse to
+# overwrite one that conflicts with an incoming tracked file).
+if [ -n "$(_git status --porcelain --untracked-files=no)" ]; then
+    echo "ERROR: Working tree at $DEPLOY_DIR has modified tracked files." >&2
+    echo "  This script will not proceed while tracked files are locally" >&2
+    echo "  modified (git status --short --untracked-files=no):" >&2
+    _git status --short --untracked-files=no >&2
+    echo "  Clean up or commit, then re-run." >&2
     exit 1
+fi
+
+# Non-blocking warning: report untracked files in the checkout so
+# operators know they exist but let deployment proceed.
+UNTRACKED_FILES="$(_git ls-files --others --exclude-standard)"
+if [ -n "$UNTRACKED_FILES" ]; then
+    echo "NOTE: Untracked files exist in the deployment checkout (non-blocking):"
+    printf '%s\n' "$UNTRACKED_FILES"
 fi
 
 # QA round 2 fix (bootstrap lag): PREV_SHA may already be supplied by
