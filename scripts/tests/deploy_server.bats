@@ -184,7 +184,7 @@ line_of() {
 	export MOCK_GIT_DIRTY=1
 	run run_deploy
 	[ "$status" -ne 0 ]
-	assert_output_contains "uncommitted changes"
+	assert_output_contains "modified tracked files"
 
 	run grep -c "git pull" "$CMD_LOG"
 	[ "$status" -ne 0 ]
