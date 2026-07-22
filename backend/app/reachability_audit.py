@@ -46,7 +46,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, false, or_
 from sqlalchemy.orm import Session
@@ -237,7 +237,7 @@ def build_message_reachability_report(
     # Imported lazily (not at module scope) to avoid a circular import: the
     # router module in turn does not import this module, but keeping this
     # runtime-local documents the direction of dependency deliberately.
-    from app.routers.conversations import (
+    from app.conversation_membership import (
         _collect_staff_ids,
         _derive_conversation_membership,
         _fetch_conversation_messages,

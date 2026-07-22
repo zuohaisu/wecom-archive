@@ -1077,12 +1077,17 @@ def test_invalid_membership_derivation_is_caught_and_audit_continues(monkeypatch
     escape.
     """
     from app.reachability_audit import build_message_reachability_report
-    import app.routers.conversations as conversations_module
+    import app.conversation_membership as conversation_membership_module
 
     def _boom(db, conv_id, tenant_id):
         raise RuntimeError("simulated malformed conversation id")
 
-    monkeypatch.setattr(conversations_module, "_fetch_conversation_messages", _boom)
+    # The audit replays the shared membership service directly (not the
+    # router's re-export), so the patch must land on the service module to
+    # affect build_message_reachability_report's membership lookup.
+    monkeypatch.setattr(
+        conversation_membership_module, "_fetch_conversation_messages", _boom
+    )
 
     broken = _insert_message(db, msgtype="text", sender="staff_a", msgtime=5400)
     _insert_recipient(db, broken.id, "contact_a")
