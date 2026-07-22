@@ -12,7 +12,8 @@
 
 ## Issue Analysis (refreshed 2026-07-22 from live Linear)
 - Original 4-phase plan mostly shipped. Resolved since: RND-209, RND-213, RND-214, RND-215, RND-207, **RND-227 (Done — CI/CD auto-migration + rollback; no longer a blocker)**.
-- **In flight (Haisu):** RND-225 (P1, OAuth fail-open security) In Progress; RND-159 (P2, search contacts+chat) In Progress.
+- **Done (2026-07-22):** RND-225 (P1, OAuth fail-open security) — verified/shipped.
+- **In flight:** RND-159 (P2, search contacts+chat) In Progress — executed by **Trae + DeepSeek V4 flash**.
 - **Open P2 Todo, ready & parallel-safe (no migration/CI/WeCom-name-change dependency):** RND-226 (nested-media entity-context fix), RND-210 (official msg-type + card rendering, child of RND-195), RND-191 (API/SQL perf — unblocked now RND-190 baseline Done), RND-160 (2c2g server opt), RND-212 (modular-monolith refactor).
 - **Backlog P2:** RND-221/220/219 (service-extraction chain), RND-211 (sync-aware refresh + "sync now"), RND-195 (all WeCom msg types — umbrella for RND-210), RND-166/165 (SaaS ops/payments).
 - **FROZEN — In Review, blocked by WeCom enterprise name change (NOT within ~1 wk):** RND-104/107/108/129/130/175. Do not merge / don't advise merge.
