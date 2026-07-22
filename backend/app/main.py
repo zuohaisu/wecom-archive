@@ -2431,7 +2431,7 @@ startAutoRefresh();
 var searchTimer=null,searchLastQ='';
 function highlightKeyword(text,keyword){
   if(!keyword)return text;
-  var re=new RegExp('('+keyword.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');
+  var re=new RegExp('('+keyword.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\$&')+')','gi');
   return text.replace(re,'<span class="sr-highlight">$1</span>');
 }
 function doSearch(){
