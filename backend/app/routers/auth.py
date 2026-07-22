@@ -31,7 +31,7 @@ from typing import Optional
 import hmac as _hmac
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -45,6 +45,8 @@ from app.auth import (
     generate_state,
     get_auth_mode,
     get_wecom_token,
+    safe_log_value,
+    strict_int_equals,
     verify_password,
 )
 from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
@@ -247,9 +249,16 @@ def admin_login_page(
     """Login page. Redirects to /admin/conversations if already authenticated.
 
     Renders password form when AUTH_MODE=password; WeCom button otherwise.
+
+    An `?error=` query param always takes priority over the already-
+    authenticated redirect: a failed OAuth callback redirects here with an
+    error code, and a stale-but-still-valid session cookie from a previous
+    login must never silently swallow that error behind a bounce back to
+    the console — the failure needs to be visible, not indistinguishable
+    from success.
     """
     session_id = request.cookies.get(SESSION_COOKIE) if request else None
-    if session_id:
+    if session_id and not error:
         now = datetime.now(timezone.utc)
         session = (
             db.query(AdminSession)
@@ -471,111 +480,167 @@ def wecom_callback(
                 "https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo",
                 params={"access_token": access_token, "code": code},
             )
+        if resp.status_code != 200:
+            raise RuntimeError(f"unexpected HTTP status {resp.status_code}")
         data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("unexpected response shape")
     except Exception as exc:
         logger.error("wecom_callback: getuserinfo request failed: %s", type(exc).__name__)
         return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
 
-    if data.get("errcode", -1) != 0:
-        logger.warning("wecom_callback: getuserinfo errcode=%s", data.get("errcode"))
+    if not strict_int_equals(data.get("errcode", -1), 0):
+        logger.warning("wecom_callback: getuserinfo errcode=%s", safe_log_value(data.get("errcode")))
         return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
 
-    wecom_user_id: str = data.get("UserId", "")
-    if not wecom_user_id:
-        logger.warning("wecom_callback: no UserId in getuserinfo response")
+    raw_user_id = data.get("UserId")
+    if not isinstance(raw_user_id, str) or not raw_user_id.strip():
+        logger.warning("wecom_callback: no valid UserId in getuserinfo response")
         return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
+    wecom_user_id = raw_user_id.strip()
 
     logger.info("wecom_callback: user identity resolved")
 
-    # 5. Verify user is an active internal employee via user/get
-    display_name = wecom_user_id
+    # 5. Verify user is an active internal employee via user/get.
+    # This check must fail closed: any exception, non-zero errcode, missing
+    # or unexpected response, or a wrong-typed field is treated as
+    # "verification failed" and rejects the login — never as "verification
+    # not needed, let them in".
     try:
         with httpx.Client(timeout=10.0) as client:
             user_resp = client.get(
                 "https://qyapi.weixin.qq.com/cgi-bin/user/get",
                 params={"access_token": access_token, "userid": wecom_user_id},
             )
+        if user_resp.status_code != 200:
+            raise RuntimeError(f"unexpected HTTP status {user_resp.status_code}")
         user_data = user_resp.json()
+        if not isinstance(user_data, dict):
+            raise RuntimeError("unexpected response shape")
     except Exception as exc:
-        logger.warning(
-            "wecom_callback: user/get failed (%s), continuing without verification",
+        logger.error(
+            "wecom_callback: user/get request failed (%s), rejecting login",
             type(exc).__name__,
         )
-        user_data = {}
+        return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
 
-    if user_data.get("errcode", 0) == 0:
-        # status=1 → active, enable=1 → not disabled
-        if user_data.get("status") != 1 or user_data.get("enable") != 1:
-            logger.warning("wecom_callback: user is inactive or disabled")
-            return RedirectResponse("/admin/login?error=user_inactive", status_code=302)
-        display_name = user_data.get("name") or wecom_user_id
-
-    # 6. Resolve tenant from DB via corp_id
-    config = (
-        db.query(TenantWecomConfig)
-        .filter(
-            TenantWecomConfig.corp_id == corp_id,
-            TenantWecomConfig.is_active.is_(True),
+    if not strict_int_equals(user_data.get("errcode", -1), 0):
+        logger.warning(
+            "wecom_callback: user/get returned errcode=%s, rejecting login",
+            safe_log_value(user_data.get("errcode")),
         )
-        .first()
-    )
-    if config is None:
-        logger.error("wecom_callback: no active tenant config found for corp")
-        return RedirectResponse("/admin/login?error=config_error", status_code=302)
+        return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
 
-    tenant_id: str = config.tenant_id
+    # Cross-check identity: the response must describe the exact userid we
+    # asked about (WeCom userids are case-insensitive), not merely *some*
+    # active user — otherwise a provider-side mixup could verify the wrong
+    # person's employment status against the session we're about to create.
+    returned_user_id = user_data.get("userid")
+    if (
+        not isinstance(returned_user_id, str)
+        or not returned_user_id.strip()
+        or returned_user_id.strip().lower() != wecom_user_id.lower()
+    ):
+        logger.warning("wecom_callback: user/get userid missing or mismatched, rejecting login")
+        return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
 
-    # 7. Upsert admin_users
-    now = datetime.now(timezone.utc)
-    user = (
-        db.query(AdminUser)
-        .filter(
-            AdminUser.tenant_id == tenant_id,
-            AdminUser.wecom_user_id == wecom_user_id,
+    # status: 1=active, 2=disabled, 4=not-activated, 5=left the enterprise.
+    # This is the complete official field set for activation state — there
+    # is no separate "enable" field in this response; requiring one made
+    # every real active employee fail to log in.
+    if not strict_int_equals(user_data.get("status"), 1):
+        logger.warning(
+            "wecom_callback: user is inactive, disabled, or has left (status=%s)",
+            safe_log_value(user_data.get("status")),
         )
-        .first()
-    )
-    if user is None:
-        user = AdminUser(
-            id=str(uuid.uuid4()),
+        return RedirectResponse("/admin/login?error=user_inactive", status_code=302)
+
+    display_name = user_data.get("name") or wecom_user_id
+
+    # 6-8. Resolve tenant, upsert admin_users, create session row.
+    # Wrapped so that any DB failure denies the login (redirect, no cookie
+    # set) instead of surfacing an uncaught 500 from a half-completed write.
+    try:
+        # 6. Resolve tenant from DB via corp_id
+        config = (
+            db.query(TenantWecomConfig)
+            .filter(
+                TenantWecomConfig.corp_id == corp_id,
+                TenantWecomConfig.is_active.is_(True),
+            )
+            .first()
+        )
+        if config is None:
+            logger.error("wecom_callback: no active tenant config found for corp")
+            return RedirectResponse("/admin/login?error=config_error", status_code=302)
+
+        tenant_id: str = config.tenant_id
+
+        # 7. Upsert admin_users
+        now = datetime.now(timezone.utc)
+        user = (
+            db.query(AdminUser)
+            .filter(
+                AdminUser.tenant_id == tenant_id,
+                AdminUser.wecom_user_id == wecom_user_id,
+            )
+            .first()
+        )
+        if user is None:
+            user = AdminUser(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                wecom_user_id=wecom_user_id,
+                name=display_name,
+                last_login_at=now,
+            )
+            db.add(user)
+        else:
+            user.last_login_at = now
+            user.name = display_name
+        db.flush()
+
+        # 8. Create session row
+        session_id = str(uuid.uuid4())
+        expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
+        session = AdminSession(
+            id=session_id,
+            admin_user_id=user.id,
             tenant_id=tenant_id,
             wecom_user_id=wecom_user_id,
-            name=display_name,
-            last_login_at=now,
+            expires_at=expires_at,
+            is_revoked=False,
         )
-        db.add(user)
-    else:
-        user.last_login_at = now
-        user.name = display_name
-    db.flush()
+        db.add(session)
+        db.flush()
 
-    # 8. Create session row
-    session_id = str(uuid.uuid4())
-    expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
-    session = AdminSession(
-        id=session_id,
-        admin_user_id=user.id,
-        tenant_id=tenant_id,
-        wecom_user_id=wecom_user_id,
-        expires_at=expires_at,
-        is_revoked=False,
-    )
-    db.add(session)
-    db.commit()
+        # 9. Build the response (cookie included) BEFORE committing. If
+        # anything here somehow fails, the except-block below still rolls
+        # back — the session row must never persist without a cookie
+        # already in hand to send with it. db.commit() must be the LAST
+        # statement in this block: nothing that can raise may run between a
+        # successful commit and `return response` below, or a committed
+        # session could end up with its cookie never actually reaching the
+        # client.
+        response = RedirectResponse("/admin/conversations", status_code=302)
+        response.set_cookie(
+            key=SESSION_COOKIE,
+            value=session_id,
+            httponly=True,
+            secure=_is_production(),
+            samesite="lax",
+            path="/",
+            max_age=SESSION_TTL_HOURS * 3600,
+        )
+        logger.info("wecom_callback: login success, session created (id not logged)")
+        db.commit()
+    except Exception as exc:
+        # Log only the exception type — DBAPI errors often embed bound
+        # parameters (e.g. the new session id) in their string repr.
+        logger.error("wecom_callback: session creation failed: %s", type(exc).__name__)
+        db.rollback()
+        return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
 
-    logger.info("wecom_callback: login success, session created (id not logged)")
-
-    # 9. Set cookie and redirect to console (hardcoded, never user-controlled)
-    response = RedirectResponse("/admin/conversations", status_code=302)
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=session_id,
-        httponly=True,
-        secure=_is_production(),
-        samesite="lax",
-        path="/",
-        max_age=SESSION_TTL_HOURS * 3600,
-    )
     return response
 
 

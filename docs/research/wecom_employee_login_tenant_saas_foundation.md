@@ -110,8 +110,12 @@ GET https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo?access_token=TOKEN&code
 **Get user info (optional verification):**
 ```
 GET https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token=TOKEN&userid=USER_ID
-→ { "errcode": 0, "userid": "...", "name": "张三", "department": [...], "status": 1, "enable": 1 }
+→ { "errcode": 0, "userid": "...", "name": "张三", "department": [...], "status": 1 }
 ```
+- `status`: 1=active, 2=disabled, 4=not-activated, 5=left the enterprise. There is
+  no `enable` field in the real response (RND-225 correction) — an earlier draft of
+  this doc invented one, and the implementation copied it, which made every real
+  active employee fail the login check in production.
 
 
 ---

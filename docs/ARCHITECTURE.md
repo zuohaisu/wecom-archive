@@ -167,7 +167,10 @@ Both modes share the same session model (`admin_sessions` table), the same cooki
 
 - WeCom self-built app OAuth 2.0 (`snsapi_base` scope, silent authorization).
 - Env vars: `WECOM_CORP_ID`, `WECOM_AGENT_ID`, `WECOM_OAUTH_SECRET`, `ADMIN_DOMAIN`.
-- Any active WeCom internal employee (status=1, enable=1) may log in.
+- Any active WeCom internal employee (`user/get.status == 1`) may log in. There is no
+  `enable` field in the real `user/get` response (RND-225) — `status` alone gates
+  activation: 1=active, 2=disabled, 4=not-activated, 5=left the enterprise. See
+  https://developer.work.weixin.qq.com/document/path/90196.
 - The backend resolves `tenant_id` from the `TenantWecomConfig` row matching `corp_id`.
 - CSRF protection: random single-use state token with 5-minute TTL.
 

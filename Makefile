@@ -72,7 +72,7 @@ lint:
 ## left to lint.
 lint-diff:
 	@set -e; \
-	files="$$(git diff --name-only --diff-filter=d -- '*.py'; git ls-files --others --exclude-standard -- '*.py')"; \
+	files="$$(git diff --name-only --diff-filter=d -- '*.py'; git diff --cached --name-only --diff-filter=d -- '*.py'; git ls-files --others --exclude-standard -- '*.py')"; \
 	files="$$(echo "$$files" | sort -u | grep -v '^$$' || true)"; \
 	if [ -z "$$files" ]; then \
 		echo "lint-diff: no changed .py files — OK"; \

@@ -1,5 +1,6 @@
 import html as _html
 import json
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
@@ -20,6 +21,35 @@ from app.routers.conversations import MediaAccessNoStoreMiddleware
 from app.routers.conversations import router as conversations_router
 from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.wecom_events import router as wecom_events_router
+
+logger = logging.getLogger(__name__)
+
+
+class _RedactOAuthCallbackQueryFilter(logging.Filter):
+    """
+    RND-225: uvicorn's default access logger (enabled unless the process is
+    started with --no-access-log — see docs/DEPLOYMENT.md, which does not
+    pass it) records the full request line for every request, including the
+    query string. The WeCom OAuth callback's `code` (a short-lived but
+    directly replayable authorization code) and `state` (CSRF token) would
+    otherwise be written verbatim to that log on every login. This does not
+    cover a reverse proxy's own access log, if one is placed in front of
+    this app — that needs equivalent redaction configured separately.
+    """
+
+    _REDACT_PREFIXES = ("/api/auth/wecom/callback?",)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+            path = args[2]
+            if path.startswith(self._REDACT_PREFIXES):
+                redacted = path.split("?", 1)[0] + "?[REDACTED]"
+                record.args = (args[0], args[1], redacted, args[3], args[4])
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactOAuthCallbackQueryFilter())
 
 app = FastAPI(title="365 WeCom Archive")
 # RND-187: guarantees Cache-Control: no-store on every response (success or
@@ -131,15 +161,23 @@ def _resolve_session_tenant_id(request: Request, db: Session) -> Optional[str]:
     if not session_id:
         return None
     now = datetime.now(timezone.utc)
-    session = (
-        db.query(AdminSession)
-        .filter(
-            AdminSession.id == session_id,
-            AdminSession.expires_at > now,
-            AdminSession.is_revoked.is_(False),
+    try:
+        session = (
+            db.query(AdminSession)
+            .filter(
+                AdminSession.id == session_id,
+                AdminSession.expires_at > now,
+                AdminSession.is_revoked.is_(False),
+            )
+            .first()
         )
-        .first()
-    )
+    except Exception as exc:
+        # A DB failure means identity cannot be confirmed — treat as
+        # unauthenticated (redirect to login), never as authenticated.
+        # Log only the exception type — DBAPI errors often embed bound
+        # parameters (here, the session token) in their string repr.
+        logger.error("_resolve_session_tenant_id: session lookup failed: %s", type(exc).__name__)
+        return None
     return session.tenant_id if session is not None else None
 
 

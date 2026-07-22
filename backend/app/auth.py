@@ -29,7 +29,7 @@ import os
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 import httpx
@@ -51,6 +51,34 @@ _TOKEN_CACHE_TTL = 7000   # seconds (WeCom tokens expire in 7200 s)
 # ---------------------------------------------------------------------------
 
 _VALID_AUTH_MODES = frozenset({"wecom", "password"})
+
+
+def strict_int_equals(value: object, expected: int) -> bool:
+    """
+    True only if value is a real int (not bool — bool is an int subclass in
+    Python, so `True == 1` is True) equal to expected. Used everywhere an
+    OAuth/API response field (errcode, status) gates a login decision, so a
+    provider returning a boolean or other truthy-but-wrong type can't slip
+    past an `== 1` / `== 0` comparison.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value == expected
+
+
+def safe_log_value(value: object) -> str:
+    """
+    Render an externally-controlled response field for logging. A plain int
+    (never bool) is shown verbatim — provider error/status codes are meant
+    to be small integers, and legitimate ones (e.g. errcode=40029) are
+    useful for debugging. Anything else — which by construction only
+    reaches this function after failing a strict_int_equals gate — is
+    rendered as just its type name, never its content: a malformed or
+    adversarial response must not be able to inject arbitrary text
+    (log forging, control characters) into application logs by putting it
+    in a field we happen to log.
+    """
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    return f"<{type(value).__name__}>"
 
 # PBKDF2 parameters — kept as constants so they are easy to audit.
 _PBKDF2_HASH = "sha256"
@@ -174,16 +202,24 @@ def get_wecom_token(corp_id: str, oauth_secret: str, cache_key: Optional[str] = 
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(url, params={"corpid": corp_id, "corpsecret": oauth_secret})
+        if resp.status_code != 200:
+            raise RuntimeError(f"unexpected HTTP status {resp.status_code}")
         data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("unexpected response shape")
     except Exception as exc:
         logger.error("WeCom gettoken request failed: %s", type(exc).__name__)
         raise RuntimeError("Failed to fetch WeCom access_token") from exc
 
-    if data.get("errcode", -1) != 0:
-        logger.error("WeCom gettoken returned error: errcode=%s", data.get("errcode"))
-        raise RuntimeError(f"WeCom gettoken failed: errcode={data.get('errcode')}")
+    if not strict_int_equals(data.get("errcode", -1), 0):
+        safe_errcode = safe_log_value(data.get("errcode"))
+        logger.error("WeCom gettoken returned error: errcode=%s", safe_errcode)
+        raise RuntimeError(f"WeCom gettoken failed: errcode={safe_errcode}")
 
-    token: str = data["access_token"]
+    token = data.get("access_token")
+    if not isinstance(token, str) or not token:
+        logger.error("WeCom gettoken response missing access_token")
+        raise RuntimeError("WeCom gettoken response missing access_token")
     expires_in = int(data.get("expires_in", 7200))
     cached_until = now + min(expires_in - 200, _TOKEN_CACHE_TTL)
 
@@ -214,19 +250,34 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     now = datetime.now(timezone.utc)
-    session = (
-        db.query(AdminSession)
-        .filter(
-            AdminSession.id == session_id,
-            AdminSession.expires_at > now,
-            AdminSession.is_revoked.is_(False),
+    try:
+        session = (
+            db.query(AdminSession)
+            .filter(
+                AdminSession.id == session_id,
+                AdminSession.expires_at > now,
+                AdminSession.is_revoked.is_(False),
+            )
+            .first()
         )
-        .first()
-    )
+    except Exception as exc:
+        # A DB failure means identity cannot be confirmed — deny, never
+        # fall back to a cached/anonymous/default identity. Log only the
+        # exception type: DBAPI errors often embed bound parameters (here,
+        # the session token) in their string repr, so exc_info/str(exc)
+        # must never be logged on this path.
+        logger.error("get_current_user: session lookup failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     if session is None:
         raise HTTPException(status_code=401, detail="Session expired or invalid")
 
-    user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
+    try:
+        user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
+    except Exception as exc:
+        logger.error("get_current_user: user lookup failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
 
