@@ -315,7 +315,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 32  # RND-159: +2 for /api/search/contacts, /api/search/messages
+    assert route_count == 33  # RND-159: +2 for /api/search/contacts, /api/search/messages; RND-229: +1 for /admin/search
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -331,6 +331,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/login",
             "/admin/messages",
             "/admin/messages/{msgid}",
+            "/admin/search",
             "/api/admin/reachability-audit",
             "/api/auth/logout",
             "/api/auth/me",
@@ -389,6 +390,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/login", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages/{msgid}", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/search", frozenset({"GET"}), "None", "HTMLResponse"),
         (
             "/api/admin/reachability-audit",
             frozenset({"GET"}),

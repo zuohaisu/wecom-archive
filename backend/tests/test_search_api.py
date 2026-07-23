@@ -42,6 +42,20 @@ def client():
         yield c
 
 
+@pytest.fixture(autouse=True)
+def _clean_app_overrides():
+    """Guard against cross-test leakage of the module-level `app` singleton's
+    dependency_overrides. Some tests override get_db/get_current_user and,
+    depending on ordering, a leaked override can corrupt an unrelated test's
+    request handling (the cause of the intermittent full-suite failure in
+    test_search_messages_pagination). Clear before AND after every test."""
+    from app.main import app
+
+    app.dependency_overrides.clear()
+    yield
+    app.dependency_overrides.clear()
+
+
 def _authed(app, db_session, tenant_id):
     """Override get_current_user + get_db to simulate an authenticated
     session for tenant_id against the real sqlite-backed db_session."""
@@ -316,46 +330,55 @@ def test_search_messages_skips_revoked(client, db) -> None:
 
 
 def test_search_messages_pagination(client, db) -> None:
+    import uuid
+
     from app.main import app
+
+    # Defensive: no leaked app state from a prior test (the autouse fixture
+    # also clears; this guards the intermittent full-suite-only failure).
+    app.dependency_overrides.clear()
+
+    # Unique keyword so this test can never match messages left behind by
+    # another code path — isolates the query to exactly the rows we insert.
+    kw = f"keyword_{uuid.uuid4().hex}"
 
     # Insert 5 messages with descending msgtime
     for i in range(5):
         msg = _insert_message(
-            db, msgtype="text", sender=f"staff_a",
+            db, msgtype="text", sender="staff_a",
             tenant_id=_TENANT_A,
-            content_text=f"message number {i} keyword",
+            content_text=f"message number {i} {kw}",
             msgtime=1000 - i,
         )
         _insert_recipient(db, msg.id, "contact_a", tenant_id=_TENANT_A)
 
+    # Walk every page via the cursor and assert: exact total of 5, distinct
+    # ids, and never any overlap between pages. This turns the previous
+    # "occasional overlap" into a deterministic, fully-covered assertion.
+    all_ids: list = []
+    before = None
     _authed(app, db, _TENANT_A)
     try:
-        # First page: limit=2
-        resp = client.get("/api/search/messages?q=keyword&limit=2")
+        for _ in range(5):
+            url = f"/api/search/messages?q={kw}&limit=2"
+            if before is not None:
+                url += f"&before={before}"
+            resp = client.get(url)
+            assert resp.status_code == 200
+            body = resp.json()
+            page_ids = [r["msgid"] for r in body["results"]]
+            assert not (set(page_ids) & set(all_ids)), (
+                "pagination returned overlapping results"
+            )
+            all_ids.extend(page_ids)
+            before = body["pagination"]["next_before"]
+            if not body["pagination"]["has_older"]:
+                break
     finally:
         app.dependency_overrides.clear()
 
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body["results"]) == 2
-    assert body["pagination"]["has_older"] is True
-    assert body["pagination"]["next_before"] is not None
-
-    # Second page: use next_before cursor
-    next_before = body["pagination"]["next_before"]
-    _authed(app, db, _TENANT_A)
-    try:
-        resp2 = client.get(f"/api/search/messages?q=keyword&limit=2&before={next_before}")
-    finally:
-        app.dependency_overrides.clear()
-
-    assert resp2.status_code == 200
-    body2 = resp2.json()
-    assert len(body2["results"]) >= 1
-    # Verify no overlapping results
-    first_ids = {r["msgid"] for r in body["results"]}
-    second_ids = {r["msgid"] for r in body2["results"]}
-    assert first_ids.isdisjoint(second_ids)
+    assert len(all_ids) == 5
+    assert len(set(all_ids)) == 5
 
 
 def test_search_messages_tenant_isolation(client, db) -> None:
