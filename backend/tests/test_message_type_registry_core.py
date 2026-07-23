@@ -285,20 +285,40 @@ def test_composite_types_are_flagged() -> None:
 
 def test_audio_doc_is_registered_separately_from_audio_archive() -> None:
     """RND-197 explicitly requires these stay distinct — audio_archive is
-    RND-202 enterprise call-recording scope, audio_doc is not."""
+    RND-202 enterprise call-recording scope, audio_doc is not. RND-210 adds
+    the voip_doc_share / voipdocshare aliases (the real WeCom msgtypes that
+    were hitting the UNKNOWN fallback) without merging the two definitions."""
     assert resolve("audio_doc") is not resolve("audio_archive")
     assert resolve("audio_doc").raw_type == "audio_doc"
-    assert resolve("audio_doc").aliases == ()
+    assert resolve("audio_doc").aliases == ("voip_doc_share", "voipdocshare")
 
 
-@pytest.mark.parametrize("msgtype", ["card", "docmsg", "audio_doc"])
+@pytest.mark.parametrize("msgtype", ["docmsg"])
 def test_raw_passthrough_types_have_no_field_parser(msgtype) -> None:
-    """RND-197: no fixture/doc in this repo confirms these types' real
-    field structure — they must stay RAW_PASSTHROUGH (raw preservation
+    """RND-197: no fixture/doc in this repo confirms docmsg's real
+    field structure — it must stay RAW_PASSTHROUGH (raw preservation
     only), never STRUCTURED_FIELDS (which would imply field extraction
     this project cannot honestly claim)."""
     assert resolve(msgtype).parser_strategy == ParserStrategy.RAW_PASSTHROUGH
     assert resolve(msgtype).support_status == MessageSupportStatus.PARTIAL
+
+
+@pytest.mark.parametrize(
+    "msgtype",
+    ["meetingvoicecall", "voip_doc_share", "voipdocshare", "audio_archive", "audio_doc", "card"],
+)
+def test_rnd210_aliased_and_structured_types_use_structured_fields_strategy(msgtype) -> None:
+    """RND-210: the official audio/contact msgtypes that previously fell
+    into the UNKNOWN fallback (meetingvoicecall / voip_doc_share /
+    voipdocshare) or RAW_PASSTHROUGH (card / audio_doc) are now recognized
+    and dispatched through STRUCTURED_FIELDS so parse_structured_content
+    extracts real fields (voiceid/endtime, doc metadata, corpname+userid).
+    They remain PARTIAL (no full rendering/playback yet)."""
+    definition = resolve(msgtype)
+    assert definition.parser_strategy == ParserStrategy.STRUCTURED_FIELDS
+    assert definition.support_status == MessageSupportStatus.PARTIAL
+    # None of them may have collapsed into the UNKNOWN fallback.
+    assert definition is not FALLBACK_DEFINITION
 
 
 @pytest.mark.parametrize("msgtype", ["link", "location", "markdown", "news", "weapp"])
@@ -755,31 +775,35 @@ def test_frontend_export_is_gated_by_real_i18n_key_presence_not_a_hardcoded_list
     """build_frontend_registry_entries() must derive its filter from
     whatever placeholder.<type> keys it is told exist, not a hardcoded
     allow-list — a registered PARTIAL/UNSUPPORTED *legacy placeholder*
-    type (e.g. "audio_archive") appears only when its i18n key is present
-    in known_placeholder_keys, and disappears the moment it is not, with no
-    code change. (RND-197: STRUCTURED_CARD types like "location" are not
-    gated by this filter at all — see build_frontend_registry_entries()'s
-    docstring — so they are not used as examples here anymore. RND-206:
-    video/voice/file/emotion are no longer "legacy placeholder" types
-    either — they are MEDIA_PREVIEW now and always present regardless of
-    this filter, exactly like STRUCTURED_CARD types — see
-    test_frontend_export_media_preview_entries_are_never_gated below, so
-    they are not used as examples here anymore. mixed/chatrecord
-    (COMPOSITE_VIEW, PARTIAL) remain genuine legacy-placeholder-bucket
-    members and are used here instead.)"""
+    type (e.g. "chatrecord", which is COMPOSITE_VIEW+PARTIAL) appears only
+    when its i18n key is present in known_placeholder_keys, and disappears
+    the moment it is not, with no code change. (RND-197: STRUCTURED_CARD
+    types like "location" are not gated by this filter at all — see
+    build_frontend_registry_entries()'s docstring — so they are not used
+    as examples here. RND-210: "audio_archive" was promoted from PLACEHOLDER
+    to STRUCTURED_CARD, so it is now always present like other
+    STRUCTURED_CARD types — it can no longer serve as a gated example.
+    "docmsg" is also STRUCTURED_CARD (RND-197), so it is not gated either.
+    RND-206: video/voice/file/emotion are MEDIA_PREVIEW now and always
+    present regardless of this filter, exactly like STRUCTURED_CARD types —
+    see test_frontend_export_media_preview_entries_are_never_gated below, so
+    they are not used as examples here. mixed/chatrecord (COMPOSITE_VIEW,
+    PARTIAL) remain genuine legacy-placeholder-bucket members and ARE used
+    here — chatrecord as the "appears when key supplied" example, mixed as
+    the "disappears when key absent" example.)"""
     with_key = build_support_matrix()  # sanity: matrix build unaffected by this filter
     assert with_key
 
-    entries_with_audio_archive = build_frontend_registry_entries(
-        known_placeholder_keys=frozenset({"placeholder.audio_archive"})
+    entries_with_chatrecord = build_frontend_registry_entries(
+        known_placeholder_keys=frozenset({"placeholder.chatrecord"})
     )
-    assert "audio_archive" in entries_with_audio_archive
-    assert "mixed" not in entries_with_audio_archive  # gated out: key not supplied
+    assert "chatrecord" in entries_with_chatrecord
+    assert "mixed" not in entries_with_chatrecord  # gated out: key not supplied
 
     entries_with_mixed = build_frontend_registry_entries(
         known_placeholder_keys=frozenset({"placeholder.mixed"})
     )
-    assert "audio_archive" not in entries_with_mixed
+    assert "chatrecord" not in entries_with_mixed
     assert "mixed" in entries_with_mixed
 
 

@@ -70,8 +70,11 @@ def test_normalise_fields_returns_structured_content_for_weapp() -> None:
     assert fields["appid"] == "wx1"
 
 
-def test_normalise_fields_returns_raw_passthrough_for_card_docmsg_audio_doc() -> None:
-    for msgtype in ("card", "docmsg", "audio_doc"):
+def test_normalise_fields_returns_raw_passthrough_for_docmsg_only() -> None:
+    # RND-210: card/audio_doc are now STRUCTURED_FIELDS (they extract real
+    # fields); docmsg remains the only RAW_PASSTHROUGH (unconfirmed schema)
+    # type among the former group.
+    for msgtype in ("docmsg",):
         decrypted = {"msgtype": msgtype, msgtype: {"unconfirmed_field": "value"}}
         normalised = _normalise_fields(decrypted)
         structured = normalised["structured_content"]

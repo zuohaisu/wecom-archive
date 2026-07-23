@@ -1258,6 +1258,71 @@ function renderSwitchCorpCard(m){
   html+='</div>';
   return html;
 }
+// RND-210 (+ QA FAIL remediation): business-card (名片) renderer. Surfaces
+// the company name + contact identifier extracted by parse_card_message.
+// When the backend resolved a tenant-scoped Contact display name
+// (f.contact_name), it is shown as the primary contact label so the
+// timeline reads "张三" instead of the raw WeCom userid "contact_zhangsan";
+// the raw userid is shown as a secondary line for traceability. The WeCom
+// protocol does NOT provide a display name or avatar itself, so when no
+// Contact match exists we fall back to the raw userid and never fabricate
+// an avatar/name (card.businessCard.noAvatar).
+function renderCardMessage(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var corpName=f.corpname||'';
+  var contactName=f.contact_name||f.userid||'';
+  var contactId=f.userid||'';
+  var html='<div class="structured-card structured-card-businesscard">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t(m.display_label_key))+'</div>';
+  if(corpName)html+='<div class="structured-card-title">'+esc(I18N.t('card.businessCard.corpName'))+esc(corpName)+'</div>';
+  if(contactName)html+='<div class="structured-card-desc">'+esc(I18N.t('card.businessCard.contactName'))+esc(contactName)+'</div>';
+  // Show the raw userid only when it differs from the resolved name (i.e.
+  // a name was actually found) — otherwise it would merely repeat the label.
+  if(contactId&&contactName!==contactId)html+='<div class="structured-card-meta structured-card-userid">'+esc(I18N.t('card.businessCard.contactId'))+esc(contactId)+'</div>';
+  // Protocol never provides an avatar/snapshot — state that rather than
+  // inventing one (RND-210 privacy boundary).
+  html+='<div class="structured-card-meta">'+esc(I18N.t('card.businessCard.noAvatar'))+'</div>';
+  html+='</div>';
+  return html;
+}
+// RND-210 (+ QA FAIL remediation): audio-archive (meeting_voice_call /
+// audio_archive) renderer. Previously audio_archive was a PLACEHOLDER type
+// excluded from the frontend registry, so it collapsed into the generic
+// "unknown message type". As a STRUCTURED_CARD it now shows the audio-
+// archive type label, the call end time (when present), and an explicit
+// "not playable" status — never an unknown placeholder. Full playback is
+// RND-202 scope, so no <audio> element is rendered here.
+function renderAudioArchiveMessage(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var et=f.endtime;
+  // WeCom endtime is epoch-seconds; fmtTime expects epoch-ms — convert only
+  // when the value looks like seconds (defensive for either unit).
+  if(et&&et<1e12)et=et*1000;
+  var html='<div class="structured-card structured-card-audioarchive">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.audioArchive'))+'</div>';
+  if(et)html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.endedAt'))+esc(fmtTime(et))+'</div>';
+  html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.playbackUnavailable'))+'</div>';
+  html+='</div>';
+  return html;
+}
+// RND-210 (+ QA FAIL remediation): audio-shared-doc (voip_doc_share /
+// audio_doc) renderer. Shows the shared document title (when the parser
+// captured one) and an explicit "not playable" status. The previous
+// renderStructuredFallback copy omitted the title, so surface it here.
+function renderAudioDocMessage(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var title=f.title||f.docid||I18N.t('messageType.audioDoc');
+  var html='<div class="structured-card structured-card-audiodoc">'
+    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.audioDoc'))+'</div>'
+    +'<div class="structured-card-title">'+esc(title)+'</div>';
+  if(f.url&&isSafeUrl(f.url))html+='<a class="structured-card-link-action" href="'+esc(f.url)+'" target="_blank" rel="noopener noreferrer">'+esc(I18N.t('link.openLink'))+'</a>';
+  html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.playbackUnavailable'))+'</div>';
+  html+='</div>';
+  return html;
+}
 // RND-198: system event card renderer — dispatches by action subtype,
 // renders a distinct (non-bubble) card visually separate from chat messages.
 // QA fix: unknown subtypes must never render raw i18n keys (e.g.
@@ -1292,9 +1357,13 @@ var STRUCTURED_CARD_RENDERERS={
   markdown:renderMarkdownCard,
   news:renderNewsCard,
   miniprogram:renderMiniprogramCard,
-  card:renderStructuredFallback,
+  card:renderCardMessage,
   docmsg:renderStructuredFallback,
-  audio_doc:renderStructuredFallback,
+  // RND-210 (+ QA FAIL remediation): audio_archive now renders a dedicated
+  // card (type label + end time + explicit "not playable") instead of the
+  // generic unknown placeholder. audio_doc shows the shared-doc title.
+  audio_archive:renderAudioArchiveMessage,
+  audio_doc:renderAudioDocMessage,
   // RND-198 interactive business types
   vote:renderVoteCard,
   todo:renderTodoCard,

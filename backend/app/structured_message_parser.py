@@ -664,6 +664,137 @@ def parse_system_event_message(payload: dict) -> tuple[dict, list[str]]:
     return fields, warnings
 
 
+def parse_card_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-210: WeCom 名片 (business card) message.
+
+    Official Conversation-Archive payload (confirmed against WeCom docs):
+        {"corpname": "<company name>", "Userid": "<contact userid>"}
+    The contact's display name is NOT in the protocol payload (only the
+    userid), and neither is any avatar — so only corpname + userid are
+    extracted. A friendly contact name would require a contacts-DB lookup
+    (deferred, see RND-210 decision note); corpid is intentionally not
+    surfaced (privacy, same rule as parse_switch_corp_message).
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    # Official doc uses "Userid" (capital U); accept the lowercase variant too.
+    corpname = _clean_str(payload.get("corpname"))
+    userid = _clean_str(payload.get("Userid")) or _clean_str(payload.get("userid"))
+    if not corpname:
+        warnings.append("missing_corpname")
+    if not userid:
+        warnings.append("missing_userid")
+
+    fields = {
+        "corpname": corpname,
+        "userid": userid,
+    }
+    return fields, warnings
+
+
+def parse_meetingvoicecall_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-210: WeCom 音频存档 (audio archive / meeting voice call) message.
+
+    Raw msgtype is "meeting_voice_call" (the precise official spelling; a
+    no-underscore "meetingvoicecall" variant also appears) — both are
+    aliased to the audio_archive definition. Key fields per WeCom docs:
+    voiceid, endtime (epoch-seconds), sdkfileid (primary media reference).
+    Shared-doc / screen-share metadata is extracted defensively only when
+    present; nothing is fabricated.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    voiceid = _clean_str(payload.get("voiceid"))
+    endtime = _safe_int(payload.get("endtime"))
+    sdkfileid = _clean_str(payload.get("sdkfileid"))
+    if not voiceid:
+        warnings.append("missing_voiceid")
+    if not sdkfileid:
+        warnings.append("missing_sdkfileid")
+
+    fields = {
+        "voiceid": voiceid,
+        "endtime": endtime,
+        "sdkfileid": sdkfileid,
+    }
+
+    # Optional shared document / screen-share — unconfirmed exact key, so
+    # probe defensively and only surface when actually present.
+    shared_doc = (
+        payload.get("shared_document")
+        or payload.get("voip_doc_share")
+        or payload.get("doc")
+    )
+    if isinstance(shared_doc, dict):
+        fields["shared_doc"] = {
+            "title": _clean_str(shared_doc.get("title"))
+            or _clean_str(shared_doc.get("filename")),
+            "url": _clean_str(shared_doc.get("url")) or _clean_str(shared_doc.get("link")),
+            "docid": _clean_str(shared_doc.get("docid"))
+            or _clean_str(shared_doc.get("fileid")),
+        }
+
+    # Demo-file / screen-share arrays (official meeting_voice_call envelope).
+    # Retained internally for audit completeness; the public-field whitelist for
+    # audio_archive omits these keys, so they are never serialised to the
+    # timeline API. UI surfacing is intentionally out of scope for RND-210.
+    demofiledata = payload.get("demofiledata")
+    if isinstance(demofiledata, list) and demofiledata:
+        fields["demofiledata"] = demofiledata
+    sharescreendata = payload.get("sharescreendata")
+    if isinstance(sharescreendata, list) and sharescreendata:
+        fields["sharescreendata"] = sharescreendata
+
+    return fields, warnings
+
+
+def parse_voip_doc_share_message(payload: dict) -> tuple[dict, list[str]]:
+    """RND-210: WeCom 音频共享文档 (voip_doc_share) message.
+
+    Extracts document metadata defensively (title / link / docid) — the
+    exact WeCom field names for this type are not confirmed by any fixture
+    in this repo, so multiple candidate keys are tried and nothing is
+    fabricated when absent.
+
+    Privacy boundary: `sdkfileid` is a server-internal media reference and is
+    NEVER surfaced as the public `docid` (that would leak the internal
+    identifier under a renamed key). Only a genuine, protocol-level `docid` /
+    `fileid` is a public document identifier; `sdkfileid` is consumed by the
+    media-download pipeline via `media_refs`, never via the public timeline
+    `fields`.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    title = (
+        _clean_str(payload.get("title"))
+        or _clean_str(payload.get("filename"))
+        or _clean_str(payload.get("name"))
+    )
+    url = (
+        _clean_str(payload.get("url"))
+        or _clean_str(payload.get("link"))
+        or _clean_str(payload.get("doc_url"))
+    )
+    # `sdkfileid` is intentionally excluded from the docid fallback — see the
+    # privacy-boundary note in the docstring above.
+    docid = (
+        _clean_str(payload.get("docid"))
+        or _clean_str(payload.get("fileid"))
+    )
+    if not title and not url and not docid:
+        warnings.append("no_doc_metadata")
+
+    fields = {
+        "title": title,
+        "url": url,
+        "docid": docid,
+    }
+    return fields, warnings
+
+
 _STRUCTURED_FIELD_PARSERS = {
     "link": parse_link_message,
     "location": parse_location_message,
@@ -678,6 +809,24 @@ _STRUCTURED_FIELD_PARSERS = {
     "schedule": parse_schedule_message,
     "redpacket": parse_redpacket_message,
     "switch_corp": parse_switch_corp_message,
+    # RND-210 (+ QA FAIL remediation): official audio/contact msgtypes that
+    # previously fell into the UNKNOWN fallback (meeting_voice_call/
+    # meetingvoicecall/voip_doc_share/voipdocshare) or RAW_PASSTHROUGH
+    # (card/audio_doc). Keyed by the RAW official msgtype the decrypt layer
+    # passes in (parse_structured_content dispatches on the raw wire value,
+    # NOT the resolved normalized_type) — so BOTH "meeting_voice_call" (the
+    # precise official spelling) and "meetingvoicecall" (a no-underscore
+    # variant seen in some payloads) must be present. "audio_archive"/
+    # "audio_doc" are also mapped so the same parser handles a top-level or
+    # nested child that arrives under the internal raw_type rather than the
+    # aliased official name.
+    "meeting_voice_call": parse_meetingvoicecall_message,
+    "meetingvoicecall": parse_meetingvoicecall_message,
+    "audio_archive": parse_meetingvoicecall_message,
+    "voip_doc_share": parse_voip_doc_share_message,
+    "voipdocshare": parse_voip_doc_share_message,
+    "audio_doc": parse_voip_doc_share_message,
+    "card": parse_card_message,
 }
 
 
@@ -1051,16 +1200,28 @@ def parse_structured_content(msgtype: Optional[str], decrypted: dict) -> Optiona
         parser = _STRUCTURED_FIELD_PARSERS.get(msgtype)
         if parser is None:
             return {"fields": None, "raw": sub_payload, "parse_warnings": ["parser_not_implemented"]}
+        # RND-210 QA FAIL round 4: the official meeting_voice_call envelope
+        # keeps `voiceid` at the TOP LEVEL while endtime/sdkfileid/shared-data
+        # live inside the `meeting_voice_call` sub-object that
+        # `decrypted.get(msgtype)` returns. Merge the top-level voiceid into the
+        # parser input so it survives normalisation + persistence -- without the
+        # merge the parser only sees the sub-object and `voiceid` is silently
+        # dropped. No other fields move: the sub-object stays the source of truth
+        # for endtime/sdkfileid/etc. The no-underscore "meetingvoicecall" variant
+        # is covered too (its envelope also carries voiceid at the top level).
+        parser_input = sub_payload
+        if msgtype in ("meeting_voice_call", "meetingvoicecall") and isinstance(decrypted, dict):
+            top_voiceid = decrypted.get("voiceid")
+            if top_voiceid is not None and "voiceid" not in sub_payload:
+                parser_input = {**sub_payload, "voiceid": top_voiceid}
         try:
-            fields, warnings = parser(sub_payload)
+            fields, warnings = parser(parser_input)
         except Exception:
             return {"fields": None, "raw": sub_payload, "parse_warnings": ["parse_failed"]}
         return {"fields": fields, "raw": sub_payload, "parse_warnings": warnings}
 
     if definition.parser_strategy == ParserStrategy.RAW_PASSTHROUGH and msgtype in (
-        "card",
         "docmsg",
-        "audio_doc",
     ):
         return {"fields": None, "raw": sub_payload, "parse_warnings": ["unconfirmed_schema"]}
 

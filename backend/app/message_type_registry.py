@@ -215,14 +215,30 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.SINGLE,
     ),
     MessageTypeDefinition(
+        # RND-210 (+ QA FAIL remediation): the real WeCom audio-archive
+        # (音频存档) msgtype is "meeting_voice_call" (with underscores) —
+        # a no-underscore spelling "meetingvoicecall" also appears in some
+        # payloads, so BOTH are aliased (NOT renamed) so resolve() recognizes
+        # them and classify_media() routes them to the byte-bearing PARTIAL
+        # media bucket. parser_strategy is STRUCTURED_FIELDS so
+        # parse_structured_content persists voiceid/endtime/sdkfileid instead
+        # of dropping to None — sdkfileid is still pulled independently by
+        # scripts.decrypt_wecom_messages_once (gated on `not is_text_content`,
+        # not parser_strategy), so media access is preserved.
+        # renderer_strategy is now STRUCTURED_CARD (was PLACEHOLDER): a
+        # PLACEHOLDER type is excluded from build_frontend_registry_entries,
+        # so the frontend fell through to "unknown message type". A dedicated
+        # renderAudioArchiveMessage surfaces the type label + end time +
+        # an explicit "not playable" status (full playback is RND-202 scope).
         raw_type="audio_archive",
         normalized_type="audio_archive",
         category=MessageCategory.MEDIA,
         support_status=MessageSupportStatus.PARTIAL,
         display_label_key="messageType.audioArchive",
-        parser_strategy=ParserStrategy.MEDIA_REFERENCE,
-        renderer_strategy=RendererStrategy.PLACEHOLDER,
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
         media_capability=MediaCapability.SINGLE,
+        aliases=("meeting_voice_call", "meetingvoicecall"),
     ),
     MessageTypeDefinition(
         raw_type="location",
@@ -245,22 +261,20 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.NONE,
     ),
     MessageTypeDefinition(
-        # RND-197: this is also the ticket's "contact" message type — WeCom's
-        # 名片/business-card message (corpname + the referenced user) is the
-        # closest confirmed match to the ticket's contact-card requirements;
-        # no separately-confirmed "contact" raw msgtype exists in this repo's
-        # fixtures/docs, so it is not registered as a second, unconfirmed
-        # entry (see structured_message_parser.py module docstring). Field
-        # extraction is not attempted (RAW_PASSTHROUGH) — no fixture/doc in
-        # this repo confirms the card payload's field names beyond
-        # "corpname", so only raw preservation + a generic structured
-        # fallback card are implemented; see RND-197 dev report.
+        # RND-197/RND-210: WeCom 名片/business-card message (corpname +
+        # contact userid). RND-197 kept this RAW_PASSTHROUGH (no confirmed
+        # schema); RND-210 promotes it to STRUCTURED_FIELDS now that the
+        # official payload shape is confirmed (see parse_card_message):
+        # {"corpname": <company>, "Userid": <contact userid>}. Only
+        # corpname + userid are extracted — no avatar, no display name, no
+        # corpid (privacy). A friendly contact name (if ever wanted) needs a
+        # contacts-DB lookup, deferred per RND-210's decision note.
         raw_type="card",
         normalized_type="card",
         category=MessageCategory.STRUCTURED,
         support_status=MessageSupportStatus.PARTIAL,
         display_label_key="messageType.card",
-        parser_strategy=ParserStrategy.RAW_PASSTHROUGH,
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
         renderer_strategy=RendererStrategy.STRUCTURED_CARD,
         media_capability=MediaCapability.NONE,
     ),
@@ -346,18 +360,24 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.NONE,
     ),
     MessageTypeDefinition(
-        # RND-197: distinct from the existing "audio_archive" entry — do not
-        # merge (audio_archive is RND-202 enterprise call-recording scope).
-        # No fixture/doc in this repo confirms audio_doc's real field
-        # structure — RAW_PASSTHROUGH only, same rationale as docmsg above.
+        # RND-197/RND-210: distinct from "audio_archive" (do not merge —
+        # audio_archive is RND-202 enterprise call-recording scope). The real
+        # WeCom msgtype for this audio-shared-doc message is "voip_doc_share"
+        # (and the no-underscore spelling "voipdocshare" also appears) — both
+        # are aliased here so they resolve out of the UNKNOWN fallback.
+        # parser_strategy promoted to STRUCTURED_FIELDS (RND-210) so
+        # parse_structured_content extracts doc metadata via
+        # parse_voip_doc_share_message. renderer_strategy stays
+        # STRUCTURED_CARD (audio_doc shows the "暂不支持播放" copy, RND-197).
         raw_type="audio_doc",
         normalized_type="audio_doc",
         category=MessageCategory.MEDIA,
         support_status=MessageSupportStatus.PARTIAL,
         display_label_key="messageType.audioDoc",
-        parser_strategy=ParserStrategy.RAW_PASSTHROUGH,
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
         renderer_strategy=RendererStrategy.STRUCTURED_CARD,
         media_capability=MediaCapability.CONDITIONAL,
+        aliases=("voip_doc_share", "voipdocshare"),
     ),
     MessageTypeDefinition(
         # RND-198: promoted to SUPPORTED with structured field extraction

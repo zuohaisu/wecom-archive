@@ -106,6 +106,17 @@ def _bundle() -> str:
         _extract(r"function renderRedpacketCard\(m\)\{.*?\n\}", "renderRedpacketCard()"),
         _extract(r"function renderSwitchCorpCard\(m\)\{.*?\n\}", "renderSwitchCorpCard()"),
         _extract(r"function renderSystemCard\(m\)\{.*?\n\}", "renderSystemCard()"),
+        # RND-210 — business-card (名片) renderer; the STRUCTURED_CARD_RENDERERS
+        # map now references it, so it must be in the bundle for the map to evaluate.
+        _extract(r"function renderCardMessage\(m\)\{.*?\n\}", "renderCardMessage()"),
+        # RND-210: STRUCTURED_CARD_RENDERERS now also references these two
+        # audio renderers — extracted for real (test_audio_doc_fallback_*
+        # exercises renderAudioDocMessage's null-fields fallback path).
+        _extract(r"function fmtTime\(ms\)\{.*?\n\}", "fmtTime()"),
+        _extract(r"function pad\(n\)\{.*?\n\}", "pad()"),
+        "function isSafeUrl(u){return typeof u==='string'&&/^https?:/i.test(u);}",
+        _extract(r"function renderAudioArchiveMessage\(m\)\{.*?\n\}", "renderAudioArchiveMessage()"),
+        _extract(r"function renderAudioDocMessage\(m\)\{.*?\n\}", "renderAudioDocMessage()"),
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
         _extract(r"function renderStructuredCard\(m\)\{.*?\n\}", "renderStructuredCard()"),
         # RND-206: renderMessageBody()/renderTimeline() now also depend on
@@ -206,6 +217,7 @@ def test_registry_has_entries_for_every_documented_msgtype() -> None:
             "markdown",
             "news",
             "docmsg",
+            "audio_archive",
             "audio_doc",
             # RND-198 interactive business types
             "system",
@@ -736,7 +748,6 @@ def test_miniprogram_card_fixes_the_weapp_normalized_type_key_mismatch() -> None
 @pytest.mark.parametrize(
     "normalized_type,display_label_key,expected_label",
     [
-        ("card", "messageType.card", "Contact card message"),
         ("docmsg", "messageType.docmsg", "Document message"),
         ("audio_doc", "messageType.audioDoc", "Audio document message"),
     ],
@@ -744,9 +755,10 @@ def test_miniprogram_card_fixes_the_weapp_normalized_type_key_mismatch() -> None
 def test_low_confidence_types_render_generic_structured_fallback(
     normalized_type, display_label_key, expected_label
 ) -> None:
-    """card/docmsg/audio_doc never get field extraction (no confirmed
-    schema) — they must show the type label plus a clear unavailable
-    line, never raw JSON."""
+    """docmsg/audio_doc never get field extraction (no confirmed schema) —
+    they must show the type label plus a clear unavailable line, never raw
+    JSON. (card is RND-210: it now extracts corpname+userid and renders via
+    renderCardMessage — covered by test_rnd_210_*.py, not this fallback.)"""
     msg = _structured_msg(normalized_type, None, display_label_key=display_label_key)
     html = _render(msg)
     assert "structured-card-fallback" in html

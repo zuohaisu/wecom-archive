@@ -61,6 +61,11 @@ def _bundle() -> str:
         _extract(r"function renderRedpacketCard\(m\)\{.*?\n\}", "renderRedpacketCard()"),
         _extract(r"function renderSwitchCorpCard\(m\)\{.*?\n\}", "renderSwitchCorpCard()"),
         _extract(r"function renderSystemCard\(m\)\{.*?\n\}", "renderSystemCard()"),
+        # RND-210 — business-card renderer referenced by STRUCTURED_CARD_RENDERERS
+        _extract(r"function renderCardMessage\(m\)\{.*?\n\}", "renderCardMessage()"),
+        # RND-210: STRUCTURED_CARD_RENDERERS now also references these two
+        # audio renderers — stub them (these tests don't exercise audio).
+        "function renderAudioArchiveMessage(m){return '';} function renderAudioDocMessage(m){return '';}",
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
         _extract(r"function renderStructuredCard\(m\)\{.*?\n\}", "renderStructuredCard()"),
         # RND-206: renderMessageBody()/renderTimeline() now also depend on

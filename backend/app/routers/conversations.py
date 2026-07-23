@@ -49,7 +49,7 @@ import copy
 import logging
 import re
 from types import SimpleNamespace
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -1713,6 +1713,46 @@ def get_conversations(
     return _build_conversation_list(messages, recipients_map, display_names, staff_ids)
 
 
+# ---------------------------------------------------------------------------
+# RND-210 QA FAIL round 2 — public-field projection for structured_content.
+# ---------------------------------------------------------------------------
+# The server persists the internal `sdkfileid` (and related media references)
+# for the media-download path, but these must NEVER reach the public timeline
+# JSON. We enforce this with (a) a global deny-set safety net that strips any
+# internal-only key from every message's structured fields, and (b) an explicit
+# per-type public-field whitelist for the audio types introduced by RND-210 so
+# the public payload contains only documented, non-sensitive fields.
+INTERNAL_STRUCTURED_FIELD_KEYS = frozenset({"sdkfileid", "corpid", "media_key"})
+
+PUBLIC_STRUCTURED_FIELD_ALLOWLIST = {
+    # audio_archive (meeting_voice_call / meetingvoicecall): only the opaque
+    # call id, end time, and any filtered shared-doc metadata — never sdkfileid.
+    "audio_archive": frozenset({"voiceid", "endtime", "shared_doc"}),
+    # audio_doc (voip_doc_share / voipdocshare): shared-document metadata only.
+    "audio_doc": frozenset({"title", "url", "docid"}),
+}
+
+
+def _project_public_structured_fields(normalized_type: Optional[str], fields: Any) -> Any:
+    """Strip internal-only keys and enforce the per-type public-field whitelist.
+
+    Returns `fields` unchanged when it is not a dict. The internal deny-set is
+    always applied (defense-in-depth); the per-type allowlist narrows the
+    output further for the audio types so only documented, non-sensitive
+    fields reach clients. The server still persists `sdkfileid` internally —
+    it is only removed from the *public* serialization here.
+    """
+    if not isinstance(fields, dict):
+        return fields
+    projected = {
+        k: v for k, v in fields.items() if k not in INTERNAL_STRUCTURED_FIELD_KEYS
+    }
+    allow = PUBLIC_STRUCTURED_FIELD_ALLOWLIST.get(normalized_type or "")
+    if allow is not None:
+        projected = {k: v for k, v in projected.items() if k in allow}
+    return projected
+
+
 @router.get(
     "/api/conversations/{conversation_id}/messages",
     response_model=ConversationMessagesOut,
@@ -1944,10 +1984,41 @@ def get_conversation_messages(
                     contact_id=contact_id,
                     roomid=getattr(msg, "roomid", None),
                 )
+            # RND-210 QA FAIL round 2: strip internal-only fields (e.g.
+            # sdkfileid) and enforce the per-type public-field whitelist so the
+            # public timeline JSON NEVER leaks server-internal data. The server
+            # still persists sdkfileid (used by the media-download path) — it
+            # is only removed from the *public* serialization here.
+            if isinstance(out_fields, dict):
+                _normalized = (type_meta or {}).get("normalized_type")
+                out_fields = _project_public_structured_fields(_normalized, out_fields)
             structured_content_out = {
                 "fields": out_fields,
                 "parse_warnings": raw_structured.get("parse_warnings", []),
             }
+
+        # RND-210 (+ QA FAIL remediation): resolve a 名片 (business card)
+        # contact's display name from the tenant's contacts registry so the
+        # timeline shows the real person name (e.g. "张三") instead of the
+        # raw WeCom userid (e.g. "contact_zhangsan"). display_names is the
+        # tenant-scoped {wecom_userid: name} map already loaded above (line
+        # ~1841) for participant labels — reused here, so no extra query.
+        # When no Contact row matches, contact_name is left absent and the
+        # frontend falls back to the raw userid (never fabricated). A shallow
+        # copy avoids mutating the ORM-loaded structured_content attribute.
+        if (
+            msg.msgtype == "card"
+            and isinstance(out_fields, dict)
+            and isinstance(display_names, dict)
+        ):
+            _card_userid = out_fields.get("userid")
+            _card_name = display_names.get(_card_userid) if _card_userid else None
+            if _card_name:
+                out_fields = {**out_fields, "contact_name": _card_name}
+                structured_content_out = {
+                    "fields": out_fields,
+                    "parse_warnings": raw_structured.get("parse_warnings", []),
+                }
 
         media_url: Optional[str] = None
         media_access_url: Optional[str] = None

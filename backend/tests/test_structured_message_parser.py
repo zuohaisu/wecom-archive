@@ -337,7 +337,7 @@ def test_dispatch_structured_fields_type_returns_fields_raw_and_warnings() -> No
     assert isinstance(result["parse_warnings"], list)
 
 
-@pytest.mark.parametrize("msgtype", ["card", "docmsg", "audio_doc"])
+@pytest.mark.parametrize("msgtype", ["docmsg"])
 def test_dispatch_raw_passthrough_types_preserve_raw_without_field_extraction(msgtype) -> None:
     sub_payload = {"some_unconfirmed_field": "value"}
     result = parse_structured_content(msgtype, {"msgtype": msgtype, msgtype: sub_payload})
@@ -919,12 +919,16 @@ def test_dispatch_never_raises_for_pathologically_nested_content() -> None:
     assert result["media_refs"] == [{"path": "0", "type": "image", "sdkfileid": "sdk-good"}]
 
 
-@pytest.mark.parametrize("msgtype", ["card", "docmsg", "audio_doc"])
+@pytest.mark.parametrize("msgtype", ["docmsg"])
 def test_nested_raw_passthrough_types_are_supported_with_no_field_extraction(msgtype) -> None:
-    """A nested card/docmsg/audio_doc child matches its top-level PARTIAL/
-    RAW_PASSTHROUGH treatment: recognized (supported=True), but no field
-    extraction is attempted (fields stays None) — it must NOT fall into
-    the generic unknown-type bucket."""
+    """A nested docmsg child matches its top-level PARTIAL/RAW_PASSTHROUGH
+    treatment: recognized (supported=True), but no field extraction is
+    attempted (fields stays None) — it must NOT fall into the generic
+    unknown-type bucket.
+
+    RND-210: card/audio_doc are no longer RAW_PASSTHROUGH — they extract
+    real fields, so they are exercised by the structured-field nested tests
+    instead."""
     fields, warnings, _refs = parse_mixed_message(
         {"item": [{"type": msgtype, "content": json.dumps({"some_field": "value"})}]}
     )
