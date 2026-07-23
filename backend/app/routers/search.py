@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, case, func, or_, text, union
+from sqlalchemy import and_, case, or_
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -21,8 +21,10 @@ from app.conversation_membership import (
     _derive_conversation_membership,
     _load_recipients_map,
     _is_staff as _legacy_is_staff,
+    _collect_staff_ids,
+    _load_display_names_for_ids,
 )
-from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
+from app.db.models import AdminUser, ArchiveMessage, Contact
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 
@@ -102,53 +104,6 @@ def _snippet_with_context(text: str, keyword: str, context_chars: int = _SNIPPET
     return snippet, pos
 
 
-def _build_display_name_map(db: Session, tenant_id: str, userids: set[str]) -> dict[str, Optional[str]]:
-    """Build {wecom_userid: name} from the contacts table."""
-    if not userids:
-        return {}
-    return {
-        c.wecom_userid: c.name
-        for c in db.query(Contact)
-        .filter(Contact.tenant_id == tenant_id, Contact.wecom_userid.in_(userids))
-        .all()
-    }
-
-
-def _build_staff_ids(db: Session, tenant_id: str) -> set[str]:
-    """Return the set of wecom_userids treated as staff for this tenant.
-    Simplified version of conversation_membership._collect_staff_ids."""
-    participant_ids: set[str] = set()
-    for row in (
-        db.query(ArchiveMessage.sender)
-        .filter(ArchiveMessage.sender.isnot(None), ArchiveMessage.tenant_id == tenant_id)
-        .distinct()
-        .all()
-    ):
-        if row[0]:
-            participant_ids.add(row[0])
-    for row in (
-        db.query(ArchiveMessageRecipient.receiver_userid)
-        .filter(ArchiveMessageRecipient.tenant_id == tenant_id)
-        .distinct()
-        .all()
-    ):
-        if row[0]:
-            participant_ids.add(row[0])
-
-    prefix_ids = {p for p in participant_ids if _legacy_is_staff(p)}
-    admin_user_rows = (
-        db.query(AdminUser.wecom_user_id)
-        .filter(AdminUser.tenant_id == tenant_id)
-        .distinct()
-        .all()
-    )
-    admin_user_ids = {row[0] for row in admin_user_rows if row[0]}
-    if not admin_user_ids:
-        return prefix_ids
-    admin_seat_ids = admin_user_ids & participant_ids
-    return prefix_ids | admin_seat_ids
-
-
 def _pick_entity_id(
     staff_ids: set[str],
     sender: Optional[str],
@@ -201,6 +156,19 @@ def search_contacts(
 
     # Search both Contact and AdminUser tables, deduplicate by wecom_userid.
     # AdminUser name takes precedence for staff display names.
+    # Each source query is bounded at the SQL level (name-match-first
+    # ordering + LIMIT) so a large tenant's total matches never get pulled
+    # into Python before truncation — the in-memory result set is capped at
+    # ~2x limit (one bounded fetch per source) instead of growing with the
+    # match count. A source's true top-`limit` rows are always among these,
+    # so the final merge+sort below still picks the correct overall top
+    # `limit`; the accepted tradeoff is that extreme cross-source dedup can
+    # leave the final result short of `limit` rather than re-querying to
+    # backfill.
+    contact_name_match = case(
+        (Contact.name.ilike(pattern, escape="\\"), 0),
+        else_=1,
+    )
     contact_rows = (
         db.query(Contact.wecom_userid, Contact.name)
         .filter(
@@ -210,9 +178,15 @@ def search_contacts(
                 Contact.wecom_userid.ilike(pattern, escape="\\"),
             ),
         )
+        .order_by(contact_name_match, Contact.name, Contact.wecom_userid)
+        .limit(limit)
         .all()
     )
 
+    admin_name_match = case(
+        (AdminUser.name.ilike(pattern, escape="\\"), 0),
+        else_=1,
+    )
     admin_rows = (
         db.query(AdminUser.wecom_user_id, AdminUser.name)
         .filter(
@@ -222,6 +196,8 @@ def search_contacts(
                 AdminUser.wecom_user_id.ilike(pattern, escape="\\"),
             ),
         )
+        .order_by(admin_name_match, AdminUser.name, AdminUser.wecom_user_id)
+        .limit(limit)
         .all()
     )
 
@@ -333,7 +309,7 @@ def search_messages(
         return MessageSearchResponse(results=[], pagination=MessageSearchPagination(has_older=False, next_before=None))
 
     # Determine staff ids for entity navigation and conversation membership
-    staff_ids = _build_staff_ids(db, tenant_id)
+    staff_ids = _collect_staff_ids(db, tenant_id)
 
     def _is_staff_member(uid: str) -> bool:
         return uid in staff_ids or _legacy_is_staff(uid)
@@ -347,7 +323,7 @@ def search_messages(
             all_userids.add(r.sender)
         for rid in recipients_map.get(r.id, []):
             all_userids.add(rid)
-    display_names = _build_display_name_map(db, tenant_id, all_userids)
+    display_names = _load_display_names_for_ids(db, tenant_id, all_userids)
 
     results: list[MessageSearchResult] = []
     for row in rows:
