@@ -52,10 +52,14 @@ def _rnd206_block() -> str:
 
 
 def _state_vars_block() -> str:
+    # RND-229 added `focusMsgId`/`focusPending` as top-level globals in
+    # main.py (declared outside the range this extractor captures). They are
+    # read by fetchTimelinePage, so declare them here in the harness's outer
+    # scope (the bundle runs at top-level, before the test's async IIFE).
     return _extract(
         r"var mode=.*?\nvar lastRenderedTimelineSignature=null;",
         "timeline/viewer state vars",
-    )
+    ) + "\nvar focusMsgId = null;\nvar focusPending = false;"
 
 
 def _bundle(extra=None) -> str:

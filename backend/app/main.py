@@ -460,6 +460,11 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .media-placeholder{background:#fafafa;border:1px dashed #d9d9d9;border-radius:4px;padding:.35rem .6rem;font-size:.8rem;color:#888;font-style:italic}
 .revoke-time{font-size:.7rem;color:#bbb;margin-top:.2rem}
 .media-preview{max-width:280px;max-height:280px;border-radius:4px;display:block}
+[data-msgid]{scroll-margin-top:1rem}
+[data-msgid].target-active{border-left:3px solid #1890ff;background:#e6f4ff}
+[data-msgid].target-flash{animation:msgFlash 1.6s ease-out both}
+@keyframes msgFlash{0%{box-shadow:0 0 0 0 rgba(24,144,255,.55);border-left-color:#1890ff;background:#fffbe6}35%{box-shadow:0 0 0 8px rgba(24,144,255,0);border-left-color:#1890ff;background:#e6f4ff}100%{box-shadow:0 0 0 0 rgba(24,144,255,0);border-left-color:#1890ff;background:#e6f4ff}}
+@media (prefers-reduced-motion: reduce){[data-msgid].target-flash{animation:none}}
 .structured-card{background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:.5rem .65rem;font-size:.8rem;max-width:320px;overflow:hidden}
 .structured-card-title{font-weight:600;margin-bottom:.2rem;word-break:break-word}
 .structured-card-desc{color:#666;font-size:.76rem;margin-bottom:.3rem;word-break:break-word}
@@ -525,6 +530,8 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .search-bar input{width:100%;padding:.22rem .6rem;border:1px solid #3a4a5a;border-radius:4px;background:#0a1a2e;color:#ddd;font-size:.8rem;outline:none;box-sizing:border-box}
 .search-bar input:focus{border-color:#1890ff;background:#0d2137}
 .search-bar input::placeholder{color:#5c7185}
+.search-bar input{padding-right:3.4rem}
+.search-bar .enter-hint{position:absolute;right:.5rem;top:50%;transform:translateY(-50%);font-size:.66rem;color:#5c7185;border:1px solid #3a4a5a;border-radius:3px;padding:0 .3rem;pointer-events:none}
 .search-results{position:absolute;top:115%;left:0;right:0;background:#fff;border:1px solid #e8e8e8;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);max-height:460px;overflow-y:auto;z-index:200;display:none}
 .sr-section{padding:.3rem 0}
 .sr-section-header{padding:.2rem .6rem;font-size:.72rem;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:.03em}
@@ -554,6 +561,7 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
   </div>
   <div class="search-bar" id="search-bar">
     <input type="text" id="search-input" placeholder="搜索联系人或聊天内容…" autocomplete="off">
+    <span class="enter-hint">↵ 结果页</span>
     <div class="search-results" id="search-results"></div>
   </div>
   <div class="top-bar-user">
@@ -878,6 +886,15 @@ function fetchTimelinePage(before, isInitial){
       timelineNextBefore=data.pagination.next_before;
       renderTimeline(isInitial);
       startHistoryObserver();
+      // RND-229 AC5/AC6 fix: trigger the initial locate only after the
+      // first-screen timeline has rendered, so a slow first-screen response
+      // no longer races the fixed 350ms timer used previously. The history
+      // pagination path (focusCheckRow's timelineHasOlder branch) handles
+      // targets that live in older pages.
+      if(isInitial && focusPending && focusMsgId){
+        focusPending=false;
+        setTimeout(focusCheckRow,60);
+      }
     })
     .catch(function(e){
       if(timelineConvId!==requestConvId||timelineRequestGen!==gen)return;
@@ -2489,12 +2506,20 @@ function startAutoRefresh(){
     }
   });
 }
+var focusMsgId=null; // RND-229: set by readFocusFromUrl() during init, read by focusCheckRow()
+// RND-229 AC5/AC6 fix: the initial focus attempt must run only after the
+// first-screen timeline has actually rendered (a fixed 350ms wait raced
+// slow first-screen responses and silently dropped the locate). Set true
+// once the target conversation is selected; consumed by fetchTimelinePage
+// on its initial render-completion.
+var focusPending=false;
 applyStaticI18n();
 loadCurrentUser();
 setMode('staff');
 lastRefreshAt=Date.now();
 updateRefreshStatus();
 startAutoRefresh();
+readFocusFromUrl();
 
 // RND-159: Search
 var searchTimer=null,searchLastQ='';
@@ -2632,7 +2657,9 @@ function onSearchMsgItemClick(){
     // Navigate to the entity first
     var targetMode=entityType==='staff'?'staff':'contact';
     setMode(targetMode);
+    var smAttempts=0;
     var waitForEntity=function(){
+      if(++smAttempts>40)return; // ~8s cap; avoid infinite retry if entity missing
       var entityBody=document.getElementById('entity-body');
       var els=entityBody.querySelectorAll('.entity-item');
       var found=false;
@@ -2678,6 +2705,78 @@ function onSearchMsgItemClick(){
     }
   }
 }
+
+// RND-229: jump back from the search results page and highlight the target message.
+// (focusMsgId is declared once near the top of this script, before readFocusFromUrl()
+//  runs during init, so its value is not reset after being set.)
+function focusMessage(msgid, convId, convType, entityId, entityType){
+  if(!convId||!msgid)return;
+  focusMsgId=msgid;
+  var targetMode=(entityType==='staff')?'staff':'contact';
+  setMode(targetMode);
+  var focusAttempts=0;
+  var waitForEntity=function(){
+    if(++focusAttempts>40)return; // ~8s cap; give up gracefully if the entity never appears
+    var entityBody=document.getElementById('entity-body');
+    var els=entityBody?entityBody.querySelectorAll('.entity-item'):[];
+    var found=false;
+    Array.prototype.forEach.call(els,function(el){
+      if(el.dataset.id===entityId){onEntityClick(el);found=true;}
+    });
+    if(found){
+      var waitForConv=setInterval(function(){
+        var convBody=document.getElementById('conv-body');
+        var cards=convBody?convBody.querySelectorAll('.conv-card'):[];
+        var cfound=false;
+        Array.prototype.forEach.call(cards,function(card){
+          if(card.dataset.id===convId){onConvClick(card);cfound=true;}
+        });
+        if(cfound){clearInterval(waitForConv);focusPending=true;}
+        setTimeout(function(){clearInterval(waitForConv);},8000);
+      },100);
+    }else{
+      setTimeout(waitForEntity,200);
+    }
+  };
+  setTimeout(waitForEntity,200);
+}
+function focusCheckRow(){
+  if(!focusMsgId)return;
+  var row=document.querySelector('[data-msgid="'+focusMsgId+'"]');
+  if(row){
+    row.scrollIntoView({behavior:'smooth',block:'center'});
+    row.classList.add('target-flash');
+    row.addEventListener('animationend',function(){row.classList.add('target-active');},{once:true});
+    showFocusBanner();
+    return;
+  }
+  if(timelineHasOlder){
+    var requestConvId=timelineConvId, gen=timelineRequestGen, before=timelineNextBefore;
+    fetchOlderMessages(requestConvId,before).then(function(){
+      if(timelineConvId!==requestConvId||timelineRequestGen!==gen)return;
+      renderTimeline(false);
+      setTimeout(focusCheckRow,250);
+    }).catch(function(){
+      if(timelineConvId!==requestConvId||timelineRequestGen!==gen)return;
+    });
+  }
+}
+function showFocusBanner(){
+  if(document.getElementById('focus-banner'))return;
+  var b=document.createElement('div');
+  b.id='focus-banner';
+  b.style.cssText='position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:300;background:#1890ff;color:#fff;padding:.35rem .8rem;border-radius:4px;font-size:.8rem;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+  b.textContent='← 返回搜索结果';
+  b.onclick=function(){history.back();};
+  document.body.appendChild(b);
+}
+function readFocusFromUrl(){
+  var p=new URLSearchParams(location.search);
+  var f=p.get('focus');
+  if(!f)return;
+  focusMessage(f,p.get('conv'),p.get('convType'),p.get('entityId'),p.get('entityType'));
+}
+
 function onSearchInput(){
   var input=document.getElementById('search-input');
   var results=document.getElementById('search-results');
@@ -2699,10 +2798,161 @@ function onSearchFocus(){
 document.getElementById('search-input').addEventListener('input',onSearchInput);
 document.getElementById('search-input').addEventListener('blur',onSearchBlur);
 document.getElementById('search-input').addEventListener('focus',onSearchFocus);
+document.getElementById('search-input').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){
+    var v=this.value.trim();
+    if(v){e.preventDefault();window.location.href='/admin/search?q='+encodeURIComponent(v);}
+  }
+});
 </script>
 </body>
 </html>
 """
+
+_SEARCH_PAGE_HTML = """\
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>搜索结果 · 对话审阅控制台</title>
+<style>
+:root{
+  --primary:#1890ff; --primary-hover:#0958d9; --primary-soft:#e6f4ff;
+  --topbar-bg:#001529; --topbar-fg:#fff; --topbar-muted:#8ca0b3; --topbar-border:#3a4a5a;
+  --page-bg:#f0f2f5; --col-bg:#fff; --border:#e8e8e8; --header-bg:#fafafa;
+  --text:#222; --text-2:#666; --text-3:#888; --text-4:#bbb; --kw:#e00;
+  --err:#cf1322; --err-bg:#fff2f0; --err-border:#ffccc7; --radius:6px;
+  --shadow-pop:0 4px 16px rgba(0,0,0,.15);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif;color:var(--text);background:var(--page-bg);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.top-bar{height:44px;background:var(--topbar-bg);color:var(--topbar-fg);display:flex;align-items:center;padding:0 1rem;gap:1rem;flex-shrink:0}
+.top-bar h1{font-size:.95rem;font-weight:600;white-space:nowrap}
+.top-bar a{color:var(--topbar-muted);font-size:.82rem;text-decoration:none;white-space:nowrap}
+.top-bar a:hover{color:#fff}
+.top-bar-user{margin-left:auto;font-size:.8rem;color:var(--topbar-muted);display:flex;align-items:center;gap:.75rem}
+.btn-logout{background:transparent;border:1px solid var(--topbar-border);color:var(--topbar-muted);padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem;text-decoration:none}
+.btn-logout:hover{border-color:var(--topbar-muted);color:#fff}
+.search-bar{position:relative;flex:0 1 320px;min-width:0}
+.search-bar form{display:flex;align-items:center;position:relative}
+.search-bar input{width:100%;padding:.22rem .6rem .22rem 1.7rem;border:1px solid var(--topbar-border);border-radius:4px;background:#0a1a2e;color:#ddd;font-size:.8rem;outline:none;box-sizing:border-box;padding-right:3.4rem}
+.search-bar input:focus{border-color:var(--primary);background:#0d2137}
+.search-bar input::placeholder{color:#5c7185}
+.search-bar .ico{position:absolute;left:.55rem;color:#5c7185;font-size:.85rem;pointer-events:none}
+.search-bar .enter-hint{position:absolute;right:.5rem;font-size:.66rem;color:#5c7185;border:1px solid var(--topbar-border);border-radius:3px;padding:0 .3rem;pointer-events:none}
+.results-page{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.results-header{display:flex;align-items:center;gap:1rem;padding:.7rem 1.25rem;background:var(--col-bg);border-bottom:1px solid var(--border);flex-shrink:0}
+.back-link{display:inline-flex;align-items:center;gap:.3rem;color:var(--primary);font-size:.82rem;text-decoration:none;white-space:nowrap}
+.back-link:hover{color:var(--primary-hover)}
+.query-heading{font-size:1.05rem;font-weight:600;display:flex;align-items:baseline;gap:.6rem;min-width:0;flex:1;overflow:hidden}
+.query-heading .q{color:var(--primary)}
+.query-heading .count{font-size:.8rem;font-weight:400;color:var(--text-3);white-space:nowrap}
+.sort-control{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:var(--text-3);white-space:nowrap}
+.sort-control select{border:1px solid var(--border);border-radius:4px;padding:.2rem .4rem;font-size:.78rem;color:var(--text-2);background:#fff}
+.results-body{flex:1;overflow-y:auto;padding:1rem 1.25rem 2rem}
+.results-list{display:flex;flex-direction:column;gap:.7rem;max-width:920px;margin:0 auto}
+.result-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:.7rem .85rem;cursor:pointer;transition:border-color .15s,box-shadow .15s,background .15s}
+.result-card:hover{border-color:var(--primary);box-shadow:var(--shadow-pop);background:#fafcff}
+.rc-context{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem}
+.rc-badge{font-size:.68rem;padding:.05rem .35rem;border-radius:2px;font-weight:600;border:1px solid}
+.rc-badge.group{background:#e6f7ff;color:#0958d9;border-color:#91caff}
+.rc-badge.direct{background:#f6ffed;color:#389e0d;border-color:#b7eb8f}
+.rc-conv{font-weight:600;font-size:.86rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rc-sender{font-size:.78rem;color:var(--text-2)}
+.rc-sender.staff{color:var(--primary-hover);font-weight:600}
+.rc-time{margin-left:auto;font-size:.72rem;color:var(--text-4);white-space:nowrap}
+.rc-snippet{font-size:.85rem;color:#444;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.rc-snippet mark{background:transparent;color:var(--kw);font-weight:700}
+.rc-foot{display:flex;align-items:center;gap:.5rem;margin-top:.45rem;font-size:.72rem;color:var(--text-3)}
+.rc-route{display:inline-flex;align-items:center;gap:.25rem}
+.rc-route .arrow{color:var(--text-4)}
+.rc-jump{margin-left:auto;color:var(--primary);font-weight:500;opacity:0;transition:opacity .15s}
+.result-card:hover .rc-jump{opacity:1}
+.state{padding:3rem 1rem;text-align:center;color:var(--text-3);font-size:.9rem}
+.state .state-ico{font-size:1.6rem;display:block;margin-bottom:.6rem;opacity:.6}
+.state-empty .hint{margin-top:.4rem;font-size:.8rem;color:var(--text-4)}
+.state-error{color:var(--err);background:var(--err-bg);border:1px solid var(--err-border);border-radius:var(--radius);max-width:420px;margin:2rem auto}
+.skeleton{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:.7rem .85rem;max-width:920px;margin:0 auto .7rem}
+.sk-line{height:.7rem;border-radius:4px;background:linear-gradient(90deg,#eee 25%,#f5f5f5 37%,#eee 63%);background-size:400% 100%;animation:sk 1.3s ease infinite;margin-bottom:.5rem}
+.sk-line.short{width:40%}
+.sk-line.mid{width:70%}
+@keyframes sk{0%{background-position:100% 0}100%{background-position:-100% 0}}
+@media (prefers-reduced-motion: reduce){.sk-line{animation:none}}
+</style>
+</head>
+<body>
+<div class="top-bar">
+  <h1>对话审阅控制台</h1>
+  <div class="search-bar">
+    <form id="searchForm" onsubmit="return doTopSearch(event)">
+      <span class="ico">🔍</span>
+      <input type="text" id="topSearch" placeholder="搜索联系人或聊天内容…" autocomplete="off">
+      <span class="enter-hint">↵ 结果页</span>
+    </form>
+  </div>
+  <div class="top-bar-user">
+    <span id="current-user"></span>
+    <a href="/admin/conversations">返回控制台</a>
+    <a class="btn-logout" href="#" onclick="doLogout();return false;">退出登录</a>
+  </div>
+</div>
+<div class="results-page" id="resultsPage">
+  <div class="results-header">
+    <a class="back-link" href="/admin/conversations">‹ 返回控制台</a>
+    <div class="query-heading">
+      <span id="qLabel"></span>
+      <span class="count" id="resultCount"></span>
+    </div>
+    <div class="sort-control">
+      <label for="sortSel">排序</label>
+      <select id="sortSel" onchange="render()">
+        <option value="time_desc" selected>时间（新→旧）</option>
+        <option value="time_asc">时间（旧→新）</option>
+      </select>
+    </div>
+  </div>
+  <div class="results-body" id="resultsBody">
+    <div class="results-list" id="resultsList"></div>
+    <div class="state state-empty" id="stateEmpty" style="display:none"><span class="state-ico">🔍</span><div>没有匹配的聊天内容</div><div class="hint" id="emptyHint">换个关键词试试</div></div>
+    <div class="state state-error" id="stateError" style="display:none"><div>⚠️ 搜索失败，请稍后重试</div></div>
+  </div>
+</div>
+<script>
+var KEYWORD='';
+var ALL=[];
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function getParam(n){return new URLSearchParams(location.search).get(n);}
+function fmtTime(ms){if(!ms)return '';var d=new Date(ms);var p=function(n){return String(n).padStart(2,'0');};return (d.getMonth()+1)+'月'+d.getDate()+'日 '+p(d.getHours())+':'+p(d.getMinutes());}
+function msgtypeLabel(t){var m={text:'文本',image:'图片',voice:'语音',video:'视频',file:'文件',link:'链接/卡片',system:'系统消息',emotion:'表情',chatrecord:'聊天记录',redpacket:'红包',miniprogram:'小程序'};return m[t]||t||'文本';}
+function escapeRegExp(s){var bs=String.fromCharCode(92);var special='.*+?^${}()|[]';var out='';for(var i=0;i<s.length;i++){var c=s[i];if(special.indexOf(c)>=0)out+=bs+c;else out+=c;}return out;}
+function highlight(text){if(!KEYWORD)return esc(text);try{var re=new RegExp('('+escapeRegExp(KEYWORD)+')','gi');return esc(text).replace(re,'<mark>$1</mark>');}catch(e){return esc(text);}}
+function loadCurrentUser(){
+  fetch('/api/auth/me').then(function(r){return r.json();}).then(function(d){
+    if(!d.authenticated){window.location.href='/admin/login';return;}
+    var el=document.getElementById('current-user');
+    if(el)el.textContent=d.display_name||d.wecom_user_id||'';
+  }).catch(function(){});
+}
+function doLogout(){
+  fetch('/api/auth/logout',{method:'POST'}).then(function(){window.location.href='/admin/login';}).catch(function(){window.location.href='/admin/login';});
+}
+function doTopSearch(e){e.preventDefault();var v=document.getElementById('topSearch').value.trim();if(v)window.location.href='/admin/search?q='+encodeURIComponent(v);return false;}
+function showError(){document.getElementById('resultsList').innerHTML='';document.getElementById('stateEmpty').style.display='none';document.getElementById('stateError').style.display='block';}
+function showEmpty(hint){document.getElementById('resultsList').innerHTML='';document.getElementById('stateError').style.display='none';document.getElementById('stateEmpty').style.display='block';if(hint)document.getElementById('emptyHint').textContent=hint;}
+function setLoading(){document.getElementById('stateEmpty').style.display='none';document.getElementById('stateError').style.display='none';var sk='';for(var i=0;i<5;i++){sk+='<div class="skeleton"><div class="sk-line mid"></div><div class="sk-line"></div><div class="sk-line short"></div></div>';}document.getElementById('resultsList').innerHTML=sk;}
+var MAX_RESULTS=1000;
+function doSearch(){setLoading();var params=['q='+encodeURIComponent(KEYWORD),'limit=50'];var all=[];function fetchPage(before){var url='/api/search/messages?'+params.join('&')+(before?('&before='+encodeURIComponent(before)):'');return fetch(url).then(function(r){if(r.status===401){window.location.href='/admin/login';return null;}if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(d){if(!d)return null;all=all.concat(d.results||[]);if(d.pagination&&d.pagination.next_before&&all.length<MAX_RESULTS){return fetchPage(d.pagination.next_before);}return all;});}fetchPage(null).then(function(results){if(results===null)return;ALL=results;render();}).catch(function(){showError();});}
+function render(){var list=document.getElementById('resultsList');var empty=document.getElementById('stateEmpty');var err=document.getElementById('stateError');empty.style.display='none';err.style.display='none';var rows=ALL.slice();var sort=document.getElementById('sortSel').value;rows=rows.slice().sort(function(a,b){return sort==='time_asc'?(a.msgtime||0)-(b.msgtime||0):(b.msgtime||0)-(a.msgtime||0);});document.getElementById('resultCount').textContent='共 '+rows.length+' 条消息匹配';if(rows.length===0){list.innerHTML='';empty.style.display='block';return;}list.innerHTML=rows.map(function(r){var badge=r.conversation_type==='group'?'<span class="rc-badge group">群聊</span>':'<span class="rc-badge direct">单聊</span>';var senderClass=r.entity_type==='staff'?'rc-sender staff':'rc-sender';var params=['focus='+encodeURIComponent(r.msgid),'conv='+encodeURIComponent(r.conversation_id),'convType='+encodeURIComponent(r.conversation_type),'entityId='+encodeURIComponent(r.entity_id||''),'entityType='+encodeURIComponent(r.entity_type||'')].join('&');return '<div class="result-card" data-href="/admin/conversations?'+params+'"><div class="rc-context">'+badge+'<span class="rc-conv" title="'+esc(r.conversation_name)+'">'+esc(r.conversation_name)+'</span><span class="'+senderClass+'">'+esc(r.sender_display_name)+'</span><span class="rc-time">'+esc(fmtTime(r.msgtime))+'</span></div><div class="rc-snippet">'+highlight(r.content_snippet||'')+'</div><div class="rc-foot"><span class="rc-route">员工 <b>'+esc(r.entity_id||'-')+'</b> <span class="arrow">·</span> 客户 <b>'+esc(r.sender||'-')+'</b> <span class="arrow">·</span> '+esc(msgtypeLabel(r.msgtype))+'</span><span class="rc-jump">查看上下文 ↗</span></div></div>';}).join('');Array.prototype.forEach.call(list.querySelectorAll('.result-card'),function(el){el.addEventListener('click',function(){window.location.href=el.getAttribute('data-href');});});}
+function init(){loadCurrentUser();KEYWORD=getParam('q')||'';var ql=document.getElementById('qLabel');if(KEYWORD){ql.innerHTML='“'+esc(KEYWORD)+'”';}else{ql.textContent='筛选结果';}if(KEYWORD){doSearch();}else{showEmpty('请输入关键词开始搜索');}}
+init();
+</script>
+</body>
+</html>
+"""
+
+
 
 
 _DIAGNOSTICS_CSS = (
@@ -2943,6 +3193,14 @@ def admin_conversations(request: Request, db: Session = Depends(get_db)):
     if _resolve_session_tenant_id(request, db) is None:
         return RedirectResponse("/admin/login", status_code=302)
     return HTMLResponse(content=_REVIEW_CONSOLE_HTML)
+
+
+@app.get("/admin/search", response_class=HTMLResponse)
+def admin_search_page(request: Request, db: Session = Depends(get_db)):
+    """Standalone search-results page (RND-229). Requires valid session."""
+    if _resolve_session_tenant_id(request, db) is None:
+        return RedirectResponse("/admin/login", status_code=302)
+    return HTMLResponse(content=_SEARCH_PAGE_HTML)
 
 
 @app.get("/admin/diagnostics/reachability", response_class=HTMLResponse)
