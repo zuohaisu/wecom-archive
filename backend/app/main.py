@@ -15,7 +15,7 @@ from app.db.models import AdminSession, ArchiveMessage, ArchiveMessageRecipient
 from app.db.schema_check import full_readiness_check
 from app.db.session import get_db, get_engine
 from app.i18n_assets import I18N_JS_SOURCE, I18N_SCRIPT_TAG
-from app.message_type_registry import build_frontend_registry_entries
+from app.message_type_registry import build_filterable_type_options, build_frontend_registry_entries
 from app.routers.auth import router as auth_router
 from app.routers.conversations import MediaAccessNoStoreMiddleware
 from app.routers.conversations import router as conversations_router
@@ -372,6 +372,14 @@ _KNOWN_PLACEHOLDER_I18N_KEYS = frozenset(
 _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON = json.dumps(
     build_frontend_registry_entries(known_placeholder_keys=_KNOWN_PLACEHOLDER_I18N_KEYS)
 )
+
+# RND-230 — the search page's "消息类型" filter options are generated from
+# the same app.message_type_registry catalog as the console's
+# MessageTypeRegistry above, instead of a second hand-maintained list —
+# see build_filterable_type_options()'s docstring for why a hand-rolled
+# subset previously drifted (missing raw types entirely, and mismatched
+# "system"/"miniprogram" against the real stored "sys"/"weapp" values).
+_SEARCH_MSGTYPE_OPTIONS_JSON = json.dumps(build_filterable_type_options())
 
 _REVIEW_CONSOLE_HTML = """\
 <!doctype html>
@@ -2880,6 +2888,27 @@ body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Micros
 .sk-line.mid{width:70%}
 @keyframes sk{0%{background-position:100% 0}100%{background-position:-100% 0}}
 @media (prefers-reduced-motion: reduce){.sk-line{animation:none}}
+.filter-bar{position:sticky;top:0;z-index:5;background:var(--col-bg);border-bottom:1px solid var(--border);padding:.55rem 1.25rem;display:flex;flex-direction:column;gap:.5rem;flex-shrink:0}
+.filter-triggers{display:flex;gap:.5rem;flex-wrap:wrap}
+.filter-group{position:relative}
+.filter-btn{display:inline-flex;align-items:center;gap:.35rem;padding:.28rem .65rem;font-size:.8rem;color:var(--text-2);background:#fff;border:1px solid var(--border);border-radius:4px;cursor:pointer;min-height:32px}
+.filter-btn:hover{border-color:var(--primary)}
+.filter-btn.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary-hover)}
+.filter-btn .filter-badge{display:none;background:var(--primary);color:#fff;font-size:.66rem;line-height:1;padding:.14rem .4rem;border-radius:999px}
+.filter-btn.active .filter-badge:not(:empty){display:inline-block}
+.filter-popover{position:absolute;top:calc(100% + 6px);left:0;min-width:220px;max-width:300px;max-height:320px;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-pop);padding:.5rem;z-index:20;display:none}
+.filter-popover.open{display:block}
+.filter-popover .fp-search{width:100%;padding:.3rem .5rem;border:1px solid var(--border);border-radius:4px;font-size:.78rem;margin-bottom:.4rem;box-sizing:border-box}
+.filter-opt{display:flex;align-items:center;gap:.4rem;padding:.32rem .3rem;font-size:.82rem;color:var(--text);border-radius:4px;cursor:pointer}
+.filter-opt:hover{background:var(--header-bg)}
+.filter-opt input{margin:0}
+.filter-opt-empty{padding:.5rem .3rem;font-size:.78rem;color:var(--text-4)}
+.filter-chips{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem}
+.chip{display:inline-flex;align-items:center;gap:.3rem;background:var(--primary-soft);color:var(--primary-hover);font-size:.78rem;padding:.22rem .55rem;border-radius:999px;min-height:24px}
+.chip-x{border:none;background:transparent;color:var(--primary-hover);cursor:pointer;font-size:.85rem;line-height:1;padding:0}
+.chip-x:hover{color:var(--primary)}
+.filter-clear-all{border:none;background:transparent;color:var(--text-3);font-size:.78rem;cursor:pointer;text-decoration:underline;min-height:24px}
+.filter-clear-all:hover{color:var(--text)}
 </style>
 </head>
 <body>
@@ -2913,15 +2942,56 @@ body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Micros
       </select>
     </div>
   </div>
+  <div class="filter-bar" id="filterBar">
+    <div class="filter-triggers">
+      <div class="filter-group">
+        <button type="button" class="filter-btn" id="fbtn-date" onclick="toggleFilterPopover('date')"><span data-i18n="search.filter.date">日期</span><span class="filter-badge" id="fbadge-date"></span></button>
+        <div class="filter-popover" id="fpop-date"></div>
+      </div>
+      <div class="filter-group">
+        <button type="button" class="filter-btn" id="fbtn-user" onclick="toggleFilterPopover('user')"><span data-i18n="search.filter.user">用户</span><span class="filter-badge" id="fbadge-user"></span></button>
+        <div class="filter-popover" id="fpop-user"></div>
+      </div>
+      <div class="filter-group">
+        <button type="button" class="filter-btn" id="fbtn-staff" onclick="toggleFilterPopover('staff')"><span data-i18n="search.filter.staff">员工</span><span class="filter-badge" id="fbadge-staff"></span></button>
+        <div class="filter-popover" id="fpop-staff"></div>
+      </div>
+      <div class="filter-group">
+        <button type="button" class="filter-btn" id="fbtn-msgtype" onclick="toggleFilterPopover('msgtype')"><span data-i18n="search.filter.msgtype">消息类型</span><span class="filter-badge" id="fbadge-msgtype"></span></button>
+        <div class="filter-popover" id="fpop-msgtype"></div>
+      </div>
+    </div>
+    <div class="filter-chips" id="filterChips" style="display:none"></div>
+  </div>
   <div class="results-body" id="resultsBody">
     <div class="results-list" id="resultsList"></div>
     <div class="state state-empty" id="stateEmpty" style="display:none"><span class="state-ico">🔍</span><div>没有匹配的聊天内容</div><div class="hint" id="emptyHint">换个关键词试试</div></div>
     <div class="state state-error" id="stateError" style="display:none"><div>⚠️ 搜索失败，请稍后重试</div></div>
   </div>
 </div>
+""" + I18N_SCRIPT_TAG + """
 <script>
+var MSGTYPE_OPTIONS=""" + _SEARCH_MSGTYPE_OPTIONS_JSON + """;
 var KEYWORD='';
 var ALL=[];
+var FILTERS={dateRange:null,user:[],staff:[],msgtype:[]};
+var OPEN_POPOVER=null;
+var PARTICIPANT_OPTIONS={contact:{},staff:{}};
+var PARTICIPANT_LABELS={contact:{},staff:{}};
+var DATE_RANGE_KEYS=[['','search.filter.dateAll'],['1d','search.filter.date1d'],['7d','search.filter.date7d'],['30d','search.filter.date30d'],['90d','search.filter.date90d']];
+var MSGTYPE_RAW_BY_NORMALIZED={};
+MSGTYPE_OPTIONS.forEach(function(opt){MSGTYPE_RAW_BY_NORMALIZED[opt.normalizedType]=opt.rawValues;});
+function msgtypeOptionLabel(normalizedType){
+  for(var i=0;i<MSGTYPE_OPTIONS.length;i++){
+    if(MSGTYPE_OPTIONS[i].normalizedType===normalizedType)return I18N.t(MSGTYPE_OPTIONS[i].labelKey);
+  }
+  return normalizedType;
+}
+function applyStaticI18n(){
+  document.querySelectorAll('[data-i18n]').forEach(function(el){
+    el.textContent=I18N.t(el.getAttribute('data-i18n'));
+  });
+}
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function getParam(n){return new URLSearchParams(location.search).get(n);}
 function fmtTime(ms){if(!ms)return '';var d=new Date(ms);var p=function(n){return String(n).padStart(2,'0');};return (d.getMonth()+1)+'月'+d.getDate()+'日 '+p(d.getHours())+':'+p(d.getMinutes());}
@@ -2943,9 +3013,299 @@ function showError(){document.getElementById('resultsList').innerHTML='';documen
 function showEmpty(hint){document.getElementById('resultsList').innerHTML='';document.getElementById('stateError').style.display='none';document.getElementById('stateEmpty').style.display='block';if(hint)document.getElementById('emptyHint').textContent=hint;}
 function setLoading(){document.getElementById('stateEmpty').style.display='none';document.getElementById('stateError').style.display='none';var sk='';for(var i=0;i<5;i++){sk+='<div class="skeleton"><div class="sk-line mid"></div><div class="sk-line"></div><div class="sk-line short"></div></div>';}document.getElementById('resultsList').innerHTML=sk;}
 var MAX_RESULTS=1000;
-function doSearch(){setLoading();var params=['q='+encodeURIComponent(KEYWORD),'limit=50'];var all=[];function fetchPage(before){var url='/api/search/messages?'+params.join('&')+(before?('&before='+encodeURIComponent(before)):'');return fetch(url).then(function(r){if(r.status===401){window.location.href='/admin/login';return null;}if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(function(d){if(!d)return null;all=all.concat(d.results||[]);if(d.pagination&&d.pagination.next_before&&all.length<MAX_RESULTS){return fetchPage(d.pagination.next_before);}return all;});}fetchPage(null).then(function(results){if(results===null)return;ALL=results;render();}).catch(function(){showError();});}
-function render(){var list=document.getElementById('resultsList');var empty=document.getElementById('stateEmpty');var err=document.getElementById('stateError');empty.style.display='none';err.style.display='none';var rows=ALL.slice();var sort=document.getElementById('sortSel').value;rows=rows.slice().sort(function(a,b){return sort==='time_asc'?(a.msgtime||0)-(b.msgtime||0):(b.msgtime||0)-(a.msgtime||0);});document.getElementById('resultCount').textContent='共 '+rows.length+' 条消息匹配';if(rows.length===0){list.innerHTML='';empty.style.display='block';return;}list.innerHTML=rows.map(function(r){var badge=r.conversation_type==='group'?'<span class="rc-badge group">群聊</span>':'<span class="rc-badge direct">单聊</span>';var senderClass=r.entity_type==='staff'?'rc-sender staff':'rc-sender';var params=['focus='+encodeURIComponent(r.msgid),'conv='+encodeURIComponent(r.conversation_id),'convType='+encodeURIComponent(r.conversation_type),'entityId='+encodeURIComponent(r.entity_id||''),'entityType='+encodeURIComponent(r.entity_type||'')].join('&');return '<div class="result-card" data-href="/admin/conversations?'+params+'"><div class="rc-context">'+badge+'<span class="rc-conv" title="'+esc(r.conversation_name)+'">'+esc(r.conversation_name)+'</span><span class="'+senderClass+'">'+esc(r.sender_display_name)+'</span><span class="rc-time">'+esc(fmtTime(r.msgtime))+'</span></div><div class="rc-snippet">'+highlight(r.content_snippet||'')+'</div><div class="rc-foot"><span class="rc-route">员工 <b>'+esc(r.entity_id||'-')+'</b> <span class="arrow">·</span> 客户 <b>'+esc(r.sender||'-')+'</b> <span class="arrow">·</span> '+esc(msgtypeLabel(r.msgtype))+'</span><span class="rc-jump">查看上下文 ↗</span></div></div>';}).join('');Array.prototype.forEach.call(list.querySelectorAll('.result-card'),function(el){el.addEventListener('click',function(){window.location.href=el.getAttribute('data-href');});});}
-function init(){loadCurrentUser();KEYWORD=getParam('q')||'';var ql=document.getElementById('qLabel');if(KEYWORD){ql.innerHTML='“'+esc(KEYWORD)+'”';}else{ql.textContent='筛选结果';}if(KEYWORD){doSearch();}else{showEmpty('请输入关键词开始搜索');}}
+
+// ---- RND-230: filter bar (date / user / staff / msgtype) ----------------
+
+function participantLabelFor(r,id){
+  return (id===r.sender && r.sender_display_name)?r.sender_display_name:id;
+}
+function setParticipant(map,id,label){
+  // Never let a raw-id fallback (no display name available from THIS row)
+  // clobber a real display name already found for the same id from a
+  // different row — whichever row is scanned last must not erase a
+  // better label a previous row already supplied.
+  if(!id)return;
+  if(!(id in map)||map[id]===id)map[id]=label;
+}
+function collectParticipants(kind){
+  // contact_ids/staff_ids are the message's full tenant-scoped participant
+  // sets (sender + every recipient, split by is_staff — see
+  // _derive_conversation_membership), not just the single `entity_id`
+  // picked for navigation. Using them directly (rather than inferring
+  // from entity_id/entity_type, which only ever names ONE side) is what
+  // makes a group message with several contacts, or a staff-authored
+  // message whose contacts never appear as `sender`, still populate the
+  // right filter options.
+  var field=kind==='staff'?'staff_ids':'contact_ids';
+  var map={};
+  ALL.forEach(function(r){
+    (r[field]||[]).forEach(function(id){
+      setParticipant(map,id,participantLabelFor(r,id));
+    });
+  });
+  return map;
+}
+function refreshParticipantCache(){
+  // PARTICIPANT_OPTIONS reflects only the current result set (popover
+  // choices narrow with filters, per design). PARTICIPANT_LABELS
+  // accumulates across the session so a chip for an already-selected
+  // participant keeps its display name even if a later filter narrows
+  // that participant out of the visible results.
+  PARTICIPANT_OPTIONS.contact=collectParticipants('contact');
+  PARTICIPANT_OPTIONS.staff=collectParticipants('staff');
+  Object.keys(PARTICIPANT_OPTIONS.contact).forEach(function(id){setParticipant(PARTICIPANT_LABELS.contact,id,PARTICIPANT_OPTIONS.contact[id]);});
+  Object.keys(PARTICIPANT_OPTIONS.staff).forEach(function(id){setParticipant(PARTICIPANT_LABELS.staff,id,PARTICIPANT_OPTIONS.staff[id]);});
+}
+function participantLabel(kind,id){
+  var map=PARTICIPANT_LABELS[kind]||{};
+  return map[id]||id;
+}
+function activeFilterCount(){
+  return (FILTERS.dateRange?1:0)+FILTERS.user.length+FILTERS.staff.length+FILTERS.msgtype.length;
+}
+function hasActiveFilters(){
+  return activeFilterCount()>0;
+}
+function setBadge(kind,count){
+  var btn=document.getElementById('fbtn-'+kind);
+  var badge=document.getElementById('fbadge-'+kind);
+  if(!btn||!badge)return;
+  if(count>0){btn.classList.add('active');badge.textContent=String(count);}
+  else{btn.classList.remove('active');badge.textContent='';}
+}
+function renderChips(){
+  var chips=[];
+  if(FILTERS.dateRange){
+    var dateOptLabel='';
+    for(var i=0;i<DATE_RANGE_KEYS.length;i++){if(DATE_RANGE_KEYS[i][0]===FILTERS.dateRange)dateOptLabel=I18N.t(DATE_RANGE_KEYS[i][1]);}
+    chips.push({kind:'date',value:'',label:I18N.t('search.filter.date')+': '+(dateOptLabel||FILTERS.dateRange)});
+  }
+  FILTERS.user.forEach(function(id){chips.push({kind:'user',value:id,label:I18N.t('search.filter.user')+': '+participantLabel('contact',id)});});
+  FILTERS.staff.forEach(function(id){chips.push({kind:'staff',value:id,label:I18N.t('search.filter.staff')+': '+participantLabel('staff',id)});});
+  FILTERS.msgtype.forEach(function(t){chips.push({kind:'msgtype',value:t,label:I18N.t('search.filter.msgtype')+': '+msgtypeOptionLabel(t)});});
+  var box=document.getElementById('filterChips');
+  if(!chips.length){box.style.display='none';box.innerHTML='';return;}
+  box.style.display='flex';
+  var html=chips.map(function(c){
+    return '<span class="chip">'+esc(c.label)+'<button type="button" class="chip-x" data-kind="'+esc(c.kind)+'" data-value="'+esc(c.value)+'" aria-label="'+esc(I18N.t('search.filter.clear'))+'">×</button></span>';
+  }).join('')+'<button type="button" class="filter-clear-all" id="btnClearAllFilters">'+esc(I18N.t('search.filter.clearAll'))+'</button>';
+  box.innerHTML=html;
+  Array.prototype.forEach.call(box.querySelectorAll('.chip-x'),function(btn){
+    btn.addEventListener('click',function(){removeFilter(btn.getAttribute('data-kind'),btn.getAttribute('data-value')||'');});
+  });
+  var clearBtn=document.getElementById('btnClearAllFilters');
+  if(clearBtn)clearBtn.addEventListener('click',clearAllFilters);
+}
+function updateFilterUI(){
+  setBadge('date',FILTERS.dateRange?1:0);
+  setBadge('user',FILTERS.user.length);
+  setBadge('staff',FILTERS.staff.length);
+  setBadge('msgtype',FILTERS.msgtype.length);
+  renderChips();
+}
+function closeAllPopovers(){
+  ['date','user','staff','msgtype'].forEach(function(k){
+    var p=document.getElementById('fpop-'+k);
+    if(p)p.classList.remove('open');
+  });
+  OPEN_POPOVER=null;
+  document.removeEventListener('click',onDocClickClosePopover,true);
+}
+function onDocClickClosePopover(e){
+  if(OPEN_POPOVER && e.target && (!e.target.closest || !e.target.closest('.filter-group'))){
+    closeAllPopovers();
+  }
+}
+function toggleFilterPopover(kind){
+  if(OPEN_POPOVER===kind){closeAllPopovers();return;}
+  closeAllPopovers();
+  if(kind==='date'){renderDatePopover();}
+  else if(kind==='msgtype'){renderMsgtypePopover();}
+  else{renderMultiPopover(kind);}
+  var p=document.getElementById('fpop-'+kind);
+  if(p)p.classList.add('open');
+  OPEN_POPOVER=kind;
+  setTimeout(function(){document.addEventListener('click',onDocClickClosePopover,true);},0);
+}
+function renderDatePopover(){
+  var html='';
+  DATE_RANGE_KEYS.forEach(function(opt){
+    var checked=(FILTERS.dateRange||'')===opt[0]?' checked':'';
+    html+='<label class="filter-opt"><input type="radio" name="fdate" class="fp-date-radio" data-value="'+esc(opt[0])+'"'+checked+'> '+esc(I18N.t(opt[1]))+'</label>';
+  });
+  var el=document.getElementById('fpop-date');
+  el.innerHTML=html;
+  Array.prototype.forEach.call(el.querySelectorAll('.fp-date-radio'),function(r){
+    r.addEventListener('change',function(){if(r.checked){setDateFilter(r.getAttribute('data-value'));}});
+  });
+}
+function setDateFilter(v){
+  FILTERS.dateRange=v||null;
+  closeAllPopovers();
+  applyFilters();
+}
+function renderMultiPopover(kind){
+  var entityType=kind==='user'?'contact':'staff';
+  var participants=PARTICIPANT_OPTIONS[entityType]||{};
+  var ids=Object.keys(participants).sort(function(a,b){
+    return (participants[a]||a).localeCompare(participants[b]||b);
+  });
+  var selected=FILTERS[kind];
+  var html='<input type="text" class="fp-search" placeholder="搜索…">';
+  html+='<div class="fp-options">';
+  if(!ids.length){
+    html+='<div class="filter-opt-empty">当前结果中暂无可选项</div>';
+  }else{
+    ids.forEach(function(id){
+      var checked=selected.indexOf(id)>=0?' checked':'';
+      var label=participants[id]||id;
+      html+='<label class="filter-opt" data-label="'+esc(label.toLowerCase())+'"><input type="checkbox" class="fp-check" data-kind="'+esc(kind)+'" data-value="'+esc(id)+'"'+checked+'> '+esc(label)+'</label>';
+    });
+  }
+  html+='</div>';
+  var el=document.getElementById('fpop-'+kind);
+  el.innerHTML=html;
+  Array.prototype.forEach.call(el.querySelectorAll('.fp-check'),function(cb){
+    cb.addEventListener('change',function(){
+      toggleMultiFilter(cb.getAttribute('data-kind'),cb.getAttribute('data-value'),cb.checked);
+    });
+  });
+  var searchBox=el.querySelector('.fp-search');
+  if(searchBox){
+    searchBox.addEventListener('input',function(){filterPopoverOptions(searchBox,el);});
+  }
+}
+function filterPopoverOptions(input,container){
+  var q=input.value.trim().toLowerCase();
+  Array.prototype.forEach.call(container.querySelectorAll('.filter-opt[data-label]'),function(el){
+    el.style.display=el.getAttribute('data-label').indexOf(q)>=0?'':'none';
+  });
+}
+function renderMsgtypePopover(){
+  var selected=FILTERS.msgtype;
+  var html='';
+  MSGTYPE_OPTIONS.forEach(function(opt){
+    var checked=selected.indexOf(opt.normalizedType)>=0?' checked':'';
+    html+='<label class="filter-opt"><input type="checkbox" class="fp-check" data-kind="msgtype" data-value="'+esc(opt.normalizedType)+'"'+checked+'> '+esc(I18N.t(opt.labelKey))+'</label>';
+  });
+  var el=document.getElementById('fpop-msgtype');
+  el.innerHTML=html;
+  Array.prototype.forEach.call(el.querySelectorAll('.fp-check'),function(cb){
+    cb.addEventListener('change',function(){
+      toggleMultiFilter(cb.getAttribute('data-kind'),cb.getAttribute('data-value'),cb.checked);
+    });
+  });
+}
+function toggleMultiFilter(kind,value,checked){
+  var arr=FILTERS[kind];
+  if(!arr)return;
+  var idx=arr.indexOf(value);
+  if(checked&&idx===-1)arr.push(value);
+  if(!checked&&idx>=0)arr.splice(idx,1);
+  applyFilters();
+}
+function removeFilter(kind,value){
+  if(kind==='date'){FILTERS.dateRange=null;}
+  else if(FILTERS[kind]){
+    var idx=FILTERS[kind].indexOf(value);
+    if(idx>=0)FILTERS[kind].splice(idx,1);
+  }
+  applyFilters();
+}
+function clearAllFilters(){
+  FILTERS={dateRange:null,user:[],staff:[],msgtype:[]};
+  applyFilters();
+}
+function parseListParam(name){
+  return new URLSearchParams(location.search).getAll(name);
+}
+function syncUrlFromState(){
+  var params=new URLSearchParams();
+  if(KEYWORD)params.set('q',KEYWORD);
+  if(FILTERS.dateRange)params.set('date_range',FILTERS.dateRange);
+  FILTERS.user.forEach(function(id){params.append('user',id);});
+  FILTERS.staff.forEach(function(id){params.append('staff',id);});
+  FILTERS.msgtype.forEach(function(t){params.append('msgtype',t);});
+  var qs=params.toString();
+  history.replaceState(null,'',location.pathname+(qs?('?'+qs):''));
+}
+function runSearchOrShowHint(){
+  // Guarded entry point for both init() and every filter mutation: q and
+  // filters can both end up empty (e.g. clearing the last active filter
+  // with no keyword typed), and doSearch() would then hit the backend's
+  // 400 "no q, no filter" guard and land on the error state instead of
+  // recovering to the normal empty-search hint.
+  if(KEYWORD||hasActiveFilters()){
+    doSearch();
+  }else{
+    ALL=[];
+    refreshParticipantCache();
+    document.getElementById('resultCount').textContent='';
+    showEmpty('请输入关键词开始搜索');
+  }
+}
+function applyFilters(){
+  updateFilterUI();
+  syncUrlFromState();
+  runSearchOrShowHint();
+}
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&OPEN_POPOVER){closeAllPopovers();}
+});
+
+// ---------------------------------------------------------------------------
+
+function buildSearchParams(){
+  var params=['limit=50'];
+  if(KEYWORD)params.push('q='+encodeURIComponent(KEYWORD));
+  if(FILTERS.dateRange)params.push('date_range='+encodeURIComponent(FILTERS.dateRange));
+  FILTERS.user.forEach(function(id){params.push('user='+encodeURIComponent(id));});
+  FILTERS.staff.forEach(function(id){params.push('staff='+encodeURIComponent(id));});
+  FILTERS.msgtype.forEach(function(t){
+    var raws=MSGTYPE_RAW_BY_NORMALIZED[t]||[t];
+    raws.forEach(function(rv){params.push('msgtype='+encodeURIComponent(rv));});
+  });
+  return params;
+}
+function doSearch(){
+  setLoading();
+  var params=buildSearchParams();
+  var all=[];
+  function fetchPage(before){
+    var url='/api/search/messages?'+params.join('&')+(before?('&before='+encodeURIComponent(before)):'');
+    return fetch(url).then(function(r){
+      if(r.status===401){window.location.href='/admin/login';return null;}
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      return r.json();
+    }).then(function(d){
+      if(!d)return null;
+      all=all.concat(d.results||[]);
+      if(d.pagination&&d.pagination.next_before&&all.length<MAX_RESULTS){return fetchPage(d.pagination.next_before);}
+      return all;
+    });
+  }
+  fetchPage(null).then(function(results){
+    if(results===null)return;
+    ALL=results;
+    refreshParticipantCache();
+    updateFilterUI();
+    render();
+  }).catch(function(){showError();});
+}
+function render(){var list=document.getElementById('resultsList');var empty=document.getElementById('stateEmpty');var err=document.getElementById('stateError');empty.style.display='none';err.style.display='none';var rows=ALL.slice();var sort=document.getElementById('sortSel').value;rows=rows.slice().sort(function(a,b){return sort==='time_asc'?(a.msgtime||0)-(b.msgtime||0):(b.msgtime||0)-(a.msgtime||0);});document.getElementById('resultCount').textContent='共 '+rows.length+' 条消息匹配';if(rows.length===0){list.innerHTML='';empty.style.display='block';document.getElementById('emptyHint').textContent=hasActiveFilters()?'试试调整或清除筛选条件':'换个关键词试试';return;}list.innerHTML=rows.map(function(r){var badge=r.conversation_type==='group'?'<span class="rc-badge group">群聊</span>':'<span class="rc-badge direct">单聊</span>';var senderClass=r.entity_type==='staff'?'rc-sender staff':'rc-sender';var params=['focus='+encodeURIComponent(r.msgid),'conv='+encodeURIComponent(r.conversation_id),'convType='+encodeURIComponent(r.conversation_type),'entityId='+encodeURIComponent(r.entity_id||''),'entityType='+encodeURIComponent(r.entity_type||'')].join('&');return '<div class="result-card" data-href="/admin/conversations?'+params+'"><div class="rc-context">'+badge+'<span class="rc-conv" title="'+esc(r.conversation_name)+'">'+esc(r.conversation_name)+'</span><span class="'+senderClass+'">'+esc(r.sender_display_name)+'</span><span class="rc-time">'+esc(fmtTime(r.msgtime))+'</span></div><div class="rc-snippet">'+highlight(r.content_snippet||'')+'</div><div class="rc-foot"><span class="rc-route">员工 <b>'+esc(r.entity_id||'-')+'</b> <span class="arrow">·</span> 客户 <b>'+esc(r.sender||'-')+'</b> <span class="arrow">·</span> '+esc(msgtypeLabel(r.msgtype))+'</span><span class="rc-jump">查看上下文 ↗</span></div></div>';}).join('');Array.prototype.forEach.call(list.querySelectorAll('.result-card'),function(el){el.addEventListener('click',function(){window.location.href=el.getAttribute('data-href');});});}
+function init(){
+  applyStaticI18n();
+  loadCurrentUser();
+  KEYWORD=getParam('q')||'';
+  FILTERS.dateRange=getParam('date_range')||null;
+  FILTERS.user=parseListParam('user');
+  FILTERS.staff=parseListParam('staff');
+  FILTERS.msgtype=parseListParam('msgtype');
+  var ql=document.getElementById('qLabel');
+  if(KEYWORD){ql.innerHTML='“'+esc(KEYWORD)+'”';}else{ql.textContent='筛选结果';}
+  updateFilterUI();
+  runSearchOrShowHint();
+}
 init();
 </script>
 </body>

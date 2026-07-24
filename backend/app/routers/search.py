@@ -9,11 +9,12 @@ tenant_id is NEVER accepted from user-supplied request params.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, case, or_
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -24,7 +25,7 @@ from app.conversation_membership import (
     _collect_staff_ids,
     _load_display_names_for_ids,
 )
-from app.db.models import AdminUser, ArchiveMessage, Contact
+from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 
@@ -59,6 +60,17 @@ class MessageSearchResult(BaseModel):
     match_position: int
     entity_id: Optional[str] = None     # The WeCom userid to navigate to
     entity_type: Optional[str] = None   # "staff" or "contact"
+    msgtype: Optional[str] = None
+    # RND-230 QA remediation (finding C12): the full tenant-scoped
+    # staff-side / contact-side participant sets for this message (sender +
+    # recipients, split via the same is_staff check used everywhere else),
+    # not just the single `entity_id` picked for navigation. A group
+    # message can have several contacts and/or several staff, and a
+    # staff-authored message's recipients are otherwise invisible to the
+    # frontend — see _derive_conversation_membership, whose staff_set/
+    # contact_set this reuses directly rather than recomputing.
+    contact_ids: list[str] = []
+    staff_ids: list[str] = []
 
 
 class MessageSearchPagination(BaseModel):
@@ -130,6 +142,31 @@ def _pick_entity_id(
         return pid, "contact"
 
     return None, None
+
+
+_DATE_RANGE_PRESET_DAYS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
+
+
+def _participant_filter(db: Session, tenant_id: str, ids: set[str]):
+    """Build a SQL-level (message.sender in ids) OR (message has a
+    recipient row in ids) predicate for the `user`/`staff` filters. The
+    recipient side is an EXISTS-shaped subquery (id IN (SELECT
+    message_id ...)), never a Python-side pull of the full recipient
+    table — the message row set stays bounded by the outer query's
+    LIMIT, same as RND-228's scalability contract for the rest of this
+    endpoint."""
+    if not ids:
+        # An empty (e.g. fully-filtered-out) id set must match nothing,
+        # not "no filter at all".
+        return ArchiveMessage.id.is_(None)
+    recipient_subq = select(ArchiveMessageRecipient.message_id).where(
+        ArchiveMessageRecipient.tenant_id == tenant_id,
+        ArchiveMessageRecipient.receiver_userid.in_(ids),
+    )
+    return or_(
+        ArchiveMessage.sender.in_(ids),
+        ArchiveMessage.id.in_(recipient_subq),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -240,22 +277,73 @@ def search_contacts(
 
 @router.get("/api/search/messages", response_model=MessageSearchResponse)
 def search_messages(
-    q: str = Query(..., min_length=1, description="Case-insensitive substring match on message content"),
+    q: Optional[str] = Query(None, min_length=1, description="Case-insensitive substring match on message content; optional when at least one filter is set"),
     limit: int = Query(20, ge=1, le=_MAX_LIMIT, description="Max rows to return (1–100)"),
     before: Optional[str] = Query(None, description="Cursor for pagination (msgtime:id format)"),
+    date_range: Optional[str] = Query(None, pattern="^(1d|7d|30d|90d)$", description="Preset recency window"),
+    date_from: Optional[int] = Query(None, description="Lower bound on msgtime, ms epoch, inclusive"),
+    date_to: Optional[int] = Query(None, description="Upper bound on msgtime, ms epoch, inclusive"),
+    user: Optional[list[str]] = Query(None, description="Contact-side participant userid(s); message must have one as sender or recipient"),
+    staff: Optional[list[str]] = Query(None, description="Staff-side participant userid(s); message must have one as sender or recipient"),
+    msgtype: Optional[list[str]] = Query(None, description="Message type(s); defaults to text-only when omitted"),
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
     """
-    Search archived text messages by content.
+    Search archived messages by content and/or filter (RND-230).
     Tenant-scoped: only returns messages belonging to the authenticated tenant.
-    Only searches text messages (msgtype='text') that have been successfully
-    decrypted and are not revoked.
+    `q` is optional — with no keyword, at least one filter must be supplied
+    (enforced below) so this never degrades into an unbounded table scan.
+    Without an explicit `msgtype` filter, only text messages are searched
+    (v1 index scope, unchanged from before this change). Only messages that
+    have been successfully decrypted and are not revoked are ever returned.
     Pagination uses cursor-based (msgtime:id) — same as conversation timeline.
     """
     _, tenant_id = auth
-    escaped_q = _escape_ilike_pattern(q)
-    pattern = f"%{escaped_q}%"
+
+    has_filter = any([date_range, date_from is not None, date_to is not None, user, staff, msgtype])
+    if q is None and not has_filter:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a search keyword (q) or at least one filter",
+        )
+
+    # staff_ids is computed eagerly only when the `staff` filter needs it;
+    # otherwise it stays None and is computed later (only if there are any
+    # rows), matching the existing entity-navigation lookup's lazy trigger.
+    staff_ids: Optional[set[str]] = None
+
+    filters = [
+        ArchiveMessage.tenant_id == tenant_id,
+        ArchiveMessage.decrypt_status == "success",
+        ArchiveMessage.is_revoked.is_(False),
+    ]
+
+    if q is not None:
+        escaped_q = _escape_ilike_pattern(q)
+        pattern = f"%{escaped_q}%"
+        filters.append(ArchiveMessage.content_text.ilike(pattern, escape="\\"))
+
+    if msgtype:
+        filters.append(ArchiveMessage.msgtype.in_(msgtype))
+    else:
+        filters.append(ArchiveMessage.msgtype == "text")
+
+    effective_date_from = date_from
+    if date_range:
+        preset_from = int(time.time() * 1000) - _DATE_RANGE_PRESET_DAYS[date_range] * 24 * 60 * 60 * 1000
+        effective_date_from = preset_from if effective_date_from is None else max(effective_date_from, preset_from)
+    if effective_date_from is not None:
+        filters.append(ArchiveMessage.msgtime >= effective_date_from)
+    if date_to is not None:
+        filters.append(ArchiveMessage.msgtime <= date_to)
+
+    if staff:
+        staff_ids = _collect_staff_ids(db, tenant_id)
+        filters.append(_participant_filter(db, tenant_id, set(staff) & staff_ids))
+
+    if user:
+        filters.append(_participant_filter(db, tenant_id, set(user)))
 
     query = (
         db.query(
@@ -265,14 +353,9 @@ def search_messages(
             ArchiveMessage.msgtime,
             ArchiveMessage.roomid,
             ArchiveMessage.id,
+            ArchiveMessage.msgtype,
         )
-        .filter(
-            ArchiveMessage.tenant_id == tenant_id,
-            ArchiveMessage.content_text.ilike(pattern, escape="\\"),
-            ArchiveMessage.msgtype == "text",
-            ArchiveMessage.decrypt_status == "success",
-            ArchiveMessage.is_revoked.is_(False),
-        )
+        .filter(*filters)
     )
 
     if before:
@@ -281,7 +364,6 @@ def search_messages(
             before_msgtime = int(before_msgtime_str)
             before_id = int(before_id_str)
         except (ValueError, AttributeError):
-            from fastapi import HTTPException
             raise HTTPException(status_code=400, detail="Malformed pagination cursor")
 
         query = query.filter(
@@ -309,7 +391,9 @@ def search_messages(
         return MessageSearchResponse(results=[], pagination=MessageSearchPagination(has_older=False, next_before=None))
 
     # Determine staff ids for entity navigation and conversation membership
-    staff_ids = _collect_staff_ids(db, tenant_id)
+    # (already computed above if the `staff` filter needed it).
+    if staff_ids is None:
+        staff_ids = _collect_staff_ids(db, tenant_id)
 
     def _is_staff_member(uid: str) -> bool:
         return uid in staff_ids or _legacy_is_staff(uid)
@@ -327,11 +411,11 @@ def search_messages(
 
     results: list[MessageSearchResult] = []
     for row in rows:
-        snippet, match_pos = _snippet_with_context(row.content_text or "", q)
+        snippet, match_pos = _snippet_with_context(row.content_text or "", q or "")
         sender_name = resolve_person_display_name(row.sender, display_names.get(row.sender))
 
         recipients = recipients_map.get(row.id, [])
-        conv_id, conv_type, _staff_set, _contact_set = _derive_conversation_membership(
+        conv_id, conv_type, row_staff_set, row_contact_set = _derive_conversation_membership(
             row.sender, row.roomid, recipients, _is_staff_member
         )
 
@@ -363,6 +447,9 @@ def search_messages(
                 match_position=match_pos,
                 entity_id=entity_id,
                 entity_type=entity_type,
+                msgtype=row.msgtype,
+                contact_ids=sorted(row_contact_set),
+                staff_ids=sorted(row_staff_set),
             )
         )
 

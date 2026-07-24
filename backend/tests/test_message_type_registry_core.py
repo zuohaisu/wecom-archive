@@ -66,6 +66,7 @@ from app.message_type_registry import (
     MessageSupportStatus,
     ParserStrategy,
     RendererStrategy,
+    build_filterable_type_options,
     build_frontend_registry_entries,
     build_support_matrix,
     describe_message_type,
@@ -860,3 +861,90 @@ def test_frontend_export_without_a_filter_returns_the_full_candidate_set() -> No
             assert definition.normalized_type not in entries
             continue
         assert definition.normalized_type in entries
+
+
+# ---------------------------------------------------------------------------
+# RND-230 — search page "消息类型" filter options. A first version of this
+# filter hand-duplicated an 11-item Chinese-label list instead of reading
+# this registry, which both under-covered it (missing audio_archive,
+# location, card, markdown, news, docmsg, audio_doc, todo, mixed, vote,
+# collect, meeting, schedule, switch_corp entirely) and mismatched two raw
+# DB values outright ("system"/"miniprogram" hand-typed vs the real stored
+# "sys"/"weapp"), so selecting those two filters silently matched nothing.
+# These tests pin build_filterable_type_options() against that regression.
+# ---------------------------------------------------------------------------
+
+
+def test_filterable_type_options_cover_every_non_control_definition() -> None:
+    options = build_filterable_type_options()
+    normalized_types = {opt["normalizedType"] for opt in options}
+    for definition in MESSAGE_TYPE_DEFINITIONS:
+        if definition.category == MessageCategory.CONTROL:
+            assert definition.normalized_type not in normalized_types
+            continue
+        assert definition.normalized_type in normalized_types
+
+
+def test_filterable_type_options_raw_values_are_the_real_stored_msgtype() -> None:
+    """The exact bug this locks in: a filter option's rawValues must be
+    real ArchiveMessage.msgtype values (raw_type + aliases), never a
+    display-only spelling — "system"/"miniprogram" (the old hand-typed
+    list) are display names, not what's ever actually stored."""
+    options = build_filterable_type_options()
+    by_normalized = {opt["normalizedType"]: opt for opt in options}
+
+    assert by_normalized["system"]["rawValues"] == ["sys"]
+    assert "system" not in by_normalized["system"]["rawValues"]
+
+    assert set(by_normalized["miniprogram"]["rawValues"]) == {"weapp", "miniprogram"}
+
+    assert by_normalized["audio_archive"]["rawValues"][0] == "audio_archive"
+    assert set(by_normalized["audio_archive"]["rawValues"]) >= {
+        "audio_archive", "meeting_voice_call", "meetingvoicecall",
+    }
+
+
+def test_filterable_type_options_raw_values_never_collide_across_types() -> None:
+    """Every raw/alias spelling must belong to exactly one filter option —
+    otherwise selecting one checkbox could silently also match a
+    different, unrelated message type at the SQL layer."""
+    options = build_filterable_type_options()
+    seen: dict = {}
+    for opt in options:
+        for raw in opt["rawValues"]:
+            assert raw not in seen, (
+                f"raw value {raw!r} claimed by both {seen.get(raw)!r} and {opt['normalizedType']!r}"
+            )
+            seen[raw] = opt["normalizedType"]
+
+
+def test_filterable_type_options_label_keys_exist_in_every_locale() -> None:
+    """Every option's labelKey must resolve to a real translation in each
+    shipped locale — a dangling messageType.* key would silently render
+    literally as "messageType.foo" in the filter popover."""
+    from app.i18n_assets import I18N_JS_SOURCE
+
+    known_keys = set(re.findall(r'"(messageType\.[a-zA-Z0-9_]+)"', I18N_JS_SOURCE))
+    options = build_filterable_type_options()
+    for opt in options:
+        assert opt["labelKey"] in known_keys, f"{opt['labelKey']!r} has no i18n translation"
+
+
+def test_filterable_type_options_is_json_serializable() -> None:
+    json.dumps(build_filterable_type_options())
+
+
+@pytestmark_node
+def test_search_page_msgtype_options_exactly_equal_the_backend_export() -> None:
+    """Same bidirectional guarantee as the console's MessageTypeRegistry
+    (test_frontend_registry_entries_exactly_equal_the_backend_export
+    above): the search page's embedded MSGTYPE_OPTIONS must be exactly
+    what build_filterable_type_options() computed, not a hand-copied
+    snapshot that can drift the moment the registry changes."""
+    from app.main import _SEARCH_MSGTYPE_OPTIONS_JSON, _SEARCH_PAGE_HTML
+
+    match = re.search(r"var MSGTYPE_OPTIONS=(\[.*?\]);", _SEARCH_PAGE_HTML, re.S)
+    assert match is not None, "var MSGTYPE_OPTIONS=... not found in _SEARCH_PAGE_HTML"
+    embedded = json.loads(match.group(1))
+    assert embedded == json.loads(_SEARCH_MSGTYPE_OPTIONS_JSON)
+    assert embedded == list(build_filterable_type_options())

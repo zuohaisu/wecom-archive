@@ -802,3 +802,38 @@ def build_frontend_registry_entries(
                 "placeholderKey": placeholder_key,
             }
     return entries
+
+
+def build_filterable_type_options() -> Tuple[dict, ...]:
+    """The full, static set of independently-selectable message-type
+    filter options for the search results page (RND-230), one entry per
+    normalized_type — the same canonical registry the review console's
+    MessageTypeRegistry is built from (build_frontend_registry_entries
+    above), so the filter list and the message renderer never drift
+    apart the way the old hand-maintained frontend copy did (see this
+    module's docstring).
+
+    Each entry's rawValues lists every raw msgtype spelling that should
+    satisfy that filter — the canonical raw_type plus any legacy aliases
+    (e.g. normalized "miniprogram" matches both raw "weapp" and the
+    legacy alias "miniprogram" some archived rows still carry) — so the
+    frontend can expand one checkbox into every msgtype value that needs
+    to reach the backend's `ArchiveMessage.msgtype.in_(...)` filter.
+
+    CONTROL-category types (currently only "revoke") are excluded: a
+    revoke event is never a standalone searchable row (same exclusion
+    build_frontend_registry_entries applies, for the same reason — see
+    its CONTROL guard above).
+
+    Order follows registry declaration order; the frontend renders
+    options in this order as-is.
+    """
+    return tuple(
+        {
+            "normalizedType": d.normalized_type,
+            "rawValues": [d.raw_type] + list(d.aliases),
+            "labelKey": d.display_label_key,
+        }
+        for d in _DEFINITIONS
+        if d.category != MessageCategory.CONTROL
+    )

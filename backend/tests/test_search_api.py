@@ -235,6 +235,8 @@ def test_search_messages_no_match(client, db) -> None:
 
 
 def test_search_messages_empty_query_returns_422(client, db) -> None:
+    """An explicit but empty q ("q=") still fails Query(min_length=1)
+    validation regardless of filters — this is unchanged by RND-230."""
     from app.main import app
 
     _authed(app, db, _TENANT_A)
@@ -244,6 +246,43 @@ def test_search_messages_empty_query_returns_422(client, db) -> None:
         app.dependency_overrides.clear()
 
     assert resp.status_code == 422
+
+
+def test_search_messages_omitted_query_and_no_filter_returns_400(client, db) -> None:
+    """RND-230: q is now optional, but omitting it entirely with zero
+    filters must still be rejected (400) rather than falling through to an
+    unbounded scan of every text message in the tenant."""
+    from app.main import app
+
+    _authed(app, db, _TENANT_A)
+    try:
+        resp = client.get("/api/search/messages")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 400
+
+
+def test_search_messages_omitted_query_with_filter_returns_200(client, db) -> None:
+    """RND-230: q may be omitted entirely as long as at least one filter is
+    present — "pure filter mode" (design spec §0 decision 2)."""
+    from app.main import app
+
+    msg = _insert_message(
+        db, msgtype="text", sender="staff_a",
+        tenant_id=_TENANT_A, content_text="pure filter mode", msgtime=100,
+    )
+    _insert_recipient(db, msg.id, "contact_a", tenant_id=_TENANT_A)
+
+    _authed(app, db, _TENANT_A)
+    try:
+        resp = client.get("/api/search/messages?msgtype=text")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["results"]) == 1
 
 
 def test_search_messages_skips_non_text_types(client, db) -> None:
