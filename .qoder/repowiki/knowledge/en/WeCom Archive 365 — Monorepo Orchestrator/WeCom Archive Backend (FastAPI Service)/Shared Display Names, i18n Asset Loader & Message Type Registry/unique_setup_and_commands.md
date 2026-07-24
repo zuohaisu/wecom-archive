@@ -1,0 +1,1 @@
+The `i18n_assets.py` module requires `app/assets/i18n.js` to exist at import time; if missing, loading any module that imports it will raise immediately. The registry performs duplicate-key validation at import time, so adding conflicting `raw_type` or `aliases` values fails fast on startup rather than at request time.

@@ -1,0 +1,1 @@
+`alembic upgrade head` applies pending migrations; `alembic revision --autogenerate -m "..."` generates new migration files. Scripts under `scripts/` are run directly with Python (e.g. `python -m scripts.bootstrap_default_tenant`, `python -m scripts.migrate_local_media_to_qiniu`) and share the same `DATABASE_URL` environment variable as the main app.

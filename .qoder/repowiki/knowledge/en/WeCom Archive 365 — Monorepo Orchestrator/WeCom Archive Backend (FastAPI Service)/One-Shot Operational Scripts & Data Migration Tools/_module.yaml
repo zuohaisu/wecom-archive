@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: backend_app/scripts
+title: One-Shot Operational Scripts & Data Migration Tools
+scope:
+    - backend/scripts/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_app/database_models
+    - path: backend_app/media_storage

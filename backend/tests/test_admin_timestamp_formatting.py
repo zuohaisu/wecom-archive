@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.main import _fmt_msgtime
+from app.html_helpers import _fmt_msgtime
 from tests._rnd216_web_shims import review_console_html, review_console_js_source
 
 _REVIEW_CONSOLE_HTML = review_console_html()

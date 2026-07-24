@@ -1,0 +1,1 @@
+Python 3 with SQLAlchemy (engine + Session + text() for raw SQL), PostgreSQL via `DATABASE_URL`, the WeCom Finance C SDK loaded dynamically through `app.sdk.wecom_sdk` (libWeWorkFinanceSdk_C.so), and optional Qiniu Kodo cloud storage via `app.media_storage` providers. Alembic revision verification delegates to `app.db.schema_check.check_revision`.

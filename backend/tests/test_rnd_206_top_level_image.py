@@ -36,7 +36,7 @@ import subprocess
 
 import pytest
 
-from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from app.routers.web import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
 from tests._rnd216_web_shims import review_console_js_source
 
 _REVIEW_CONSOLE_JS = review_console_js_source()

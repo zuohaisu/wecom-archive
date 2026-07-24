@@ -32,7 +32,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.i18n_assets import I18N_JS_SOURCE, I18N_SCRIPT_TAG
-from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON, _SEARCH_MSGTYPE_OPTIONS_JSON
+from app.routers.web import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON, _SEARCH_MSGTYPE_OPTIONS_JSON
 from app.web import render_template
 
 _STATIC_DIR = Path(__file__).parent.parent / "app" / "web" / "static"

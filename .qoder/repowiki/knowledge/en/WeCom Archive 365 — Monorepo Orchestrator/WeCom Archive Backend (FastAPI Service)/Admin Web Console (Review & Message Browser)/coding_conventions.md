@@ -1,0 +1,5 @@
+- Template placeholders use the `__UPPER_CASE_TOKEN__` syntax and are substituted in a single `re.sub` pass to avoid cascading replacement corruption.
+- Static assets are referenced with a `?v=__STATIC_VERSION__` query string to force browser cache invalidation after deployment.
+- i18n strings are injected via an `I18N` global object and applied to elements using `data-i18n` attributes rather than inline translations.
+- JavaScript modules follow a strict load-order dependency chain declared in the template: state → api-client → list/timeline/renderers → media-viewer → refresh → entry point.
+- User-supplied content rendered into templates is passed through an `_e()` escaping helper before being embedded as template values.

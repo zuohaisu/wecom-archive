@@ -1,0 +1,1 @@
+The revoke reconciliation module is invoked from `scripts/decrypt_wecom_messages_once.py` immediately after each row's `structured_content` is set, and its repair scan mirrors `app.media_download`'s candidate-query pattern so it can be called on every worker invocation without cost.

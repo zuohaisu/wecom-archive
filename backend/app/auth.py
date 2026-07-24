@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 import httpx
-from fastapi import Cookie, Depends, HTTPException
+from fastapi import Cookie, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.db.models import AdminSession, AdminUser
@@ -282,6 +282,39 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="User not found")
 
     return user, session.tenant_id
+
+
+def require_html_session(
+    request: Request, db: Session = Depends(get_db)
+) -> Optional[str]:
+    """
+    FastAPI dependency for HTML admin routes. Returns tenant_id for the
+    authenticated session, or None if unauthenticated. Callers redirect to
+    /admin/login on None instead of the 401 that get_current_user raises.
+    tenant_id is the authoritative scope for all subsequent archive queries.
+    """
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if not session_id:
+        return None
+    now = datetime.now(timezone.utc)
+    try:
+        session = (
+            db.query(AdminSession)
+            .filter(
+                AdminSession.id == session_id,
+                AdminSession.expires_at > now,
+                AdminSession.is_revoked.is_(False),
+            )
+            .first()
+        )
+    except Exception as exc:
+        # A DB failure means identity cannot be confirmed — treat as
+        # unauthenticated (redirect to login), never as authenticated.
+        # Log only the exception type — DBAPI errors often embed bound
+        # parameters (here, the session token) in their string repr.
+        logger.error("require_html_session: session lookup failed: %s", type(exc).__name__)
+        return None
+    return session.tenant_id if session is not None else None
 
 
 def _is_production() -> bool:

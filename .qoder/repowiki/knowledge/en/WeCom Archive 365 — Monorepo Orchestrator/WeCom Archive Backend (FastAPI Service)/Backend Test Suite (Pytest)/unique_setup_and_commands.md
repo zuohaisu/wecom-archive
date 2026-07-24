@@ -1,0 +1,1 @@
+Run from `backend/`: `pytest tests/<file>.py -v`. Tests requiring Node.js skip automatically if `node` is not on PATH. Tests requiring a real database skip unless `DATABASE_URL` is set; some tests temporarily set it via `monkeypatch.setenv('DATABASE_URL', url)` before invoking Alembic/migration code.

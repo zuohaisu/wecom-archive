@@ -1,0 +1,1 @@
+Plain Python + regex for template rendering (no Jinja2 or other engine); vanilla ES5-style JavaScript with `fetch()` and DOM manipulation; CSS custom properties and `prefers-reduced-motion`; MD5-based static asset fingerprinting computed at import time.

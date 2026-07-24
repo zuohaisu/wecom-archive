@@ -1,0 +1,1 @@
+No build or test commands. The company homepage is deployed by copying `index.html` and `style.css` under `/var/www/crowntime-site/` and configuring Nginx to serve `crowntime.cn` / `www.crowntime.cn` separately from the archive backend (`qwhhcd.crowntime.cn`).

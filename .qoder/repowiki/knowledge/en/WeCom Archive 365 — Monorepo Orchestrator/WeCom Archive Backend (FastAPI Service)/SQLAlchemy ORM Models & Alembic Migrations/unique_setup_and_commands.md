@@ -1,0 +1,1 @@
+Alembic runs against `DATABASE_URL` (or `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` fallbacks in `alembic/env.py`). Schema drift is enforced by `schema_check.check_revision()` which compares repository HEAD revisions against database current heads — used by both the HTTP readiness endpoint and `scripts/verify_alembic_head.py`.

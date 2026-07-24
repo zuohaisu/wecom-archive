@@ -1,0 +1,1 @@
+Automated Let's Encrypt certificate renewal for Qiniu CDN domains, orchestrating acme.sh, Qiniu upload/bind/verify, HTTPS validation, and webhook notifications with dry-run/staging/production modes.

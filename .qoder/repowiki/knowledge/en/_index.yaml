@@ -1,0 +1,177 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+nodes_managed: true
+exported_at: "2026-07-24T17:51:16Z"
+modules:
+    "":
+        dir_name: WeCom Archive 365 — Monorepo Orchestrator
+        title: WeCom Archive 365 — Monorepo Orchestrator
+        scope:
+            - README.md
+            - Makefile
+            - pyproject.toml
+            - .gitignore
+            - DESIGN-linear.app.md
+            - DEV_AGENT_RULES.md
+            - PROJECT_DOCUMENTATION_REPORT.md
+            - TASK_TRACKING.md
+            - .env.example
+        source_files: []
+        children:
+            - backend_app
+            - deployment_infra
+            - docs_and_design
+            - ssl_renew_tool
+        depends_on: []
+        related_to: []
+    backend_app:
+        dir_name: WeCom Archive Backend (FastAPI Service)
+        title: WeCom Archive Backend (FastAPI Service)
+        scope:
+            - backend/
+        source_files: []
+        children:
+            - backend_app/database_models
+            - backend_app/media_storage
+            - backend_app/reachability_audit
+            - backend_app/scripts
+            - backend_app/shared_utils
+            - backend_app/tests
+            - backend_app/web_frontend
+            - backend_app/wecom_integration
+        depends_on: []
+        related_to:
+            - path: deployment_infra
+    backend_app/database_models:
+        dir_name: SQLAlchemy ORM Models & Alembic Migrations
+        title: SQLAlchemy ORM Models & Alembic Migrations
+        scope:
+            - backend/app/db/
+            - backend/alembic/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/reachability_audit
+            - path: backend_app/scripts
+    backend_app/media_storage:
+        dir_name: Media Storage Abstraction, Download Pipeline & Thumbnail Generation
+        title: Media Storage Abstraction, Download Pipeline & Thumbnail Generation
+        scope:
+            - backend/app/media_storage.py
+            - backend/app/media_download.py
+            - backend/app/media_thumbnails.py
+            - backend/app/thumbnail_pipeline.py
+            - backend/app/qiniu_storage.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/scripts
+            - path: backend_app/tests
+            - path: backend_app/wecom_integration
+    backend_app/reachability_audit:
+        dir_name: Message Reachability Audit & Revoke Reconciliation
+        title: Message Reachability Audit & Revoke Reconciliation
+        scope:
+            - backend/app/routers/reachability_audit.py
+            - backend/app/reachability_audit.py
+            - backend/app/revoke_reconciliation.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/database_models
+    backend_app/scripts:
+        dir_name: One-Shot Operational Scripts & Data Migration Tools
+        title: One-Shot Operational Scripts & Data Migration Tools
+        scope:
+            - backend/scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/database_models
+            - path: backend_app/media_storage
+    backend_app/shared_utils:
+        dir_name: Shared Display Names, i18n Asset Loader & Message Type Registry
+        title: Shared Display Names, i18n Asset Loader & Message Type Registry
+        scope:
+            - backend/app/display_names.py
+            - backend/app/i18n_assets.py
+            - backend/app/message_type_registry.py
+            - backend/app/structured_message_parser.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/web_frontend
+    backend_app/tests:
+        dir_name: Backend Test Suite (Pytest)
+        title: Backend Test Suite (Pytest)
+        scope:
+            - backend/tests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/media_storage
+            - path: backend_app/web_frontend
+    backend_app/web_frontend:
+        dir_name: Admin Web Console (Review & Message Browser)
+        title: Admin Web Console (Review & Message Browser)
+        scope:
+            - backend/app/web/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/shared_utils
+            - path: backend_app/tests
+    backend_app/wecom_integration:
+        dir_name: WeCom Integration (Event Callbacks, C SDK Wrapper & Contact Metadata)
+        title: WeCom Integration (Event Callbacks, C SDK Wrapper & Contact Metadata)
+        scope:
+            - backend/app/routers/wecom_events.py
+            - backend/app/sdk/wecom_sdk.py
+            - backend/app/wecom_contacts.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/media_storage
+    deployment_infra:
+        dir_name: Production Deployment & Systemd Service Units
+        title: Production Deployment & Systemd Service Units
+        scope:
+            - deploy/
+            - scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app
+            - path: ssl_renew_tool
+    docs_and_design:
+        dir_name: Project Documentation, Design Specs & Static Site
+        title: Project Documentation, Design Specs & Static Site
+        scope:
+            - docs/
+            - design/
+            - static_site/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    ssl_renew_tool:
+        dir_name: SSL Certificate Auto-Renewal & Qiniu CDN Deployment
+        title: SSL Certificate Auto-Renewal & Qiniu CDN Deployment
+        scope:
+            - ssl-renew/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: deployment_infra

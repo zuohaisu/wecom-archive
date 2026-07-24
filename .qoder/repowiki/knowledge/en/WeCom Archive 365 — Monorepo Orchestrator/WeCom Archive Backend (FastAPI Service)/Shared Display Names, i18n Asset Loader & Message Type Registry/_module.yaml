@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: backend_app/shared_utils
+title: Shared Display Names, i18n Asset Loader & Message Type Registry
+scope:
+    - backend/app/display_names.py
+    - backend/app/i18n_assets.py
+    - backend/app/message_type_registry.py
+    - backend/app/structured_message_parser.py
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_app/web_frontend

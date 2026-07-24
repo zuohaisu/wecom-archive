@@ -317,14 +317,14 @@ def test_get_current_user_db_failure_on_user_lookup_raises_401(db: Session) -> N
 
 
 def test_resolve_session_tenant_id_db_failure_returns_none() -> None:
-    from app.main import _resolve_session_tenant_id
+    from app.auth import require_html_session
 
     request = MagicMock()
     request.cookies = {"session_id": "whatever"}
     broken_db = MagicMock()
     broken_db.query.side_effect = RuntimeError("connection lost")
 
-    assert _resolve_session_tenant_id(request, broken_db) is None
+    assert require_html_session(request, broken_db) is None
 
 
 def test_admin_conversations_redirects_to_login_when_db_lookup_fails(client) -> None:
@@ -1196,7 +1196,7 @@ def test_get_current_user_db_failure_log_does_not_leak_session_token(caplog) -> 
 def test_resolve_session_tenant_id_db_failure_log_does_not_leak_session_token(caplog) -> None:
     import logging as _logging
 
-    from app.main import _resolve_session_tenant_id
+    from app.auth import require_html_session
 
     sensitive_session_id = "super-secret-session-token-zyxwvu987654"
 
@@ -1210,7 +1210,7 @@ def test_resolve_session_tenant_id_db_failure_log_does_not_leak_session_token(ca
     broken_db.query.side_effect = _LeakyError()
 
     with caplog.at_level(_logging.ERROR):
-        assert _resolve_session_tenant_id(request, broken_db) is None
+        assert require_html_session(request, broken_db) is None
 
     assert sensitive_session_id not in caplog.text
     assert "_LeakyError" in caplog.text

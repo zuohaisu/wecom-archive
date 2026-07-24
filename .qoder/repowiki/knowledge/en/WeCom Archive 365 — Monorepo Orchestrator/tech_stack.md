@@ -1,0 +1,1 @@
+Python 3.9+ with FastAPI + SQLAlchemy + Alembic for the backend; Bash + acme.sh + Qiniu SDK for SSL renewal; systemd service/timer units for production orchestration; ruff for unified Python linting across backend and ssl-renew Python files; Node.js for embedded JS asset validation in the backend build step.

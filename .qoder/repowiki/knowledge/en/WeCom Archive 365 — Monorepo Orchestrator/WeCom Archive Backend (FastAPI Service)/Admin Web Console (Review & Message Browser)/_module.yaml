@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: backend_app/web_frontend
+title: Admin Web Console (Review & Message Browser)
+scope:
+    - backend/app/web/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_app/shared_utils
+    - path: backend_app/tests

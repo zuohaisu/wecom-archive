@@ -1,0 +1,4 @@
+- All Python linting uses ruff configured centrally in `pyproject.toml`, with per-file ignores scoped to `backend/tests/*.py` for the established pytest fixture import pattern.
+- Secrets are never committed; `.env` is gitignored everywhere and `.env.example` serves as the single source of truth for required environment variables.
+- Each child module ships its own test suite (pytest for backend, bats + pytest for ssl-renew) invoked through dedicated `make` targets rather than ad-hoc commands.
+- Deployment assets (systemd units, deploy scripts) live under `deploy/` and `scripts/` at the repo root and are versioned alongside the code they operate on.

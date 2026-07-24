@@ -1,0 +1,1 @@
+Standalone Python scripts for one-time or repeatable operational tasks: tenant bootstrapping, WeCom archive sync, media migration to Qiniu, Alembic head verification, and development mock data ingestion.

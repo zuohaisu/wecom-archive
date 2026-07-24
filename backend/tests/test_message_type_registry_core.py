@@ -55,7 +55,7 @@ import subprocess
 
 import pytest
 
-from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from app.routers.web import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
 from app.media_classification import classify_media
 from app.message_type_registry import (
     FALLBACK_DEFINITION,
@@ -947,7 +947,7 @@ def test_search_page_msgtype_options_exactly_equal_the_backend_export() -> None:
     above): the search page's embedded MSGTYPE_OPTIONS must be exactly
     what build_filterable_type_options() computed, not a hand-copied
     snapshot that can drift the moment the registry changes."""
-    from app.main import _SEARCH_MSGTYPE_OPTIONS_JSON
+    from app.routers.web import _SEARCH_MSGTYPE_OPTIONS_JSON
 
     search_page_html_content = search_page_html()
     # RND-216: search.js now reads MSGTYPE_OPTIONS off a page-level

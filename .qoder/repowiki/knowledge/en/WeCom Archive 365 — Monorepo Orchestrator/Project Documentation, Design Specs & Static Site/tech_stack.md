@@ -1,0 +1,1 @@
+Plain Markdown documents, one HTML mockup, and a minimal static site built with vanilla HTML + CSS (no JavaScript, no build step). Deployment targets Nginx as a static file server for the company homepage.

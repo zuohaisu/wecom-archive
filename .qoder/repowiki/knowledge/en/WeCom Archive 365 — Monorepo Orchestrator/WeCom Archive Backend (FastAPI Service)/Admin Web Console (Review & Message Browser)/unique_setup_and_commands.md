@@ -1,0 +1,1 @@
+No build step is required. Static assets are served directly from `backend/app/web/static/` and their cache-busting version is recomputed automatically when the Python process imports `web.__init__`, so redeploying the code picks up new JS/CSS content without a separate asset pipeline.

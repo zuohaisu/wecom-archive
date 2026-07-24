@@ -1,0 +1,1 @@
+Provides a pluggable media storage provider interface (local filesystem and Qiniu Kodo), a unified download pipeline for WeCom image/voice/video/file/emotion messages, and server-side thumbnail generation with deterministic object-key naming and per-row backend resolution.
