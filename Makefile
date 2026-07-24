@@ -101,19 +101,25 @@ typecheck:
 ## end-to-end. Until RND-216, backend/app/assets/i18n.js was the only
 ## standalone JS asset (everything else was inlined into main.py's Python
 ## source); RND-216 externalized the admin console's page scripts too, so
-## every backend/app/web/static/*.js file (review-console.js, search.js,
-## diagnostics.js — templated HTML now lives in backend/app/web/templates/
-## and is assembled at request time by app.web.render_template, never at
-## build time) is checked the same way. The app-construction check below
-## still catches a broken/missing template or static asset at build time
-## (render_template reads them eagerly the first time a route renders, and
-## app.web computes STATIC_VERSION from the static/ directory at import
-## time), not at request time in production.
+## every backend/app/web/static/*.js file (search.js, diagnostics.js —
+## templated HTML now lives in backend/app/web/templates/ and is assembled
+## at request time by app.web.render_template, never at build time) is
+## checked the same way. RND-217 further split the review console's script
+## into 8 modules under backend/app/web/static/console/ (console-state.js,
+## api-client.js, conversation-list.js, timeline.js, message-renderers.js,
+## media-viewer.js, refresh.js, console-entry.js — loaded by
+## review_console.html as 8 ordered <script src> tags), checked the same
+## way individually so each one is independently syntax-valid. The
+## app-construction check below still catches a broken/missing template or
+## static asset at build time (render_template reads them eagerly the
+## first time a route renders, and app.web computes STATIC_VERSION from
+## the static/ directory at import time), not at request time in
+## production.
 build:
 	$(BACKEND_PY) -m compileall -q backend/app backend/scripts
 	@if command -v node >/dev/null 2>&1; then \
 		node --check backend/app/assets/i18n.js && echo "build: backend/app/assets/i18n.js syntax OK"; \
-		for f in backend/app/web/static/*.js; do \
+		for f in backend/app/web/static/*.js backend/app/web/static/console/*.js; do \
 			node --check "$$f" && echo "build: $$f syntax OK"; \
 		done; \
 	else \

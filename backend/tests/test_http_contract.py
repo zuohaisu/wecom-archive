@@ -866,9 +866,14 @@ class TestFrontendBaseline:
         # <script src="..."> instead of being inlined into the page — the
         # auto-refresh code now lives there, so fetch it too before
         # concluding the mechanism is missing.
-        match = re.search(r'<script src="(/web/static/review-console\.js\?v=[^"]*)"></script>', html)
-        assert match is not None, "review-console.js <script src> not found in page"
-        js = authed_html_client.get(match.group(1)).text
+        # RND-217: review-console.js was further split into 8 modules under
+        # /web/static/console/ (console-state.js, refresh.js, ...), each its
+        # own <script src="..."> tag — fetch all of them and search across
+        # their combined content, since which one holds refresh.js's code is
+        # an implementation detail this test shouldn't hardcode.
+        matches = re.findall(r'<script src="(/web/static/console/[^"]*\.js\?v=[^"]*)"></script>', html)
+        assert matches, "review console module <script src> tags not found in page"
+        js = "".join(authed_html_client.get(src).text for src in matches)
         assert "refreshCountdownSec" in js or "setInterval(" in js, "auto-refresh not found"
 
     def test_unchanged_load_same_html(self, authed_html_client: TestClient) -> None:

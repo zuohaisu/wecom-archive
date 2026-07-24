@@ -441,8 +441,9 @@ def get_message(
 
 # ---------------------------------------------------------------------------
 # RND-216 — admin console static assets (base.css/diagnostics.css,
-# review-console.js/search.js/diagnostics.js). Mounted last so it never
-# shadows an API route. Every template references these through
+# search.js/diagnostics.js, and — since RND-217 split it into 8 modules —
+# web/static/console/*.js). Mounted last so it never shadows an API route.
+# Every template references these through
 # app.web.STATIC_VERSION's `?v=<hash>` query string (see render_template),
 # so a long, immutable Cache-Control here is safe: any content change
 # produces a new URL, and stale-cached responses under the old URL are

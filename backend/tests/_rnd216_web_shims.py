@@ -37,9 +37,59 @@ from app.web import render_template
 
 _STATIC_DIR = Path(__file__).parent.parent / "app" / "web" / "static"
 
+# RND-217: review-console.js was split into 8 modules under static/console/,
+# loaded by review_console.html as 8 ordered <script src> tags instead of one
+# <script src="review-console.js">. This is the same dependency order the
+# template uses (function/var hoisting is per-<script>-tag, not global across
+# tags, so state must load before anything reads it and console-entry's
+# bootstrap sequence must load last).
+_CONSOLE_JS_MODULES = [
+    "console-state.js",
+    "api-client.js",
+    "conversation-list.js",
+    "timeline.js",
+    "message-renderers.js",
+    "media-viewer.js",
+    "refresh.js",
+    "console-entry.js",
+]
+
+# message-renderers.js carries this exact comment at the point where
+# media-viewer.js's <script> tag loads in the real page -- see that comment
+# for why. A handful of pre-existing Node-harness tests regex-extract the
+# RND-206 "var MediaAccessCache=(function(){...function renderCompositeMessage
+# (m){...}" span out of the review console JS as a single contiguous chunk
+# (it predates RND-217 and was written against the old single-file
+# review-console.js, where the Viewer lived inline in the middle of that
+# span). Splicing media-viewer.js's real content back in at this marker, for
+# the test-facing bundle only, reproduces that exact contiguous text so those
+# tests keep working unmodified -- the real browser page never sees this
+# splice, it just loads media-viewer.js as its own next <script> tag.
+_VIEWER_SPLICE_MARKER = (
+    "/* RND-217: media-viewer.js (the shared image/video/chatrecord overlay --\n"
+    "   openViewer/closeViewer/viewerShow/ensureViewerRoot/refreshViewerLabels/\n"
+    "   restoreViewerFocus/openChatrecordViewer) loads as its own <script> tag\n"
+    "   immediately after this file. registerViewerItem() above only records\n"
+    "   items into the shared timelineViewerItems array that the Viewer reads;\n"
+    "   it does not depend on the Viewer's own code being loaded yet. */\n"
+)
+
 
 def _static_js(filename: str) -> str:
     return (_STATIC_DIR / filename).read_text(encoding="utf-8")
+
+
+def _console_js_bundle() -> str:
+    modules = {name: _static_js(f"console/{name}") for name in _CONSOLE_JS_MODULES}
+    assert _VIEWER_SPLICE_MARKER in modules["message-renderers.js"], (
+        "media-viewer.js splice marker not found in message-renderers.js -- "
+        "did the marker comment text drift out of sync between the two files?"
+    )
+    modules["message-renderers.js"] = modules["message-renderers.js"].replace(
+        _VIEWER_SPLICE_MARKER, _VIEWER_SPLICE_MARKER + modules["media-viewer.js"], 1
+    )
+    ordered = [name for name in _CONSOLE_JS_MODULES if name != "media-viewer.js"]
+    return "\n".join(modules[name] for name in ordered)
 
 
 def review_console_html() -> str:
@@ -63,7 +113,7 @@ def diagnostics_html() -> str:
 
 
 def review_console_js_source() -> str:
-    return I18N_JS_SOURCE + "\n" + _static_js("review-console.js")
+    return I18N_JS_SOURCE + "\n" + _console_js_bundle()
 
 
 def search_js_source() -> str:
