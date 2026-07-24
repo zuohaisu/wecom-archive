@@ -19,7 +19,12 @@
 - **Decision (2026-07-23):** user chose to do them SEPARATELY — RND-226 first (alone), THEN RND-210 on a branch off main **after RND-226 merges** (never on pre-226 branch). RND-210 execution prompt prepared in advance: `.workbuddy/prompts/rnd-210-execution-prompt.md`. RND-226 prompt: `.workbuddy/prompts/rnd-226-execution-prompt.md`.
 - **Backlog P2:** RND-221/220/219 (service-extraction chain), RND-211 (sync-aware refresh + "sync now"), RND-195 (all WeCom msg types — umbrella for RND-210), RND-166/165 (SaaS ops/payments).
 - **FROZEN — In Review, blocked by WeCom enterprise name change (NOT within ~1 wk):** RND-104/107/108/129/130/175. Do not merge / don't advise merge.
-- Refactor chain done through RND-215. **RND-216 QA-PASS (2026-07-24), ready for user commit/merge — unblocks RND-217/218.** 217→218→{219|220|221}→222→223→224 still pending.
+- Refactor chain done through RND-215. **RND-216 MERGED to main (2026-07-24, commit `b2d46fc`)** — unblocks RND-217/218. **RND-217 已实现（工作区改动就绪、未提交）；须等 QA agent 验收通过且用户明确许可后才可 commit/push.** 218→{219|220|221}→222→223→224 still pending.
+
+## Hard Rules (AI agent 必须遵守)
+- **Agent 绝不执行 git commit / push**：所有 git 提交与推送一律由用户本人操作。即便改动就绪、QA 已通过、或用户说「可以提交」，agent 也不代劳——只提示用户自行 commit/push。（2026-07-25 用户明确：git commit 暂时都由用户自己做。）
+- **QA 先行**：开发 agent 实现后，先交独立 QA agent 验收（读言、不改实现、不 commit/push），QA 通过后由用户决定是否 commit。
+- 交付物是「开发提示词 + 验收提示词」两份文件，由用户决定何时交给开发/QA agent 执行。
 - NOTE: user-level memory still lists RND-159/160/161/167/176 as "Todo quick wins" — stale. Live: RND-159 In Progress; RND-160/161/167/176 are Backlog.
 
 ## Linear API quirks

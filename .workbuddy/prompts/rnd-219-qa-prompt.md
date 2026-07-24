@@ -1,109 +1,56 @@
-# RND-219 测试 / QA 验收提示词（独立验收智能体）
+# RND-219 验收提示词（独立 QA agent）
 
-> 用途：粘贴给**独立**测试 / QA 智能体（按 `DEV_AGENT_RULES.md` 的 Codex 验收角色），对**已实现的** RND-219 做独立验收。
-> 与开发提示词（`.workbuddy/prompts/rnd-219-execution-prompt.md`）解耦：本提示词不指导如何实现，只规定「怎么判定算做完、怎么证明没做完」。开发 agent 完成并自测通过后，由本 agent 独立复验。
-> 权威依据：Linear 工单 **RND-219** 的验收标准（ordering / group-wins / seat status / display names / tenant isolation 等价；router 仅 HTTP+返回；query count 不恶化）+ 代码硬约束。
-
----
-
-## 0. 验收依据
-
-- **Linear RND-219 验收（必须全过）**：
-  - ordering、group-wins、seat status、display names、tenant isolation 与现状等价；
-  - router 只处理 HTTP 参数与返回（不含聚合/查询逻辑）；
-  - query count 不得恶化。
-- **非目标不可被破坏**：timeline / media 端点与对应 schema 必须保持改造前行为（RND-220 才动）。
+> 用途：粘贴给独立 QA / Code Review 智能体，在开发 agent 完成 RND-219 后、用户 commit 前做验收。
+> 边界：**只读言、不改实现、不 `git commit`/`push`**；只报告发现与放行 / 退回建议。
 
 ---
 
-## 1. 前置检查（先确认环境，再验收）
+## 0. 角色与边界
+- 你是独立验收者。开发 agent 已完成 RND-219 的提取实现，你来验收。
+- **只验证、不改代码**：发现问题时在 Linear 评论 + 本回复列出，由开发 agent 修复；你不得直接改 `conversations.py` / `services/` / `schemas/`。
+- **不 commit / push**：git 提交与推送一律由用户（Haisu）操作。
+- 验收口径：RND-219 是**行为保持的结构性重构**，验收核心是「提取后与提取前逐字节等价 + 结构收敛」，不是功能新增。
 
-1. 代码已合入待测分支，且 **RND-212 已在 `main`**、`backend/app/conversation_membership.py` 存在。
-2. 开发 agent 已通过 `make verify`（lint-diff + typecheck + build + 全量 pytest）。若未通过，本 agent 先复跑一遍 `make verify` 作为基线。
-3. 本地开发服务器可访问（默认 `http://localhost:8000`）；若不在运行，用项目既有方式启动 **前台** 进程后再验（不后台化、不加 `&`）。
-4. 拿到开发 agent 评论中的 **query baseline 数字**（三端点改造前 query 数）；若缺失，本 agent 自行用 counter fixture 重测 baseline 与改造后对比。
+## 1. 验收依据
+- Linear 工单 RND-219 验收标准原文：
+  > ordering、group-wins、seat status、display names、tenant isolation 与现状等价；router 只处理 HTTP 参数与返回；query count 不得恶化。
+- 非目标：不做查询性能优化，不改 timeline / media。
+- 配套开发提示词（`rnd-219-execution-prompt.md`）定义的提取范围与耦合红线。
 
----
+## 2. 检查清单
 
-## 2. 验收清单（逐条 PASS / FAIL + 证据）
+### 2.1 行为等价（最高优先级）
+- [ ] **ordering**：monitored accounts 的 active-first / latest_message_time desc 排序；conversations 的 last activity desc 排序，与重构前一致（对比 `tests/test_staff_seats.py` / `tests/test_conversation_display_names.py` 的基线断言）。
+- [ ] **group-wins**：`_derive_conversation_membership` 的会话归并规则等价（direct 双方 / group roomid），无会话被错并或漏并。
+- [ ] **seat status**：active/history 判定与 `conversation_count` 与现状一致。
+- [ ] **display names**：person / room display name 解析路径与降级（缺名时 `resolve_person_display_name` 行为）一致。
+- [ ] **tenant isolation**：跨租户不可见彼此 monitored accounts / contacts / conversations（核对 `tests/test_tenant_isolation.py`）。
+- [ ] **response contract**：`MonitoredAccountOut` / `ContactOut` / `ConversationOut` 字段名、类型、顺序、OpenAPI schema 未变；`test_http_contract.py` 的 route snapshot 仍通过。
 
-> 每条给出「判定方法 + 期望 + 实测」。FAIL 必须附最小复现步骤。整体结论见 §5。
+### 2.2 结构收敛
+- [ ] 三个端点（`get_monitored_accounts` / `get_contacts` / `get_conversations`）已变为薄封装：仅参数校验 + 调 service + 返回 `response_model`，原查询 / 聚合逻辑已下沉。
+- [ ] 新建 `app/schemas/listing.py` 承载 listing 响应模型；新建 `app/services/listing_service.py` 承载逻辑；import 与 `response_model` 引用正确更新。
+- [ ] **耦合红线**：仅搬了三端点独占的 helper；被 timeline 共享的 helper 未被误搬（如有 shared helper，确认放在内部共享模块且 Linear 已标注供 RND-220 消费）。
+- [ ] 未触碰 timeline cursor（`_encode_message_cursor` / `_decode_message_cursor`）、消息时间线路由、media / timeline 逻辑（非目标）。
 
-### 后端等价（直接打三个 Listing 端点）
-- **C1 ordering 等价**：`GET /api/conversations?mode=staff&staff_id=<X>` 返回按 `(last_message_time, conversation_id)` 降序；构造多条同 `msgtime` 消息，断言 tie-break 由 `id` 决定（RND-158 契约，与 `test_staff_seats.py` 一致）。
-- **C2 group-wins 等价**：构造同一 `conversation_id` 同时被 direct-pair key（`_direct_conv_id`）与真实 `roomid` 命中的消息集，断言结果 `conversation_type == "group"`，且**与消息处理顺序无关**（对应 `test_staff_seats.py::test_full_equiv_direct_group_key_collision` 及其 `_group_first`/`_direct_first` 对）。
-- **C3 seat status 等价**：`GET /api/monitored-accounts` 中 `latest_message_time` 最大者为 `seat_status="active"`、其余 `history`；整体排序 active-first 再 `latest_message_time` 降序；`is_active_archive_seat` 与 `seat_status` 一致。
-- **C4 display names 等价**：group 行 `display_name == resolve_room_display_name(...)`；direct 行取 contact/staff 显示名；`latest_sender_display_name` 正确（对照 `test_conversation_display_names.py`）。
-- **C5 tenant isolation 等价**：用**另一租户**认证调三端点，断言只能见到本租户数据；请求里即使塞 `tenant_id` 参数也应被忽略（`tenant_id` 只来自 `get_current_user`）。
-- **C6 query count 不恶化**：用 query-counter fixture 复测三端点改造后 query 数 ≤ 改造前 baseline（对照开发评论数字或本 agent 自测 baseline）。超即 FAIL。
-- **C7 router 仅 HTTP+返回（代码审查）**：`routers/conversations.py` 中三个 handler 函数体只含「解析 auth/Query → 调 service → return」；**不得**含 `_build_conversation_list`、`_load_display_names`、SQL `db.query(...)` 等聚合/查询逻辑（这些应只在 `conversation_listing.py`）。
-- **C8 非目标未被破坏（代码 + 行为）**：
-  - `git diff` 确认 `get_conversation_messages`（~1756）、media 系列（~2410/2554/2754/2868）及 `TimelineMessageOut`/`MediaAccessOut`/`NestedMediaAccessOut`/`PaginationOut`/`ConversationMessagesOut`（~1391–1540）**无改动**；
-  - 真实打 `GET /api/conversations/{id}/messages` 与 media 端点，返回结构与改造前一致（可对照既有 media/timeline 测试）。
-- **C9 路由数与路径不变**：`test_http_contract.py` 路由计数不变；三路径 `/api/monitored-accounts`、`/api/contacts`、`/api/conversations` 仍存在且 `response_model` 分别为 `MonitoredAccountOut`/`ContactOut`/`ConversationOut`（现 import 自 `app.conversation_schemas`）。
-- **C10 复用 membership 函数对象（代码审查）**：`conversation_listing.py` 与 router 对 membership 逻辑（`_collect_staff_ids` 等）的 import 来源**均为 `app.conversation_membership`**，无在 service/router 内重定义；`_load_display_names` 在 router 与 service 间**无双定义**（re-export 或单一定义，见执行提示词 §1.1）。
+### 2.3 性能 / 质量门槛
+- [ ] **query count 不恶化**：三端点的 DB 查询次数与重构前一致（核对开发 agent 的 query-count 说明；必要时用 SQL echo 自测）。
+- [ ] `make verify`（lint-diff + typecheck + build + 全量 pytest）全绿。
+- [ ] 无新增第三方依赖；无 secrets 引入；仅预期文件变更。
 
-### 回归（不破坏既有能力）
-- **C11 `test_staff_seats.py` 全绿**（seat status + ordering + group-wins 权威锚点）。
-- **C12 `test_conversation_display_names.py` 全绿**。
-- **C13 `test_conversation_membership_service.py` 全绿**。
-- **C14 `test_tenant_isolation.py` 全绿**。
-- **C15 `test_http_contract.py` 全绿**（路由数不变）。
-- **C16 `make verify` 全绿**（lint-diff + typecheck + build + 全量 pytest）。
-- **C17 RND-226 / RND-210 未被破坏**：`test_rnd_226_nested_entity_context.py`、`test_rnd_210_msgtype_and_card.py` 仍绿（确认收敛未误伤已上线逻辑）。
+### 2.4 风险 / 回归
+- [ ] 既有相关套件全绿：`tests/test_staff_seats.py tests/test_conversation_display_names.py tests/test_contact_sync.py tests/test_tenant_isolation.py tests/test_http_contract.py`（及 `make verify` 全量）。
+- [ ] 浏览器 smoke：会话列表 / 联系人 / 监控账号页渲染正常（参照项目 Playwright 脚本）。
 
----
+## 3. 验证命令（在 `backend/` 下）
+- 定向：
+  ```bash
+  python -m pytest tests/test_staff_seats.py tests/test_conversation_display_names.py tests/test_contact_sync.py tests/test_tenant_isolation.py tests/test_http_contract.py -q
+  ```
+- 全量收尾：`make verify`
+- query count 抽查：如项目有 SQL echo / query-count 工具则启用；否则基于开发 agent 给的查询序列逐项核对期望 vs 实际。
 
-## 3. 测试方法
-
-- **后端等价 + 回归**：`cd backend` 后跑
-  - `python -m pytest tests/test_staff_seats.py tests/test_conversation_display_names.py tests/test_conversation_membership_service.py tests/test_tenant_isolation.py tests/test_http_contract.py tests/test_rnd_226_nested_entity_context.py tests/test_rnd_210_msgtype_and_card.py -q`
-  - 若开发 agent 未交付 query 基线，本 agent 用 counter fixture（包 `Session.execute` 或 `engine` `before_cursor_execute` 事件）自测三端点改造后 query 数，并标注「baseline 缺失，本次自测为准」。
-- **代码审查项（C7/C8/C10）**：直接读 `git diff` 与 `conversation_listing.py` / `conversation_schemas.py` / `routers/conversations.py` 头部 import，逐项核对。
-- **收口**：跑 `make verify` 确认全绿。
-
----
-
-## 4. 硬性约束（验收 agent 自身也要守）
-- 不修改任何实现代码；只**读**、**断言**与**跑测试**。若发现需要改代码才能验证，说明是「待测代码缺口」而非自己补。
-- 不绕过租户隔离做测试（用合法多租户 fixture 验证隔离）。
-- 不自行 `git commit` / `push`；只输出验收结论与证据。
-- 不引入后台进程；开发服务器假设已在运行，命令前台运行。
-
----
-
-## 5. 输出格式（必须结构化）
-
-```
-## RND-219 验收报告
-整体结论：PASS / FAIL / BLOCKED
-环境：分支 <x> · 是否含 RND-212/conversation_membership：是/否 · make verify：通过/失败
-query 基线：monitored-accounts=<n> contacts=<n> conversations=<n>（来源：开发评论/本 agent 自测）
-
-| 编号 | 验收点 | 结果 | 证据（实测/命令/代码位置） |
-|------|--------|------|---------------------------|
-| C1   | ordering 等价 | PASS | ... |
-| C2   | group-wins 等价 | PASS | ... |
-| C3   | seat status 等价 | PASS | ... |
-| C4   | display names 等价 | PASS | ... |
-| C5   | tenant isolation 等价 | PASS | ... |
-| C6   | query count 不恶化 | PASS | 改造后 ≤ baseline（<n>/<n>/<n>） |
-| C7   | router 仅 HTTP+返回 | PASS | 代码审查：handler 无聚合/查询逻辑 |
-| C8   | 非目标未破坏 | PASS | git diff 确认 timeline/media 无改动 |
-| C9   | 路由数/路径不变 | PASS | test_http_contract 通过 |
-| C10  | 复用 membership 对象 | PASS | import 来源均为 conversation_membership |
-| C11–C17 | 回归套件 | PASS | pytest 全绿 / make verify 全绿 |
-
-### 失败项 / 阻塞项
-- <逐条：现象 + 最小复现 + 影响范围>
-
-### 边界与已知限制确认
-- 非目标（timeline/media/查询优化）确认未触碰 → 视为 PASS 非缺陷。
-- 其他观察到的限制：<…>
-
-### 结论与建议
-- 可合并 / 需返工（列出必须修的项）/ 阻塞（缺 RND-212 或 conversation_membership）。
-```
-
-- 若某条无论如何无法复现（如环境导致 C1–C5 打不了），如实标注 **NOT REPRODUCIBLE** 而非判 FAIL；若实现确有问题，判 FAIL 并给出可复现证据。
-- 最终把该报告作为 Linear RND-219 评论贴出（状态保持 In Progress / Todo，交还用户 Haisu 决策合并）。
+## 4. 放行 / 退回标准
+- **放行**：上述 2.1–2.3 全部满足，`make verify` 绿，且未越界（未动 timeline/media、未搬 shared helper、未自 commit/push）。在 Linear 评论给出「验收通过」+ 关键核对点。
+- **退回（打回开发 agent）**：任一出现回归——行为不等价（ordering / group-wins / seat / display name / tenant）、response contract 变化、query count 恶化、误搬 shared helper、触碰非目标代码、或测试失败。列出具体差异（期望 vs 实际），不自行改实现。
+- 无论放行与否，**不要 commit/push**；提交与合并由用户决定。
