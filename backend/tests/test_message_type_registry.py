@@ -34,7 +34,10 @@ import subprocess
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from tests._rnd216_web_shims import review_console_js_source
+
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 NODE = shutil.which("node")
 
@@ -42,8 +45,8 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this
 
 
 def _extract(pattern: str, label: str) -> str:
-    match = re.search(pattern, _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_HTML"
+    match = re.search(pattern, _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_JS"
     return match.group(0)
 
 
@@ -53,7 +56,7 @@ def _extract(pattern: str, label: str) -> str:
 
 
 def test_message_type_registry_exists_in_console_html() -> None:
-    assert "var MessageTypeRegistry=" in _REVIEW_CONSOLE_HTML
+    assert "var MessageTypeRegistry=" in _REVIEW_CONSOLE_JS
 
 
 def test_render_message_body_references_the_registry() -> None:
@@ -82,6 +85,13 @@ def _bundle() -> str:
         _extract(r"function pad\(n\)\{.*?\}", "pad()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # RND-216: the MessageTypeRegistry IIFE now reads its `entries` off
+        # a page-level `RND216_MTR_ENTRIES` global (injected by
+        # templates/review_console.html into a small <script> ahead of the
+        # externalized review-console.js) instead of an inlined JSON
+        # literal — this bundle must define that global itself before the
+        # IIFE runs.
+        f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};",
         _extract(
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),

@@ -13,6 +13,7 @@ No live database required (SQLite :memory: or mock DB).
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Generator, get_args
 from unittest.mock import MagicMock
@@ -859,9 +860,16 @@ class TestFrontendBaseline:
     def test_refresh_interval_present(self, authed_html_client: TestClient) -> None:
         resp = authed_html_client.get("/admin/conversations", follow_redirects=False)
         html = resp.text
-        assert "refreshCountdownSec" in html or "setInterval(" in html, (
-            "auto-refresh not found"
-        )
+        if "refreshCountdownSec" in html or "setInterval(" in html:
+            return
+        # RND-216: review-console.js is now referenced via an external
+        # <script src="..."> instead of being inlined into the page — the
+        # auto-refresh code now lives there, so fetch it too before
+        # concluding the mechanism is missing.
+        match = re.search(r'<script src="(/web/static/review-console\.js\?v=[^"]*)"></script>', html)
+        assert match is not None, "review-console.js <script src> not found in page"
+        js = authed_html_client.get(match.group(1)).text
+        assert "refreshCountdownSec" in js or "setInterval(" in js, "auto-refresh not found"
 
     def test_unchanged_load_same_html(self, authed_html_client: TestClient) -> None:
         h1 = authed_html_client.get("/admin/conversations", follow_redirects=False).text

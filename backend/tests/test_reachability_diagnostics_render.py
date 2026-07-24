@@ -3,7 +3,7 @@ Tests for RND-180 — Message Reachability diagnostics page client-side
 rendering (ReachabilityStatusRegistry, renderReport(), renderStatusTable(),
 renderTypeTable()).
 
-Scope: the diagnostics page's embedded JS (_DIAGNOSTICS_HTML) only. It
+Scope: the diagnostics page's embedded JS (_DIAGNOSTICS_JS) only. It
 consumes the aggregate report object exactly as returned by the real
 GET /api/admin/reachability-audit endpoint (RND-178) and must never compute
 reachability itself — these tests feed it hand-built report objects (the
@@ -28,7 +28,9 @@ import subprocess
 
 import pytest
 
-from app.main import _DIAGNOSTICS_HTML
+from tests._rnd216_web_shims import diagnostics_js_source
+
+_DIAGNOSTICS_JS = diagnostics_js_source()
 
 NODE = shutil.which("node")
 
@@ -36,8 +38,8 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this
 
 
 def _extract(pattern: str, label: str) -> str:
-    match = re.search(pattern, _DIAGNOSTICS_HTML, re.S)
-    assert match is not None, f"{label} not found in _DIAGNOSTICS_HTML"
+    match = re.search(pattern, _DIAGNOSTICS_JS, re.S)
+    assert match is not None, f"{label} not found in _DIAGNOSTICS_JS"
     return match.group(0)
 
 
@@ -47,7 +49,7 @@ def _extract(pattern: str, label: str) -> str:
 
 
 def test_reachability_status_registry_exists_in_page() -> None:
-    assert "var ReachabilityStatusRegistry=" in _DIAGNOSTICS_HTML
+    assert "var ReachabilityStatusRegistry=" in _DIAGNOSTICS_JS
 
 
 def test_render_report_references_the_registry() -> None:

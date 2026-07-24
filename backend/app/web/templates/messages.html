@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Archive Messages</title>
+<link rel="stylesheet" href="/web/static/base.css?v=__STATIC_VERSION__">
+</head><body>
+<h1>Archive Messages</h1>
+<form method="get" action="/admin/messages">
+  <label>Sender: <input type="text" name="sender" value="__SENDER_VAL__" placeholder="user ID"></label>
+  <label>Keyword: <input type="text" name="q" value="__Q_VAL__" placeholder="search content"></label>
+  <button type="submit">Filter</button>
+  <a href="/admin/messages">Clear</a>
+</form>
+<table>
+  <thead><tr>
+    <th>msgid</th><th>sender</th><th>room</th><th>type</th>
+    <th>time (UTC+8)</th><th>content</th><th>status</th>
+  </tr></thead>
+  <tbody>__ROW_HTML__</tbody>
+</table>
+</body></html>

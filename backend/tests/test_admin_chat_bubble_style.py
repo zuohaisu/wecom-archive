@@ -27,7 +27,10 @@ from __future__ import annotations
 
 import re
 
-from app.main import _REVIEW_CONSOLE_HTML
+from tests._rnd216_web_shims import review_console_html, review_console_js_source
+
+_REVIEW_CONSOLE_HTML = review_console_html()
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 
 def _extract_style_block() -> str:
@@ -146,7 +149,7 @@ def test_render_timeline_direction_logic_unchanged() -> None:
     # RND-204: per-row direction/bubble logic now lives in timelineRowHtml(),
     # which renderTimeline() delegates to.
     match = re.search(
-        r"function timelineRowHtml\(m\)\{.*?\n\}", _REVIEW_CONSOLE_HTML, re.S
+        r"function timelineRowHtml\(m\)\{.*?\n\}", _REVIEW_CONSOLE_JS, re.S
     )
     assert match is not None
     src = match.group(0)

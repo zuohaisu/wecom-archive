@@ -26,7 +26,10 @@ import subprocess
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from tests._rnd216_web_shims import review_console_js_source
+
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 NODE = shutil.which("node")
 
@@ -34,8 +37,8 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this
 
 
 def _extract(pattern: str, label: str) -> str:
-    match = re.search(pattern, _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_HTML"
+    match = re.search(pattern, _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_JS"
     return match.group(0)
 
 
@@ -56,6 +59,7 @@ def _bundle(extra: list[str] | None = None) -> str:
         _extract(r"function handleUnauth\(r\)\{.*?\n\}", "handleUnauth()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};",
         _extract(r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"),
         _extract(r"function isSafeUrl\(u\)\{.*?\n\}", "isSafeUrl()"),
         _extract(r"function hostnameOf\(u\)\{.*?\n\}", "hostnameOf()"),
@@ -153,17 +157,17 @@ def test_video_placeholder_no_longer_hardcoded_unsupported() -> None:
     # RND-206 requirement: the old blanket "不支持视频消息" copy must no
     # longer be the ONLY thing ever shown for a video message — a real
     # <video> element must be reachable once media_status=="available".
-    assert "data-rnd206-kind" in _REVIEW_CONSOLE_HTML
-    assert "renderVideoPreview" in _REVIEW_CONSOLE_HTML
-    assert "media-video" in _REVIEW_CONSOLE_HTML
+    assert "data-rnd206-kind" in _REVIEW_CONSOLE_JS
+    assert "renderVideoPreview" in _REVIEW_CONSOLE_JS
+    assert "media-video" in _REVIEW_CONSOLE_JS
 
 
 def test_viewer_markup_present() -> None:
-    assert "rnd206-viewer" in _REVIEW_CONSOLE_HTML
-    assert "function openViewer(" in _REVIEW_CONSOLE_HTML
-    assert "function closeViewer(" in _REVIEW_CONSOLE_HTML
-    assert "ArrowLeft" in _REVIEW_CONSOLE_HTML and "ArrowRight" in _REVIEW_CONSOLE_HTML
-    assert "Escape" in _REVIEW_CONSOLE_HTML
+    assert "rnd206-viewer" in _REVIEW_CONSOLE_JS
+    assert "function openViewer(" in _REVIEW_CONSOLE_JS
+    assert "function closeViewer(" in _REVIEW_CONSOLE_JS
+    assert "ArrowLeft" in _REVIEW_CONSOLE_JS and "ArrowRight" in _REVIEW_CONSOLE_JS
+    assert "Escape" in _REVIEW_CONSOLE_JS
 
 
 def test_media_access_cache_never_persists_to_localstorage() -> None:

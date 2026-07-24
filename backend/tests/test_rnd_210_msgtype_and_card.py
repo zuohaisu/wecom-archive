@@ -49,7 +49,6 @@ import subprocess
 import pytest
 
 from app.db.models import Contact
-from app.main import _REVIEW_CONSOLE_HTML
 from app.media_classification import classify_media
 from app.message_type_registry import (
     FALLBACK_DEFINITION,
@@ -62,6 +61,7 @@ from app.structured_message_parser import (
     parse_card_message,
     parse_structured_content,
 )
+from tests._rnd216_web_shims import review_console_js_source
 from tests.test_media_access_descriptor import _authed, client  # noqa: F401
 from tests.test_reachability_audit import (  # noqa: F401
     _TENANT_A,
@@ -69,6 +69,8 @@ from tests.test_reachability_audit import (  # noqa: F401
     _insert_recipient,
     db,
 )
+
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 NODE = shutil.which("node")
 pytestmark_node = pytest.mark.skipif(NODE is None, reason="node not available in this environment")
@@ -253,8 +255,8 @@ def test_audio_archive_is_in_frontend_registry_as_structured() -> None:
 
 
 def _extract(pattern: str, label: str) -> str:
-    match = re.search(pattern, _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_HTML"
+    match = re.search(pattern, _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_JS"
     return match.group(0)
 
 

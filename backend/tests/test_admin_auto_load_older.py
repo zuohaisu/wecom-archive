@@ -43,7 +43,11 @@ import subprocess
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from tests._rnd216_web_shims import review_console_html, review_console_js_source
+
+_REVIEW_CONSOLE_HTML = review_console_html()
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 NODE = shutil.which("node")
 
@@ -51,8 +55,8 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this
 
 
 def _extract(pattern: str, label: str) -> str:
-    match = re.search(pattern, _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_HTML"
+    match = re.search(pattern, _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_JS"
     return match.group(0)
 
 
@@ -63,12 +67,12 @@ def _extract(pattern: str, label: str) -> str:
 
 def test_manual_load_older_button_is_gone() -> None:
     assert "load-older-btn" not in _REVIEW_CONSOLE_HTML
-    assert "function loadOlderMessages(" not in _REVIEW_CONSOLE_HTML
+    assert "function loadOlderMessages(" not in _REVIEW_CONSOLE_JS
 
 
 def test_sentinel_and_history_status_elements_present() -> None:
-    assert 'id="timeline-top-sentinel"' in _REVIEW_CONSOLE_HTML
-    assert 'id="timeline-history-status"' in _REVIEW_CONSOLE_HTML
+    assert 'id="timeline-top-sentinel"' in _REVIEW_CONSOLE_JS
+    assert 'id="timeline-history-status"' in _REVIEW_CONSOLE_JS
 
 
 def test_new_helper_functions_exist() -> None:
@@ -85,11 +89,11 @@ def test_new_helper_functions_exist() -> None:
         "function historyRetryHtml()",
         "function fetchOlderMessages(convId,before)",
     ):
-        assert fn in _REVIEW_CONSOLE_HTML, f"missing {fn}"
+        assert fn in _REVIEW_CONSOLE_JS, f"missing {fn}"
 
 
 def test_uses_intersection_observer() -> None:
-    assert "new IntersectionObserver(" in _REVIEW_CONSOLE_HTML
+    assert "new IntersectionObserver(" in _REVIEW_CONSOLE_JS
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +132,11 @@ def _bundle() -> str:
         _extract(r"function timelineEntityQueryParams\(\)\{.*?\n\}", "timelineEntityQueryParams()"),
         # RND-173: renderMessageBody() now resolves unsupported/placeholder
         # types through MessageTypeRegistry instead of an inline generic string.
+        # RND-216: MessageTypeRegistry now reads its `entries` data off a
+        # page-level RND216_MTR_ENTRIES global (injected by a small inline
+        # <script> in the template) instead of an inlined JSON literal —
+        # define that global before the IIFE runs.
+        f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};",
         _extract(
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
         ),

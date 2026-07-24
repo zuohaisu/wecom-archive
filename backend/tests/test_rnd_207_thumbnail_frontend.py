@@ -13,8 +13,10 @@ import json
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from tests._rnd216_web_shims import review_console_js_source
 from tests.test_rnd_206_rich_media import NODE, _msg, _run
+
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this environment")
 
@@ -25,27 +27,27 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this
 
 
 def test_async_decode_and_dimension_reservation_present() -> None:
-    assert "img.decoding='async'" in _REVIEW_CONSOLE_HTML
-    assert "data-rnd207-w" in _REVIEW_CONSOLE_HTML
-    assert "data-rnd207-h" in _REVIEW_CONSOLE_HTML
+    assert "img.decoding='async'" in _REVIEW_CONSOLE_JS
+    assert "data-rnd207-w" in _REVIEW_CONSOLE_JS
+    assert "data-rnd207-h" in _REVIEW_CONSOLE_JS
 
 
 def test_thumbnail_wiring_present() -> None:
-    assert "function thumbSlotOpts(" in _REVIEW_CONSOLE_HTML
+    assert "function thumbSlotOpts(" in _REVIEW_CONSOLE_JS
     # the frontend consumes the server-built thumbnail_access_url as-is (it
     # never constructs the ?variant=thumb query itself)
-    assert "thumbnail_access_url" in _REVIEW_CONSOLE_HTML
+    assert "thumbnail_access_url" in _REVIEW_CONSOLE_JS
     # top-level image + emotion dispatch pass the thumbnail opts through
-    assert "thumbSlotOpts(m)" in _REVIEW_CONSOLE_HTML
+    assert "thumbSlotOpts(m)" in _REVIEW_CONSOLE_JS
     # nested composite media passes the descriptor's thumbnail opts through
-    assert "thumbSlotOpts(media)" in _REVIEW_CONSOLE_HTML
+    assert "thumbSlotOpts(media)" in _REVIEW_CONSOLE_JS
 
 
 def test_refresh_signature_includes_thumbnail_fields_not_signed_url() -> None:
     # The RND-204 stability guarantee is preserved: the signature covers the
     # stable thumbnail endpoint path + intrinsic dims, and still never the
     # resolved signed URL.
-    assert "m.thumbnail_access_url,m.image_width,m.image_height" in _REVIEW_CONSOLE_HTML
+    assert "m.thumbnail_access_url,m.image_width,m.image_height" in _REVIEW_CONSOLE_JS
 
 
 # ---------------------------------------------------------------------------

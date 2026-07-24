@@ -25,7 +25,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML, _fmt_msgtime
+from app.main import _fmt_msgtime
+from tests._rnd216_web_shims import review_console_html, review_console_js_source
+
+_REVIEW_CONSOLE_HTML = review_console_html()
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +76,8 @@ def test_fmt_msgtime_has_no_stray_utc_label_in_value() -> None:
 
 
 def _extract_js_fmt_time_source() -> str:
-    match = re.search(r"function fmtTime\(ms\)\{.*?\n\}", _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, "fmtTime() not found in _REVIEW_CONSOLE_HTML"
+    match = re.search(r"function fmtTime\(ms\)\{.*?\n\}", _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, "fmtTime() not found in _REVIEW_CONSOLE_JS"
     return match.group(0)
 
 

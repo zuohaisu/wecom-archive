@@ -11,7 +11,7 @@ first-screen render completion (via a `focusPending` flag consumed inside
 `fetchTimelinePage`'s `isInitial` success path).
 
 We follow the repo's established pattern (see test_rnd_198_frontend.py):
-extract the *real* embedded console functions from `_REVIEW_CONSOLE_HTML`
+extract the *real* embedded console functions from `_REVIEW_CONSOLE_JS`
 and execute them under Node with a minimal DOM / fetch shim, so the test
 exercises live behavior rather than a re-implementation.
 
@@ -36,7 +36,9 @@ import subprocess
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from tests._rnd216_web_shims import review_console_js_source
+
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this environment")
@@ -51,7 +53,7 @@ def _extract_fn(src: str, name: str) -> str:
     marker = "function " + name + "("
     idx = src.find(marker)
     if idx < 0:
-        raise AssertionError("function %s not found in _REVIEW_CONSOLE_HTML" % name)
+        raise AssertionError("function %s not found in _REVIEW_CONSOLE_JS" % name)
     brace = src.find("{", idx)
     if brace < 0:
         raise AssertionError("opening brace not found for %s" % name)
@@ -111,7 +113,7 @@ def _bundle_real_fns() -> str:
         "fetchOlderMessages",
         "loadTimeline",
     ]
-    return "\n".join(_extract_fn(_REVIEW_CONSOLE_HTML, n) for n in names)
+    return "\n".join(_extract_fn(_REVIEW_CONSOLE_JS, n) for n in names)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +217,7 @@ function fetch(url){
   });
 }
 
-// ===== real console functions (extracted from _REVIEW_CONSOLE_HTML) =====
+// ===== real console functions (extracted from _REVIEW_CONSOLE_JS) =====
 __REAL_FNS__
 
 // ===== scenario driver =====

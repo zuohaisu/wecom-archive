@@ -24,6 +24,11 @@ from pathlib import Path
 
 import pytest
 
+from tests._rnd216_web_shims import review_console_html, review_console_js_source
+
+_REVIEW_CONSOLE_HTML = review_console_html()
+_REVIEW_CONSOLE_JS = review_console_js_source()
+
 NODE = shutil.which("node")
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this environment")
@@ -134,10 +139,8 @@ def _extract_from_source(source: str, pattern: str, label: str) -> str:
 
 
 def test_console_selector_renders_from_available_locales_not_hardcoded() -> None:
-    from app.main import _REVIEW_CONSOLE_HTML
-
     src = _extract_from_source(
-        _REVIEW_CONSOLE_HTML, r"function renderLangMenu\(\)\{.*?\n\}", "renderLangMenu()"
+        _REVIEW_CONSOLE_JS, r"function renderLangMenu\(\)\{.*?\n\}", "renderLangMenu()"
     )
     assert "I18N.availableLocales()" in src
     assert "zh-CN" not in src
@@ -331,9 +334,7 @@ process.stdout.write(JSON.stringify(result));
 
 
 def test_console_html_has_i18n_core_and_language_selector() -> None:
-    from app.main import _REVIEW_CONSOLE_HTML
-
-    assert "I18N_CORE_START" in _REVIEW_CONSOLE_HTML
+    assert "I18N_CORE_START" in _REVIEW_CONSOLE_JS
     assert 'id="lang-switch"' in _REVIEW_CONSOLE_HTML
     assert 'id="lang-menu"' in _REVIEW_CONSOLE_HTML
     assert 'data-i18n="nav.language"' in _REVIEW_CONSOLE_HTML
@@ -370,22 +371,20 @@ def test_login_error_banner_uses_i18n_key_with_zh_cn_fallback_text() -> None:
 def test_rnd152_history_labels_render_through_i18n_in_all_locales() -> None:
     """RND-152's loading/end-of-history/retry banners must still work — now
     sourced from I18N.t() instead of hardcoded English."""
-    from app.main import _REVIEW_CONSOLE_HTML
-
     i18n_core = _extract_from_source(
-        _REVIEW_CONSOLE_HTML, r"/\* I18N_CORE_START.*?I18N_CORE_END \*/", "I18N core"
+        _REVIEW_CONSOLE_JS, r"/\* I18N_CORE_START.*?I18N_CORE_END \*/", "I18N core"
     )
     history_status_el = _extract_from_source(
-        _REVIEW_CONSOLE_HTML, r"function historyStatusEl\(\)\{.*?\}", "historyStatusEl()"
+        _REVIEW_CONSOLE_JS, r"function historyStatusEl\(\)\{.*?\}", "historyStatusEl()"
     )
     show_loading = _extract_from_source(
-        _REVIEW_CONSOLE_HTML, r"function showLoadingOlder\(\)\{.*?\n\}", "showLoadingOlder()"
+        _REVIEW_CONSOLE_JS, r"function showLoadingOlder\(\)\{.*?\n\}", "showLoadingOlder()"
     )
     show_end = _extract_from_source(
-        _REVIEW_CONSOLE_HTML, r"function showEndOfHistory\(\)\{.*?\n\}", "showEndOfHistory()"
+        _REVIEW_CONSOLE_JS, r"function showEndOfHistory\(\)\{.*?\n\}", "showEndOfHistory()"
     )
     retry_html = _extract_from_source(
-        _REVIEW_CONSOLE_HTML, r"function historyRetryHtml\(\)\{.*?\n\}", "historyRetryHtml()"
+        _REVIEW_CONSOLE_JS, r"function historyRetryHtml\(\)\{.*?\n\}", "historyRetryHtml()"
     )
 
     expectations = {

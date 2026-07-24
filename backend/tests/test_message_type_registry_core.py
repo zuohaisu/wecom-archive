@@ -55,7 +55,7 @@ import subprocess
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
 from app.media_classification import classify_media
 from app.message_type_registry import (
     FALLBACK_DEFINITION,
@@ -77,8 +77,11 @@ from app.message_type_registry import (
     is_known_message_type,
     resolve,
 )
+from tests._rnd216_web_shims import review_console_js_source, search_page_html
 
 NODE = shutil.which("node")
+
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 
 # ---------------------------------------------------------------------------
@@ -714,15 +717,20 @@ pytestmark_node = pytest.mark.skipif(NODE is None, reason="node not available in
 
 
 def _extract(pattern: str) -> str:
-    match = re.search(pattern, _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, f"pattern not found in _REVIEW_CONSOLE_HTML: {pattern}"
+    match = re.search(pattern, _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, f"pattern not found in _REVIEW_CONSOLE_JS: {pattern}"
     return match.group(0)
 
 
 def _frontend_registry_entries() -> dict:
     assert NODE, "node executable not found"
     src = _extract(r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);")
+    # RND-216: the IIFE now reads `entries` off a page-level
+    # RND216_MTR_ENTRIES global (injected by templates/review_console.html
+    # ahead of the externalized review-console.js) instead of an inlined
+    # JSON literal — define that global here before the IIFE runs.
     harness = f"""
+var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};
 {src}
 process.stdout.write(JSON.stringify(MessageTypeRegistry.entries));
 """
@@ -738,8 +746,6 @@ def test_frontend_registry_entries_exactly_equal_the_backend_export() -> None:
     computed from the registry — proving the frontend is genuinely
     consuming backend-derived data, not a hand-written literal that
     happens to look similar."""
-    from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
-
     assert _frontend_registry_entries() == json.loads(_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON)
 
 
@@ -941,10 +947,15 @@ def test_search_page_msgtype_options_exactly_equal_the_backend_export() -> None:
     above): the search page's embedded MSGTYPE_OPTIONS must be exactly
     what build_filterable_type_options() computed, not a hand-copied
     snapshot that can drift the moment the registry changes."""
-    from app.main import _SEARCH_MSGTYPE_OPTIONS_JSON, _SEARCH_PAGE_HTML
+    from app.main import _SEARCH_MSGTYPE_OPTIONS_JSON
 
-    match = re.search(r"var MSGTYPE_OPTIONS=(\[.*?\]);", _SEARCH_PAGE_HTML, re.S)
-    assert match is not None, "var MSGTYPE_OPTIONS=... not found in _SEARCH_PAGE_HTML"
+    search_page_html_content = search_page_html()
+    # RND-216: search.js now reads MSGTYPE_OPTIONS off a page-level
+    # RND216_MSGTYPE_OPTIONS global (injected by templates/search.html
+    # ahead of the externalized search.js) instead of an inlined JSON
+    # literal inside the script body.
+    match = re.search(r"var RND216_MSGTYPE_OPTIONS = (\[.*?\]);", search_page_html_content, re.S)
+    assert match is not None, "var RND216_MSGTYPE_OPTIONS=... not found in rendered search page"
     embedded = json.loads(match.group(1))
     assert embedded == json.loads(_SEARCH_MSGTYPE_OPTIONS_JSON)
     assert embedded == list(build_filterable_type_options())

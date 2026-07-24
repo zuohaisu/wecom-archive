@@ -35,7 +35,9 @@ import subprocess
 
 import pytest
 
-from app.main import _SEARCH_PAGE_HTML
+from tests._rnd216_web_shims import search_js_source
+
+_SEARCH_JS = search_js_source()
 
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this environment")
@@ -44,9 +46,9 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this
 def _extract_participant_helpers() -> str:
     start_marker = "function participantLabelFor(r,id){"
     end_marker = "function refreshParticipantCache(){"
-    start = _SEARCH_PAGE_HTML.index(start_marker)
-    end = _SEARCH_PAGE_HTML.index(end_marker, start)
-    src = _SEARCH_PAGE_HTML[start:end]
+    start = _SEARCH_JS.index(start_marker)
+    end = _SEARCH_JS.index(end_marker, start)
+    src = _SEARCH_JS[start:end]
     assert "function collectParticipants(kind){" in src
     return src
 

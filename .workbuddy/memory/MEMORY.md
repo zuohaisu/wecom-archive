@@ -19,7 +19,7 @@
 - **Decision (2026-07-23):** user chose to do them SEPARATELY — RND-226 first (alone), THEN RND-210 on a branch off main **after RND-226 merges** (never on pre-226 branch). RND-210 execution prompt prepared in advance: `.workbuddy/prompts/rnd-210-execution-prompt.md`. RND-226 prompt: `.workbuddy/prompts/rnd-226-execution-prompt.md`.
 - **Backlog P2:** RND-221/220/219 (service-extraction chain), RND-211 (sync-aware refresh + "sync now"), RND-195 (all WeCom msg types — umbrella for RND-210), RND-166/165 (SaaS ops/payments).
 - **FROZEN — In Review, blocked by WeCom enterprise name change (NOT within ~1 wk):** RND-104/107/108/129/130/175. Do not merge / don't advise merge.
-- Refactor chain done through RND-215; 216→217→218→{219|220|221}→222→223→224 still pending if pursued.
+- Refactor chain done through RND-215. **RND-216 QA-PASS (2026-07-24), ready for user commit/merge — unblocks RND-217/218.** 217→218→{219|220|221}→222→223→224 still pending.
 - NOTE: user-level memory still lists RND-159/160/161/167/176 as "Todo quick wins" — stale. Live: RND-159 In Progress; RND-160/161/167/176 are Backlog.
 
 ## Linear API quirks

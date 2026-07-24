@@ -1,8 +1,8 @@
 """
 Tests for RND-150 — fix group chat participant overflow in admin timeline.
 
-Root cause: the review console's renderTimeline() (embedded JS in
-_REVIEW_CONSOLE_HTML) rendered every message's recipient list inline as a
+Root cause: the review console's renderTimeline() (JS served from
+review-console.js) rendered every message's recipient list inline as a
 raw, comma-joined string — `rcptNames.join(', ')`. For a direct message this
 is one name, but for a group message `recipients` is the full per-message
 `tolist` fan-out (one row per room member), so the timeline printed a
@@ -16,7 +16,7 @@ summary — "Group chat · N participants" — instead of the joined list.
 Direct-message rendering (single "→ name" line) is unchanged.
 
 These tests execute the actual embedded JS (extracted from
-_REVIEW_CONSOLE_HTML by source pattern, same technique used in
+_REVIEW_CONSOLE_JS by source pattern, same technique used in
 test_admin_timestamp_formatting.py) under Node, with a minimal DOM/global
 stub, so the assertions exercise real rendering behavior rather than only
 pattern-matching the source text.
@@ -34,14 +34,17 @@ import subprocess
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from tests._rnd216_web_shims import review_console_js_source
+
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 NODE = shutil.which("node")
 
 
 def _extract(pattern: str, label: str) -> str:
-    match = re.search(pattern, _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_HTML"
+    match = re.search(pattern, _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_JS"
     return match.group(0)
 
 
@@ -65,6 +68,11 @@ def _extract_render_timeline_bundle() -> str:
     )
     # RND-173: renderMessageBody() now resolves unsupported/placeholder types
     # through MessageTypeRegistry instead of an inline generic string.
+    # RND-216: MessageTypeRegistry now reads its `entries` data off a
+    # page-level RND216_MTR_ENTRIES global (injected by a small inline
+    # <script> in the template) instead of an inlined JSON literal — define
+    # that global before the IIFE runs.
+    mtr_entries_src = f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};"
     message_type_registry_src = _extract(
         r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
     )
@@ -101,6 +109,7 @@ def _extract_render_timeline_bundle() -> str:
             pad_src,
             media_labels_src,
             media_status_labels_src,
+            mtr_entries_src,
             message_type_registry_src,
             rnd206_block_src,
             render_message_body_src,

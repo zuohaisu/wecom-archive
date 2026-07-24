@@ -31,14 +31,17 @@ import subprocess
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from tests._rnd216_web_shims import review_console_html, review_console_js_source
+
+_REVIEW_CONSOLE_HTML = review_console_html()
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 NODE = shutil.which("node")
 
 
 def _extract(pattern: str, label: str) -> str:
-    match = re.search(pattern, _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_HTML"
+    match = re.search(pattern, _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_JS"
     return match.group(0)
 
 
@@ -64,40 +67,40 @@ def test_html_has_new_message_indicator() -> None:
 
 
 def test_js_has_countdown_and_last_refresh_labels() -> None:
-    assert "最近更新" in _REVIEW_CONSOLE_HTML
-    assert "下次刷新" in _REVIEW_CONSOLE_HTML
-    assert "秒后" in _REVIEW_CONSOLE_HTML
+    assert "最近更新" in _REVIEW_CONSOLE_JS
+    assert "下次刷新" in _REVIEW_CONSOLE_JS
+    assert "秒后" in _REVIEW_CONSOLE_JS
 
 
 def test_js_has_polling_interval_and_countdown_logic() -> None:
-    assert "REFRESH_INTERVAL_SEC=30" in _REVIEW_CONSOLE_HTML
-    assert "setInterval(tickRefreshCountdown,1000)" in _REVIEW_CONSOLE_HTML
-    assert "function scheduleNextRefresh()" in _REVIEW_CONSOLE_HTML
-    assert "function updateRefreshStatus()" in _REVIEW_CONSOLE_HTML
-    assert "function refreshNow(reason)" in _REVIEW_CONSOLE_HTML
+    assert "REFRESH_INTERVAL_SEC=30" in _REVIEW_CONSOLE_JS
+    assert "setInterval(tickRefreshCountdown,1000)" in _REVIEW_CONSOLE_JS
+    assert "function scheduleNextRefresh()" in _REVIEW_CONSOLE_JS
+    assert "function updateRefreshStatus()" in _REVIEW_CONSOLE_JS
+    assert "function refreshNow(reason)" in _REVIEW_CONSOLE_JS
 
 
 def test_js_has_near_bottom_guard() -> None:
-    assert "function isNearBottom()" in _REVIEW_CONSOLE_HTML
+    assert "function isNearBottom()" in _REVIEW_CONSOLE_JS
 
 
 def test_js_has_msgid_based_merge_dedupe() -> None:
-    assert "function mergeMessagesByMsgid(existing,incoming)" in _REVIEW_CONSOLE_HTML
+    assert "function mergeMessagesByMsgid(existing,incoming)" in _REVIEW_CONSOLE_JS
     assert "m.msgid" in _extract(
         r"function mergeMessagesByMsgid\(existing,incoming\)\{.*?\n\}", "mergeMessagesByMsgid()"
     )
 
 
 def test_js_pauses_polling_when_tab_hidden_and_resumes_when_visible() -> None:
-    assert "visibilitychange" in _REVIEW_CONSOLE_HTML
-    assert "document.hidden" in _REVIEW_CONSOLE_HTML
-    assert "refreshNow('visibility')" in _REVIEW_CONSOLE_HTML
+    assert "visibilitychange" in _REVIEW_CONSOLE_JS
+    assert "document.hidden" in _REVIEW_CONSOLE_JS
+    assert "refreshNow('visibility')" in _REVIEW_CONSOLE_JS
 
 
 def test_no_websocket_or_sse_usage() -> None:
-    assert "WebSocket" not in _REVIEW_CONSOLE_HTML
-    assert "EventSource" not in _REVIEW_CONSOLE_HTML
-    assert "text/event-stream" not in _REVIEW_CONSOLE_HTML
+    assert "WebSocket" not in _REVIEW_CONSOLE_JS
+    assert "EventSource" not in _REVIEW_CONSOLE_JS
+    assert "text/event-stream" not in _REVIEW_CONSOLE_JS
 
 
 def test_refresh_does_not_touch_load_older_pagination_state() -> None:
@@ -325,7 +328,7 @@ def test_render_conv_list_no_active_class_when_selection_not_present() -> None:
 
 def test_review_console_still_has_exactly_one_timezone_label() -> None:
     assert _REVIEW_CONSOLE_HTML.count('class="tz-note"') == 1
-    assert "Beijing time (UTC+8)" in _REVIEW_CONSOLE_HTML
+    assert "Beijing time (UTC+8)" in _REVIEW_CONSOLE_JS
 
 
 def test_render_timeline_group_branch_still_never_joins_raw_recipients() -> None:

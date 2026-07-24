@@ -16,7 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from app.main import _SEARCH_PAGE_HTML
+from tests._rnd216_web_shims import search_page_html
+
+_SEARCH_PAGE_HTML = search_page_html()
 
 
 def _extract_page_script(html: str) -> str:

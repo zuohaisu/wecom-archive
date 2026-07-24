@@ -94,20 +94,30 @@ typecheck:
 	cd backend && $(BACKEND_PY) -c "from app.main import app; assert len(app.routes) > 0, 'no routes registered'"
 	@echo "typecheck: OK (import/syntax-level only)"
 
-## No separate frontend build step exists (FastAPI serves the review
-## console as server-rendered HTML with embedded JS — see the lint target
-## comment above). "build" here means: every backend module compiles,
-## backend/app/assets/i18n.js (the one standalone JS asset — everything
-## else is inlined into main.py's Python source) parses as valid JS, and
-## the FastAPI app actually constructs end-to-end (which inlines i18n.js's
-## contents into the served HTML at import time, so a broken/missing asset
-## fails right here, not at request time in production).
+## No separate frontend build step exists — FastAPI serves the admin
+## console as server-rendered HTML (see the lint target comment above).
+## "build" here means: every backend module compiles, every standalone JS
+## asset parses as valid JS, and the FastAPI app actually constructs
+## end-to-end. Until RND-216, backend/app/assets/i18n.js was the only
+## standalone JS asset (everything else was inlined into main.py's Python
+## source); RND-216 externalized the admin console's page scripts too, so
+## every backend/app/web/static/*.js file (review-console.js, search.js,
+## diagnostics.js — templated HTML now lives in backend/app/web/templates/
+## and is assembled at request time by app.web.render_template, never at
+## build time) is checked the same way. The app-construction check below
+## still catches a broken/missing template or static asset at build time
+## (render_template reads them eagerly the first time a route renders, and
+## app.web computes STATIC_VERSION from the static/ directory at import
+## time), not at request time in production.
 build:
 	$(BACKEND_PY) -m compileall -q backend/app backend/scripts
 	@if command -v node >/dev/null 2>&1; then \
 		node --check backend/app/assets/i18n.js && echo "build: backend/app/assets/i18n.js syntax OK"; \
+		for f in backend/app/web/static/*.js; do \
+			node --check "$$f" && echo "build: $$f syntax OK"; \
+		done; \
 	else \
-		echo "build: node not found — skipped backend/app/assets/i18n.js syntax check" >&2; \
+		echo "build: node not found — skipped JS syntax checks" >&2; \
 	fi
 	cd backend && $(BACKEND_PY) -c "from app.main import app; assert len(app.routes) > 0, 'no routes registered'"
 	@echo "build: OK"

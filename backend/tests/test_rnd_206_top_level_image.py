@@ -36,7 +36,10 @@ import subprocess
 
 import pytest
 
-from app.main import _REVIEW_CONSOLE_HTML
+from app.main import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from tests._rnd216_web_shims import review_console_js_source
+
+_REVIEW_CONSOLE_JS = review_console_js_source()
 
 NODE = shutil.which("node")
 
@@ -44,8 +47,8 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this
 
 
 def _extract(pattern: str, label: str) -> str:
-    match = re.search(pattern, _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_HTML"
+    match = re.search(pattern, _REVIEW_CONSOLE_JS, re.S)
+    assert match is not None, f"{label} not found in _REVIEW_CONSOLE_JS"
     return match.group(0)
 
 
@@ -66,6 +69,7 @@ def _bundle(extra=None) -> str:
         _extract(r"function handleUnauth\(r\)\{.*?\n\}", "handleUnauth()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};",
         _extract(r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"),
         _extract(r"function isSafeUrl\(u\)\{.*?\n\}", "isSafeUrl()"),
         _extract(r"function hostnameOf\(u\)\{.*?\n\}", "hostnameOf()"),
@@ -521,10 +525,10 @@ def test_legacy_loader_functions_no_longer_exist() -> None:
     """The standalone RND-187 chain must actually be gone, not merely
     unused -- confirms this is a real migration, not a second parallel
     system left dormant alongside the shared one."""
-    assert "function loadMediaImage(" not in _REVIEW_CONSOLE_HTML
-    assert "function onMediaImageError(" not in _REVIEW_CONSOLE_HTML
-    assert "function showMediaError(" not in _REVIEW_CONSOLE_HTML
-    assert "function hydrateMediaImages(" not in _REVIEW_CONSOLE_HTML
+    assert "function loadMediaImage(" not in _REVIEW_CONSOLE_JS
+    assert "function onMediaImageError(" not in _REVIEW_CONSOLE_JS
+    assert "function showMediaError(" not in _REVIEW_CONSOLE_JS
+    assert "function hydrateMediaImages(" not in _REVIEW_CONSOLE_JS
 
 
 # ---------------------------------------------------------------------------

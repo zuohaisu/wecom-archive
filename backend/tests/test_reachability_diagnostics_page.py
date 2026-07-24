@@ -31,6 +31,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests._rnd216_web_shims import (
+    diagnostics_html,
+    diagnostics_js_source,
+    review_console_html,
+)
+
+_DIAGNOSTICS_HTML = diagnostics_html()
+_DIAGNOSTICS_JS = diagnostics_js_source()
+_REVIEW_CONSOLE_HTML = review_console_html()
+
 
 def _mock_db_no_session() -> Generator:
     """get_db override: DB that returns no session for every lookup (unauthenticated)."""
@@ -104,16 +114,12 @@ def test_diagnostics_page_renders_when_authenticated(client) -> None:
 
 
 def test_diagnostics_page_fetches_the_real_reachability_audit_endpoint() -> None:
-    from app.main import _DIAGNOSTICS_HTML
-
-    assert "/api/admin/reachability-audit" in _DIAGNOSTICS_HTML
+    assert "/api/admin/reachability-audit" in _DIAGNOSTICS_JS
 
 
 def test_diagnostics_page_does_not_pass_include_samples() -> None:
     """The page must never opt into per-message samples — aggregate-only by default."""
-    from app.main import _DIAGNOSTICS_HTML
-
-    assert "include_samples" not in _DIAGNOSTICS_HTML
+    assert "include_samples" not in _DIAGNOSTICS_JS
 
 
 # ---------------------------------------------------------------------------
@@ -122,21 +128,15 @@ def test_diagnostics_page_does_not_pass_include_samples() -> None:
 
 
 def test_diagnostics_page_title_is_not_hardcoded_english() -> None:
-    from app.main import _DIAGNOSTICS_HTML
-
     assert "<title>Message Reachability Diagnostics</title>" not in _DIAGNOSTICS_HTML
 
 
 def test_diagnostics_page_sets_document_title_via_i18n() -> None:
-    from app.main import _DIAGNOSTICS_HTML
-
-    assert "document.title=I18N.t('diagnostics.pageTitle')" in _DIAGNOSTICS_HTML
+    assert "document.title=I18N.t('diagnostics.pageTitle')" in _DIAGNOSTICS_JS
 
 
 def test_diagnostics_page_has_no_message_list_or_detail_rendering() -> None:
     """Out of scope per RND-180: no message list, no message detail drawer."""
-    from app.main import _DIAGNOSTICS_HTML
-
     lowered = _DIAGNOSTICS_HTML.lower()
     for banned in ("msgid", "sdkfileid", "media_key", "local_path", "oss_key", "content_text"):
         assert banned not in lowered, f"unexpected {banned!r} reference in diagnostics page"
@@ -144,20 +144,17 @@ def test_diagnostics_page_has_no_message_list_or_detail_rendering() -> None:
 
 def test_diagnostics_page_status_registry_covers_all_known_statuses() -> None:
     """ReachabilityStatusRegistry must have an entry per RND-178 ReachabilityStatus value."""
-    from app.main import _DIAGNOSTICS_HTML
     from app.reachability_audit import ReachabilityStatus
 
     for status in ReachabilityStatus:
-        assert f"{status.value}:{{labelKey:" in _DIAGNOSTICS_HTML.replace(" ", ""), (
+        assert f"{status.value}:{{labelKey:" in _DIAGNOSTICS_JS.replace(" ", ""), (
             f"expected a ReachabilityStatusRegistry entry for {status.value!r}"
         )
 
 
 def test_diagnostics_page_status_registry_has_fallback_for_unknown_status() -> None:
-    from app.main import _DIAGNOSTICS_HTML
-
-    assert "reachability.status.unknown" in _DIAGNOSTICS_HTML
-    assert "FALLBACK" in _DIAGNOSTICS_HTML
+    assert "reachability.status.unknown" in _DIAGNOSTICS_JS
+    assert "FALLBACK" in _DIAGNOSTICS_JS
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +163,6 @@ def test_diagnostics_page_status_registry_has_fallback_for_unknown_status() -> N
 
 
 def test_review_console_has_diagnostics_nav_entry() -> None:
-    from app.main import _REVIEW_CONSOLE_HTML
-
     assert '/admin/diagnostics/reachability' in _REVIEW_CONSOLE_HTML
     assert 'data-i18n="nav.diagnostics"' in _REVIEW_CONSOLE_HTML
 
