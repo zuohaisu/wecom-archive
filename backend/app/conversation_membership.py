@@ -107,6 +107,26 @@ def _staff_ids_for_participants(
 
 
 
+def _load_display_names(db: Session, tenant_id: str) -> dict[str, Optional[str]]:
+    """Return {wecom_userid: name} raw from Contact.name, scoped to tenant.
+
+    Values are never blank (Contact rows are only ever created with a
+    non-blank name — see upsert_contact_display_name), but a given ID may
+    simply be absent from the dict if no Contact row exists yet. Callers
+    resolve the final display label via resolve_person_display_name, which
+    supplies the raw-ID fallback for absent/blank entries.
+
+    RND-219: moved here (unchanged) because it is shared by both the
+    monitored-accounts/contacts listing endpoints (app.services.listing_service)
+    and the message-timeline endpoint (app.routers.conversations), so neither
+    side may redefine it.
+    """
+    return {
+        c.wecom_userid: c.name
+        for c in db.query(Contact).filter(Contact.tenant_id == tenant_id).all()
+    }
+
+
 def _load_display_names_for_ids(
     db: Session, tenant_id: str, wecom_userids: set[str]
 ) -> dict[str, Optional[str]]:
@@ -201,6 +221,21 @@ def _entity_seed_ids(db: Session, entity_id: str, tenant_id: str) -> set[int]:
     }
     return sender_ids | recipient_ids
 
+
+
+def _is_valid_roomid(roomid: Optional[str]) -> bool:
+    """Return True if roomid should be treated as a group conversation
+    identifier. Matches _derive_conversation_membership's truthiness rule
+    (``roomid = roomid or ""`` then ``if roomid:``), so that this function
+    and the authoritative builder agree on every input:
+      - None/empty roomid → direct message (falsy after ``or ""``)
+      - non-empty roomid (including whitespace-only) → group (truthy)
+
+    RND-219: moved here (unchanged) because it is shared by both the
+    listing service's compact-projection helpers and the message-timeline /
+    media routes left in app.routers.conversations.
+    """
+    return bool(roomid)
 
 
 def _derive_conversation_membership(

@@ -160,6 +160,11 @@ def test_router_and_service_reference_same_function_objects() -> None:
         "_staff_ids_for_participants",
         "_derive_conversation_membership",
         "_fetch_conversation_messages",
+        # RND-219: _load_display_names and _is_valid_roomid moved here too —
+        # shared by the listing service (app.services.listing_service) and
+        # the message-timeline/media code left in the router.
+        "_load_display_names",
+        "_is_valid_roomid",
     ]
     for name in shared:
         router_obj = getattr(rtr, name, None)

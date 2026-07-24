@@ -1,0 +1,665 @@
+"""Listing service (RND-219) — monitored-accounts / contacts / conversation-list.
+
+Functions here were moved (not reimplemented) out of
+app.routers.conversations so that the three listing endpoints
+(get_monitored_accounts, get_contacts, get_conversations) reduce to thin
+HTTP wrappers: parameter validation -> call a function here -> return.
+
+Scope note: only helpers reachable EXCLUSIVELY from those three endpoints
+live here. Helpers shared with the message-timeline / media endpoints
+(_load_display_names, _is_valid_roomid, and everything already in
+app.conversation_membership) stay in their existing shared module and are
+imported from there, never redefined here, so the router and this service
+can never diverge on shared logic.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Optional, Tuple
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.conversation_membership import (
+    _collect_archive_participant_ids,
+    _collect_staff_ids,
+    _derive_conversation_membership,
+    _entity_seed_ids,
+    _is_staff,
+    _is_valid_roomid,
+    _load_display_names,
+    _load_display_names_for_ids,
+    _staff_ids_for_participants,
+)
+from app.db.models import ArchiveMessage, ArchiveMessageRecipient
+from app.display_names import resolve_person_display_name, resolve_room_display_name
+from app.schemas.listing import ContactOut, MonitoredAccountOut
+
+
+def _compact_entity_messages(
+    db: Session, entity_id: str, tenant_id: str
+) -> Tuple[list, dict[int, list[str]]]:
+    """Fetch a compact projection of the messages expanded from entity_id's
+    participation, producing the same message set _fetch_messages_for_entity
+    returns for well-formed data, but only the columns strictly required for
+    conversation-key derivation:
+
+      - message.id, message.sender, message.roomid
+      - per-message recipient userid list
+
+    Uses the same seed-ID logic and group-room expansion rules as
+    _fetch_messages_for_entity, so the intermediate message set is the same
+    under normal data. For malformed inputs (whitespace-only roomids, etc.)
+    the intermediate expansion may differ by a marginal number of rows, but
+    that does not affect the final canonical-count guarantee: the compact
+    projection always derives keys through the exact same
+    _derive_conversation_membership function the authoritative builder uses.
+
+    No ArchiveMessage ORM objects are materialized — only lightweight tuples
+    are built from column values, avoiding the content_text, msgtype, sdkfileid,
+    decrypted_payload, etc. fields that make full ORM fetches expensive.
+
+    Returns (compact_msgs, recipients_map) where:
+      compact_msgs: list of SimpleNamespace with .id, .sender, .roomid
+      recipients_map: {message.id: [receiver_userid, ...]}
+    """
+    # 1. Find seed message IDs where entity_id is sender or recipient.
+    sender_ids: set[int] = {
+        row[0]
+        for row in db.query(ArchiveMessage.id)
+        .filter(
+            ArchiveMessage.sender == entity_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    }
+    recipient_ids: set[int] = {
+        row[0]
+        for row in db.query(ArchiveMessageRecipient.message_id)
+        .filter(
+            ArchiveMessageRecipient.receiver_userid == entity_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
+        .all()
+    }
+    seed_ids = sender_ids | recipient_ids
+    if not seed_ids:
+        return [], {}
+
+    # 2. Compact projection of seed messages — only (id, sender, roomid).
+    seed_rows = (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+        .filter(
+            ArchiveMessage.id.in_(seed_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    # Convert to SimpleNamespace to match the interface _derive_conversation_membership
+    # expects (msg.sender, msg.roomid, msg.id).
+    seed_msgs = [
+        SimpleNamespace(id=r[0], sender=r[1], roomid=r[2])
+        for r in seed_rows
+    ]
+
+    # 3. Collect group rooms and expand to ALL messages in those rooms.
+    group_rooms = {m.roomid for m in seed_msgs if _is_valid_roomid(m.roomid)}
+
+    final_ids: set[int] = set()
+
+    if group_rooms:
+        for row in (
+            db.query(ArchiveMessage.id)
+            .filter(
+                ArchiveMessage.roomid.in_(group_rooms),
+                ArchiveMessage.tenant_id == tenant_id,
+            )
+            .all()
+        ):
+            final_ids.add(row[0])
+
+    # 4. Direct messages from seed are included as-is.
+    direct_ids = {m.id for m in seed_msgs if not _is_valid_roomid(m.roomid)}
+    final_ids.update(direct_ids)
+
+    if not final_ids:
+        return [], {}
+
+    # 5. Compact projection of final message set.
+    final_rows = (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+        .filter(
+            ArchiveMessage.id.in_(final_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    compact_msgs = [
+        SimpleNamespace(id=r[0], sender=r[1], roomid=r[2])
+        for r in final_rows
+    ]
+
+    # 6. Batch-load recipients for all final messages.
+    recipients_map: dict[int, list[str]] = {}
+    for r in (
+        db.query(ArchiveMessageRecipient.message_id, ArchiveMessageRecipient.receiver_userid)
+        .filter(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.message_id.in_(final_ids),
+        )
+        .all()
+    ):
+        recipients_map.setdefault(r[0], []).append(r[1])
+
+    return compact_msgs, recipients_map
+
+
+def _count_entity_conversations(
+    db: Session, entity_id: str, tenant_id: str, staff_ids: Optional[set[str]] = None
+) -> int:
+    """Count distinct conversations for an entity, reproducing the exact
+    canonical conversation keys from _build_conversation_list /
+    _derive_conversation_membership without materializing full ArchiveMessage
+    ORM objects.
+
+    Fetches a compact projection (message.id, message.sender, message.roomid)
+    plus per-message recipient userids — avoids loading content_text, msgtype,
+    sdkfileid, media payloads, and every other heavy column on ArchiveMessage.
+
+    staff_ids: when provided, determines staff/contact classification
+    matching _build_conversation_list's behavior. When None, falls back to
+    the legacy "staff_" prefix check.
+    """
+    compact_msgs, recipients_map = _compact_entity_messages(db, entity_id, tenant_id)
+    if not compact_msgs:
+        return 0
+
+    # Define is_staff matching _build_conversation_list's rule.
+    def is_staff(uid: str) -> bool:
+        if staff_ids is not None:
+            return uid in staff_ids
+        return uid.startswith("staff_")
+
+    # Derive canonical conversation keys using the exact same
+    # _derive_conversation_membership function the authoritative
+    # _build_conversation_list uses.
+    canonical_keys: set[str] = set()
+    for msg in compact_msgs:
+        recipients = recipients_map.get(msg.id, [])
+        conv_id, conv_type, _staff_set, _contact_set = _derive_conversation_membership(
+            msg.sender, msg.roomid, recipients, is_staff
+        )
+        canonical_keys.add(conv_id)
+
+    return len(canonical_keys)
+
+
+def _latest_own_participation_time(
+    db: Session, entity_id: str, tenant_id: str
+) -> Optional[int]:
+    """
+    Return the max msgtime among messages where entity_id is literally the
+    sender, or literally a listed recipient — WITHOUT expanding through
+    shared group rooms.
+
+    This is deliberately narrower than _fetch_messages_for_entity(), which
+    expands seed messages to every message in a shared group room so the
+    Sessions list can show full group context. That expansion is correct
+    for session viewing, but if it were also used to compute a seat's
+    "latest activity" for active/history ranking, a historical seat that
+    once participated in a group would incorrectly inherit a later message
+    in that same room sent by someone else after the seat stopped
+    participating (RND-132 QA fix). Only this function's result may be used
+    for seat active/history classification and ranking.
+    """
+    sender_max = (
+        db.query(func.max(ArchiveMessage.msgtime))
+        .filter(
+            ArchiveMessage.sender == entity_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .scalar()
+    )
+    recipient_max = (
+        db.query(func.max(ArchiveMessage.msgtime))
+        .join(
+            ArchiveMessageRecipient,
+            ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+        )
+        .filter(
+            ArchiveMessageRecipient.receiver_userid == entity_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .scalar()
+    )
+    candidates = [v for v in (sender_max, recipient_max) if v is not None]
+    return max(candidates) if candidates else None
+
+
+def _fetch_compact_messages_for_entity(
+    db: Session, entity_id: str, tenant_id: str
+) -> list:
+    """RND-158 Phase 2: compact-projection counterpart to
+    _fetch_messages_for_entity(), used ONLY by GET /api/conversations
+    (get_conversations). Produces the same message set (same seed-ID +
+    group-room-expansion rules), but selects only the columns
+    _build_conversation_list actually reads: id, sender, roomid, msgtime,
+    content_text — never the heavy columns (raw_encrypted_payload,
+    encrypt_random_key, encrypt_chat_msg, decrypted_payload,
+    structured_content, sdkfileid, tolist, msgtype, decrypt_status,
+    is_revoked, revoked_at, msgid, created_at) that made full ArchiveMessage
+    ORM materialization the dominant cost in profiling (see RND-158 Phase 2
+    benchmark notes). content_text itself is still fetched in full (only
+    _build_conversation_list's final `[:200]` slice truncates it) — every
+    other heavy column is dropped from the projection.
+
+    _fetch_messages_for_entity() itself is left untouched and unused after
+    this change: it is kept because removing a function nothing calls is
+    out of scope for a profiling-driven perf change, and other code may
+    come to depend on it.
+
+    Returns a list of SimpleNamespace(id, sender, roomid, msgtime,
+    content_text) — the exact attribute surface _build_conversation_list
+    and _derive_conversation_membership read.
+    """
+    seed_ids = _entity_seed_ids(db, entity_id, tenant_id)
+    if not seed_ids:
+        return []
+
+    seed_rows = (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+        .filter(
+            ArchiveMessage.id.in_(seed_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    group_rooms = {r[2] for r in seed_rows if _is_valid_roomid(r[2])}
+
+    final_ids: set[int] = set()
+    if group_rooms:
+        for row in (
+            db.query(ArchiveMessage.id)
+            .filter(
+                ArchiveMessage.roomid.in_(group_rooms),
+                ArchiveMessage.tenant_id == tenant_id,
+            )
+            .all()
+        ):
+            final_ids.add(row[0])
+
+    direct_ids = {r[0] for r in seed_rows if not _is_valid_roomid(r[2])}
+    final_ids.update(direct_ids)
+
+    if not final_ids:
+        return []
+
+    final_rows = (
+        db.query(
+            ArchiveMessage.id,
+            ArchiveMessage.sender,
+            ArchiveMessage.roomid,
+            ArchiveMessage.msgtime,
+            ArchiveMessage.content_text,
+        )
+        .filter(
+            ArchiveMessage.id.in_(final_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        # RND-158 SQL ordering contract: identical ORDER BY msgtime ASC, id
+        # ASC as _fetch_messages_for_entity's final query above — kept
+        # symmetric so the authoritative and optimized paths always
+        # process messages in the same order and stay byte-for-byte
+        # equivalent (see test_full_equiv_* / _assert_full_equivalence in
+        # test_staff_seats.py). See the comment on that ORDER BY for the
+        # full rationale. conversation_type/roomid collision resolution in
+        # _build_conversation_list no longer depends on row order at all
+        # (group-wins, order-independent — see its docstring), so this
+        # ORDER BY can be added safely without the asymmetry concern that
+        # previously blocked it.
+        .order_by(ArchiveMessage.msgtime.asc(), ArchiveMessage.id.asc())
+        .all()
+    )
+    return [
+        SimpleNamespace(
+            id=r[0], sender=r[1], roomid=r[2], msgtime=r[3], content_text=r[4]
+        )
+        for r in final_rows
+    ]
+
+
+def _load_recipients_map_compact(
+    db: Session, tenant_id: str, msg_ids: list[int]
+) -> dict[int, list[str]]:
+    """RND-158 Phase 2: compact-column counterpart to _load_recipients_map(),
+    used ONLY by get_conversations(). Selects (message_id, receiver_userid)
+    tuple columns instead of full ArchiveMessageRecipient ORM rows, avoiding
+    per-row ORM object construction for what can be thousands of recipient
+    rows. ArchiveMessageRecipient columns are all light already, but ORM
+    instantiation overhead itself was measured as material (see RND-158
+    Phase 2 benchmark notes) — this returns the identical
+    {message_id: [receiver_userid, ...]} shape _load_recipients_map()
+    returns, so it is a drop-in replacement for this call site only.
+
+    _load_recipients_map() itself is deliberately left untouched: it is
+    still used by the message-timeline endpoint
+    (get_conversation_messages/_fetch_conversation_messages), which is
+    explicitly out of scope for this phase and must not change behavior or
+    performance.
+    """
+    if not msg_ids:
+        return {}
+    result: dict[int, list[str]] = {}
+    for message_id, receiver_userid in (
+        db.query(
+            ArchiveMessageRecipient.message_id, ArchiveMessageRecipient.receiver_userid
+        )
+        .filter(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.message_id.in_(msg_ids),
+        )
+        .all()
+    ):
+        result.setdefault(message_id, []).append(receiver_userid)
+    return result
+
+
+def _build_conversation_list(
+    messages: list,
+    recipients_map: dict[int, list[str]],
+    display_names: dict[str, str],
+    staff_ids: Optional[set[str]] = None,
+) -> list[dict]:
+    """
+    Aggregate a flat message list into conversation summary objects.
+
+    staff_ids: when provided (the tenant's resolved seat set from
+    _collect_staff_ids), membership in this set determines staff/contact
+    classification instead of the legacy "staff_" prefix check — this lets
+    callers classify participants correctly in tenants where the archive
+    seat's real userid does not use that prefix. Defaults to None so this
+    remains a pure function callable without a DB round-trip (existing
+    tests rely on this).
+
+    Returns a list sorted by last_message_time descending (most recent first).
+
+    Collision-priority contract (RND-158 SQL-ordering fix round): a single
+    conversation_id can be produced by two structurally different
+    messages — an inferred direct-pair key (`_direct_conv_id`) and an
+    actual roomid — colliding into the same `convs[conv_id]` bucket (see
+    test_full_equiv_direct_group_key_collision and its
+    _group_first/_direct_first order-independence pair). Which
+    conversation_type/roomid the bucket ends up with must NOT depend on
+    which message happened to be aggregated first (that would make the
+    result depend on incidental SQL row order). The contract is:
+    "group" always wins over "direct": an explicit non-empty roomid on a
+    message is stronger structural evidence of a real group chat than an
+    inferred direct-pair key, so a bucket's conversation_type is "group"
+    if ANY aggregated message was group-shaped, and "direct" only if
+    EVERY aggregated message was direct-shaped — regardless of processing
+    order. This is enforced by only ever upgrading direct -> group below,
+    never downgrading group -> direct once set, which is a commutative,
+    order-independent reduction over the message list. This is
+    independent of latest-message selection: the (msgtime, id) sort below
+    still picks "latest" purely from data["msgs"], untouched by which
+    message set conversation_type.
+    """
+    convs: dict[str, dict] = {}
+
+    def is_staff(uid: str) -> bool:
+        if staff_ids is not None:
+            return uid in staff_ids
+        return _is_staff(uid)
+
+    for msg in messages:
+        roomid = msg.roomid or ""
+        recipients = recipients_map.get(msg.id, [])
+        conv_id, conv_type, staff_set, contact_set = _derive_conversation_membership(
+            msg.sender, msg.roomid, recipients, is_staff
+        )
+
+        if conv_id not in convs:
+            convs[conv_id] = {
+                "conversation_id": conv_id,
+                "conversation_type": conv_type,
+                "roomid": msg.roomid if roomid else None,
+                "monitored_account_ids": set(),
+                "contact_ids": set(),
+                "msgs": [],
+            }
+        elif conv_type == "group" and convs[conv_id]["conversation_type"] == "direct":
+            # Group-wins collision upgrade: a later-processed group-shaped
+            # message overrides an earlier direct-shaped one that landed
+            # in the same bucket. Never the reverse (group is never
+            # downgraded to direct).
+            convs[conv_id]["conversation_type"] = "group"
+            convs[conv_id]["roomid"] = msg.roomid if roomid else None
+
+        convs[conv_id]["monitored_account_ids"].update(staff_set)
+        convs[conv_id]["contact_ids"].update(contact_set)
+        convs[conv_id]["msgs"].append(msg)
+
+    result = []
+    for conv_id, data in convs.items():
+        # RND-158 tie-break fix: deterministic message recency contract —
+        # the "latest" message within a conversation is the one with the
+        # highest (msgtime, id) tuple, both descending. msgtime alone is
+        # not sufficient: multiple messages can share the same msgtime
+        # (same-second bulk sends, clock granularity, etc.), and without a
+        # secondary key the "latest" pick would depend on whatever order
+        # messages happened to arrive in `data["msgs"]` — itself a
+        # function of non-deterministic DB row order upstream. `id` (the
+        # ArchiveMessage integer primary key, non-null/unique/immutable,
+        # already present on every message object built by both the full
+        # ORM path and the compact-projection path) breaks ties
+        # deterministically and reproducibly. This Python-side sort is
+        # authoritative on its own — it does not rely on the incoming
+        # list already being DB-ordered.
+        msgs_sorted = sorted(data["msgs"], key=lambda m: (m.msgtime or 0, m.id))
+        latest = msgs_sorted[-1]
+
+        sids = sorted(data["monitored_account_ids"])
+        cids = sorted(data["contact_ids"])
+
+        if data["conversation_type"] == "group":
+            room_raw_id = data["roomid"] or conv_id
+            room_display_name = resolve_room_display_name(room_raw_id)
+            display_name = room_display_name
+            raw_id = room_raw_id
+        else:
+            room_display_name = None
+            room_raw_id = None
+            if cids:
+                raw_id = cids[0]
+            elif sids:
+                raw_id = sids[0]
+            else:
+                raw_id = conv_id
+            display_name = resolve_person_display_name(raw_id, display_names.get(raw_id))
+
+        latest_sender_id = latest.sender
+        latest_sender_display_name = (
+            resolve_person_display_name(latest_sender_id, display_names.get(latest_sender_id))
+            if latest_sender_id
+            else None
+        )
+
+        result.append(
+            {
+                "conversation_id": conv_id,
+                "conversation_type": data["conversation_type"],
+                "display_name": display_name,
+                "raw_id": raw_id,
+                "roomid": data["roomid"],
+                "monitored_account_ids": sids,
+                "monitored_account_raw_ids": sids,
+                "monitored_account_display_names": [
+                    resolve_person_display_name(sid, display_names.get(sid)) for sid in sids
+                ],
+                "contact_ids": cids,
+                "contact_raw_ids": cids,
+                "contact_display_names": [
+                    resolve_person_display_name(cid, display_names.get(cid)) for cid in cids
+                ],
+                "room_display_name": room_display_name,
+                "room_raw_id": room_raw_id,
+                "last_message_time": latest.msgtime,
+                "last_message_text": (latest.content_text or "")[:200],
+                "message_count": len(msgs_sorted),
+                "latest_sender_id": latest_sender_id,
+                "latest_sender_raw_id": latest_sender_id,
+                "latest_sender_display_name": latest_sender_display_name,
+                "review_status": None,
+                "ai_status": None,
+                "ai_summary": None,
+            }
+        )
+
+    # RND-158 tie-break fix: deterministic conversation ordering contract —
+    # sort by (last_message_time, conversation_id), both descending.
+    # conversation_id is the canonical, stable identifier already present
+    # on every result row (unlike display_name/room_display_name, which
+    # are mutable/localized and unsuitable as a tie-break key). Python
+    # tuple comparison is lexicographic, so sorting on the
+    # (last_message_time, conversation_id) tuple with reverse=True yields
+    # descending order on BOTH elements: ties on last_message_time fall
+    # back to conversation_id descending, verified below in
+    # test_staff_seats.py. No negation trick is needed since
+    # conversation_id (a string) compares/reverses correctly as the tuple
+    # secondary key.
+    result.sort(key=lambda x: (x["last_message_time"] or 0, x["conversation_id"]), reverse=True)
+    return result
+
+
+def list_monitored_accounts(db: Session, tenant_id: str) -> list[MonitoredAccountOut]:
+    """
+    Return all WeCom archive seats (monitored accounts) for this tenant —
+    both the currently active seat and historical seats with archived
+    records — sorted active-first, then by latest_message_time descending.
+
+    See _collect_staff_ids() and app.routers.conversations' module
+    docstring for how seats are identified in the absence of a formal
+    seat-roster source.
+
+    latest_message_time (and therefore active/history ranking) is computed
+    from _latest_own_participation_time() — each seat's own sender/recipient
+    rows only, never the group-room-expanded set _fetch_messages_for_entity()
+    returns. conversation_count still uses the expanded set: that is a
+    session-viewing concern (how many threads to show under this seat), not
+    a classification concern (RND-132 QA fix — see _latest_own_participation_time
+    docstring for why these two must stay separate).
+    """
+    staff_ids = _collect_staff_ids(db, tenant_id)
+    if not staff_ids:
+        return []
+
+    display_names = _load_display_names(db, tenant_id)
+
+    seats: list[dict] = []
+    for sid in staff_ids:
+        latest_message_time = _latest_own_participation_time(db, sid, tenant_id)
+        if latest_message_time is None:
+            # No direct participation at all for this identity — not a seat
+            # worth surfacing (definition requires archived records where
+            # the seat is literally the sender or a listed recipient).
+            continue
+        # RND-158: avoid full ArchiveMessage ORM object materialization for
+        # conversation_count. The old code fetched every message as a full
+        # ORM object (all columns including content_text, msgtype, sdkfileid,
+        # decrypted_payload, etc.) then aggregated them through
+        # _build_conversation_list — just to compute the display-badge
+        # conversation_count. The revised path fetches a compact projection
+        # (message.id, message.sender, message.roomid + recipient userids)
+        # and derives canonical conversation keys using the exact same
+        # _derive_conversation_membership function the authoritative builder
+        # uses, avoiding full ORM object construction while preserving exact
+        # count semantics. Per-seat query scaling remains unchanged.
+        # The authoritative conversation list endpoint (/api/conversations)
+        # still uses the full _fetch_messages_for_entity +
+        # _build_conversation_list path for correctness.
+        conversation_count = _count_entity_conversations(db, sid, tenant_id, staff_ids)
+        seats.append(
+            {
+                "staff_id": sid,
+                "latest_message_time": latest_message_time,
+                "conversation_count": conversation_count,
+            }
+        )
+
+    if not seats:
+        return []
+
+    seats.sort(key=lambda s: (s["latest_message_time"] or 0, s["staff_id"]), reverse=True)
+
+    result = []
+    for idx, seat in enumerate(seats):
+        sid = seat["staff_id"]
+        is_active = idx == 0
+        result.append(
+            MonitoredAccountOut(
+                monitored_account_id=sid,
+                staff_id=sid,
+                raw_id=sid,
+                display_name=resolve_person_display_name(sid, display_names.get(sid)),
+                seat_status="active" if is_active else "history",
+                is_active_archive_seat=is_active,
+                latest_message_time=seat["latest_message_time"],
+                conversation_count=seat["conversation_count"],
+            )
+        )
+    return result
+
+
+def list_contacts(db: Session, tenant_id: str) -> list[ContactOut]:
+    """Return all contacts (non-staff participants) observed in the tenant archive."""
+    participant_ids = _collect_archive_participant_ids(db, tenant_id)
+    staff_ids = _collect_staff_ids(db, tenant_id)
+    contact_ids = participant_ids - staff_ids
+    display_names = _load_display_names(db, tenant_id)
+    return [
+        ContactOut(
+            contact_id=cid,
+            display_name=resolve_person_display_name(cid, display_names.get(cid)),
+            raw_id=cid,
+        )
+        for cid in sorted(contact_ids)
+    ]
+
+
+def list_conversations(
+    db: Session, tenant_id: str, entity_id: str
+) -> list[dict]:
+    """Return conversations for a monitored account or contact entity_id.
+
+    Sorted by last activity descending. Returns plain dicts (matching
+    _build_conversation_list's return shape) — the route's
+    response_model=list[ConversationOut] handles serialization, exactly as
+    the original inline get_conversations() body did.
+    """
+    # RND-158 Phase 2: compact-projection fetch — see
+    # _fetch_compact_messages_for_entity / _load_recipients_map_compact
+    # docstrings. Avoids full ArchiveMessage/ArchiveMessageRecipient ORM
+    # materialization, which profiling showed was the dominant cost of this
+    # endpoint. _build_conversation_list only ever reads .id/.sender/
+    # .roomid/.msgtime/.content_text off each message and message_id/
+    # receiver_userid off recipients, so this is behavior-preserving.
+    messages = _fetch_compact_messages_for_entity(db, entity_id, tenant_id)
+    if not messages:
+        return []
+
+    recipients_map = _load_recipients_map_compact(db, tenant_id, [m.id for m in messages])
+
+    # RND-158 Phase 2: scope display-name lookup and staff classification to
+    # only the ids that actually appear in this message set — see
+    # _load_display_names_for_ids / _staff_ids_for_participants docstrings
+    # for why this is exactly equivalent to the tenant-wide versions for
+    # every id _build_conversation_list ever queries.
+    participant_ids: set[str] = {m.sender for m in messages if m.sender}
+    for recipient_ids in recipients_map.values():
+        participant_ids.update(recipient_ids)
+
+    display_names = _load_display_names_for_ids(db, tenant_id, participant_ids)
+    staff_ids = _staff_ids_for_participants(db, tenant_id, participant_ids)
+    return _build_conversation_list(messages, recipients_map, display_names, staff_ids)

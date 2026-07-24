@@ -341,6 +341,7 @@ def test_monitored_accounts_ranks_active_seat_first_and_keeps_history(
     from app.db.session import get_db
     from app.main import app
     import app.routers.conversations as conv
+    import app.services.listing_service as listing_service
 
     seen_tenant_ids = []
 
@@ -360,11 +361,16 @@ def test_monitored_accounts_ranks_active_seat_first_and_keeps_history(
             return [_msg(2, "staff_old_account", msgtime=1000)]
         return []
 
-    monkeypatch.setattr(conv, "_collect_staff_ids", fake_collect_staff_ids)
-    monkeypatch.setattr(conv, "_latest_own_participation_time", fake_latest_own_participation)
+    # RND-219: get_monitored_accounts' aggregation now runs inside
+    # app.services.listing_service, so the functions it actually calls
+    # must be patched there. _fetch_messages_for_entity/_load_recipients_map
+    # are not called by this endpoint (never were) — left patched on `conv`
+    # as an inert no-op guard against a real DB call sneaking through.
+    monkeypatch.setattr(listing_service, "_collect_staff_ids", fake_collect_staff_ids)
+    monkeypatch.setattr(listing_service, "_latest_own_participation_time", fake_latest_own_participation)
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_fetch_messages)
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
+    monkeypatch.setattr(listing_service, "_load_display_names", lambda db, tenant_id: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty
@@ -394,12 +400,12 @@ def test_monitored_accounts_ranks_active_seat_first_and_keeps_history(
 
 def test_monitored_accounts_empty_when_no_seats_identified(client, monkeypatch) -> None:
     """No formal source and no signal match -> empty list, never a noisy dump of senders."""
-    import app.routers.conversations as conv
+    import app.services.listing_service as listing_service
     from app.auth import get_current_user
     from app.db.session import get_db
     from app.main import app
 
-    monkeypatch.setattr(conv, "_collect_staff_ids", lambda db, tenant_id: set())
+    monkeypatch.setattr(listing_service, "_collect_staff_ids", lambda db, tenant_id: set())
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty
@@ -416,15 +422,16 @@ def test_monitored_accounts_display_name_falls_back_when_contact_name_missing(
 ) -> None:
     """RND-130 backfill blocked -> contacts.name may be missing; seat must still show a label."""
     import app.routers.conversations as conv
+    import app.services.listing_service as listing_service
     from app.auth import get_current_user
     from app.db.session import get_db
     from app.main import app
 
     monkeypatch.setattr(
-        conv, "_collect_staff_ids", lambda db, tenant_id: {"real_wecom_user_001"}
+        listing_service, "_collect_staff_ids", lambda db, tenant_id: {"real_wecom_user_001"}
     )
     monkeypatch.setattr(
-        conv, "_latest_own_participation_time", lambda db, entity_id, tenant_id: 100
+        listing_service, "_latest_own_participation_time", lambda db, entity_id, tenant_id: 100
     )
     monkeypatch.setattr(
         conv,
@@ -432,7 +439,7 @@ def test_monitored_accounts_display_name_falls_back_when_contact_name_missing(
         lambda db, entity_id, tenant_id: [_msg(1, entity_id, msgtime=100)],
     )
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
+    monkeypatch.setattr(listing_service, "_load_display_names", lambda db, tenant_id: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty
@@ -465,7 +472,7 @@ def test_monitored_accounts_requires_auth_still_blocked(client) -> None:
 
 
 def test_staff_sessions_include_direct_and_group_conversations(client, monkeypatch) -> None:
-    import app.routers.conversations as conv
+    import app.services.listing_service as listing_service
     from app.auth import get_current_user
     from app.db.session import get_db
     from app.main import app
@@ -478,16 +485,17 @@ def test_staff_sessions_include_direct_and_group_conversations(client, monkeypat
 
     # get_conversations() uses the compact-projection path
     # (_fetch_compact_messages_for_entity et al.), not the legacy
-    # _fetch_messages_for_entity -- see that route's docstring.
+    # _fetch_messages_for_entity -- see that route's docstring. RND-219:
+    # this aggregation now runs inside app.services.listing_service.
     monkeypatch.setattr(
-        conv, "_fetch_compact_messages_for_entity", lambda db, entity_id, tenant_id: messages
+        listing_service, "_fetch_compact_messages_for_entity", lambda db, entity_id, tenant_id: messages
     )
     monkeypatch.setattr(
-        conv, "_load_recipients_map_compact", lambda db, tenant_id, ids: recipients_map
+        listing_service, "_load_recipients_map_compact", lambda db, tenant_id, ids: recipients_map
     )
-    monkeypatch.setattr(conv, "_load_display_names_for_ids", lambda db, tenant_id, ids: {})
+    monkeypatch.setattr(listing_service, "_load_display_names_for_ids", lambda db, tenant_id, ids: {})
     monkeypatch.setattr(
-        conv, "_staff_ids_for_participants", lambda db, tenant_id, ids: {"real_wecom_user_001"}
+        listing_service, "_staff_ids_for_participants", lambda db, tenant_id, ids: {"real_wecom_user_001"}
     )
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
@@ -508,7 +516,7 @@ def test_staff_sessions_include_direct_and_group_conversations(client, monkeypat
 
 
 def test_staff_sessions_sorted_by_latest_message_time_desc(client, monkeypatch) -> None:
-    import app.routers.conversations as conv
+    import app.services.listing_service as listing_service
     from app.auth import get_current_user
     from app.db.session import get_db
     from app.main import app
@@ -520,12 +528,12 @@ def test_staff_sessions_sorted_by_latest_message_time_desc(client, monkeypatch) 
     ]
 
     monkeypatch.setattr(
-        conv, "_fetch_compact_messages_for_entity", lambda db, entity_id, tenant_id: messages
+        listing_service, "_fetch_compact_messages_for_entity", lambda db, entity_id, tenant_id: messages
     )
-    monkeypatch.setattr(conv, "_load_recipients_map_compact", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(conv, "_load_display_names_for_ids", lambda db, tenant_id, ids: {})
+    monkeypatch.setattr(listing_service, "_load_recipients_map_compact", lambda db, tenant_id, ids: {})
+    monkeypatch.setattr(listing_service, "_load_display_names_for_ids", lambda db, tenant_id, ids: {})
     monkeypatch.setattr(
-        conv, "_staff_ids_for_participants", lambda db, tenant_id, ids: {"real_wecom_user_001"}
+        listing_service, "_staff_ids_for_participants", lambda db, tenant_id, ids: {"real_wecom_user_001"}
     )
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
@@ -761,6 +769,7 @@ def test_monitored_accounts_avoids_full_orm_materialization_for_conversation_cou
     _derive_conversation_membership logic as the authoritative builder.
     """
     import app.routers.conversations as conv
+    import app.services.listing_service as listing_service
     from app.auth import get_current_user
     from app.db.session import get_db
     from app.main import app
@@ -777,15 +786,15 @@ def test_monitored_accounts_avoids_full_orm_materialization_for_conversation_cou
         return 5
 
     monkeypatch.setattr(
-        conv, "_collect_staff_ids", lambda db, tenant_id: {"staff_a", "staff_b"}
+        listing_service, "_collect_staff_ids", lambda db, tenant_id: {"staff_a", "staff_b"}
     )
     monkeypatch.setattr(
-        conv, "_latest_own_participation_time", lambda db, entity_id, tenant_id: 100
+        listing_service, "_latest_own_participation_time", lambda db, entity_id, tenant_id: 100
     )
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_old_fetch)
-    monkeypatch.setattr(conv, "_count_entity_conversations", fake_count)
+    monkeypatch.setattr(listing_service, "_count_entity_conversations", fake_count)
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
+    monkeypatch.setattr(listing_service, "_load_display_names", lambda db, tenant_id: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty
@@ -1121,6 +1130,7 @@ def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
     client, monkeypatch
 ) -> None:
     import app.routers.conversations as conv
+    import app.services.listing_service as listing_service
     from app.auth import get_current_user
     from app.db.session import get_db
     from app.main import app
@@ -1145,13 +1155,13 @@ def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
         return []
 
     monkeypatch.setattr(
-        conv, "_collect_staff_ids", lambda db, tenant_id: {"staff_a", "staff_b"}
+        listing_service, "_collect_staff_ids", lambda db, tenant_id: {"staff_a", "staff_b"}
     )
-    monkeypatch.setattr(conv, "_latest_own_participation_time", fake_latest_own_participation)
-    monkeypatch.setattr(conv, "_count_entity_conversations", lambda db, eid, tid, staff_ids=None: 1)
+    monkeypatch.setattr(listing_service, "_latest_own_participation_time", fake_latest_own_participation)
+    monkeypatch.setattr(listing_service, "_count_entity_conversations", lambda db, eid, tid, staff_ids=None: 1)
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_fetch_messages)
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(conv, "_load_display_names", lambda db, tenant_id: {})
+    monkeypatch.setattr(listing_service, "_load_display_names", lambda db, tenant_id: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty
