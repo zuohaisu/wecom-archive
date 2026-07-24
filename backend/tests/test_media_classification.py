@@ -259,7 +259,7 @@ def test_timeline_voice_placeholder_status(client) -> None:
 
 
 def test_timeline_direct_voice_empty_text_still_serialized(client, monkeypatch) -> None:
-    import app.routers.conversations as conv
+    import app.services.timeline_service as timeline_service
 
     from app.main import app
 
@@ -272,8 +272,12 @@ def test_timeline_direct_voice_empty_text_still_serialized(client, monkeypatch) 
         msgtype="voice",
         sdkfileid="redacted-media-id",
     )
+    # RND-220: resolve_timeline_page's implementation (and its own call to
+    # _fetch_conversation_messages) now lives in app.services.timeline_service,
+    # not app.routers.conversations (which only re-exports the function
+    # object) -- patch the name where it is actually looked up at call time.
     monkeypatch.setattr(
-        conv, "_fetch_conversation_messages", lambda db, cid, tenant_id, **kwargs: [msg]
+        timeline_service, "_fetch_conversation_messages", lambda db, cid, tenant_id, **kwargs: [msg]
     )
     resp = _run_messages_query(client, app, [], conversation_id="direct__contact_a___staff_a")
     assert resp.status_code == 200

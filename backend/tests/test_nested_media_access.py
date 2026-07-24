@@ -318,13 +318,18 @@ def test_descriptor_downloaded_but_file_missing_on_disk_is_failed(tmp_path, monk
 
 def test_descriptor_provider_outage_is_unavailable(monkeypatch) -> None:
     from app.db.models import MediaFile
-    import app.routers.conversations as conv
+    import app.services.timeline_service as timeline_service
     from app.routers.conversations import _build_nested_media_descriptor
 
     def _boom(_media_file):
         raise MediaStorageUnavailable("simulated outage")
 
-    monkeypatch.setattr(conv, "resolve_downloadable_media_state", _boom)
+    # RND-220: _build_nested_media_descriptor's implementation (and its own
+    # call to resolve_downloadable_media_state) now lives in
+    # app.services.timeline_service, not app.routers.conversations (which
+    # only re-exports the function object) -- patch the name where it is
+    # actually looked up at call time.
+    monkeypatch.setattr(timeline_service, "resolve_downloadable_media_state", _boom)
     media_file = MediaFile(
         sdkfileid="sdk-1", archive_message_id=1, tenant_id=_TENANT_A,
         download_status="downloaded", storage_backend="qiniu_kodo",
