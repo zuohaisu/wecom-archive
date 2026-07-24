@@ -1,5 +1,0 @@
-- Tenant isolation is enforced by filtering every query on `tenant_id` explicitly (never trusting implicit foreign-key relationships), applied both to `ArchiveMessage` scans and `ArchiveMessageRecipient` joins.
-- Concurrency-safety is achieved through database-level conditional updates (`UPDATE ... WHERE status='pending' AND ...`) rather than Python read-compare-write, with `synchronize_session=False` to avoid stale ORM state.
-- Idempotency is guaranteed by SELECT-before-insert patterns backed by unique constraints (e.g. `uq_message_revocations_revoke_event_message_id`), with `IntegrityError` caught inside a nested SAVEPOINT so only the conflicting insert rolls back.
-- Public output types are explicit allow-list dataclasses (`MessageReachabilitySample`, Pydantic `ReachabilityAuditOut`) that deliberately exclude sensitive fields like content, msgid, sdkfileid, and media keys.
-- Cross-module dependencies are imported at function scope (e.g. `from app.conversation_membership import ...` inside `build_message_reachability_report`) to make the one-directional dependency visible and prevent circular imports.

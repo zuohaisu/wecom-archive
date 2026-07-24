@@ -1,0 +1,1 @@
+No build step — static versioning is derived at import time by walking `static/` recursively and hashing every file, so redeploying new assets automatically changes the `?v=` query string appended to `<script src=...>` tags in templates.

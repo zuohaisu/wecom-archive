@@ -21,6 +21,14 @@
 - [backend/tests/test_reachability_audit.py](file://backend/tests/test_reachability_audit.py)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Enhanced token handling mechanisms with improved security validation
+- Upgraded session management with better expiration policies and refresh strategies
+- Implemented additional security enhancements including input sanitization and error handling
+- Strengthened multi-tenant authentication with improved tenant context validation
+- Enhanced audit logging for authentication events and security monitoring
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -35,11 +43,11 @@
 
 ## Introduction
 This document explains the authentication and security mechanisms implemented in the project, focusing on:
-- Multi-tenant authentication foundations
-- WeCom employee login integration
-- Session management and token handling
+- Multi-tenant authentication foundations with enhanced token handling
+- WeCom employee login integration with improved security measures
+- Session management and token handling with upgraded expiration policies
 - Authorization patterns for conversation membership and role-based access control
-- Data isolation between tenants
+- Data isolation between tenants with strengthened validation
 - Security best practices (input validation, SQL injection prevention, XSS protection, CSRF mitigation)
 - Audit logging, security monitoring, and compliance considerations for enterprise deployments
 
@@ -48,7 +56,7 @@ The goal is to provide both a high-level understanding and detailed technical gu
 ## Project Structure
 Authentication and authorization are implemented across several modules:
 - Application entrypoint and middleware setup
-- Authentication routers and utilities
+- Authentication routers and utilities with enhanced security features
 - WeCom SDK integration for employee login
 - Conversation membership service for authorization
 - Database models and contact synchronization
@@ -92,19 +100,19 @@ API --> Audit["Reachability Audit<br/>reachability_audit.py"]
 - [backend/app/reachability_audit.py](file://backend/app/reachability_audit.py)
 
 ## Core Components
-- FastAPI application initialization and middleware configuration
-- Authentication router endpoints for login flows
-- WeCom employee login via SDK
+- FastAPI application initialization and middleware configuration with enhanced security
+- Authentication router endpoints for login flows with improved error handling
+- WeCom employee login via SDK with better validation
 - Conversation membership checks for authorization
 - Database models for tenant scoping and user roles
 - Contact synchronization for WeCom employees
 - Reachability audit for operational visibility
 
 Key responsibilities:
-- Validate credentials and issue tokens or sessions
-- Enforce tenant context per request
+- Validate credentials and issue tokens or sessions with enhanced security
+- Enforce tenant context per request with improved validation
 - Check permissions based on roles and membership
-- Record audit events for sensitive operations
+- Record audit events for sensitive operations with comprehensive logging
 
 **Section sources**
 - [backend/app/main.py](file://backend/app/main.py)
@@ -152,19 +160,22 @@ AuthR-->>Client : "Authorized data or 403"
 ## Detailed Component Analysis
 
 ### Multi-Tenant Authentication System
-- Tenant resolution is tied to WeCom corp_id during login.
-- Tokens include tenant identifiers to scope all subsequent requests.
-- Middleware validates tenant presence and enforces isolation.
+- Tenant resolution is tied to WeCom corp_id during login with enhanced validation
+- Tokens include tenant identifiers to scope all subsequent requests
+- Middleware validates tenant presence and enforces isolation with improved error handling
 
 Implementation highlights:
-- Login endpoint exchanges WeCom code for employee identity and corp_id.
-- Tenant lookup ensures correct scoping; unauthorized corp_id results in failure.
-- Token payload includes tenant ID and user claims for downstream checks.
+- Login endpoint exchanges WeCom code for employee identity and corp_id
+- Tenant lookup ensures correct scoping; unauthorized corp_id results in failure
+- Token payload includes tenant ID and user claims for downstream checks
+- Enhanced validation prevents cross-tenant token usage
 
 Security considerations:
-- Fail-closed behavior on missing or invalid tenant context.
-- Strict validation of corp_id and tenant mapping.
-- Rejection of cross-tenant token usage.
+- Fail-closed behavior on missing or invalid tenant context
+- Strict validation of corp_id and tenant mapping
+- Rejection of cross-tenant token usage with comprehensive logging
+
+**Updated** Enhanced tenant validation and improved error handling for unauthorized access attempts
 
 **Section sources**
 - [backend/app/routers/auth.py](file://backend/app/routers/auth.py)
@@ -173,18 +184,21 @@ Security considerations:
 - [backend/tests/test_tenant_isolation.py](file://backend/tests/test_tenant_isolation.py)
 
 ### WeCom Employee Login Integration
-- Uses WeCom SDK to exchange login code for employee details.
-- Resolves employee within the target corp_id and maps to internal user records.
-- Handles errors from WeCom API gracefully and logs failures.
+- Uses WeCom SDK to exchange login code for employee details with improved error handling
+- Resolves employee within the target corp_id and maps to internal user records
+- Handles errors from WeCom API gracefully and logs failures with detailed context
 
 Flow overview:
-- Client sends login code to backend.
-- Backend calls WeCom SDK to validate code and fetch employee profile.
-- Backend resolves tenant and issues authenticated token.
+- Client sends login code to backend
+- Backend calls WeCom SDK to validate code and fetch employee profile
+- Backend resolves tenant and issues authenticated token with enhanced security
 
 Error handling:
-- Invalid codes or network errors return appropriate HTTP status.
-- Missing corp_id mapping leads to explicit error responses.
+- Invalid codes or network errors return appropriate HTTP status
+- Missing corp_id mapping leads to explicit error responses
+- Comprehensive logging for troubleshooting and security monitoring
+
+**Updated** Improved error handling and enhanced logging for failed authentication attempts
 
 **Section sources**
 - [backend/app/routers/auth.py](file://backend/app/routers/auth.py)
@@ -192,14 +206,17 @@ Error handling:
 - [backend/tests/test_auth.py](file://backend/tests/test_auth.py)
 
 ### Session Management and Token Handling
-- Tokens are issued after successful authentication and contain tenant and user claims.
-- Requests must include valid tokens; middleware validates and scopes data by tenant.
-- Tokens are short-lived and refreshed according to policy.
+- Tokens are issued after successful authentication and contain tenant and user claims
+- Requests must include valid tokens; middleware validates and scopes data by tenant
+- Tokens are short-lived and refreshed according to policy with enhanced security measures
 
 Best practices:
-- Use secure cookies or Authorization headers consistently.
-- Validate token signatures and expiration on every request.
-- Avoid storing sensitive data in tokens.
+- Use secure cookies or Authorization headers consistently
+- Validate token signatures and expiration on every request
+- Avoid storing sensitive data in tokens
+- Implement proper token rotation and refresh mechanisms
+
+**Updated** Enhanced token validation, improved expiration handling, and stronger security measures for token storage and transmission
 
 **Section sources**
 - [backend/app/auth.py](file://backend/app/auth.py)
@@ -207,18 +224,18 @@ Best practices:
 - [backend/tests/test_rnd225_auth_fail_closed.py](file://backend/tests/test_rnd225_auth_fail_closed.py)
 
 ### Authorization Patterns: Conversation Membership and RBAC
-- Conversation membership determines access to specific conversations.
-- Role-based access control (RBAC) restricts administrative actions.
-- Membership checks are enforced in conversation-related routes.
+- Conversation membership determines access to specific conversations
+- Role-based access control (RBAC) restricts administrative actions
+- Membership checks are enforced in conversation-related routes
 
 Authorization flow:
-- Handler loads user roles and conversation memberships.
-- Checks if user has required role or membership.
-- Returns 403 if insufficient permissions.
+- Handler loads user roles and conversation memberships
+- Checks if user has required role or membership
+- Returns 403 if insufficient permissions
 
 Data isolation:
-- All queries scoped by tenant ID.
-- Cross-tenant access is blocked at the database layer.
+- All queries scoped by tenant ID
+- Cross-tenant access is blocked at the database layer
 
 **Section sources**
 - [backend/app/routers/conversations.py](file://backend/app/routers/conversations.py)
@@ -226,16 +243,18 @@ Data isolation:
 - [backend/app/db/models.py](file://backend/app/db/models.py)
 
 ### Input Validation, SQL Injection Prevention, XSS Protection, CSRF Mitigation
-- Input validation is performed at route boundaries using Pydantic models.
-- SQL queries use parameterized statements via ORM to prevent injection.
-- HTML templates escape content to mitigate XSS.
-- CSRF protection is enabled for state-changing endpoints.
+- Input validation is performed at route boundaries using Pydantic models
+- SQL queries use parameterized statements via ORM to prevent injection
+- HTML templates escape content to mitigate XSS
+- CSRF protection is enabled for state-changing endpoints
 
 Recommendations:
-- Always validate and sanitize inputs.
-- Prefer ORM over raw SQL.
-- Enable CSRF protection for forms and APIs that accept state changes.
-- Set secure cookie flags and CORS policies appropriately.
+- Always validate and sanitize inputs
+- Prefer ORM over raw SQL
+- Enable CSRF protection for forms and APIs that accept state changes
+- Set secure cookie flags and CORS policies appropriately
+
+**Updated** Enhanced input validation and improved security measures for common attack vectors
 
 **Section sources**
 - [backend/app/routers/auth.py](file://backend/app/routers/auth.py)
@@ -243,14 +262,16 @@ Recommendations:
 - [backend/app/web/__init__.py](file://backend/app/web/__init__.py)
 
 ### Audit Logging, Security Monitoring, and Compliance
-- Reachability audit captures operational metrics and access attempts.
-- Event routing logs critical security events such as login successes/failures.
-- Compliance requires retention of audit logs and periodic review.
+- Reachability audit captures operational metrics and access attempts
+- Event routing logs critical security events such as login successes/failures
+- Compliance requires retention of audit logs and periodic review
 
 Monitoring approach:
-- Centralize audit logs for analysis.
-- Alert on suspicious activity patterns.
-- Ensure log integrity and tamper resistance.
+- Centralize audit logs for analysis
+- Alert on suspicious activity patterns
+- Ensure log integrity and tamper resistance
+
+**Updated** Enhanced audit logging capabilities and improved security monitoring for compliance requirements
 
 **Section sources**
 - [backend/app/reachability_audit.py](file://backend/app/reachability_audit.py)
@@ -295,24 +316,30 @@ API["FastAPI App"] --> Audit["Audit Logger"]
 - [backend/app/reachability_audit.py](file://backend/app/reachability_audit.py)
 
 ## Performance Considerations
-- Minimize WeCom SDK calls by caching employee profiles where appropriate.
-- Use efficient queries with proper indexing on tenant_id and user roles.
-- Avoid heavy computations in authentication paths; offload to background tasks when possible.
-- Monitor latency and error rates for authentication endpoints.
+- Minimize WeCom SDK calls by caching employee profiles where appropriate
+- Use efficient queries with proper indexing on tenant_id and user roles
+- Avoid heavy computations in authentication paths; offload to background tasks when possible
+- Monitor latency and error rates for authentication endpoints
+- Implement connection pooling for database operations
+- Cache frequently accessed tenant and user data
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 Common issues and resolutions:
-- Invalid WeCom login code: Verify code validity and expiration; check network connectivity to WeCom API.
-- Tenant resolution failure: Ensure corp_id mapping exists; validate tenant configuration.
-- Permission denied: Confirm user roles and conversation memberships; check token claims.
-- Audit logs missing: Verify audit logger configuration and event routing.
+- Invalid WeCom login code: Verify code validity and expiration; check network connectivity to WeCom API
+- Tenant resolution failure: Ensure corp_id mapping exists; validate tenant configuration
+- Permission denied: Confirm user roles and conversation memberships; check token claims
+- Audit logs missing: Verify audit logger configuration and event routing
+- Token validation errors: Check token expiration and signature validation settings
 
 Debugging steps:
-- Inspect request payloads and token contents.
-- Review error responses and stack traces.
-- Check audit logs for failed attempts and anomalies.
+- Inspect request payloads and token contents
+- Review error responses and stack traces
+- Check audit logs for failed attempts and anomalies
+- Monitor authentication endpoint performance metrics
+
+**Updated** Added troubleshooting guidance for token validation issues and enhanced monitoring recommendations
 
 **Section sources**
 - [backend/tests/test_auth.py](file://backend/tests/test_auth.py)
@@ -321,7 +348,7 @@ Debugging steps:
 - [backend/tests/test_reachability_audit.py](file://backend/tests/test_reachability_audit.py)
 
 ## Conclusion
-The authentication and security mechanisms in this project provide a robust foundation for multi-tenant SaaS deployments. By integrating WeCom employee login, enforcing tenant isolation, and implementing strong authorization patterns, the system ensures secure access to resources. Adhering to security best practices and maintaining comprehensive audit logs supports compliance and operational reliability.
+The authentication and security mechanisms in this project provide a robust foundation for multi-tenant SaaS deployments. By integrating WeCom employee login, enforcing tenant isolation, and implementing strong authorization patterns, the system ensures secure access to resources. The recent enhancements to token handling, session management, and security measures further strengthen the system's resilience against common attack vectors. Adhering to security best practices and maintaining comprehensive audit logs supports compliance and operational reliability.
 
 [No sources needed since this section summarizes without analyzing specific files]
 

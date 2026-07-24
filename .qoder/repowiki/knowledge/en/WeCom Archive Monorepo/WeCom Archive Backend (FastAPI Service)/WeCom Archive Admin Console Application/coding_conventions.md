@@ -1,0 +1,4 @@
+- Each router module defines a FastAPI `router` object and is included centrally in `main.py` rather than scattered across the codebase.
+- Pydantic schemas live alongside their router in `schemas/` and are imported directly by routes for request/response validation.
+- Database access goes through the shared `db.session.get_engine()` / session pattern rather than per-route connections.
+- External integrations (WeCom SDK, contact metadata) are isolated under `sdk/` and helper modules, keeping routers thin.

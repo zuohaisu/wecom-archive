@@ -1,5 +1,0 @@
-- Each C SDK function group is declared in pairs: a `configure_sdk_<feature>(lib)` function that sets `argtypes`/`restype`, followed by thin Python wrappers that encode strings to UTF-8 bytes and forward raw pointers.
-- External API failures are swallowed and return `None` (or raise a domain-specific exception like `SdkMediaError`) rather than propagating HTTP exceptions, so callers treat missing data as normal.
-- Secrets and configuration are read from environment variables through small `_get_*()` helpers that raise `HTTPException(500)` when values are missing or malformed.
-- Binary data extracted from the C SDK is always accessed via explicit length + `ctypes.string_at(ptr, length)` instead of relying on NUL-terminated string semantics, preserving embedded zero bytes.
-- All logging deliberately avoids embedding sensitive identifiers (sdkfileid, userid, access_token) in log messages, using generic warnings with redacted context.

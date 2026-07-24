@@ -1,1 +1,0 @@
-Diagnostic audit that classifies every successfully archived WeCom message as reachable or unreachable with a specific reason code, plus reconciliation logic that links revoke events to their original messages in a concurrency-safe, idempotent way.

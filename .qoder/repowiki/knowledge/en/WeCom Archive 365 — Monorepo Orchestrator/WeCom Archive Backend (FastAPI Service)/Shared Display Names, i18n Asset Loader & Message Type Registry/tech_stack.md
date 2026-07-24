@@ -1,1 +1,0 @@
-Pure Python stdlib only (dataclasses, enum, MappingProxyType, pathlib, json, urllib.parse); no external libraries. The i18n loader consumes a hand-authored JavaScript file (`app/assets/i18n.js`) rather than generating it.

@@ -1,0 +1,1 @@
+Defines SQLAlchemy ORM models, session/engine lifecycle, and schema-readiness checks for the WeCom archive application's PostgreSQL database.

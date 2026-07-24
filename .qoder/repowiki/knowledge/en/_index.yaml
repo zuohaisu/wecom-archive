@@ -3,11 +3,11 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-07-24T17:51:16Z"
+exported_at: "2026-07-24T19:15:48Z"
 modules:
     "":
-        dir_name: WeCom Archive 365 — Monorepo Orchestrator
-        title: WeCom Archive 365 — Monorepo Orchestrator
+        dir_name: WeCom Archive Monorepo
+        title: WeCom Archive Monorepo
         scope:
             - README.md
             - Makefile
@@ -33,115 +33,124 @@ modules:
             - backend/
         source_files: []
         children:
-            - backend_app/database_models
-            - backend_app/media_storage
-            - backend_app/reachability_audit
+            - backend_app/app_core
+            - backend_app/migrations
             - backend_app/scripts
-            - backend_app/shared_utils
             - backend_app/tests
-            - backend_app/web_frontend
-            - backend_app/wecom_integration
         depends_on: []
         related_to:
             - path: deployment_infra
-    backend_app/database_models:
-        dir_name: SQLAlchemy ORM Models & Alembic Migrations
-        title: SQLAlchemy ORM Models & Alembic Migrations
+    backend_app/app_core:
+        dir_name: WeCom Archive Admin Console Application
+        title: WeCom Archive Admin Console Application
         scope:
-            - backend/app/db/
-            - backend/alembic/
+            - backend/app/
+        source_files: []
+        children:
+            - backend_app/app_core/api_routers
+            - backend_app/app_core/core_services_and_utils
+            - backend_app/app_core/database_layer
+            - backend_app/app_core/media_pipeline
+            - backend_app/app_core/web_console
+            - backend_app/app_core/wecom_integration
+        depends_on: []
+        related_to: []
+    backend_app/app_core/api_routers:
+        dir_name: FastAPI API Routers & Response Schemas
+        title: FastAPI API Routers & Response Schemas
+        scope:
+            - backend/app/routers/
+            - backend/app/schemas/
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: backend_app/reachability_audit
-            - path: backend_app/scripts
-    backend_app/media_storage:
-        dir_name: Media Storage Abstraction, Download Pipeline & Thumbnail Generation
-        title: Media Storage Abstraction, Download Pipeline & Thumbnail Generation
+        related_to: []
+    backend_app/app_core/core_services_and_utils:
+        dir_name: Core Services, Message Type Registry & UI Assets
+        title: Core Services, Message Type Registry & UI Assets
         scope:
-            - backend/app/media_storage.py
+            - backend/app/services/
+            - backend/app/structured_message_parser.py
+            - backend/app/message_type_registry.py
+            - backend/app/display_names.py
+            - backend/app/html_helpers.py
+            - backend/app/i18n_assets.py
+            - backend/app/assets/i18n.js
+            - backend/app/revoke_reconciliation.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/app_core/database_layer:
+        dir_name: SQLAlchemy ORM Models & Database Session Layer
+        title: SQLAlchemy ORM Models & Database Session Layer
+        scope:
+            - backend/app/db/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/app_core/media_pipeline:
+        dir_name: Media Pipeline Download, Storage, Classification & Thumbnails
+        title: 'Media Pipeline: Download, Storage, Classification & Thumbnails'
+        scope:
+            - backend/app/media_classification.py
             - backend/app/media_download.py
+            - backend/app/media_storage.py
             - backend/app/media_thumbnails.py
             - backend/app/thumbnail_pipeline.py
             - backend/app/qiniu_storage.py
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: backend_app/scripts
-            - path: backend_app/tests
-            - path: backend_app/wecom_integration
-    backend_app/reachability_audit:
-        dir_name: Message Reachability Audit & Revoke Reconciliation
-        title: Message Reachability Audit & Revoke Reconciliation
-        scope:
-            - backend/app/routers/reachability_audit.py
-            - backend/app/reachability_audit.py
-            - backend/app/revoke_reconciliation.py
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: backend_app/database_models
-    backend_app/scripts:
-        dir_name: One-Shot Operational Scripts & Data Migration Tools
-        title: One-Shot Operational Scripts & Data Migration Tools
-        scope:
-            - backend/scripts/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: backend_app/database_models
-            - path: backend_app/media_storage
-    backend_app/shared_utils:
-        dir_name: Shared Display Names, i18n Asset Loader & Message Type Registry
-        title: Shared Display Names, i18n Asset Loader & Message Type Registry
-        scope:
-            - backend/app/display_names.py
-            - backend/app/i18n_assets.py
-            - backend/app/message_type_registry.py
-            - backend/app/structured_message_parser.py
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: backend_app/web_frontend
-    backend_app/tests:
-        dir_name: Backend Test Suite (Pytest)
-        title: Backend Test Suite (Pytest)
-        scope:
-            - backend/tests/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: backend_app/media_storage
-            - path: backend_app/web_frontend
-    backend_app/web_frontend:
-        dir_name: Admin Web Console (Review & Message Browser)
-        title: Admin Web Console (Review & Message Browser)
+        related_to: []
+    backend_app/app_core/web_console:
+        dir_name: Web Console & Admin Templates
+        title: Web Console & Admin Templates
         scope:
             - backend/app/web/
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: backend_app/shared_utils
-            - path: backend_app/tests
-    backend_app/wecom_integration:
-        dir_name: WeCom Integration (Event Callbacks, C SDK Wrapper & Contact Metadata)
-        title: WeCom Integration (Event Callbacks, C SDK Wrapper & Contact Metadata)
+        related_to: []
+    backend_app/app_core/wecom_integration:
+        dir_name: WeCom Integration (Event Callbacks, Contact Metadata & C SDK Wrapper)
+        title: WeCom Integration (Event Callbacks, Contact Metadata & C SDK Wrapper)
         scope:
-            - backend/app/routers/wecom_events.py
             - backend/app/sdk/wecom_sdk.py
             - backend/app/wecom_contacts.py
+            - backend/app/routers/wecom_events.py
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: backend_app/media_storage
+        related_to: []
+    backend_app/migrations:
+        dir_name: Database Schema Migrations (Alembic)
+        title: Database Schema Migrations (Alembic)
+        scope:
+            - backend/alembic/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/scripts:
+        dir_name: One-Shot Maintenance & Bootstrap Scripts
+        title: One-Shot Maintenance & Bootstrap Scripts
+        scope:
+            - backend/scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/tests:
+        dir_name: tests
+        title: tests
+        scope:
+            - backend/tests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
     deployment_infra:
         dir_name: Production Deployment & Systemd Service Units
         title: Production Deployment & Systemd Service Units

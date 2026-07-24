@@ -1,0 +1,1 @@
+Python 3 with SQLAlchemy (engine + Session + raw `text()` queries), PostgreSQL via psycopg2, and the WeCom Finance C SDK loaded dynamically through `app.sdk.wecom_sdk` (shared library path via `WECOM_SDK_LIB_PATH`). Alembic revision verification delegates to `app.db.schema_check.check_revision`.

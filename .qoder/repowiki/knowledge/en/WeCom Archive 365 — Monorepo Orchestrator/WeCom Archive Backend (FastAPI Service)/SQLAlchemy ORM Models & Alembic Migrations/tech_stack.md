@@ -1,1 +1,0 @@
-SQLAlchemy ORM with `DeclarativeBase`, PostgreSQL via `sqlalchemy.dialects.postgresql.JSONB` and GIN indexes, Alembic for schema migrations, and `func.now()` / `server_default=sa.text('NOW()')` for server-side timestamp defaults.

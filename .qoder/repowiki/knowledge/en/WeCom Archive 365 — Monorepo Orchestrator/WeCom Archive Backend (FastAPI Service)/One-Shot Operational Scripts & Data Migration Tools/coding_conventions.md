@@ -1,6 +1,0 @@
-- Every script follows the same shape: module docstring with Usage/Required env vars/Exit codes/Safety constraints, a `_require_env(name)` helper that prints `[FAIL] ...` and calls `sys.exit(1)`, and a `main()` guarded by `if __name__ == "__main__"`.
-- Tenant scoping is resolved server-side from `WECOM_CORP_ID` via `tenant_wecom_configs` using a shared `_require_tenant_id(session, corp_id)` pattern — no `--tenant-id` flag is accepted from callers.
-- All database access goes through SQLAlchemy `Session(engine)` context managers with explicit `session.commit()` after each write, and raw SQL is passed through `sqlalchemy.text()` rather than string formatting.
-- Output is structured with `[INFO]`, `[WARN]`, `[FAIL]`, and `[PASS]` prefixes flushed immediately (`flush=True`), never printing secrets, message content, or raw encrypted payloads.
-- Scripts are idempotent by design: inserts use `ON CONFLICT DO NOTHING` or uniqueness checks on `(tenant_id, msgid)`, and re-running is guaranteed to be a no-op for already-processed rows.
-- External dependencies (C SDK libraries, file locks, optional env vars) are wrapped in try/except blocks that print sanitized error messages and exit non-zero, never leaking stack traces.

@@ -1,1 +1,0 @@
-SQLAlchemy ORM with raw `update()` statements (using `execution_options(synchronize_session=False)`) for race-free conditional writes; FastAPI `APIRouter` with Pydantic response models for the admin endpoint; datetime conversion between epoch-ms and UTC-aware `datetime` objects.

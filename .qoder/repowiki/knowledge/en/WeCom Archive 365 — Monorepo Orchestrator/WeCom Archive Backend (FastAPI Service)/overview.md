@@ -1,1 +1,0 @@
-FastAPI service that wires WeCom archive ingestion, media storage, reachability auditing, and the admin web console into a single process with PostgreSQL-backed tenant-scoped data and Alembic migrations.

@@ -1,1 +1,0 @@
-pytest with FastAPI `TestClient`, `unittest.mock.MagicMock`, `pytest.monkeypatch`; Node.js subprocess harness for executing embedded JavaScript (review console, search page, diagnostics) via `subprocess.run([NODE, '-e', ...])`. External cloud storage tested against Qiniu SDK through mocked boundaries.

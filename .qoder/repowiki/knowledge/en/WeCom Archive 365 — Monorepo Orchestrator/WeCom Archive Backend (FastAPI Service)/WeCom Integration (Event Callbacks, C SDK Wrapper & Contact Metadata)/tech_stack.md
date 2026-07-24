@@ -1,1 +1,0 @@
-FastAPI for HTTP routing, cryptography library for AES-CBC/PKCS#7 decryption, ctypes for binding the compiled WeCom Conversation Archive C SDK (lib path supplied at runtime), and httpx for synchronous WeCom OpenAPI calls.

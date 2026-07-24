@@ -1,1 +1,0 @@
-Python with Pillow (PIL) for image processing, SQLAlchemy ORM for database access, httpx for HTTP requests, and the Qiniu Kodo SDK (`qiniu`) loaded lazily only when the qiniu_kodo provider is selected. Signed URLs use Qiniu's `Auth.private_download_url` with an optional fixed-window deadline for HTTP cache stability.

@@ -1,1 +1,0 @@
-Provides deterministic display-name resolution for contacts/rooms, loads the admin UI's shared i18n JS asset as an embeddable script tag, and serves as the single authoritative registry of WeCom message types with their parser/renderer strategies.

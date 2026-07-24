@@ -1,0 +1,1 @@
+Single-process FastAPI service that ingests WeCom archive events, persists messages and media via SQLAlchemy/Alembic, exposes admin APIs and a review console, and runs operational backfill scripts against the same PostgreSQL schema.

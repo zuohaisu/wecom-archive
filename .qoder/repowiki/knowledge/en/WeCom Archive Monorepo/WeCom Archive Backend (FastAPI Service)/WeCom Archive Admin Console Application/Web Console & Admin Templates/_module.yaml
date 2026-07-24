@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: backend_app/app_core/web_console
+title: Web Console & Admin Templates
+scope:
+    - backend/app/web/
+source_files: []
+depends_on: []
+related_to: []

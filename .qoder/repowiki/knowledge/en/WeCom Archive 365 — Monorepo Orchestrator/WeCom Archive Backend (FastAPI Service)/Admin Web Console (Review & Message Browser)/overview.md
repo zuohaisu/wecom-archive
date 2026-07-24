@@ -1,1 +1,0 @@
-Hand-authored admin web console providing staff/contact conversation browsing, message timeline viewing, search, diagnostics, and media review with a minimal Python template renderer and vanilla JavaScript frontend.

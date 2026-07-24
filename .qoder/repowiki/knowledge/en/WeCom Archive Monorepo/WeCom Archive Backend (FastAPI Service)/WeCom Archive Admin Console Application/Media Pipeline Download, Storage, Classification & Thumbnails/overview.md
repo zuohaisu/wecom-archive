@@ -1,0 +1,1 @@
+End-to-end pipeline for acquiring WeCom media (image/voice/video/file/emotion), persisting it via a pluggable local or Qiniu storage provider, classifying message media types, and generating server-side thumbnails for timeline display.

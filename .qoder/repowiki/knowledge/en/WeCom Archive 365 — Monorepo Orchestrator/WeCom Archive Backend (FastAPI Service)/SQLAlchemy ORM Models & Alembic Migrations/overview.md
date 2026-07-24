@@ -1,1 +1,0 @@
-Defines the SQLAlchemy ORM models for WeCom archive data (tenants, messages, media, contacts, sessions) and manages their schema evolution through Alembic migrations with PostgreSQL-specific indexes and constraints.

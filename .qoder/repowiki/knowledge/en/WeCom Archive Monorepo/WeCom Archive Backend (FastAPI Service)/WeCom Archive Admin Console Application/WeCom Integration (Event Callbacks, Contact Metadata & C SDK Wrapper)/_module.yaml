@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: backend_app/app_core/wecom_integration
+title: WeCom Integration (Event Callbacks, Contact Metadata & C SDK Wrapper)
+scope:
+    - backend/app/sdk/wecom_sdk.py
+    - backend/app/wecom_contacts.py
+    - backend/app/routers/wecom_events.py
+source_files: []
+depends_on: []
+related_to: []

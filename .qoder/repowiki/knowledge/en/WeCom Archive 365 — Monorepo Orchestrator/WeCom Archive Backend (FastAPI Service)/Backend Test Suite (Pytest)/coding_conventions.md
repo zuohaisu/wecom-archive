@@ -1,6 +1,0 @@
-- Each test module begins with a docstring describing the RND ticket scope, the exact app module under test, and what behavior is validated.
-- Database-dependent tests are guarded by `@pytest.mark.skipif(not _DB_AVAILABLE, reason='DATABASE_URL not set')` where `_DB_AVAILABLE = bool(os.environ.get('DATABASE_URL', '').strip())`.
-- Node-dependent tests declare `NODE = shutil.which('node')` at module level and apply `pytestmark = pytest.mark.skipif(NODE is None, reason='node not available in this environment')`.
-- FastAPI dependency overrides are applied per-test via an `autouse=True` fixture that sets `app.dependency_overrides[get_db] = <mock>` and clears them after yield.
-- External SDK calls (Qiniu, httpx) are never invoked directly; tests monkeypatch the provider's internal attributes (e.g. `provider._auth.private_download_url`) or replace methods to assert error sanitization and URL construction.
-- Shared constants like fake credentials (`_FAKE_ACCESS_KEY`, `_FAKE_SECRET_KEY`) are defined at module top and asserted never to appear in generated URLs or logged output.

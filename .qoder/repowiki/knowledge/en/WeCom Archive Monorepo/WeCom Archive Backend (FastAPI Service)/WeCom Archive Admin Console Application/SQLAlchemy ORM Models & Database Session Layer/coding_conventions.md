@@ -1,0 +1,6 @@
+- Every ORM model defines `__tablename__` and places unique/foreign-key/index constraints inside a `__table_args__` tuple rather than per-column arguments.
+- All timestamp columns use `DateTime(timezone=True)` with `server_default=func.now()` for `created_at` and `onupdate=func.now()` for `updated_at`.
+- Tenant scoping is enforced via a `tenant_id` column on every multi-tenant table, paired with a `UniqueConstraint("tenant_id", ...)` to make uniqueness tenant-local.
+- Application-level integrity guards are implemented as `@event.listens_for(Model, 'before_insert'|'before_update')` listeners that raise typed exceptions (e.g. `DuplicateCorpIdError`) before the DB constraint fires.
+- Database operations never commit transactions themselves — callers control the transaction boundary, and helpers accept an injected `Session` parameter.
+- Schema-check and health functions return safe, secret-free messages containing only revision IDs or generic error strings, never connection details.

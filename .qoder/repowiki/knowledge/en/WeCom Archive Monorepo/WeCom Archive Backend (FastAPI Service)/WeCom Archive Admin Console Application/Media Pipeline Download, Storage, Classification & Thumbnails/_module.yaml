@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: backend_app/app_core/media_pipeline
+title: 'Media Pipeline: Download, Storage, Classification & Thumbnails'
+scope:
+    - backend/app/media_classification.py
+    - backend/app/media_download.py
+    - backend/app/media_storage.py
+    - backend/app/media_thumbnails.py
+    - backend/app/thumbnail_pipeline.py
+    - backend/app/qiniu_storage.py
+source_files: []
+depends_on: []
+related_to: []

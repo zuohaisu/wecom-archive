@@ -1,1 +1,0 @@
-Integrates the backend with WeCom's Conversation Archive by handling encrypted event callbacks, wrapping the native C SDK for chat data and media download, and resolving contact display names via OpenAPI.

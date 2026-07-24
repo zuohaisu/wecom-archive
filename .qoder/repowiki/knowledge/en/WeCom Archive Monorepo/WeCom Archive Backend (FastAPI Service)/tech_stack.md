@@ -1,0 +1,1 @@
+FastAPI + Pydantic v2 for HTTP APIs, SQLAlchemy ORM with PostgreSQL, Alembic for schema migrations, Jinja2-style Python templates served via a custom `render_template`, and vanilla JavaScript frontend mounted under `/web/static`. Logging uses uvicorn's access logger with a custom filter to redact OAuth callback secrets.
