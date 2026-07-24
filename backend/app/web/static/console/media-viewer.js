@@ -17,6 +17,20 @@ var viewerKeyHandlerBound=false;
 var viewerGen=0;
 var viewerFocusTrigger=null;
 
+// Registry of items the Viewer can page through for the CURRENT
+// renderTimeline() pass -- reset at the top of renderTimeline() (see
+// timeline.js), populated as each image/emotion/video element is rendered
+// (see message-renderers.js) so prev/next navigates every viewable item
+// across the whole visible timeline, not just siblings within one message.
+// Kept here alongside the rest of the Viewer's state; message-renderers.js
+// loads immediately before this file, but both only touch these globals at
+// runtime (inside renderTimeline()/the composite renderers), never at load.
+var timelineViewerItems=[];
+function registerViewerItem(item){
+  timelineViewerItems.push(item);
+  return timelineViewerItems.length-1;
+}
+
 function ensureViewerRoot(){
   var root=document.getElementById('rnd206-viewer');
   if(root)return root;

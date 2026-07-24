@@ -67,13 +67,6 @@ function setMode(m){
   hideNewMessageIndicator();
   loadEntityList();
 }
-applyStaticI18n();
-loadCurrentUser();
-setMode('staff');
-lastRefreshAt=Date.now();
-updateRefreshStatus();
-startAutoRefresh();
-readFocusFromUrl();
 function highlightKeyword(text,keyword){
   if(!keyword)return text;
   var re=new RegExp('('+keyword.replace(/[.*+?^${}()|[\]\\]/g,'\$&')+')','gi');
@@ -355,3 +348,15 @@ document.getElementById('search-input').addEventListener('keydown',function(e){
     if(v){e.preventDefault();window.location.href='/admin/search?q='+encodeURIComponent(v);}
   }
 });
+
+// RND-217 C5: bootstrap runs LAST -- every other top-level side effect
+// (the lang-menu outside-click handler and all four #search-input
+// listeners above) is registered before we kick off the initial load, so
+// the first render/auto-refresh never races an unregistered listener.
+applyStaticI18n();
+loadCurrentUser();
+setMode('staff');
+lastRefreshAt=Date.now();
+updateRefreshStatus();
+startAutoRefresh();
+readFocusFromUrl();

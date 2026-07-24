@@ -492,23 +492,12 @@ function fmtFileName(desc){
   return I18N.t('file.fallbackName');
 }
 
-// Registry of items the Viewer can page through for the CURRENT
-// renderTimeline() pass -- reset at the top of renderTimeline(), populated
-// as each image/emotion/video element is rendered so prev/next navigates
-// every viewable item across the whole visible timeline, not just siblings
-// within one message.
-var timelineViewerItems=[];
-function registerViewerItem(item){
-  timelineViewerItems.push(item);
-  return timelineViewerItems.length-1;
-}
-
-/* RND-217: media-viewer.js (the shared image/video/chatrecord overlay --
-   openViewer/closeViewer/viewerShow/ensureViewerRoot/refreshViewerLabels/
-   restoreViewerFocus/openChatrecordViewer) loads as its own <script> tag
-   immediately after this file. registerViewerItem() above only records
-   items into the shared timelineViewerItems array that the Viewer reads;
-   it does not depend on the Viewer's own code being loaded yet. */
+/* RND-217: the shared Viewer registry (timelineViewerItems /
+   registerViewerItem) now lives in media-viewer.js alongside the rest of
+   the Viewer's state and code. renderTimeline() resets timelineViewerItems
+   and the composite renderers below call registerViewerItem() at runtime;
+   both are globals defined by media-viewer.js, which loads immediately
+   after this file, so they resolve before any renderTimeline() pass runs. */
 
 
 // ---------------------------------------------------------------------------

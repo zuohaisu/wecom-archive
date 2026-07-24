@@ -60,18 +60,21 @@ _CONSOLE_JS_MODULES = [
 # RND-206 "var MediaAccessCache=(function(){...function renderCompositeMessage
 # (m){...}" span out of the review console JS as a single contiguous chunk
 # (it predates RND-217 and was written against the old single-file
-# review-console.js, where the Viewer lived inline in the middle of that
-# span). Splicing media-viewer.js's real content back in at this marker, for
-# the test-facing bundle only, reproduces that exact contiguous text so those
-# tests keep working unmodified -- the real browser page never sees this
-# splice, it just loads media-viewer.js as its own next <script> tag.
+# review-console.js, where the Viewer -- including the shared
+# timelineViewerItems / registerViewerItem registry those tests rely on --
+# lived inline in the middle of that span). RND-217 moved the Viewer (and its
+# registry) into media-viewer.js; splicing media-viewer.js's real content
+# back in at this marker, for the test-facing bundle only, reproduces that
+# exact contiguous text so those tests keep working unmodified -- the real
+# browser page never sees this splice, it just loads media-viewer.js as its
+# own next <script> tag.
 _VIEWER_SPLICE_MARKER = (
-    "/* RND-217: media-viewer.js (the shared image/video/chatrecord overlay --\n"
-    "   openViewer/closeViewer/viewerShow/ensureViewerRoot/refreshViewerLabels/\n"
-    "   restoreViewerFocus/openChatrecordViewer) loads as its own <script> tag\n"
-    "   immediately after this file. registerViewerItem() above only records\n"
-    "   items into the shared timelineViewerItems array that the Viewer reads;\n"
-    "   it does not depend on the Viewer's own code being loaded yet. */\n"
+    "/* RND-217: the shared Viewer registry (timelineViewerItems /\n"
+    "   registerViewerItem) now lives in media-viewer.js alongside the rest of\n"
+    "   the Viewer's state and code. renderTimeline() resets timelineViewerItems\n"
+    "   and the composite renderers below call registerViewerItem() at runtime;\n"
+    "   both are globals defined by media-viewer.js, which loads immediately\n"
+    "   after this file, so they resolve before any renderTimeline() pass runs. */\n"
 )
 
 
