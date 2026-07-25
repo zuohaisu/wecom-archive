@@ -10,6 +10,7 @@
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
 - [main.py](file://backend/app/main.py)
+- [settings.py](file://backend/app/settings.py)
 - [0005_media_storage_backend_reference.py](file://backend/alembic/versions/0005_media_storage_backend_reference.py)
 - [0006_media_migration_bookkeeping.py](file://backend/alembic/versions/0006_media_migration_bookkeeping.py)
 - [0007_media_migration_metadata.py](file://backend/alembic/versions/0007_media_migration_metadata.py)
@@ -25,10 +26,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added dedicated MediaWorker service section for improved reliability and progress tracking
-- Updated media download pipeline architecture to reflect the new worker-based approach
-- Enhanced reliability and monitoring capabilities documentation
-- Updated dependency analysis to include the new MediaWorker component
+- Added domain-specific configuration support through new typed settings architecture
+- Enhanced storage backend initialization with structured configuration validation
+- Updated factory pattern to leverage typed settings for backend selection
+- Improved configuration management for media storage backends
+- Added comprehensive settings validation and type safety for storage configurations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -43,10 +45,10 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the storage abstraction layer that unifies media persistence across multiple backends, primarily local filesystem and Qiniu Cloud Object Storage (KODO). It covers the unified interface, backend factory pattern, enhanced media download pipeline with dedicated MediaWorker service for improved reliability and progress tracking, thumbnail generation workflow, classification system, access control, CDN integration, migration framework for moving media between backends, backup strategies, disaster recovery procedures, and performance optimizations such as caching, connection pooling, and concurrent operations.
+This document explains the storage abstraction layer that unifies media persistence across multiple backends, primarily local filesystem and Qiniu Cloud Object Storage (KODO). It covers the unified interface, backend factory pattern with enhanced typed settings architecture, enhanced media download pipeline with dedicated MediaWorker service for improved reliability and progress tracking, thumbnail generation workflow, classification system, access control, CDN integration, migration framework for moving media between backends, backup strategies, disaster recovery procedures, and performance optimizations such as caching, connection pooling, and concurrent operations. The system now features domain-specific configuration support through a robust typed settings architecture that ensures type safety and validation for all storage backend configurations.
 
 ## Project Structure
-The storage abstraction is implemented under the backend application module with dedicated files for storage interfaces, backend implementations, worker services, pipelines, and scripts. Alembic migrations provide schema evolution for backend references, migration bookkeeping, metadata, and thumbnails. Operational runbooks and research documents describe design decisions and operational procedures.
+The storage abstraction is implemented under the backend application module with dedicated files for storage interfaces, backend implementations, worker services, pipelines, scripts, and typed settings. Alembic migrations provide schema evolution for backend references, migration bookkeeping, metadata, and thumbnails. Operational runbooks and research documents describe design decisions and operational procedures. The new typed settings architecture provides structured configuration management with validation and type safety.
 
 ```mermaid
 graph TB
@@ -59,6 +61,7 @@ E["thumbnail_pipeline.py"]
 F["media_thumbnails.py"]
 G["media_classification.py"]
 H["main.py"]
+I["settings.py"]
 end
 subgraph "Migrations"
 M1["0005_media_storage_backend_reference.py"]
@@ -78,6 +81,8 @@ E --> A
 F --> A
 G --> A
 H --> A
+I --> A
+I --> H
 S1 --> A
 S1 --> B
 S2 --> E
@@ -96,6 +101,7 @@ M4 --> E
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
 - [main.py](file://backend/app/main.py)
+- [settings.py](file://backend/app/settings.py)
 - [0005_media_storage_backend_reference.py](file://backend/alembic/versions/0005_media_storage_backend_reference.py)
 - [0006_media_migration_bookkeeping.py](file://backend/alembic/versions/0006_media_migration_bookkeeping.py)
 - [0007_media_migration_metadata.py](file://backend/alembic/versions/0007_media_migration_metadata.py)
@@ -111,12 +117,13 @@ M4 --> E
 - Unified storage interface: Defines a consistent API for storing, retrieving, deleting, and generating signed URLs for media objects, abstracting backend specifics.
 - Local filesystem backend: Implements the interface using the local disk, suitable for development or small-scale deployments.
 - Qiniu Cloud backend: Implements the interface against Qiniu KODO, including signed URL generation and CDN domain support.
-- Backend factory: Resolves the active storage backend based on configuration, enabling runtime selection without changing callers.
+- Backend factory with typed settings: Resolves the active storage backend based on validated configuration, enabling runtime selection without changing callers.
 - **Enhanced Media Worker Service**: Dedicated service for reliable media processing with progress tracking, retry mechanisms, and error handling.
 - Media download pipeline: Orchestrates fetching media from WeCom, classifying content, persisting via the storage interface, and triggering downstream processing through the MediaWorker.
 - Thumbnail pipeline: Generates thumbnails for supported media types, persists them alongside originals, and updates metadata.
 - Classification system: Determines media type and properties to guide storage paths, thumbnail generation, and access policies.
 - Access control and CDN: Enforces tenant isolation and generates time-limited signed URLs; integrates with CDN domains for efficient delivery.
+- **Typed Settings Architecture**: Provides domain-specific configuration validation and type safety for storage backends.
 
 **Section sources**
 - [media_storage.py](file://backend/app/media_storage.py)
@@ -126,10 +133,11 @@ M4 --> E
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
+- [settings.py](file://backend/app/settings.py)
 - [rnd_185_media_storage_abstraction.md](file://docs/research/rnd_185_media_storage_abstraction.md)
 
 ## Architecture Overview
-The storage abstraction layer provides a single entry point for all media operations. Callers use the unified interface without knowing whether data resides locally or on Qiniu. The factory selects the backend at startup based on environment configuration. The enhanced architecture now includes a dedicated MediaWorker service that handles media processing tasks with improved reliability, progress tracking, and error recovery. Downstream components like download and thumbnail pipelines consume this interface uniformly while leveraging the worker service for robust processing.
+The storage abstraction layer provides a single entry point for all media operations. Callers use the unified interface without knowing whether data resides locally or on Qiniu. The factory selects the backend at startup based on environment configuration with enhanced typed settings validation. The enhanced architecture now includes a dedicated MediaWorker service that handles media processing tasks with improved reliability, progress tracking, and error recovery. Downstream components like download and thumbnail pipelines consume this interface uniformly while leveraging the worker service for robust processing. The typed settings architecture ensures configuration validity and type safety throughout the system.
 
 ```mermaid
 classDiagram
@@ -163,9 +171,16 @@ class MediaWorker {
 class StorageFactory {
 +resolve() StorageInterface
 }
+class TypedSettings {
++validate_config()
++get_backend_config()
++get_cdn_config()
++get_timeout_config()
+}
 StorageInterface <|.. LocalStorageBackend
 StorageInterface <|.. QiniuStorageBackend
 StorageFactory --> StorageInterface : "returns"
+StorageFactory --> TypedSettings : "uses"
 MediaWorker --> StorageInterface : "uses"
 ```
 
@@ -173,26 +188,33 @@ MediaWorker --> StorageInterface : "uses"
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [media_worker.py](file://backend/app/services/media_worker.py)
+- [settings.py](file://backend/app/settings.py)
 
 **Section sources**
 - [rnd_185_media_storage_abstraction.md](file://docs/research/rnd_185_media_storage_abstraction.md)
 
 ## Detailed Component Analysis
 
-### Unified Storage Interface and Factory
+### Unified Storage Interface and Factory with Typed Settings
+**Updated** The storage interface and factory now leverage the new typed settings architecture for enhanced configuration validation and type safety.
+
 - Interface contract: Methods for store/get/delete/signed_url/exists ensure consistent behavior across backends.
-- Factory resolution: Reads configuration to instantiate either LocalStorageBackend or QiniuStorageBackend.
+- Factory resolution with typed settings: Reads validated configuration to instantiate either LocalStorageBackend or QiniuStorageBackend with proper type checking.
 - Tenant scoping: Paths and keys incorporate tenant identifiers to isolate media per tenant.
 - Error handling: Normalizes backend-specific errors into common exceptions for upstream handling.
+- Configuration validation: Ensures all required settings are present and properly typed before backend initialization.
 
 ```mermaid
 sequenceDiagram
 participant Caller as "Caller"
 participant Factory as "StorageFactory"
+participant Settings as "TypedSettings"
 participant Backend as "StorageInterface"
 participant Disk as "Local FS"
 participant Qiniu as "Qiniu KODO"
 Caller->>Factory : resolve()
+Factory->>Settings : validate_and_get_config()
+Settings-->>Factory : validated_config
 alt Local backend configured
 Factory-->>Caller : LocalStorageBackend
 Caller->>Disk : store/get/delete/signed_url
@@ -205,10 +227,12 @@ end
 **Diagram sources**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [settings.py](file://backend/app/settings.py)
 
 **Section sources**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [settings.py](file://backend/app/settings.py)
 
 ### Enhanced Media Worker Service
 **Updated** The media download pipeline now leverages a dedicated MediaWorker service that provides improved reliability, progress tracking, and error handling capabilities.
@@ -403,14 +427,45 @@ Report --> End(["End"])
 - [wecom_archive_media_download_runbook.md](file://docs/wecom_archive_media_download_runbook.md)
 - [wecom_archive_worker_runbook.md](file://docs/wecom_archive_worker_runbook.md)
 
+### Typed Settings Architecture
+**New** The storage system now features a comprehensive typed settings architecture that provides domain-specific configuration support with validation and type safety.
+
+- **Configuration Validation**: All storage backend configurations are validated against predefined schemas before initialization
+- **Type Safety**: Strong typing ensures configuration values match expected formats and constraints
+- **Domain-Specific Settings**: Separate configuration structures for different storage backends (local, Qiniu, etc.)
+- **Runtime Validation**: Configuration is validated at application startup to catch errors early
+- **Environment Integration**: Seamless integration with environment variables and configuration files
+- **Default Values**: Sensible defaults provided for optional configuration parameters
+
+```mermaid
+flowchart TD
+Config["Configuration Input"] --> Validate["Validation Layer"]
+Validate --> TypeCheck["Type Checking"]
+TypeCheck --> SchemaValidation["Schema Validation"]
+SchemaValidation --> Valid{"Valid?"}
+Valid --> |Yes| Initialize["Initialize Backend"]
+Valid --> |No| Error["Configuration Error"]
+Initialize --> Backend["Storage Backend"]
+Error --> Log["Log and Exit"]
+```
+
+**Diagram sources**
+- [settings.py](file://backend/app/settings.py)
+- [media_storage.py](file://backend/app/media_storage.py)
+
+**Section sources**
+- [settings.py](file://backend/app/settings.py)
+- [media_storage.py](file://backend/app/media_storage.py)
+
 ## Dependency Analysis
-**Updated** The storage layer now includes the MediaWorker service as a central component for reliable media processing, integrating with configuration for backend selection, WeCom SDK for ingestion, database for metadata, and CDN for delivery. Migrations evolve schema to support backend references and migration bookkeeping.
+**Updated** The storage layer now includes the MediaWorker service as a central component for reliable media processing, integrating with typed settings for configuration validation, backend selection, WeCom SDK for ingestion, database for metadata, and CDN for delivery. Migrations evolve schema to support backend references and migration bookkeeping.
 
 ```mermaid
 graph TB
 Main["main.py"] --> Storage["media_storage.py"]
 Storage --> Local["Local FS"]
 Storage --> Qiniu["qiniu_storage.py"]
+Storage --> Settings["settings.py"]
 Download["media_download.py"] --> Storage
 Download --> Worker["services/media_worker.py"]
 Worker --> Storage
@@ -421,6 +476,7 @@ MigScript["migrate_local_media_to_qiniu.py"] --> Storage
 MigScript --> Qiniu
 DB["Database"] --> MigBook["migration bookkeeping"]
 DB --> ThumbMeta["thumbnail metadata"]
+Settings --> Main
 ```
 
 **Diagram sources**
@@ -433,6 +489,7 @@ DB --> ThumbMeta["thumbnail metadata"]
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
 - [migrate_local_media_to_qiniu.py](file://backend/scripts/migrate_local_media_to_qiniu.py)
+- [settings.py](file://backend/app/settings.py)
 - [0006_media_migration_bookkeeping.py](file://backend/alembic/versions/0006_media_migration_bookkeeping.py)
 - [0012_media_thumbnails.py](file://backend/alembic/versions/0012_media_thumbnails.py)
 
@@ -446,6 +503,7 @@ DB --> ThumbMeta["thumbnail metadata"]
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
 - [migrate_local_media_to_qiniu.py](file://backend/scripts/migrate_local_media_to_qiniu.py)
+- [settings.py](file://backend/app/settings.py)
 - [0006_media_migration_bookkeeping.py](file://backend/alembic/versions/0006_media_migration_bookkeeping.py)
 - [0012_media_thumbnails.py](file://backend/alembic/versions/0012_media_thumbnails.py)
 
@@ -458,6 +516,8 @@ DB --> ThumbMeta["thumbnail metadata"]
 - Thumbnail optimization: Generate only necessary sizes and formats; cache thumbnails aggressively.
 - **Worker Optimization**: Leverage MediaWorker's built-in concurrency controls and resource management for optimal throughput.
 - **Progress Tracking**: Utilize worker progress tracking for better user experience and monitoring.
+- **Configuration Validation**: Typed settings reduce runtime errors and improve startup performance through early validation.
+- **Memory Management**: Efficient configuration loading and validation to minimize memory overhead.
 
 [No sources needed since this section provides general guidance]
 
@@ -469,18 +529,21 @@ DB --> ThumbMeta["thumbnail metadata"]
 - Access control: Ensure tenant scoping in keys and correct ACL settings; test signed URL retrieval with different tenants.
 - **Worker Issues**: Monitor MediaWorker health endpoints, check retry queues, and review error logs for processing failures.
 - **Progress Tracking**: Investigate stuck tasks by examining worker progress logs and queue status.
+- **Configuration Errors**: Validate typed settings configuration, check environment variables, and review startup logs for validation errors.
+- **Backend Initialization**: Verify backend-specific configuration parameters and connection settings.
 
 **Section sources**
 - [wecom_archive_media_download_runbook.md](file://docs/wecom_archive_media_download_runbook.md)
 - [wecom_archive_worker_runbook.md](file://docs/wecom_archive_worker_runbook.md)
 
 ## Conclusion
-The storage abstraction layer delivers a robust, extensible foundation for media management across local and cloud backends. By standardizing operations through a unified interface and factory pattern, it simplifies integration, enables seamless migration, and supports scalable delivery via CDN. The enhanced architecture with the dedicated MediaWorker service provides improved reliability, progress tracking, and error recovery capabilities. Combined with strong access control, comprehensive migration tooling, and operational runbooks, it provides a reliable platform for enterprise-grade media archival and retrieval.
+The storage abstraction layer delivers a robust, extensible foundation for media management across local and cloud backends. By standardizing operations through a unified interface and factory pattern with enhanced typed settings architecture, it simplifies integration, enables seamless migration, and supports scalable delivery via CDN. The enhanced architecture with the dedicated MediaWorker service provides improved reliability, progress tracking, and error recovery capabilities. Combined with strong access control, comprehensive migration tooling, operational runbooks, and the new typed settings architecture for configuration validation, it provides a reliable platform for enterprise-grade media archival and retrieval.
 
 ## Appendices
-- Configuration examples: Backend selection, CDN domains, and timeout/pooling parameters.
+- Configuration examples: Backend selection, CDN domains, and timeout/pooling parameters with typed settings validation.
 - Migration runbook: Step-by-step instructions for moving media between backends safely.
 - Operational checklists: Pre/post migration validations, backup schedules, and DR drills.
 - **Worker Configuration**: MediaWorker setup, scaling parameters, and monitoring configuration.
+- **Typed Settings Reference**: Complete reference for all configuration options, validation rules, and environment variable mappings.
 
 [No sources needed since this section provides general guidance]

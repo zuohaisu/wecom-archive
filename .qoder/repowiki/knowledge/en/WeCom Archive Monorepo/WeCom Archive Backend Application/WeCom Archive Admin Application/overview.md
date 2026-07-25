@@ -1,0 +1,1 @@
+FastAPI service that wires WeCom conversation-archive routers, SQLAlchemy models, media download/classification pipeline, and the admin web console into a single deployable HTTP server.

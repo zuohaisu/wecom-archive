@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: backend_app
-title: WeCom Archive Backend Service
+title: WeCom Archive Backend Application
 scope:
     - backend/
 source_files: []

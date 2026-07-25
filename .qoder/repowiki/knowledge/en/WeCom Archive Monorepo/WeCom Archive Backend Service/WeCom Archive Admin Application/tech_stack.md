@@ -1,1 +1,0 @@
-FastAPI + Uvicorn for HTTP, SQLAlchemy for ORM over PostgreSQL, httpx for WeCom API calls, ctypes wrapper around the WeCom C SDK, Jinja2-style HTML templates served directly, and static CSS/JS for the admin console.

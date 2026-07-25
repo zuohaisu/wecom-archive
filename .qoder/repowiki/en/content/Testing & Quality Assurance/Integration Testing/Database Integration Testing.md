@@ -20,6 +20,13 @@
 - [tests/requirements.txt](file://backend/tests/requirements.txt)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated database session management section to reflect new typed settings implementation
+- Enhanced connection pooling configuration to support domain-specific database connections
+- Added guidance for testing with typed settings-based session management
+- Updated troubleshooting section to address typed settings configuration issues
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -35,6 +42,8 @@
 ## Introduction
 This document provides a comprehensive guide to database integration testing for the project, focusing on transactional behavior, concurrent access scenarios, and data consistency validation. It explains how to set up test databases, manage fixtures, simulate real-world operations, and validate tenant isolation, conversation membership management, message revocation integrity, and migration scripts. It also covers connection pooling strategies, transaction rollback approaches, and performance testing techniques for database-heavy workloads.
 
+**Updated** The database session management now utilizes typed settings for proper domain-specific database connection handling, improving type safety and configuration management.
+
 ## Project Structure
 The database layer is implemented with SQLAlchemy and Alembic migrations. Tests are organized under backend/tests and include dedicated tests for tenant isolation, conversation membership, message revocation integrity, concurrency, and migrations. The Alembic configuration and environment setup are located under backend/alembic.
 
@@ -42,7 +51,7 @@ The database layer is implemented with SQLAlchemy and Alembic migrations. Tests 
 graph TB
 subgraph "Database Layer"
 Base["base.py"]
-Session["session.py"]
+Session["session.py (Typed Settings)"]
 Models["models.py"]
 SchemaCheck["schema_check.py"]
 end
@@ -108,16 +117,17 @@ RevConc --> Session
 - [tests/alembic.ini](file://backend/tests/alembic.ini)
 
 ## Core Components
-- Database session management: Centralized session factory and engine configuration ensure consistent connections across tests and application code.
+- **Enhanced Database session management**: Centralized session factory with typed settings ensures consistent connections across tests and application code with improved type safety and domain-specific configuration.
 - Model definitions: Declarative models define entities such as tenants, conversations, memberships, messages, and revocations.
 - Migration environment: Alembic environment configures metadata and runs migrations within isolated test contexts.
 - Business services: Conversation membership and revoke reconciliation implement core business logic that interacts with the database.
 
 Key responsibilities:
-- Provide reusable session scopes for tests (per-test or per-function).
+- Provide reusable session scopes for tests (per-test or per-function) using typed settings.
 - Ensure schema readiness via Alembic before running tests.
 - Enforce tenant scoping at query boundaries.
 - Validate constraints and integrity rules through assertions and helper utilities.
+- Support domain-specific database connection handling through typed configuration.
 
 **Section sources**
 - [app/db/session.py](file://backend/app/db/session.py)
@@ -127,20 +137,23 @@ Key responsibilities:
 - [app/revoke_reconciliation.py](file://backend/app/revoke_reconciliation.py)
 
 ## Architecture Overview
-The integration testing architecture centers around an isolated test database, Alembic-managed schema, and session-scoped transactions. Tests bootstrap the database, run migrations, create fixtures, execute operations, and assert outcomes while ensuring isolation between tenants and correctness of revocation semantics.
+The integration testing architecture centers around an isolated test database, Alembic-managed schema, and session-scoped transactions with typed settings support. Tests bootstrap the database, run migrations, create fixtures, execute operations, and assert outcomes while ensuring isolation between tenants and correctness of revocation semantics.
 
 ```mermaid
 sequenceDiagram
 participant Test as "Test Runner"
+participant Settings as "Typed Settings"
 participant Alembic as "Alembic Env"
 participant Engine as "DB Engine"
 participant Session as "Session Factory"
 participant Service as "Membership/Reconcile"
 participant DB as "Database"
+Test->>Settings : Load typed configuration
+Settings->>Engine : Configure with typed settings
 Test->>Alembic : Configure metadata and URL
 Alembic->>Engine : Create/Connect engine
 Alembic->>DB : Run migrations (head)
-Test->>Session : Create scoped session
+Test->>Session : Create scoped session with typed settings
 Test->>Service : Execute business operation
 Service->>Session : Query/Insert/Update
 Session->>DB : Commit/Rollback
@@ -156,15 +169,19 @@ Test->>Test : Assert state and constraints
 
 ## Detailed Component Analysis
 
-### Database Session and Connection Pooling
-- Session factory encapsulates engine creation, connection parameters, and session scoping.
-- Connection pooling is configured via engine arguments; tests should use short-lived sessions to avoid pool exhaustion.
-- For concurrent tests, isolate engines per process or use separate databases to prevent contention.
+### Enhanced Database Session Management with Typed Settings
+**Updated** The session management system has been modernized to use typed settings for improved type safety and domain-specific database connection handling.
+
+- **Typed Settings Integration**: Session factory now accepts typed configuration objects that enforce type safety and provide better IDE support.
+- **Domain-Specific Connections**: Different database domains (e.g., primary, read-replica, analytics) can be configured with distinct typed settings.
+- **Configuration Validation**: Typed settings ensure all required parameters are present and correctly formatted before engine creation.
+- **Environment-Specific Configuration**: Separate typed settings for development, testing, and production environments.
 
 Recommendations:
-- Use per-test session scope to guarantee clean state.
-- Tune pool size and timeouts based on test concurrency levels.
-- Avoid long-running transactions in tests to reduce lock contention.
+- Use per-test session scope with typed settings to guarantee clean state and type safety.
+- Define separate typed settings classes for different database domains.
+- Leverage IDE autocomplete and type checking for better developer experience.
+- Validate settings at startup to catch configuration errors early.
 
 **Section sources**
 - [app/db/session.py](file://backend/app/db/session.py)
@@ -254,11 +271,12 @@ Validation techniques:
 - [scripts/check_message_revocations_integrity.py](file://backend/scripts/check_message_revocations_integrity.py)
 
 ## Dependency Analysis
-The following diagram illustrates dependencies between core components used in integration testing.
+The following diagram illustrates dependencies between core components used in integration testing, including the new typed settings integration.
 
 ```mermaid
 graph TB
-Session["session.py"] --> Models["models.py"]
+TypedSettings["Typed Settings"] --> Session["session.py"]
+Session --> Models["models.py"]
 Models --> SchemaCheck["schema_check.py"]
 Membership["conversation_membership.py"] --> Session
 Reconcile["revoke_reconciliation.py"] --> Session
@@ -287,7 +305,7 @@ RevConc["test_revoke_concurrency.py"] --> Session
 **Section sources**
 - [app/db/session.py](file://backend/app/db/session.py)
 - [app/db/models.py](file://backend/app/db/models.py)
-- [app/db/schema_check.py](file://backend/app/db/schema_check.py)
+- [app/db/schema/schema_check.py](file://backend/app/db/schema_check.py)
 - [app/conversation_membership.py](file://backend/app/conversation_membership.py)
 - [app/revoke_reconciliation.py](file://backend/app/revoke_reconciliation.py)
 - [alembic/env.py](file://backend/alembic/env.py)
@@ -304,8 +322,7 @@ RevConc["test_revoke_concurrency.py"] --> Session
 - Batch operations: Use bulk inserts/updates where appropriate to reduce round trips.
 - Indexing: Ensure indexes support common query patterns in tests to reflect production performance characteristics.
 - Isolation level: Choose appropriate isolation levels to balance consistency and throughput.
-
-[No sources needed since this section provides general guidance]
+- **Typed Settings Optimization**: Leverage typed settings caching to avoid repeated configuration parsing overhead.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -314,11 +331,13 @@ Common issues and resolutions:
 - Tenant isolation breaches: Audit queries for missing tenant filters.
 - Constraint violations: Inspect model definitions and foreign key constraints.
 - Concurrency conflicts: Implement retries and validate final state after concurrent operations.
+- **Typed Settings Issues**: Verify all required settings fields are properly configured and types match expected values.
 
 Diagnostic steps:
 - Enable SQL logging to inspect generated queries.
 - Run integrity checks post-migration and post-operation.
 - Use schema checks to validate structure and constraints.
+- **Validate typed settings configuration** using built-in validation methods.
 
 **Section sources**
 - [alembic/env.py](file://backend/alembic/env.py)
@@ -326,20 +345,24 @@ Diagnostic steps:
 - [scripts/check_message_revocations_integrity.py](file://backend/scripts/check_message_revocations_integrity.py)
 
 ## Conclusion
-Effective database integration testing requires careful setup of isolated test databases, robust session management, and comprehensive coverage of transactional and concurrent scenarios. By leveraging Alembic for schema evolution, enforcing tenant isolation, and validating revocation integrity, teams can ensure data consistency and reliability. Adopting best practices for connection pooling, transaction boundaries, and performance tuning will further strengthen test stability and fidelity.
+Effective database integration testing requires careful setup of isolated test databases, robust session management with typed settings, and comprehensive coverage of transactional and concurrent scenarios. By leveraging Alembic for schema evolution, enforcing tenant isolation, and validating revocation integrity, teams can ensure data consistency and reliability. Adopting best practices for connection pooling, transaction boundaries, and performance tuning will further strengthen test stability and fidelity.
 
-[No sources needed since this section summarizes without analyzing specific files]
+**Updated** The introduction of typed settings for database session management provides enhanced type safety, better configuration validation, and improved support for domain-specific database connections.
 
 ## Appendices
 
-### Setting Up Test Databases
-- Configure Alembic test settings in alembic.ini or environment variables.
+### Setting Up Test Databases with Typed Settings
+**Updated** Configure Alembic test settings using typed settings objects for better type safety and validation.
+
+- Define typed settings classes for different environments (development, testing, production).
 - Initialize the test database and apply migrations to head.
-- Use per-test session scopes to maintain isolation.
+- Use per-test session scopes with typed settings to maintain isolation.
+- Validate settings configuration at startup to catch errors early.
 
 **Section sources**
 - [tests/alembic.ini](file://backend/tests/alembic.ini)
 - [alembic/env.py](file://backend/alembic/env.py)
+- [app/db/session.py](file://backend/app/db/session.py)
 
 ### Managing Test Fixtures
 - Create deterministic fixtures for tenants, conversations, members, and messages.
@@ -401,10 +424,25 @@ Effective database integration testing requires careful setup of isolated test d
 - [alembic/env.py](file://backend/alembic/env.py)
 - [scripts/check_message_revocations_integrity.py](file://backend/scripts/check_message_revocations_integrity.py)
 
-### Connection Pooling and Performance Testing
-- Tune pool size and timeouts based on test concurrency.
+### Connection Pooling and Performance Testing with Typed Settings
+**Updated** Configure connection pooling using typed settings for better type safety and configuration management.
+
+- Tune pool size and timeouts based on test concurrency using typed settings.
 - Monitor pool metrics and adjust configurations accordingly.
 - Use batch operations and indexing to improve performance.
+- Leverage typed settings caching to reduce configuration overhead.
+
+**Section sources**
+- [app/db/session.py](file://backend/app/db/session.py)
+
+### Typed Settings Configuration Guide
+**New Section** Comprehensive guide for configuring typed settings in database session management.
+
+- Define typed settings classes with proper field validation.
+- Use environment-specific settings files for different deployment targets.
+- Implement settings inheritance and override mechanisms.
+- Validate settings at application startup to catch configuration errors early.
+- Support domain-specific database connections through typed configuration.
 
 **Section sources**
 - [app/db/session.py](file://backend/app/db/session.py)

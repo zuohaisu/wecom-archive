@@ -34,11 +34,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced Service Layer Architecture section to document the new Timeline Resolution and Projection Service
-- Updated architecture diagrams to reflect the timeline service abstraction layer
-- Added detailed analysis of how the web application now interacts with timeline services through proper service abstraction
-- Strengthened the separation between route handlers and business logic for timeline operations
-- Updated dependency analysis to include the new timeline service component
+- Updated FastAPI Server Setup section to document the new App Factory pattern implementation
+- Enhanced architecture diagrams to reflect factory-based application initialization
+- Added detailed analysis of how the application now uses factory functions for better testability and configuration management
+- Updated dependency analysis to include the factory pattern benefits for testing and environment-specific configurations
+- Strengthened the separation between application configuration and runtime initialization
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -54,15 +54,16 @@
 11. [Conclusion](#conclusion)
 
 ## Introduction
-This document describes the web application architecture for a WeCom archive system built with FastAPI. The application has undergone significant architectural enhancements including the introduction of a dedicated Timeline Resolution and Projection Service that abstracts complex timeline operations from direct route handler logic. The modular router architecture follows Flask/FastAPI best practices with clear boundaries between authentication, conversation management, message operations, web page rendering, and search functionality. Business logic is now properly abstracted into service layers including the new timeline service for better maintainability and testability. It covers server setup, template rendering, static asset management, and the client-side JavaScript console used for conversation listing, message viewing, media browsing, and search. It also explains authentication middleware, session management, role-based access control, responsive design patterns, internationalization support, real-time update mechanisms, diagnostics and health endpoints, error handling strategies, and performance monitoring integration.
+This document describes the web application architecture for a WeCom archive system built with FastAPI. The application has undergone significant architectural enhancements including the introduction of a dedicated Timeline Resolution and Projection Service that abstracts complex timeline operations from direct route handler logic, and the adoption of the App Factory pattern for application bootstrapping. The modular router architecture follows Flask/FastAPI best practices with clear boundaries between authentication, conversation management, message operations, web page rendering, and search functionality. Business logic is now properly abstracted into service layers including the new timeline service for better maintainability and testability. It covers server setup using factory-based initialization, template rendering, static asset management, and the client-side JavaScript console used for conversation listing, message viewing, media browsing, and search. It also explains authentication middleware, session management, role-based access control, responsive design patterns, internationalization support, real-time update mechanisms, diagnostics and health endpoints, error handling strategies, and performance monitoring integration.
 
 ## Project Structure
-The backend is organized under backend/app with clear separation between API routers, service layer, data models, storage logic, and web-facing assets (templates and static files). The recent architectural enhancements have introduced a dedicated Timeline Resolution and Projection Service that handles complex timeline operations through proper service abstraction rather than direct route handler logic. Each router module handles specific functional areas: authentication, conversations, messages, web pages, and search. The frontend console is implemented as vanilla JavaScript modules loaded by templates. The architecture now follows Flask/FastAPI best practices with dedicated modules for different concerns, enhanced modularity, and comprehensive service layer abstraction.
+The backend is organized under backend/app with clear separation between API routers, service layer, data models, storage logic, and web-facing assets (templates and static files). The recent architectural enhancements have introduced both a dedicated Timeline Resolution and Projection Service that handles complex timeline operations through proper service abstraction rather than direct route handler logic, and an App Factory pattern for application initialization. Each router module handles specific functional areas: authentication, conversations, messages, web pages, and search. The frontend console is implemented as vanilla JavaScript modules loaded by templates. The architecture now follows Flask/FastAPI best practices with dedicated modules for different concerns, enhanced modularity, comprehensive service layer abstraction, and factory-based application initialization for improved testability and configuration management.
 
 ```mermaid
 graph TB
-subgraph "FastAPI App - Enhanced Modular Architecture"
-Main["main.py<br/>App initialization & config"]
+subgraph "FastAPI App - Factory Pattern Architecture"
+Main["main.py<br/>App Factory Function"]
+FactoryInit["create_app() Factory<br/>Application Initialization"]
 AuthRouter["routers/auth.py<br/>Authentication endpoints"]
 ConvRouter["routers/conversations.py<br/>Conversation management"]
 SearchRouter["routers/search.py<br/>Search functionality"]
@@ -84,17 +85,18 @@ MediaStorage["media_storage.py<br/>Storage abstraction"]
 Thumbnails["media_thumbnails.py<br/>Thumbnail generation"]
 Parser["structured_message_parser.py<br/>Message parsing"]
 end
-Main --> AuthRouter
-Main --> ConvRouter
-Main --> SearchRouter
-Main --> MsgRouter
-Main --> WebRouter
-Main --> AuthService
-Main --> TimelineService
-Main --> AuthMiddleware
-Main --> Templates
-Main --> StaticJS
-Main --> I18N
+Main --> FactoryInit
+FactoryInit --> AuthRouter
+FactoryInit --> ConvRouter
+FactoryInit --> SearchRouter
+FactoryInit --> MsgRouter
+FactoryInit --> WebRouter
+FactoryInit --> AuthService
+FactoryInit --> TimelineService
+FactoryInit --> AuthMiddleware
+FactoryInit --> Templates
+FactoryInit --> StaticJS
+FactoryInit --> I18N
 AuthRouter --> Models
 ConvRouter --> Models
 SearchRouter --> Models
@@ -136,7 +138,7 @@ Parser --> Models
 - [web/__init__.py](file://backend/app/web/__init__.py)
 
 ## Core Components
-- **FastAPI Server**: Centralized app initialization with modular router registration, middleware stack configuration, and static/template mounting. Significantly simplified through route extraction to dedicated modules.
+- **FastAPI Server with App Factory**: Centralized app initialization using factory pattern for better testability and configuration management, with modular router registration, middleware stack configuration, and static/template mounting. Significantly simplified through route extraction to dedicated modules and factory-based initialization.
 - **Authentication Middleware**: Validates sessions, enforces roles, and protects routes with secure cookie handling.
 - **Modular Routers**: REST endpoints organized by concern - authentication, conversations, messages, web pages, and search, each in dedicated modules following separation of concerns.
 - **Enhanced Service Layer**: Business logic extracted into dedicated services including the new timeline service for better maintainability and testability.
@@ -166,29 +168,31 @@ Parser --> Models
 - [structured_message_parser.py](file://backend/app/structured_message_parser.py)
 
 ## Architecture Overview
-The FastAPI application exposes HTTP endpoints through modular routers for authentication, conversation retrieval, message operations, and search functionality. Pages are rendered via Jinja2 templates that load static JavaScript modules to build the interactive console. Authentication middleware guards sensitive routes using session cookies and role checks. The enhanced service layer provides business logic abstraction including the new timeline resolution and projection service for complex timeline operations. Media assets are served through a storage abstraction that supports local and cloud backends, with thumbnail generation on demand. The modular router architecture ensures clear separation between request handling, business logic, and data access, with timeline operations now properly abstracted through the timeline service layer.
+The FastAPI application exposes HTTP endpoints through modular routers for authentication, conversation retrieval, message operations, and search functionality. Pages are rendered via Jinja2 templates that load static JavaScript modules to build the interactive console. Authentication middleware guards sensitive routes using session cookies and role checks. The enhanced service layer provides business logic abstraction including the new timeline resolution and projection service for complex timeline operations. The application now uses an App Factory pattern for initialization, providing better testability and environment-specific configuration management. Media assets are served through a storage abstraction that supports local and cloud backends, with thumbnail generation on demand. The modular router architecture ensures clear separation between request handling, business logic, and data access, with timeline operations now properly abstracted through the timeline service layer.
 
 ```mermaid
 sequenceDiagram
 participant Browser as "Browser"
-participant FastAPI as "FastAPI App"
+participant Factory as "App Factory"
 participant Router as "Modular Router"
 participant TimelineService as "Timeline Service"
 participant ListingService as "Listing Service"
 participant DB as "Database"
 participant Storage as "Media Storage"
-Browser->>FastAPI : GET /login (template)
-FastAPI-->>Browser : messages.html
-Browser->>FastAPI : POST /auth/login
-FastAPI->>Router : authenticate()
+Browser->>Factory : create_app()
+Factory-->>Browser : configured FastAPI app
+Browser->>Factory : GET /login (template)
+Factory-->>Browser : messages.html
+Browser->>Factory : POST /auth/login
+Factory->>Router : authenticate()
 Router->>ListingService : business logic
 ListingService->>DB : verify credentials
 DB-->>ListingService : user record
 ListingService-->>Router : processed result
-Router-->>FastAPI : session cookie set
-FastAPI-->>Browser : redirect to /console
-Browser->>FastAPI : GET /api/timeline
-FastAPI->>Router : timeline operations
+Router-->>Factory : session cookie set
+Factory-->>Browser : redirect to /console
+Browser->>Factory : GET /api/timeline
+Factory->>Router : timeline operations
 Router->>TimelineService : resolve timeline
 TimelineService->>DB : query timeline data
 DB-->>TimelineService : raw timeline data
@@ -210,22 +214,26 @@ Router-->>Browser : JSON
 
 ## Detailed Component Analysis
 
-### FastAPI Server Setup and Modular Routing
-- Initializes the FastAPI app with significantly reduced complexity due to route extraction to dedicated modules.
+### FastAPI Server Setup with App Factory Pattern
+- Initializes the FastAPI app using a factory function pattern for better testability and configuration management.
+- Factory function creates and configures the application instance with all dependencies injected.
 - Registers modular routers following separation of concerns principles.
-- Mounts static files and configures template directories.
-- Applies global middleware including authentication, CORS, and logging.
+- Mounts static files and configures template directories within the factory.
+- Applies global middleware including authentication, CORS, and logging during factory initialization.
 - Exposes diagnostic and health endpoints for operational visibility.
-- **Updated**: Routes are now organized in dedicated modules (messages.py, web.py) following separation of concerns, making main.py much simpler and more maintainable.
+- **Updated**: Application initialization now uses the App Factory pattern, allowing for environment-specific configurations, easier testing with mock dependencies, and cleaner separation between application configuration and runtime initialization. Routes are organized in dedicated modules (messages.py, web.py) following separation of concerns, making the factory function simpler and more maintainable.
 
 ```mermaid
 flowchart TD
-Start(["App Startup"]) --> MountStatic["Mount static directory"]
+Start(["Factory Function Called"]) --> CreateApp["Create FastAPI Instance"]
+CreateApp --> ConfigureSettings["Configure Settings & Config"]
+ConfigureSettings --> MountStatic["Mount static directory"]
 MountStatic --> MountTemplates["Configure template engine"]
 MountTemplates --> RegisterRouters["Register modular routers<br/>(auth, conversations, messages,<br/>web, search)"]
 RegisterRouters --> ApplyMiddleware["Apply auth and other middleware"]
 ApplyMiddleware --> HealthEndpoints["Expose /health and /diagnostics"]
-HealthEndpoints --> Ready(["Server Ready"])
+HealthEndpoints --> ReturnApp["Return configured app instance"]
+ReturnApp --> Ready(["App Ready for Deployment"])
 ```
 
 **Diagram sources**
@@ -570,7 +578,7 @@ Store --> Expose["Expose via /diagnostics"]
 - [static/diagnostics.js](file://backend/app/web/static/diagnostics.js)
 
 ## Service Layer Architecture
-The application now includes a dedicated service layer that encapsulates business logic, providing better separation of concerns and testability. The listing service specifically handles complex data operations and business rules for conversation and message listings. The modular router architecture ensures that routers focus on request/response handling while delegating business logic to services. **Updated**: The service layer has been enhanced with the new Timeline Resolution and Projection Service that abstracts complex timeline operations from direct route handler logic, providing proper service abstraction for timeline-related business logic.
+The application now includes a dedicated service layer that encapsulates business logic, providing better separation of concerns and testability. The listing service specifically handles complex data operations and business rules for conversation and message listings. The modular router architecture ensures that routers focus on request/response handling while delegating business logic to services. **Updated**: The service layer has been enhanced with the new Timeline Resolution and Projection Service that abstracts complex timeline operations from direct route handler logic, providing proper service abstraction for timeline-related business logic. The App Factory pattern further enhances testability by allowing easy injection of mock services during testing.
 
 ```mermaid
 classDiagram
@@ -658,7 +666,7 @@ TimelineFilteringService --> TimelineMetricService : "generates metrics"
 - [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 
 ## Dependency Analysis
-The application exhibits clear layering with enhanced separation: routers depend on service layer which depends on models and storage abstractions; templates depend on static assets; client modules depend on the API client and i18n utilities. **Updated**: The service layer now includes both the listing service and the new timeline service, acting as intermediaries between routers and data access, improving maintainability and testability. The modular router architecture ensures that each router has well-defined dependencies and responsibilities, with timeline operations properly abstracted through the timeline service layer.
+The application exhibits clear layering with enhanced separation: routers depend on service layer which depends on models and storage abstractions; templates depend on static assets; client modules depend on the API client and i18n utilities. **Updated**: The service layer now includes both the listing service and the new timeline service, acting as intermediaries between routers and data access, improving maintainability and testability. The App Factory pattern enables clean dependency injection and easier testing with mock implementations. The modular router architecture ensures that each router has well-defined dependencies and responsibilities, with timeline operations properly abstracted through the timeline service layer. Factory-based initialization allows for environment-specific configurations and easier testing scenarios.
 
 ```mermaid
 graph TB
@@ -675,6 +683,9 @@ Models --> Session["DB Session"]
 Storage --> Thumbnails["Thumbnails"]
 ListingService --> DataAccess["Data Access Layer"]
 TimelineService --> DataAccess
+Factory["App Factory"] --> Routers
+Factory --> Services
+Factory --> Models
 ```
 
 **Diagram sources**
@@ -713,7 +724,7 @@ TimelineService --> DataAccess
 - Lazy-load heavy assets (images, videos) and use thumbnails where possible.
 - Monitor and optimize database queries with proper indexing and joins.
 - Leverage browser caching headers for static assets and media.
-- **Updated**: Enhanced service layer enables better caching strategies and business logic optimization, particularly for timeline operations. The timeline service can implement sophisticated caching for resolved and projected timeline data. Modular router architecture allows for targeted performance monitoring and optimization per functional area, with timeline operations benefiting from dedicated service-level optimizations.
+- **Updated**: Enhanced service layer enables better caching strategies and business logic optimization, particularly for timeline operations. The timeline service can implement sophisticated caching for resolved and projected timeline data. The App Factory pattern allows for optimized configuration loading and dependency injection. Modular router architecture allows for targeted performance monitoring and optimization per functional area, with timeline operations benefiting from dedicated service-level optimizations. Factory-based initialization enables environment-specific performance tuning.
 
 ## Troubleshooting Guide
 - Verify health endpoint responds with expected status codes and dependency checks.
@@ -721,7 +732,7 @@ TimelineService --> DataAccess
 - Check browser console for JavaScript errors and network failures.
 - Validate session cookies and role claims when encountering authorization issues.
 - Review server logs for stack traces and error context.
-- **Updated**: Check service layer logs for business logic errors and data processing issues, particularly timeline resolution and projection operations. Modular router structure makes it easier to isolate and debug specific functional areas, with timeline service providing dedicated logging for timeline-related operations.
+- **Updated**: Check service layer logs for business logic errors and data processing issues, particularly timeline resolution and projection operations. Modular router structure makes it easier to isolate and debug specific functional areas, with timeline service providing dedicated logging for timeline-related operations. App Factory pattern simplifies testing and debugging by allowing isolated configuration and dependency injection.
 
 **Section sources**
 - [main.py](file://backend/app/main.py)
@@ -729,4 +740,4 @@ TimelineService --> DataAccess
 - [static/diagnostics.js](file://backend/app/web/static/diagnostics.js)
 
 ## Conclusion
-The web application combines a robust FastAPI backend with a modular vanilla JavaScript console to deliver a responsive, internationalized, and secure experience. The recent architectural enhancements including the introduction of the Timeline Resolution and Projection Service represent a significant step forward in service layer abstraction, ensuring that complex timeline operations are properly encapsulated away from direct route handler logic. The modular router architecture with separated concerns, dedicated router modules (messages.py, web.py), and comprehensive service layer extraction follows Flask/FastAPI best practices, significantly reducing main.py complexity and improving maintainability and scalability. Authentication middleware ensures role-based access, while media pipelines and structured message parsing enrich the user interface. Diagnostics and health endpoints provide operational visibility, and performance monitoring integrates seamlessly for proactive maintenance. The enhanced service layer architecture including the new timeline service enables better testing, caching, and business logic management. The modular router approach creates clear boundaries between request handling, business logic, and data access, making the codebase more maintainable and scalable with proper separation of timeline-related concerns.
+The web application combines a robust FastAPI backend with a modular vanilla JavaScript console to deliver a responsive, internationalized, and secure experience. The recent architectural enhancements including the introduction of the Timeline Resolution and Projection Service and the adoption of the App Factory pattern represent significant steps forward in service layer abstraction and application initialization. The factory-based approach provides better testability, environment-specific configuration management, and cleaner separation between application setup and runtime behavior. The modular router architecture with separated concerns, dedicated router modules (messages.py, web.py), and comprehensive service layer extraction follows Flask/FastAPI best practices, significantly reducing main.py complexity and improving maintainability and scalability. Authentication middleware ensures role-based access, while media pipelines and structured message parsing enrich the user interface. Diagnostics and health endpoints provide operational visibility, and performance monitoring integrates seamlessly for proactive maintenance. The enhanced service layer architecture including the new timeline service enables better testing, caching, and business logic management. The App Factory pattern facilitates easier testing with mock dependencies and environment-specific configurations. The modular router approach creates clear boundaries between request handling, business logic, and data access, making the codebase more maintainable and scalable with proper separation of timeline-related concerns and factory-based initialization patterns.

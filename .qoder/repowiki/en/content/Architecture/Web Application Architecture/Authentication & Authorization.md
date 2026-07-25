@@ -9,6 +9,7 @@
 - [contacts.py](file://backend/app/db/contacts.py)
 - [wecom_contacts.py](file://backend/app/wecom_contacts.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [settings.py](file://backend/app/settings.py)
 - [test_auth.py](file://backend/tests/test_auth.py)
 - [test_password_auth.py](file://backend/tests/test_password_auth.py)
 - [test_tenant_isolation.py](file://backend/tests/test_tenant_isolation.py)
@@ -17,11 +18,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced authentication middleware with additional security features
-- Improved authorization handling mechanisms
-- Updated security headers and CSRF protection implementation
-- Strengthened input validation patterns
-- Enhanced tenant isolation enforcement
+- Integrated authentication module with new typed settings system for improved configuration management
+- Enhanced configuration validation and type safety across authentication components
+- Updated settings access patterns throughout authentication middleware and routers
+- Improved error handling for configuration-related authentication failures
+- Strengthened security posture through centralized configuration management
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -44,6 +45,7 @@ The authentication and authorization features are primarily implemented under:
 - Auth router endpoints with stricter validation
 - Data models for users, roles, and tenants with better constraints
 - WeCom integration for contacts and events with enhanced security
+- Centralized typed settings system for configuration management
 - Tests validating auth flows, password auth, tenant isolation, and contact sync
 
 ```mermaid
@@ -56,6 +58,7 @@ Models["db/models.py<br/>Better Constraints"]
 ContactsDB["db/contacts.py<br/>Secure Sync"]
 WecomContacts["wecom_contacts.py<br/>Protected Access"]
 WecomSDK["sdk/wecom_sdk.py<br/>Secure API"]
+Settings["app/settings.py<br/>Typed Configuration"]
 end
 Client["Client"] --> Main
 Main --> AuthUtils
@@ -64,6 +67,8 @@ AuthRouter --> Models
 AuthRouter --> ContactsDB
 AuthRouter --> WecomContacts
 WecomContacts --> WecomSDK
+AuthUtils --> Settings
+AuthRouter --> Settings
 ```
 
 **Diagram sources**
@@ -74,6 +79,7 @@ WecomContacts --> WecomSDK
 - [contacts.py](file://backend/app/db/contacts.py)
 - [wecom_contacts.py](file://backend/app/wecom_contacts.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [settings.py](file://backend/app/settings.py)
 
 **Section sources**
 - [main.py](file://backend/app/main.py)
@@ -83,6 +89,7 @@ WecomContacts --> WecomSDK
 - [contacts.py](file://backend/app/db/contacts.py)
 - [wecom_contacts.py](file://backend/app/wecom_contacts.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [settings.py](file://backend/app/settings.py)
 
 ## Core Components
 - **Enhanced Authentication Middleware**: Enforces login state with additional security checks, sets current user context with enhanced validation, and applies strict tenant scoping where applicable.
@@ -91,6 +98,7 @@ WecomContacts --> WecomSDK
 - **Secured Auth Endpoints**: Login, logout, token/session issuance, and profile operations with enhanced input validation and rate limiting.
 - **Robust Tenant Isolation**: Ensures data access is strictly scoped to the active tenant with enhanced boundary enforcement.
 - **Protected Contact Synchronization**: Integrates with WeCom to sync employee/contact data into local storage with enhanced security measures.
+- **Centralized Typed Settings**: Provides type-safe configuration management for authentication parameters, security policies, and service integrations.
 
 Key responsibilities:
 - Validate credentials with enhanced security checks and issue sessions/tokens securely
@@ -98,6 +106,7 @@ Key responsibilities:
 - Enforce strict tenant boundaries on all queries with enhanced validation
 - Provide hardened defaults for security headers and CSRF handling
 - Implement rigorous input validation before processing with sanitization
+- Manage authentication configuration through centralized typed settings
 
 **Section sources**
 - [auth.py](file://backend/app/auth.py)
@@ -106,9 +115,10 @@ Key responsibilities:
 - [contacts.py](file://backend/app/db/contacts.py)
 - [wecom_contacts.py](file://backend/app/wecom_contacts.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [settings.py](file://backend/app/settings.py)
 
 ## Architecture Overview
-The enhanced authentication flow integrates FastAPI-style middleware and routers with database-backed user and role models, optional WeCom identity sources, and additional security layers.
+The enhanced authentication flow integrates FastAPI-style middleware and routers with database-backed user and role models, optional WeCom identity sources, and additional security layers. The new typed settings system provides centralized configuration management for authentication parameters.
 
 ```mermaid
 sequenceDiagram
@@ -116,6 +126,7 @@ participant C as "Client"
 participant M as "Enhanced Middleware<br/>main.py"
 participant R as "Auth Router<br/>routers/auth.py"
 participant U as "Auth Utils<br/>app/auth.py"
+participant S as "Typed Settings<br/>app/settings.py"
 participant DB as "Database<br/>db/models.py"
 participant WC as "WeCom SDK<br/>sdk/wecom_sdk.py"
 C->>M : HTTP Request
@@ -125,6 +136,8 @@ M-->>C : 401 Unauthorized
 else Authenticated
 M->>R : Route handler with enhanced validation
 R->>U : Verify credentials / roles with audit logging
+U->>S : Load authentication configuration
+S-->>U : Validated settings with type safety
 U->>DB : Query user/roles with tenant scoping
 DB-->>U : User + Roles with enhanced integrity
 U-->>R : Permission result with audit trail
@@ -139,6 +152,7 @@ Note over WC,C : Optional WeCom login/callback path with enhanced security
 - [auth.py](file://backend/app/routers/auth.py)
 - [models.py](file://backend/app/db/models.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [settings.py](file://backend/app/settings.py)
 
 ## Detailed Component Analysis
 
@@ -168,7 +182,7 @@ Deny --> End(["End"])
 Next --> End
 ```
 
-**Updated** Enhanced with additional security checks, improved error handling, and comprehensive audit logging
+**Updated** Enhanced with additional security checks, improved error handling, comprehensive audit logging, and integration with typed settings system for configuration validation
 
 **Diagram sources**
 - [main.py](file://backend/app/main.py)
@@ -191,10 +205,11 @@ Best practices:
 - Ensure consistent session serialization across processes with integrity verification
 - Implement session monitoring and anomaly detection
 
-**Updated** Enhanced with additional security flags, integrity checks, and monitoring capabilities
+**Updated** Enhanced with additional security flags, integrity checks, monitoring capabilities, and centralized configuration through typed settings
 
 **Section sources**
 - [auth.py](file://backend/app/auth.py)
+- [settings.py](file://backend/app/settings.py)
 
 ### Strengthened Role-Based Access Control (RBAC)
 Design:
@@ -233,7 +248,7 @@ User --> Role : "assigned with validation"
 Role --> Permission : "grants with scope"
 ```
 
-**Updated** Enhanced with additional validation methods, scope checking, and context validation
+**Updated** Enhanced with additional validation methods, scope checking, context validation, and configuration-driven permission policies
 
 **Diagram sources**
 - [models.py](file://backend/app/db/models.py)
@@ -255,11 +270,12 @@ Input validation:
 - Sanitization and normalization of inputs with enhanced security measures
 - Comprehensive error handling with sanitized responses
 
-**Updated** Enhanced with stricter validation, rate limiting, and comprehensive error handling
+**Updated** Enhanced with stricter validation, rate limiting, comprehensive error handling, and configuration-driven security policies through typed settings
 
 **Section sources**
 - [auth.py](file://backend/app/routers/auth.py)
 - [auth.py](file://backend/app/auth.py)
+- [settings.py](file://backend/app/settings.py)
 
 ### Robust Tenant Isolation
 Mechanisms:
@@ -272,11 +288,12 @@ Data model implications:
 - Indexes and constraints ensure efficient tenant-scoped lookups with performance optimization
 - Enhanced referential integrity between tenant-related entities
 
-**Updated** Enhanced with stricter boundary enforcement, comprehensive audit logging, and performance optimization
+**Updated** Enhanced with stricter boundary enforcement, comprehensive audit logging, performance optimization, and tenant-specific configuration through typed settings
 
 **Section sources**
 - [models.py](file://backend/app/db/models.py)
 - [auth.py](file://backend/app/auth.py)
+- [settings.py](file://backend/app/settings.py)
 
 ### Protected Contact Synchronization
 Workflow:
@@ -290,12 +307,13 @@ Error handling:
 - Idempotent upserts to avoid duplicates with enhanced conflict resolution
 - Audit logs for sync operations with comprehensive tracking
 
-**Updated** Enhanced with better error handling, retry logic, and comprehensive audit logging
+**Updated** Enhanced with better error handling, retry logic, comprehensive audit logging, and WeCom integration configuration through typed settings
 
 **Section sources**
 - [wecom_contacts.py](file://backend/app/wecom_contacts.py)
 - [contacts.py](file://backend/app/db/contacts.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [settings.py](file://backend/app/settings.py)
 
 ### Enhanced Security Headers and CSRF Protection
 Headers:
@@ -312,11 +330,12 @@ CSRF:
 - Validation on POST/PUT/DELETE endpoints with comprehensive checking
 - Enhanced anti-replay protection and nonce management
 
-**Updated** Enhanced with additional security headers, stronger CSRF protection, and comprehensive validation
+**Updated** Enhanced with additional security headers, stronger CSRF protection, comprehensive validation, and security policy configuration through typed settings
 
 **Section sources**
 - [main.py](file://backend/app/main.py)
 - [auth.py](file://backend/app/auth.py)
+- [settings.py](file://backend/app/settings.py)
 
 ### Advanced Input Validation Patterns
 Patterns:
@@ -326,11 +345,43 @@ Patterns:
 - Rejection of oversized payloads early with rate limiting
 - Enhanced type checking and format validation
 
-**Updated** Enhanced with more comprehensive validation rules, sanitization, and rate limiting
+**Updated** Enhanced with more comprehensive validation rules, sanitization, rate limiting, and validation configuration through typed settings
 
 **Section sources**
 - [auth.py](file://backend/app/routers/auth.py)
 - [models.py](file://backend/app/db/models.py)
+- [settings.py](file://backend/app/settings.py)
+
+### Centralized Typed Settings System
+New Features:
+- Type-safe configuration management for authentication parameters
+- Environment-specific configuration loading with validation
+- Centralized access to security policies, timeout settings, and service endpoints
+- Runtime configuration validation with detailed error reporting
+- Integration points for all authentication components
+
+Configuration Categories:
+- Authentication settings (session duration, token expiry, password policies)
+- Security settings (CORS policies, CSP directives, rate limiting)
+- Service integration settings (WeCom API endpoints, timeouts, retry policies)
+- Database connection settings with tenant-aware configuration
+
+```mermaid
+flowchart TD
+Config["Configuration Source<br/>Environment Variables/Files"] --> Loader["Settings Loader<br/>Type Validation"]
+Loader --> AuthSettings["Authentication Settings"]
+Loader --> SecuritySettings["Security Settings"]
+Loader --> ServiceSettings["Service Integration Settings"]
+AuthSettings --> AuthMiddleware["Auth Middleware"]
+SecuritySettings --> SecurityHeaders["Security Headers"]
+ServiceSettings --> WeComSDK["WeCom SDK"]
+```
+
+**Diagram sources**
+- [settings.py](file://backend/app/settings.py)
+
+**Section sources**
+- [settings.py](file://backend/app/settings.py)
 
 ## Dependency Analysis
 ```mermaid
@@ -341,9 +392,11 @@ AuthRouter --> Models["db/models.py<br/>Better Constraints"]
 AuthRouter --> ContactsDB["db/contacts.py<br/>Secure Sync"]
 AuthRouter --> WecomContacts["wecom_contacts.py<br/>Protected Access"]
 WecomContacts --> WecomSDK["sdk/wecom_sdk.py<br/>Secure API"]
+AuthUtils --> Settings["app/settings.py<br/>Typed Configuration"]
+AuthRouter --> Settings
 ```
 
-**Updated** Enhanced dependencies with improved security and validation layers
+**Updated** Enhanced dependencies with improved security and validation layers, centralized configuration management through typed settings
 
 **Diagram sources**
 - [main.py](file://backend/app/main.py)
@@ -353,6 +406,7 @@ WecomContacts --> WecomSDK["sdk/wecom_sdk.py<br/>Secure API"]
 - [contacts.py](file://backend/app/db/contacts.py)
 - [wecom_contacts.py](file://backend/app/wecom_contacts.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [settings.py](file://backend/app/settings.py)
 
 **Section sources**
 - [main.py](file://backend/app/main.py)
@@ -362,6 +416,7 @@ WecomContacts --> WecomSDK["sdk/wecom_sdk.py<br/>Secure API"]
 - [contacts.py](file://backend/app/db/contacts.py)
 - [wecom_contacts.py](file://backend/app/wecom_contacts.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [settings.py](file://backend/app/settings.py)
 
 ## Performance Considerations
 - Minimize DB round-trips by batching user/role lookups with enhanced caching
@@ -370,8 +425,9 @@ WecomContacts --> WecomSDK["sdk/wecom_sdk.py<br/>Secure API"]
 - Avoid heavy computations in middleware; defer to handlers with async processing
 - Paginate large contact sync results and process incrementally with progress tracking
 - Implement comprehensive performance monitoring and alerting
+- Leverage typed settings for efficient configuration loading and caching
 
-**Updated** Enhanced with caching strategies, monitoring, and performance optimization
+**Updated** Enhanced with caching strategies, monitoring, performance optimization, and efficient configuration management through typed settings
 
 ## Troubleshooting Guide
 Common issues:
@@ -379,6 +435,7 @@ Common issues:
 - 403 Forbidden from insufficient roles/permissions with specific permission information
 - Tenant isolation errors when accessing cross-tenant data with detailed boundary information
 - Contact sync failures due to API rate limits or network errors with retry guidance
+- Configuration errors from invalid typed settings with detailed validation messages
 
 Debugging steps:
 - Inspect session cookies and tokens with enhanced diagnostic information
@@ -386,8 +443,9 @@ Debugging steps:
 - Verify tenant membership and role assignments with validation tools
 - Check WeCom SDK connectivity and credentials with health checks
 - Monitor security headers and CSRF token validation
+- Validate configuration settings using typed settings validation tools
 
-**Updated** Enhanced troubleshooting with better error messages, diagnostic tools, and monitoring
+**Updated** Enhanced troubleshooting with better error messages, diagnostic tools, monitoring, and configuration validation support
 
 **Section sources**
 - [test_auth.py](file://backend/tests/test_auth.py)
@@ -396,6 +454,6 @@ Debugging steps:
 - [test_contact_sync.py](file://backend/tests/test_contact_sync.py)
 
 ## Conclusion
-The enhanced authentication and authorization system combines robust middleware with additional security features, secure session management, fine-grained RBAC, and strengthened tenant isolation to protect resources within tenant boundaries. Contact synchronization integrates seamlessly with WeCom while maintaining data integrity and enhanced security. The architectural improvements have significantly strengthened the security posture with additional validation, comprehensive audit logging, and enhanced error handling. Adhering to the outlined security best practices ensures a resilient, scalable, and secure platform.
+The enhanced authentication and authorization system combines robust middleware with additional security features, secure session management, fine-grained RBAC, and strengthened tenant isolation to protect resources within tenant boundaries. Contact synchronization integrates seamlessly with WeCom while maintaining data integrity and enhanced security. The architectural improvements have significantly strengthened the security posture with additional validation, comprehensive audit logging, enhanced error handling, and centralized configuration management through the new typed settings system. Adhering to the outlined security best practices ensures a resilient, scalable, and secure platform with improved configuration management across all authentication domains.
 
-**Updated** Enhanced conclusion reflecting the significant security improvements and architectural enhancements
+**Updated** Enhanced conclusion reflecting the significant security improvements, architectural enhancements, and centralized configuration management through typed settings
