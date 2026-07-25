@@ -1,0 +1,16 @@
+schema_version: 1
+module_path: backend_app/app_core/core_services_and_utils
+title: Core Services & Message-Type Registry
+scope:
+    - backend/app/services/
+    - backend/app/structured_message_parser.py
+    - backend/app/message_type_registry.py
+    - backend/app/display_names.py
+    - backend/app/html_helpers.py
+    - backend/app/i18n_assets.py
+    - backend/app/assets/i18n.js
+    - backend/app/revoke_reconciliation.py
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_app/tests

@@ -89,12 +89,13 @@ def _authed(app, db_session, tenant_id):
 def _patch_cloud_provider(monkeypatch, objects: dict, unavailable: bool = False) -> None:
     """Make both call sites that resolve a provider for the "qiniu_kodo"
     backend (app.media_storage.resolve_image_file_state's internal lookup,
-    and the media route's own direct lookup) return the same fake provider
-    — while leaving the "local" backend's real LocalStorageProvider
-    resolution untouched, so a mixed local+Qiniu deployment can be
-    exercised in the same test (see the mixed-storage tests below)."""
+    and app.services.media_access's own direct lookup, RND-221) return the
+    same fake provider — while leaving the "local" backend's real
+    LocalStorageProvider resolution untouched, so a mixed local+Qiniu
+    deployment can be exercised in the same test (see the mixed-storage
+    tests below)."""
     from app import media_storage
-    from app.routers import conversations as conv
+    from app.services import media_access
 
     provider = _FakeCloudProvider(objects, unavailable=unavailable)
     real_factory = media_storage.get_media_storage_provider
@@ -105,7 +106,7 @@ def _patch_cloud_provider(monkeypatch, objects: dict, unavailable: bool = False)
         return real_factory(storage_backend)
 
     monkeypatch.setattr(media_storage, "get_media_storage_provider", _fake_factory)
-    monkeypatch.setattr(conv, "get_media_storage_provider", _fake_factory)
+    monkeypatch.setattr(media_access, "get_media_storage_provider", _fake_factory)
 
 
 # ---------------------------------------------------------------------------
@@ -687,7 +688,7 @@ def test_timeline_conversation_still_loads_during_qiniu_outage(client, db, monke
 
     _patch_cloud_provider(monkeypatch, {}, unavailable=True)
 
-    text_msg = _insert_message(
+    _insert_message(
         db, msgid="msg-tl-outage-text", msgtype="text", sender="staff_a", roomid="roomTlOutage",
         content_text="hello", tenant_id=_TENANT_A, msgtime=100,
     )

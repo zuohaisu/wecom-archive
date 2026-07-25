@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: backend_app/migrations
+title: Database Schema Migrations (Alembic)
+scope:
+    - backend/alembic/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_app/tests
+    - path: deployment_infra

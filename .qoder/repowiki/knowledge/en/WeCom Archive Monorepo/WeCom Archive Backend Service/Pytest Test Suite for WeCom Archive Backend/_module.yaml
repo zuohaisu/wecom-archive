@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: backend_app/tests
+title: Pytest Test Suite for WeCom Archive Backend
+scope:
+    - backend/tests/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_app/app_core/api_routers
+    - path: backend_app/app_core/core_services_and_utils
+    - path: backend_app/migrations

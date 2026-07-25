@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: backend_app
+title: WeCom Archive Backend Service
+scope:
+    - backend/
+source_files: []
+depends_on: []
+related_to: []

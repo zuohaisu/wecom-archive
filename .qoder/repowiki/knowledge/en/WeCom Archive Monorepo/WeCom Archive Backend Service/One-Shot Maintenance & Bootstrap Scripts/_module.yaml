@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: backend_app/scripts
+title: One-Shot Maintenance & Bootstrap Scripts
+scope:
+    - backend/scripts/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_app/app_core/database_layer
+    - path: backend_app/app_core/media_pipeline
+    - path: backend_app/app_core/wecom_integration

@@ -1,0 +1,1 @@
+FastAPI APIRouter modules and Pydantic response schemas that expose the WeCom Archive admin console's authentication, conversation listing, message timeline, search, media access, reachability diagnostics, HTML pages, and WeCom webhook event endpoints.

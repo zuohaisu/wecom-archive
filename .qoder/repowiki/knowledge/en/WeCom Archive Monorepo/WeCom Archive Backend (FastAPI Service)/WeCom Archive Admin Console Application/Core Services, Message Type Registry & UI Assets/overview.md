@@ -1,1 +1,0 @@
-Shared backend utilities for listing conversations/contacts/accounts, the authoritative WeCom message-type registry with structured parsers, display-name resolution, HTML helpers, i18n asset loading, and revoke-event reconciliation.

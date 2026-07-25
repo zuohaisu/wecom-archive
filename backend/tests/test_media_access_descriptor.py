@@ -182,7 +182,7 @@ def _authed(app, db_session, tenant_id):
 
 def _patch_cloud_provider(monkeypatch, objects: dict, **kwargs) -> None:
     from app import media_storage
-    from app.routers import conversations as conv
+    from app.services import media_access
 
     provider = _FakeCloudProviderWithSignedUrl(objects, **kwargs)
     real_factory = media_storage.get_media_storage_provider
@@ -193,7 +193,7 @@ def _patch_cloud_provider(monkeypatch, objects: dict, **kwargs) -> None:
         return real_factory(storage_backend)
 
     monkeypatch.setattr(media_storage, "get_media_storage_provider", _fake_factory)
-    monkeypatch.setattr(conv, "get_media_storage_provider", _fake_factory)
+    monkeypatch.setattr(media_access, "get_media_storage_provider", _fake_factory)
 
 
 def _access_url(conversation_id: str, msgid: str) -> str:

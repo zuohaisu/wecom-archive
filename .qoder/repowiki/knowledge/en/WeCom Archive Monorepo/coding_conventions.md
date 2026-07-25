@@ -1,4 +1,5 @@
-- All Python linting uses ruff configured centrally in `pyproject.toml`, with per-file ignores scoped to `backend/tests/*.py` for the established pytest fixture import pattern.
-- Secrets are never committed; `.env` is gitignored everywhere and `.env.example` serves as the single source of truth for required environment variables.
-- Each child module ships its own test suite (pytest for backend, bats + pytest for ssl-renew) invoked through dedicated `make` targets rather than ad-hoc commands.
-- Deployment assets (systemd units, deploy scripts) live under `deploy/` and `scripts/` at the repo root and are versioned alongside the code they operate on.
+- All Python code uses ruff for linting with F811 ignored only in `backend/tests/` to accommodate pytest fixture import conventions.
+- Environment configuration is centralized through `.env` files copied from `.env.example`, never committed to version control.
+- Each subsystem has its own Makefile target group (backend: lint/typecheck/build/test/verify; ssl-renew: ssl-lint/ssl-test/ssl-dry-run/ssl-verify-systemd) while sharing a single root `.venv/`.
+- Database schema changes go through Alembic migrations under `backend/alembic/`, applied before any feature code runs.
+- Secrets policy enforced via `.gitignore` and `DEV_AGENT_RULES.md` §4 — no real credentials or `.env` files may be committed.

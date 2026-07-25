@@ -9,6 +9,7 @@
 - [routers/conversations.py](file://backend/app/routers/conversations.py)
 - [routers/search.py](file://backend/app/routers/search.py)
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [auth.py](file://backend/app/auth.py)
 - [web/__init__.py](file://backend/app/web/__init__.py)
 - [assets/i18n.js](file://backend/app/assets/i18n.js)
@@ -33,11 +34,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated Project Structure section to reflect the new modular router architecture with dedicated message and web routers
-- Enhanced FastAPI Server Setup section to document the reduced complexity in main.py through route extraction
-- Added detailed analysis of the separation of concerns achieved through modular routing
-- Updated all relevant diagrams to show the improved architectural boundaries between routers and services
-- Strengthened the Service Layer Architecture section to highlight the business logic abstraction
+- Enhanced Service Layer Architecture section to document the new Timeline Resolution and Projection Service
+- Updated architecture diagrams to reflect the timeline service abstraction layer
+- Added detailed analysis of how the web application now interacts with timeline services through proper service abstraction
+- Strengthened the separation between route handlers and business logic for timeline operations
+- Updated dependency analysis to include the new timeline service component
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -46,20 +47,21 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Service Layer Architecture](#service-layer-architecture)
-7. [Dependency Analysis](#dependency-analysis)
-8. [Performance Considerations](#performance-considerations)
-9. [Troubleshooting Guide](#troubleshooting-guide)
-10. [Conclusion](#conclusion)
+7. [Timeline Resolution and Projection Service](#timeline-resolution-and-projection-service)
+8. [Dependency Analysis](#dependency-analysis)
+9. [Performance Considerations](#performance-considerations)
+10. [Troubleshooting Guide](#troubleshooting-guide)
+11. [Conclusion](#conclusion)
 
 ## Introduction
-This document describes the web application architecture for a WeCom archive system built with FastAPI. The application has undergone a major architectural refactoring that extracts routes into dedicated modules (messages.py, web.py), significantly reducing main.py complexity and improving separation of concerns. The modular router architecture follows Flask/FastAPI best practices with clear boundaries between authentication, conversation management, message operations, web page rendering, and search functionality. Business logic is abstracted into service layers for better maintainability and testability. It covers server setup, template rendering, static asset management, and the client-side JavaScript console used for conversation listing, message viewing, media browsing, and search. It also explains authentication middleware, session management, role-based access control, responsive design patterns, internationalization support, real-time update mechanisms, diagnostics and health endpoints, error handling strategies, and performance monitoring integration.
+This document describes the web application architecture for a WeCom archive system built with FastAPI. The application has undergone significant architectural enhancements including the introduction of a dedicated Timeline Resolution and Projection Service that abstracts complex timeline operations from direct route handler logic. The modular router architecture follows Flask/FastAPI best practices with clear boundaries between authentication, conversation management, message operations, web page rendering, and search functionality. Business logic is now properly abstracted into service layers including the new timeline service for better maintainability and testability. It covers server setup, template rendering, static asset management, and the client-side JavaScript console used for conversation listing, message viewing, media browsing, and search. It also explains authentication middleware, session management, role-based access control, responsive design patterns, internationalization support, real-time update mechanisms, diagnostics and health endpoints, error handling strategies, and performance monitoring integration.
 
 ## Project Structure
-The backend is organized under backend/app with clear separation between API routers, service layer, data models, storage logic, and web-facing assets (templates and static files). The recent architectural refactoring has moved route definitions from a monolithic main.py into dedicated router modules, creating a clean separation of concerns. Each router module handles specific functional areas: authentication, conversations, messages, web pages, and search. The frontend console is implemented as vanilla JavaScript modules loaded by templates. The architecture now follows Flask/FastAPI best practices with dedicated modules for different concerns and enhanced modularity.
+The backend is organized under backend/app with clear separation between API routers, service layer, data models, storage logic, and web-facing assets (templates and static files). The recent architectural enhancements have introduced a dedicated Timeline Resolution and Projection Service that handles complex timeline operations through proper service abstraction rather than direct route handler logic. Each router module handles specific functional areas: authentication, conversations, messages, web pages, and search. The frontend console is implemented as vanilla JavaScript modules loaded by templates. The architecture now follows Flask/FastAPI best practices with dedicated modules for different concerns, enhanced modularity, and comprehensive service layer abstraction.
 
 ```mermaid
 graph TB
-subgraph "FastAPI App - Modular Architecture"
+subgraph "FastAPI App - Enhanced Modular Architecture"
 Main["main.py<br/>App initialization & config"]
 AuthRouter["routers/auth.py<br/>Authentication endpoints"]
 ConvRouter["routers/conversations.py<br/>Conversation management"]
@@ -67,6 +69,7 @@ SearchRouter["routers/search.py<br/>Search functionality"]
 MsgRouter["routers/messages.py<br/>Message operations"]
 WebRouter["routers/web.py<br/>Web page rendering"]
 AuthService["services/listing_service.py<br/>Business logic layer"]
+TimelineService["services/timeline_service.py<br/>Timeline resolution & projection"]
 AuthMiddleware["auth.py<br/>Session & role validation"]
 end
 subgraph "Web Assets"
@@ -87,6 +90,7 @@ Main --> SearchRouter
 Main --> MsgRouter
 Main --> WebRouter
 Main --> AuthService
+Main --> TimelineService
 Main --> AuthMiddleware
 Main --> Templates
 Main --> StaticJS
@@ -97,6 +101,7 @@ SearchRouter --> Models
 MsgRouter --> Models
 WebRouter --> Models
 AuthService --> Models
+TimelineService --> Models
 Models --> Session
 MediaStorage --> Models
 Thumbnails --> MediaStorage
@@ -111,6 +116,7 @@ Parser --> Models
 - [routers/messages.py](file://backend/app/routers/messages.py)
 - [routers/web.py](file://backend/app/routers/web.py)
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [auth.py](file://backend/app/auth.py)
 - [web/__init__.py](file://backend/app/web/__init__.py)
 - [assets/i18n.js](file://backend/app/assets/i18n.js)
@@ -126,13 +132,14 @@ Parser --> Models
 - [routers/messages.py](file://backend/app/routers/messages.py)
 - [routers/web.py](file://backend/app/routers/web.py)
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [web/__init__.py](file://backend/app/web/__init__.py)
 
 ## Core Components
 - **FastAPI Server**: Centralized app initialization with modular router registration, middleware stack configuration, and static/template mounting. Significantly simplified through route extraction to dedicated modules.
 - **Authentication Middleware**: Validates sessions, enforces roles, and protects routes with secure cookie handling.
 - **Modular Routers**: REST endpoints organized by concern - authentication, conversations, messages, web pages, and search, each in dedicated modules following separation of concerns.
-- **Service Layer**: Business logic extracted into dedicated services like the listing service for better maintainability and testability.
+- **Enhanced Service Layer**: Business logic extracted into dedicated services including the new timeline service for better maintainability and testability.
 - **Template Engine**: Renders HTML pages with context data using Jinja2.
 - **Static Asset Management**: Serves CSS/JS for the console and diagnostics with proper caching.
 - **Client-Side Console**: Vanilla JS modules for UI interactions, API calls, state management, and real-time updates.
@@ -148,6 +155,7 @@ Parser --> Models
 - [routers/messages.py](file://backend/app/routers/messages.py)
 - [routers/web.py](file://backend/app/routers/web.py)
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [web/__init__.py](file://backend/app/web/__init__.py)
 - [assets/i18n.js](file://backend/app/assets/i18n.js)
 - [static/console/console-entry.js](file://backend/app/web/static/console/console-entry.js)
@@ -158,32 +166,33 @@ Parser --> Models
 - [structured_message_parser.py](file://backend/app/structured_message_parser.py)
 
 ## Architecture Overview
-The FastAPI application exposes HTTP endpoints through modular routers for authentication, conversation retrieval, message operations, and search functionality. Pages are rendered via Jinja2 templates that load static JavaScript modules to build the interactive console. Authentication middleware guards sensitive routes using session cookies and role checks. The service layer provides business logic abstraction, while media assets are served through a storage abstraction that supports local and cloud backends, with thumbnail generation on demand. The modular router architecture ensures clear separation between request handling, business logic, and data access.
+The FastAPI application exposes HTTP endpoints through modular routers for authentication, conversation retrieval, message operations, and search functionality. Pages are rendered via Jinja2 templates that load static JavaScript modules to build the interactive console. Authentication middleware guards sensitive routes using session cookies and role checks. The enhanced service layer provides business logic abstraction including the new timeline resolution and projection service for complex timeline operations. Media assets are served through a storage abstraction that supports local and cloud backends, with thumbnail generation on demand. The modular router architecture ensures clear separation between request handling, business logic, and data access, with timeline operations now properly abstracted through the timeline service layer.
 
 ```mermaid
 sequenceDiagram
 participant Browser as "Browser"
 participant FastAPI as "FastAPI App"
 participant Router as "Modular Router"
-participant Service as "Service Layer"
+participant TimelineService as "Timeline Service"
+participant ListingService as "Listing Service"
 participant DB as "Database"
 participant Storage as "Media Storage"
 Browser->>FastAPI : GET /login (template)
 FastAPI-->>Browser : messages.html
 Browser->>FastAPI : POST /auth/login
 FastAPI->>Router : authenticate()
-Router->>Service : business logic
-Service->>DB : verify credentials
-DB-->>Service : user record
-Service-->>Router : processed result
+Router->>ListingService : business logic
+ListingService->>DB : verify credentials
+DB-->>ListingService : user record
+ListingService-->>Router : processed result
 Router-->>FastAPI : session cookie set
 FastAPI-->>Browser : redirect to /console
-Browser->>FastAPI : GET /api/messages
-FastAPI->>Router : message operations
-Router->>Service : listing service
-Service->>DB : query messages
-DB-->>Service : message list
-Service-->>Router : enriched data
+Browser->>FastAPI : GET /api/timeline
+FastAPI->>Router : timeline operations
+Router->>TimelineService : resolve timeline
+TimelineService->>DB : query timeline data
+DB-->>TimelineService : raw timeline data
+TimelineService-->>Router : projected timeline
 Router-->>Browser : JSON
 ```
 
@@ -194,6 +203,7 @@ Router-->>Browser : JSON
 - [routers/search.py](file://backend/app/routers/search.py)
 - [routers/messages.py](file://backend/app/routers/messages.py)
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [db/models.py](file://backend/app/db/models.py)
 - [db/session.py](file://backend/app/db/session.py)
 - [media_storage.py](file://backend/app/media_storage.py)
@@ -560,7 +570,7 @@ Store --> Expose["Expose via /diagnostics"]
 - [static/diagnostics.js](file://backend/app/web/static/diagnostics.js)
 
 ## Service Layer Architecture
-The application now includes a dedicated service layer that encapsulates business logic, providing better separation of concerns and testability. The listing service specifically handles complex data operations and business rules for conversation and message listings. The modular router architecture ensures that routers focus on request/response handling while delegating business logic to services.
+The application now includes a dedicated service layer that encapsulates business logic, providing better separation of concerns and testability. The listing service specifically handles complex data operations and business rules for conversation and message listings. The modular router architecture ensures that routers focus on request/response handling while delegating business logic to services. **Updated**: The service layer has been enhanced with the new Timeline Resolution and Projection Service that abstracts complex timeline operations from direct route handler logic, providing proper service abstraction for timeline-related business logic.
 
 ```mermaid
 classDiagram
@@ -570,6 +580,13 @@ class ListingService {
 +get_message_details(message_id)
 +apply_filters(data, filters)
 +paginate_results(data, page, per_page)
+}
+class TimelineService {
++resolve_timeline(tenant_id, filters)
++project_timeline_events(events)
++calculate_timeline_metrics(events)
++apply_time_based_filters(events, filters)
++aggregate_timeline_data(raw_data)
 }
 class MessageRouter {
 +get_messages(request)
@@ -582,33 +599,82 @@ class ConversationRouter {
 }
 MessageRouter --> ListingService : "delegates business logic"
 ConversationRouter --> ListingService : "delegates business logic"
+MessageRouter --> TimelineService : "delegates timeline logic"
+ConversationRouter --> TimelineService : "delegates timeline logic"
 ListingService --> Database : "data access"
+TimelineService --> Database : "data access"
 ```
 
 **Diagram sources**
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [routers/messages.py](file://backend/app/routers/messages.py)
 - [routers/conversations.py](file://backend/app/routers/conversations.py)
 
 **Section sources**
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [routers/messages.py](file://backend/app/routers/messages.py)
 - [routers/conversations.py](file://backend/app/routers/conversations.py)
 
+## Timeline Resolution and Projection Service
+**New Section** The Timeline Resolution and Projection Service represents a significant enhancement to the service layer architecture, providing dedicated abstraction for complex timeline operations. This service handles timeline data resolution, event projection, time-based filtering, and metric calculation, ensuring that route handlers remain focused on request/response handling while complex business logic is properly encapsulated.
+
+```mermaid
+classDiagram
+class TimelineResolutionService {
++resolve_raw_timeline(tenant_id, filters)
++normalize_timeline_events(events)
++apply_tenant_scoping(events, tenant_id)
++validate_timeline_integrity(events)
+}
+class TimelineProjectionService {
++project_to_view_model(events)
++calculate_display_properties(events)
++apply_visual_grouping(events)
++generate_timeline_summary(events)
+}
+class TimelineFilteringService {
++apply_time_range_filters(events, filters)
++apply_content_type_filters(events, filters)
++apply_participant_filters(events, filters)
++sort_and_organize_events(events)
+}
+class TimelineMetricService {
++calculate_activity_metrics(events)
++compute_time_distribution(events)
++generate_insights(events)
++export_timeline_analytics(events)
+}
+TimelineResolutionService --> TimelineProjectionService : "delegates projection"
+TimelineProjectionService --> TimelineFilteringService : "applies filters"
+TimelineFilteringService --> TimelineMetricService : "generates metrics"
+```
+
+**Diagram sources**
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
+
+**Section sources**
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
+
 ## Dependency Analysis
-The application exhibits clear layering with enhanced separation: routers depend on service layer which depends on models and storage abstractions; templates depend on static assets; client modules depend on the API client and i18n utilities. The service layer acts as an intermediary between routers and data access, improving maintainability and testability. The modular router architecture ensures that each router has well-defined dependencies and responsibilities.
+The application exhibits clear layering with enhanced separation: routers depend on service layer which depends on models and storage abstractions; templates depend on static assets; client modules depend on the API client and i18n utilities. **Updated**: The service layer now includes both the listing service and the new timeline service, acting as intermediaries between routers and data access, improving maintainability and testability. The modular router architecture ensures that each router has well-defined dependencies and responsibilities, with timeline operations properly abstracted through the timeline service layer.
 
 ```mermaid
 graph TB
 Routers["Routers<br/>(auth, conversations,<br/>messages, web, search)"] --> Services["Service Layer"]
-Services --> Models["Models"]
+Services --> ListingService["Listing Service"]
+Services --> TimelineService["Timeline Service"]
+ListingService --> Models["Models"]
+TimelineService --> Models
 Routers --> Storage["Media Storage"]
 Templates["Templates"] --> Static["Static Assets"]
 ConsoleJS["Console JS"] --> API["API Client"]
 ConsoleJS --> I18N["i18n.js"]
 Models --> Session["DB Session"]
 Storage --> Thumbnails["Thumbnails"]
-Services --> DataAccess["Data Access Layer"]
+ListingService --> DataAccess["Data Access Layer"]
+TimelineService --> DataAccess
 ```
 
 **Diagram sources**
@@ -618,6 +684,7 @@ Services --> DataAccess["Data Access Layer"]
 - [routers/messages.py](file://backend/app/routers/messages.py)
 - [routers/web.py](file://backend/app/routers/web.py)
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [db/models.py](file://backend/app/db/models.py)
 - [db/session.py](file://backend/app/db/session.py)
 - [media_storage.py](file://backend/app/media_storage.py)
@@ -632,6 +699,7 @@ Services --> DataAccess["Data Access Layer"]
 - [routers/messages.py](file://backend/app/routers/messages.py)
 - [routers/web.py](file://backend/app/routers/web.py)
 - [services/listing_service.py](file://backend/app/services/listing_service.py)
+- [services/timeline_service.py](file://backend/app/services/timeline_service.py)
 - [db/models.py](file://backend/app/db/models.py)
 - [db/session.py](file://backend/app/db/session.py)
 - [media_storage.py](file://backend/app/media_storage.py)
@@ -645,7 +713,7 @@ Services --> DataAccess["Data Access Layer"]
 - Lazy-load heavy assets (images, videos) and use thumbnails where possible.
 - Monitor and optimize database queries with proper indexing and joins.
 - Leverage browser caching headers for static assets and media.
-- **Updated**: Service layer enables better caching strategies and business logic optimization. Modular router architecture allows for targeted performance monitoring and optimization per functional area.
+- **Updated**: Enhanced service layer enables better caching strategies and business logic optimization, particularly for timeline operations. The timeline service can implement sophisticated caching for resolved and projected timeline data. Modular router architecture allows for targeted performance monitoring and optimization per functional area, with timeline operations benefiting from dedicated service-level optimizations.
 
 ## Troubleshooting Guide
 - Verify health endpoint responds with expected status codes and dependency checks.
@@ -653,7 +721,7 @@ Services --> DataAccess["Data Access Layer"]
 - Check browser console for JavaScript errors and network failures.
 - Validate session cookies and role claims when encountering authorization issues.
 - Review server logs for stack traces and error context.
-- **Updated**: Check service layer logs for business logic errors and data processing issues. Modular router structure makes it easier to isolate and debug specific functional areas.
+- **Updated**: Check service layer logs for business logic errors and data processing issues, particularly timeline resolution and projection operations. Modular router structure makes it easier to isolate and debug specific functional areas, with timeline service providing dedicated logging for timeline-related operations.
 
 **Section sources**
 - [main.py](file://backend/app/main.py)
@@ -661,4 +729,4 @@ Services --> DataAccess["Data Access Layer"]
 - [static/diagnostics.js](file://backend/app/web/static/diagnostics.js)
 
 ## Conclusion
-The web application combines a robust FastAPI backend with a modular vanilla JavaScript console to deliver a responsive, internationalized, and secure experience. The recent architectural restructuring with separated concerns, dedicated router modules (messages.py, web.py), and service layer extraction follows Flask/FastAPI best practices, significantly reducing main.py complexity and improving maintainability and scalability. Authentication middleware ensures role-based access, while media pipelines and structured message parsing enrich the user interface. Diagnostics and health endpoints provide operational visibility, and performance monitoring integrates seamlessly for proactive maintenance. The new service layer architecture enables better testing, caching, and business logic management. The modular router approach creates clear boundaries between request handling, business logic, and data access, making the codebase more maintainable and scalable.
+The web application combines a robust FastAPI backend with a modular vanilla JavaScript console to deliver a responsive, internationalized, and secure experience. The recent architectural enhancements including the introduction of the Timeline Resolution and Projection Service represent a significant step forward in service layer abstraction, ensuring that complex timeline operations are properly encapsulated away from direct route handler logic. The modular router architecture with separated concerns, dedicated router modules (messages.py, web.py), and comprehensive service layer extraction follows Flask/FastAPI best practices, significantly reducing main.py complexity and improving maintainability and scalability. Authentication middleware ensures role-based access, while media pipelines and structured message parsing enrich the user interface. Diagnostics and health endpoints provide operational visibility, and performance monitoring integrates seamlessly for proactive maintenance. The enhanced service layer architecture including the new timeline service enables better testing, caching, and business logic management. The modular router approach creates clear boundaries between request handling, business logic, and data access, making the codebase more maintainable and scalable with proper separation of timeline-related concerns.

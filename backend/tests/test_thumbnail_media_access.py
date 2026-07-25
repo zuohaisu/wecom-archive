@@ -48,7 +48,7 @@ class _RecordingProvider(_FakeCloudProviderWithSignedUrl):
 
 def _patch_recording_provider(monkeypatch, objects) -> None:
     from app import media_storage
-    from app.routers import conversations as conv
+    from app.services import media_access
 
     provider = _RecordingProvider(objects)
     real_factory = media_storage.get_media_storage_provider
@@ -60,7 +60,7 @@ def _patch_recording_provider(monkeypatch, objects) -> None:
         return real_factory(storage_backend)
 
     monkeypatch.setattr(media_storage, "get_media_storage_provider", _fake_factory)
-    monkeypatch.setattr(conv, "get_media_storage_provider", _fake_factory)
+    monkeypatch.setattr(media_access, "get_media_storage_provider", _fake_factory)
 
 
 def _seed_qiniu_image(db, *, roomid, msgid, sdkfileid, key, thumb_ref=None,

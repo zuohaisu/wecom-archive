@@ -1,1 +1,1 @@
-Monorepo uniting the WeCom archive FastAPI backend, SSL certificate auto-renewal tool, systemd deployment infrastructure, and project documentation under a single Makefile-driven build, lint, test, and deploy workflow.
+Monorepo root that unifies the FastAPI WeCom archive backend, systemd-based deployment automation, Let's Encrypt/Qiniu SSL renewal tooling, and project documentation under a single Python/Shell development and production workflow.

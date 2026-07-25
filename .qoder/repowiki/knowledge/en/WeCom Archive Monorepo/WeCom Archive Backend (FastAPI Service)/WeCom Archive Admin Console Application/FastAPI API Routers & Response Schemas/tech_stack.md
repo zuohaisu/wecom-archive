@@ -1,1 +1,0 @@
-FastAPI routers with Pydantic v2 models, SQLAlchemy ORM queries, httpx for outbound WeCom API calls, cryptography for AES-CBC decryption of WeCom webhooks, Starlette middleware for Cache-Control enforcement, and Jinja-style template rendering via `app.web.render_template`.

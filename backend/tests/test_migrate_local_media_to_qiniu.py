@@ -1260,7 +1260,7 @@ def _authed(app, db_session, tenant_id):
 
 def _patch_target_provider(monkeypatch, objects: dict) -> None:
     from app import media_storage
-    from app.routers import conversations as conv
+    from app.services import media_access
 
     class _FakeCloudProvider:
         def supports_local_path(self) -> bool:
@@ -1292,7 +1292,7 @@ def _patch_target_provider(monkeypatch, objects: dict) -> None:
         return real_factory(storage_backend)
 
     monkeypatch.setattr(media_storage, "get_media_storage_provider", _fake_factory)
-    monkeypatch.setattr(conv, "get_media_storage_provider", _fake_factory)
+    monkeypatch.setattr(media_access, "get_media_storage_provider", _fake_factory)
     return provider
 
 

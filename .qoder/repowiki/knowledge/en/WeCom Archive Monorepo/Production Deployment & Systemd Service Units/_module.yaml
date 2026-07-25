@@ -7,5 +7,6 @@ scope:
 source_files: []
 depends_on: []
 related_to:
-    - path: backend_app
+    - path: backend_app/app_core
+    - path: backend_app/migrations
     - path: ssl_renew_tool

@@ -7,8 +7,9 @@ from fastapi.staticfiles import StaticFiles
 from app.db.schema_check import full_readiness_check
 from app.db.session import get_engine
 from app.routers.auth import router as auth_router
-from app.routers.conversations import MediaAccessNoStoreMiddleware
 from app.routers.conversations import router as conversations_router
+from app.routers.media import MediaAccessNoStoreMiddleware
+from app.routers.media import router as media_router
 from app.routers.messages import router as messages_router
 from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.search import router as search_router
@@ -52,6 +53,7 @@ app = FastAPI(title="365 WeCom Archive")
 app.add_middleware(MediaAccessNoStoreMiddleware)
 app.include_router(auth_router)
 app.include_router(conversations_router)
+app.include_router(media_router)
 app.include_router(reachability_audit_router)
 app.include_router(search_router)
 app.include_router(wecom_events_router)
@@ -117,7 +119,7 @@ def health(response: Response):
 # so a long, immutable Cache-Control here is safe: any content change
 # produces a new URL, and stale-cached responses under the old URL are
 # simply never requested again. This is unrelated to (and does not need an
-# exemption from) app.routers.conversations.MediaAccessNoStoreMiddleware —
+# exemption from) app.routers.media.MediaAccessNoStoreMiddleware —
 # that middleware only touches the media-access-descriptor path pattern
 # (see _MEDIA_ACCESS_PATH_RE), never /web/static.
 # ---------------------------------------------------------------------------

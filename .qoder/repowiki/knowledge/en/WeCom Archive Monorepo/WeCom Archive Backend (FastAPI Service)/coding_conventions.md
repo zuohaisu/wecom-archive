@@ -1,5 +1,0 @@
-- Every route depends on `db: Session = Depends(get_db)` and resolves `tenant_id` from the authenticated session to scope all queries.
-- Pydantic response models use `model_config = {'from_attributes': True}` to serialize SQLAlchemy ORM objects directly.
-- HTML routes return `HTMLResponse(content=render_template(...))` and redirect unauthenticated users to `/admin/login` rather than returning 401.
-- Alembic migrations follow `NNNN_slug.py` naming with descriptive slugs and keep PostgreSQL-specific indexes/constraints inside the migration file.
-- Cross-cutting utilities (display names, i18n script tag, message type registry) are imported as single-source-of-truth modules rather than duplicated per router.

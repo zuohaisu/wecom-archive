@@ -755,7 +755,7 @@ def test_access_route_failed_media_returns_404(client, db) -> None:
 
 def test_access_route_provider_outage_returns_503(client, db, monkeypatch) -> None:
     from app.main import app
-    import app.routers.conversations as conv
+    from app.services import media_access
 
     msg = _insert_mixed_with_media(db, "room-j", "sdk-outage")
     _insert_media_file(
@@ -766,7 +766,7 @@ def test_access_route_provider_outage_returns_503(client, db, monkeypatch) -> No
     def _boom(*_a, **_k):
         raise MediaStorageUnavailable("simulated")
 
-    monkeypatch.setattr(conv, "resolve_downloadable_media_file_state", _boom)
+    monkeypatch.setattr(media_access, "resolve_downloadable_media_file_state", _boom)
 
     _authed(app, db, _TENANT_A)
     try:

@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: backend_app/app_core
+title: WeCom Archive FastAPI Application
+scope:
+    - backend/app/
+source_files: []
+depends_on: []
+related_to:
+    - path: deployment_infra

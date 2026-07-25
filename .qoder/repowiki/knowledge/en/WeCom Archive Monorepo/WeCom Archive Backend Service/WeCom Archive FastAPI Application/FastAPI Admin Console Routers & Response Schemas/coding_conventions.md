@@ -1,0 +1,6 @@
+- Every route declares `db: Session = Depends(get_db)` and obtains tenant isolation exclusively through `get_current_user` or `require_html_session` dependencies — `tenant_id` is never read from query/path/body parameters.
+- Response payloads are typed with Pydantic `BaseModel` classes defined in `app.schemas.*`, using `model_config = {'from_attributes': True}` for direct ORM-to-JSON serialization.
+- HTML-rendering routes return `HTMLResponse` and use `render_template(name, **kwargs)` with values passed through `_e()` for escaping, while JSON routes return plain Python dicts or Pydantic models via `response_model`.
+- Authentication-gated routes either raise `HTTPException` for API endpoints or `RedirectResponse('/admin/login')` for HTML endpoints when `require_html_session` returns None.
+- Sensitive data (passwords, tokens, session ids) is never logged; logging uses `logger.info/warning/error` with sanitized placeholders and `safe_log_value` where external values must be printed.
+- Database writes follow an explicit try/commit pattern where the response object (including cookies) is constructed before `db.commit()`, with rollback in the except block to avoid orphaned sessions.

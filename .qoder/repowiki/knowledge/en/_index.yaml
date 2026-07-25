@@ -3,7 +3,7 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-07-24T19:15:48Z"
+exported_at: "2026-07-24T20:42:04Z"
 modules:
     "":
         dir_name: WeCom Archive Monorepo
@@ -27,8 +27,8 @@ modules:
         depends_on: []
         related_to: []
     backend_app:
-        dir_name: WeCom Archive Backend (FastAPI Service)
-        title: WeCom Archive Backend (FastAPI Service)
+        dir_name: WeCom Archive Backend Service
+        title: WeCom Archive Backend Service
         scope:
             - backend/
         source_files: []
@@ -38,11 +38,10 @@ modules:
             - backend_app/scripts
             - backend_app/tests
         depends_on: []
-        related_to:
-            - path: deployment_infra
+        related_to: []
     backend_app/app_core:
-        dir_name: WeCom Archive Admin Console Application
-        title: WeCom Archive Admin Console Application
+        dir_name: WeCom Archive FastAPI Application
+        title: WeCom Archive FastAPI Application
         scope:
             - backend/app/
         source_files: []
@@ -54,20 +53,22 @@ modules:
             - backend_app/app_core/web_console
             - backend_app/app_core/wecom_integration
         depends_on: []
-        related_to: []
+        related_to:
+            - path: deployment_infra
     backend_app/app_core/api_routers:
-        dir_name: FastAPI API Routers & Response Schemas
-        title: FastAPI API Routers & Response Schemas
+        dir_name: FastAPI Admin Console Routers & Response Schemas
+        title: FastAPI Admin Console Routers & Response Schemas
         scope:
             - backend/app/routers/
             - backend/app/schemas/
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: backend_app/tests
     backend_app/app_core/core_services_and_utils:
-        dir_name: Core Services, Message Type Registry & UI Assets
-        title: Core Services, Message Type Registry & UI Assets
+        dir_name: Core Services & Message-Type Registry
+        title: Core Services & Message-Type Registry
         scope:
             - backend/app/services/
             - backend/app/structured_message_parser.py
@@ -80,7 +81,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: backend_app/tests
     backend_app/app_core/database_layer:
         dir_name: SQLAlchemy ORM Models & Database Session Layer
         title: SQLAlchemy ORM Models & Database Session Layer
@@ -89,7 +91,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: backend_app/scripts
     backend_app/app_core/media_pipeline:
         dir_name: Media Pipeline Download, Storage, Classification & Thumbnails
         title: 'Media Pipeline: Download, Storage, Classification & Thumbnails'
@@ -103,7 +106,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: backend_app/scripts
     backend_app/app_core/web_console:
         dir_name: Web Console & Admin Templates
         title: Web Console & Admin Templates
@@ -123,7 +127,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: backend_app/scripts
     backend_app/migrations:
         dir_name: Database Schema Migrations (Alembic)
         title: Database Schema Migrations (Alembic)
@@ -132,7 +137,9 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: backend_app/tests
+            - path: deployment_infra
     backend_app/scripts:
         dir_name: One-Shot Maintenance & Bootstrap Scripts
         title: One-Shot Maintenance & Bootstrap Scripts
@@ -141,16 +148,22 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: backend_app/app_core/database_layer
+            - path: backend_app/app_core/media_pipeline
+            - path: backend_app/app_core/wecom_integration
     backend_app/tests:
-        dir_name: tests
-        title: tests
+        dir_name: Pytest Test Suite for WeCom Archive Backend
+        title: Pytest Test Suite for WeCom Archive Backend
         scope:
             - backend/tests/
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: backend_app/app_core/api_routers
+            - path: backend_app/app_core/core_services_and_utils
+            - path: backend_app/migrations
     deployment_infra:
         dir_name: Production Deployment & Systemd Service Units
         title: Production Deployment & Systemd Service Units
@@ -161,7 +174,8 @@ modules:
         children: []
         depends_on: []
         related_to:
-            - path: backend_app
+            - path: backend_app/app_core
+            - path: backend_app/migrations
             - path: ssl_renew_tool
     docs_and_design:
         dir_name: Project Documentation, Design Specs & Static Site

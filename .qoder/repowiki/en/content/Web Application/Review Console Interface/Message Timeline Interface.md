@@ -15,7 +15,15 @@
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated architecture overview to reflect the new timeline_service.py backend service
+- Added dedicated section for timeline service architecture and responsibilities
+- Updated dependency analysis to include the new service layer
+- Enhanced backend support section to document the separation of concerns
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -23,17 +31,18 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+6. [Timeline Service Architecture](#timeline-service-architecture)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
-This document explains the message timeline interface used to display conversation messages chronologically, with support for multiple message types and media. It covers how messages are rendered by a pluggable renderer system, how users navigate and select messages, and how interactions (actions) are handled. It also documents custom message type support, media handling, and performance strategies for large histories.
+This document explains the message timeline interface used to display conversation messages chronologically, with support for multiple message types and media. It covers how messages are rendered by a pluggable renderer system, how users navigate and select messages, and how interactions (actions) are handled. The architecture now features a dedicated timeline service that handles backend processing with improved separation of concerns, while maintaining the same frontend interface experience.
 
 ## Project Structure
-The timeline is implemented primarily on the frontend using JavaScript modules under the console assets, backed by server-side routers and utilities for structured message parsing, media storage, and thumbnails.
+The timeline is implemented primarily on the frontend using JavaScript modules under the console assets, backed by server-side routers, services, and utilities for structured message parsing, media storage, and thumbnails.
 
 ```mermaid
 graph TB
@@ -47,6 +56,7 @@ API["api-client.js"]
 end
 subgraph "Backend Web"
 CONV["routers/conversations.py"]
+TS["services/timeline_service.py"]
 SMP["structured_message_parser.py"]
 MTR["message_type_registry.py"]
 MS["media_storage.py"]
@@ -59,9 +69,10 @@ TL --> MV
 TL --> CS
 TL --> API
 API --> CONV
-CONV --> SMP
-CONV --> MS
-CONV --> MT
+CONV --> TS
+TS --> SMP
+TS --> MS
+TS --> MT
 MT --> TP
 ```
 
@@ -73,6 +84,7 @@ MT --> TP
 - [console-state.js](file://backend/app/web/static/console/console-state.js)
 - [api-client.js](file://backend/app/web/static/console/api-client.js)
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
 - [structured_message_parser.py](file://backend/app/structured_message_parser.py)
 - [message_type_registry.py](file://backend/app/message_type_registry.py)
 - [media_storage.py](file://backend/app/media_storage.py)
@@ -88,6 +100,7 @@ MT --> TP
 - [console-state.js](file://backend/app/web/static/console/console-state.js)
 - [api-client.js](file://backend/app/web/static/console/api-client.js)
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
 - [structured_message_parser.py](file://backend/app/structured_message_parser.py)
 - [message_type_registry.py](file://backend/app/message_type_registry.py)
 - [media_storage.py](file://backend/app/media_storage.py)
@@ -101,12 +114,14 @@ MT --> TP
 - Conversation list integration: selects conversations and triggers timeline updates.
 - State management: holds current conversation, page state, filters, and selection.
 - API client: fetches paginated messages and metadata from backend endpoints.
+- Timeline service: handles backend timeline processing with improved separation of concerns.
 
 Key responsibilities:
 - Chronological ordering and pagination of messages.
 - Rendering different message types via specialized renderers.
 - Handling user interactions such as selecting, expanding, and invoking actions.
 - Loading and displaying media with thumbnails and lazy loading.
+- Backend timeline processing through dedicated service layer.
 
 **Section sources**
 - [timeline.js](file://backend/app/web/static/console/timeline.js)
@@ -115,9 +130,10 @@ Key responsibilities:
 - [conversation-list.js](file://backend/app/web/static/console/conversation-list.js)
 - [console-state.js](file://backend/app/web/static/console/console-state.js)
 - [api-client.js](file://backend/app/web/static/console/api-client.js)
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
 
 ## Architecture Overview
-The timeline follows a modular architecture where the controller coordinates data fetching, state updates, and rendering through a registry of message-type-specific renderers. Media is served via optimized endpoints with thumbnail generation and caching.
+The timeline follows a modular architecture where the controller coordinates data fetching, state updates, and rendering through a registry of message-type-specific renderers. The backend now features a dedicated timeline service that handles all timeline-related processing with better separation of concerns. Media is served via optimized endpoints with thumbnail generation and caching.
 
 ```mermaid
 sequenceDiagram
@@ -125,21 +141,22 @@ participant User as "User"
 participant TL as "Timeline Controller"
 participant API as "API Client"
 participant Router as "Conversations Router"
+participant TS as "Timeline Service"
 participant Parser as "Structured Message Parser"
 participant Storage as "Media Storage"
 participant Thumbnails as "Thumbnail Pipeline"
 User->>TL : Select conversation / scroll to load more
 TL->>API : Request messages (page, size, filters)
 API->>Router : GET /conversations/{id}/messages
-Router->>Parser : Parse structured content
+Router->>TS : Process timeline request
+TS->>Parser : Parse structured content
+TS->>Storage : Access media URLs
+TS->>Thumbnails : Generate thumbnails
+TS-->>Router : Processed timeline data
 Router-->>API : Messages payload
 API-->>TL : Paginated messages
 TL->>TL : Update state and order chronologically
 TL->>TL : Render visible items via renderer registry
-TL->>Storage : Load media URLs (signed if needed)
-Storage-->>TL : Media access descriptors
-TL->>Thumbnails : Request thumbnails for media
-Thumbnails-->>TL : Thumbnail URLs
 TL-->>User : Rendered timeline with media previews
 ```
 
@@ -147,6 +164,7 @@ TL-->>User : Rendered timeline with media previews
 - [timeline.js](file://backend/app/web/static/console/timeline.js)
 - [api-client.js](file://backend/app/web/static/console/api-client.js)
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
 - [structured_message_parser.py](file://backend/app/structured_message_parser.py)
 - [media_storage.py](file://backend/app/media_storage.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
@@ -163,7 +181,7 @@ Responsibilities:
 - Handle user interactions like scrolling, keyboard navigation, and action invocations.
 
 Interaction patterns:
-- Infinite scroll or explicit “load more” triggers additional pages.
+- Infinite scroll or explicit "load more" triggers additional pages.
 - Selection highlights the active message and may open details or actions.
 - Keyboard shortcuts for navigating between messages and triggering actions.
 
@@ -217,23 +235,60 @@ Integration points:
 - [conversation-list.js](file://backend/app/web/static/console/conversation-list.js)
 - [timeline.js](file://backend/app/web/static/console/timeline.js)
 
-### Backend Support for Structured Messages
-Parsing and typing:
-- The structured message parser normalizes incoming message content into a consistent schema.
-- The message type registry on the backend categorizes messages for routing and processing.
-
-**Section sources**
-- [structured_message_parser.py](file://backend/app/structured_message_parser.py)
-- [message_type_registry.py](file://backend/app/message_type_registry.py)
-
 ### Template Entry Point
 The messages template wires the console scripts and provides the container for the timeline UI.
 
 **Section sources**
 - [messages.html](file://backend/app/web/templates/messages.html)
 
+## Timeline Service Architecture
+
+**Updated** The backend timeline processing has been moved to a dedicated `timeline_service.py` file, providing better separation of concerns and improved maintainability.
+
+### Service Responsibilities
+The timeline service centralizes all timeline-related business logic including:
+- Message retrieval and chronological ordering
+- Pagination handling and cursor management
+- Message filtering and search integration
+- Media URL resolution and thumbnail coordination
+- Structured message content processing
+
+### Service Layer Benefits
+- **Separation of Concerns**: Timeline logic is isolated from router concerns
+- **Testability**: Dedicated service layer enables focused unit testing
+- **Reusability**: Common timeline operations can be reused across endpoints
+- **Maintainability**: Centralized logic reduces code duplication and complexity
+
+### Service Integration Pattern
+The service integrates with existing components through well-defined interfaces:
+- Structured message parser for content normalization
+- Media storage for URL resolution and access control
+- Thumbnail pipeline for image optimization
+- Database layer for efficient message retrieval
+
+```mermaid
+graph LR
+TS["Timeline Service"] --> DB["Database Layer"]
+TS --> SMP["Structured Message Parser"]
+TS --> MS["Media Storage"]
+TS --> TP["Thumbnail Pipeline"]
+TS --> MTR["Message Type Registry"]
+CONV["Conversations Router"] --> TS
+```
+
+**Diagram sources**
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
+- [structured_message_parser.py](file://backend/app/structured_message_parser.py)
+- [media_storage.py](file://backend/app/media_storage.py)
+- [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
+- [message_type_registry.py](file://backend/app/message_type_registry.py)
+- [conversations.py](file://backend/app/routers/conversations.py)
+
+**Section sources**
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
+
 ## Dependency Analysis
-The timeline depends on several modules for data, rendering, and media. The following diagram shows key dependencies and their relationships.
+The timeline depends on several modules for data, rendering, and media. The following diagram shows key dependencies and their relationships, now including the new timeline service layer.
 
 ```mermaid
 graph LR
@@ -243,9 +298,10 @@ TL --> MV["media-viewer.js"]
 TL --> CS["console-state.js"]
 TL --> CL["conversation-list.js"]
 API --> CONV["conversations.py"]
-CONV --> SMP["structured_message_parser.py"]
-CONV --> MS["media_storage.py"]
-CONV --> MT["media_thumbnails.py"]
+CONV --> TS["timeline_service.py"]
+TS --> SMP["structured_message_parser.py"]
+TS --> MS["media_storage.py"]
+TS --> MT["media_thumbnails.py"]
 MT --> TP["thumbnail_pipeline.py"]
 ```
 
@@ -257,6 +313,7 @@ MT --> TP["thumbnail_pipeline.py"]
 - [console-state.js](file://backend/app/web/static/console/console-state.js)
 - [conversation-list.js](file://backend/app/web/static/console/conversation-list.js)
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
 - [structured_message_parser.py](file://backend/app/structured_message_parser.py)
 - [media_storage.py](file://backend/app/media_storage.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
@@ -270,6 +327,7 @@ MT --> TP["thumbnail_pipeline.py"]
 - [console-state.js](file://backend/app/web/static/console/console-state.js)
 - [conversation-list.js](file://backend/app/web/static/console/conversation-list.js)
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
 - [structured_message_parser.py](file://backend/app/structured_message_parser.py)
 - [media_storage.py](file://backend/app/media_storage.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
@@ -285,8 +343,7 @@ Strategies for large message histories:
 - Memoization: Cache computed renderer outputs for identical message payloads.
 - Background prefetch: Preload next page data while the user reads current content.
 - Efficient selection: Track selection indices rather than full objects to minimize memory usage.
-
-[No sources needed since this section provides general guidance]
+- Service layer optimization: Leverage the dedicated timeline service for efficient backend processing.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -295,6 +352,7 @@ Common issues and resolutions:
 - Slow loading: Inspect pagination size and network latency; consider reducing page size or enabling prefetch.
 - Incorrect ordering: Confirm chronological sorting keys and timezone handling in both frontend and backend.
 - Selection glitches: Validate state synchronization between timeline and conversation list.
+- Service layer issues: Check timeline service logs for backend processing errors and database connectivity problems.
 
 **Section sources**
 - [timeline.js](file://backend/app/web/static/console/timeline.js)
@@ -303,11 +361,10 @@ Common issues and resolutions:
 - [media_storage.py](file://backend/app/media_storage.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
+- [timeline_service.py](file://backend/app/services/timeline_service.py)
 
 ## Conclusion
-The message timeline interface combines a flexible renderer registry, robust media handling, and efficient pagination to deliver a smooth chronological browsing experience. By adhering to the patterns outlined here—registering custom renderers, optimizing media delivery, and applying virtualization—you can extend and scale the timeline effectively.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The message timeline interface combines a flexible renderer registry, robust media handling, efficient pagination, and a dedicated backend service layer to deliver a smooth chronological browsing experience. The new timeline service architecture provides better separation of concerns and improved maintainability while preserving the same frontend interface. By adhering to the patterns outlined here—registering custom renderers, optimizing media delivery, applying virtualization, and leveraging the service layer—you can extend and scale the timeline effectively.
 
 ## Appendices
 
@@ -324,7 +381,7 @@ Steps:
 ### Implementing Message Actions
 Patterns:
 - Attach event handlers to interactive elements within rendered messages.
-- Use the timeline’s action dispatcher to trigger backend operations or UI changes.
+- Use the timeline's action dispatcher to trigger backend operations or UI changes.
 - Provide feedback (loading states, success/error notifications).
 
 **Section sources**
@@ -337,5 +394,15 @@ Recommendations:
 - Use requestAnimationFrame for smooth updates.
 - Cache renderer outputs keyed by message ID.
 - Monitor memory usage and garbage collection pauses.
+- Leverage the timeline service for efficient backend processing.
 
-[No sources needed since this section provides general guidance]
+### Timeline Service Development
+Guidelines for extending the timeline service:
+- Follow the established service interface patterns.
+- Implement proper error handling and logging.
+- Ensure thread safety for concurrent access scenarios.
+- Write comprehensive unit tests for service methods.
+- Document service contracts and dependencies clearly.
+
+**Section sources**
+- [timeline_service.py](file://backend/app/services/timeline_service.py)

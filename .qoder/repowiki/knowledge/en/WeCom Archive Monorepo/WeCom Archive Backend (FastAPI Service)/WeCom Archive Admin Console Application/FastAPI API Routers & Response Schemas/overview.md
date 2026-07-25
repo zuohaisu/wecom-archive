@@ -1,1 +1,0 @@
-FastAPI route definitions and Pydantic response schemas for the WeCom Archive admin console, covering authentication (WeCom OAuth + password), conversations, messages, search, reachability diagnostics, web page rendering, and WeCom event callbacks.
