@@ -20,6 +20,7 @@
 - **Backlog P2:** RND-221/220/219 (service-extraction chain), RND-211 (sync-aware refresh + "sync now"), RND-195 (all WeCom msg types — umbrella for RND-210), RND-166/165 (SaaS ops/payments).
 - **FROZEN — In Review, blocked by WeCom enterprise name change (NOT within ~1 wk):** RND-104/107/108/129/130/175. Do not merge / don't advise merge.
 - Refactor chain done through RND-215. **RND-216 MERGED to main (2026-07-24, commit `b2d46fc`)** — unblocks RND-217/218. **RND-217 已实现（工作区改动就绪、未提交）；须等 QA agent 验收通过且用户明确许可后才可 commit/push.** 218→{219|220|221}→222→223→224 still pending.
+- **Chain progress (2026-07-25):** RND-218 (`5fa1ee6`)、RND-219 (`13e1cee`)、RND-220 (`4d55766`=HEAD)、RND-221 均已在 `main` 工作树实现（未提交/未独立提交）；**RND-221 已独立 QA 验收 PASS（16/16，comment `66ea1deb`，状态 In Progress）**，实现为未提交工作区改动。RND-222/223/224 仍 pending，须等链前置合入 origin/main。注：route 总数自测=33（QA 自测口径，baseline 缺失）。
 
 ## Hard Rules (AI agent 必须遵守)
 - **Agent 绝不执行 git commit / push**：所有 git 提交与推送一律由用户本人操作。即便改动就绪、QA 已通过、或用户说「可以提交」，agent 也不代劳——只提示用户自行 commit/push。（2026-07-25 用户明确：git commit 暂时都由用户自己做。）

@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import inspect
 
-from scripts.decrypt_wecom_messages_once import _normalise_fields, main as _decrypt_main
+from app.services.decrypt_worker import run_decrypt_once as _run_decrypt_once
+from scripts.decrypt_wecom_messages_once import _normalise_fields
 
 
 def test_normalise_fields_returns_structured_content_for_link() -> None:
@@ -197,7 +198,11 @@ def test_structured_content_raw_is_scoped_for_mixed_too() -> None:
 
 
 def test_decrypted_payload_column_is_still_never_assigned_in_the_decrypt_script() -> None:
-    source = inspect.getsource(_decrypt_main)
+    """RND-222 moved the row-update loop out of the CLI script's main()
+    and into app.services.decrypt_worker.run_decrypt_once() — the SF-1
+    guard this test protects now lives there; see that module's docstring
+    for the extraction."""
+    source = inspect.getsource(_run_decrypt_once)
     assert "record.decrypted_payload" not in source
     assert "record.structured_content" in source
 

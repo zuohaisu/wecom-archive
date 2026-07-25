@@ -630,24 +630,30 @@ def test_parser_dispatch_uses_registry_not_a_literal_text_check() -> None:
     """Confirms the dispatch really reads get_parser_strategy(), not a
     hardcoded `msgtype == "text"` string comparison — a msgtype whose
     registry entry claims TEXT_CONTENT strategy gets text-style
-    extraction even though it is not literally "text"."""
-    import scripts.decrypt_wecom_messages_once as decrypt_module
+    extraction even though it is not literally "text".
 
-    original_get_parser_strategy = decrypt_module.get_parser_strategy
-    decrypt_module.get_parser_strategy = (
+    RND-222 moved _normalise_fields() into app.services.decrypt_worker
+    (scripts.decrypt_wecom_messages_once._normalise_fields is now a
+    re-export of the same function object) — its get_parser_strategy
+    global lookup resolves via decrypt_worker's own module globals, so
+    the patch target must be decrypt_worker, not the script."""
+    from app.services import decrypt_worker
+
+    original_get_parser_strategy = decrypt_worker.get_parser_strategy
+    decrypt_worker.get_parser_strategy = (
         lambda msgtype: ParserStrategy.TEXT_CONTENT
         if msgtype == "spoofed_text_type"
         else original_get_parser_strategy(msgtype)
     )
     try:
-        normalised = decrypt_module._normalise_fields(
+        normalised = decrypt_worker._normalise_fields(
             {
                 "msgtype": "spoofed_text_type",
                 "text": {"content": "still extracted via TEXT_CONTENT strategy"},
             }
         )
     finally:
-        decrypt_module.get_parser_strategy = original_get_parser_strategy
+        decrypt_worker.get_parser_strategy = original_get_parser_strategy
 
     assert normalised["content_text"] == "still extracted via TEXT_CONTENT strategy"
 

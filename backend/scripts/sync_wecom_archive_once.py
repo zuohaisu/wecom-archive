@@ -2,9 +2,14 @@
 """
 One-shot real WeCom archive sync worker.
 
-Loads environment, initialises the WeCom Finance SDK, reads the current seq
-cursor from the database, calls GetChatData, persists encrypted archive records
-into PostgreSQL, and advances the cursor after a successful commit.
+Loads environment, resolves the active tenant for WECOM_CORP_ID,
+initialises the WeCom Finance SDK, then delegates the actual GetChatData
+call and record persistence to
+app.services.sync_worker.run_sync_once() (RND-222) — this script is now
+only the CLI shell: env parsing, tenant resolution, SDK/slice lifecycle,
+and translating the returned summary into the documented print/exit-code
+contract below. See app/services/sync_worker.py's module docstring for
+the core loop itself.
 
 Idempotent — re-running never creates duplicate rows (keyed on (tenant_id, msgid)).
 
@@ -33,7 +38,6 @@ Safety constraints:
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
@@ -43,8 +47,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.db.models import ArchiveMessage, SyncState, TenantWecomConfig
+from app.db.models import TenantWecomConfig
 from app.sdk import wecom_sdk
+from app.services.sync_worker import (  # noqa: F401 -- re-exported for backward-compat imports
+    _read_seq,
+    _upsert_seq,
+    run_sync_once,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -112,37 +121,6 @@ def _require_tenant_id(session: Session, corp_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Sync state
-# ---------------------------------------------------------------------------
-
-
-def _read_seq(session: Session, corp_id: str, tenant_id: str) -> int:
-    """Return the last synced seq for *(tenant_id, corp_id)*, or 0 if absent."""
-    row = (
-        session.query(SyncState)
-        .filter(SyncState.corp_id == corp_id, SyncState.tenant_id == tenant_id)
-        .with_for_update(skip_locked=True)
-        .first()
-    )
-    if row is None:
-        return 0
-    return row.last_seq
-
-
-def _upsert_seq(session: Session, corp_id: str, new_seq: int, tenant_id: str) -> None:
-    """Create or update the sync state row for *(tenant_id, corp_id)* to *new_seq*."""
-    row = (
-        session.query(SyncState)
-        .filter(SyncState.corp_id == corp_id, SyncState.tenant_id == tenant_id)
-        .first()
-    )
-    if row is None:
-        session.add(SyncState(corp_id=corp_id, last_seq=new_seq, tenant_id=tenant_id))
-    else:
-        row.last_seq = new_seq
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -155,14 +133,13 @@ def main() -> None:
     secret = _require_env("WECOM_ARCHIVE_SECRET")
     limit = _optional_int_env("WECOM_CHAT_LIMIT", 500)
 
-    # --- 2. Resolve tenant and read seq cursor (before SDK init) ---
+    # --- 2. Resolve tenant (before SDK init) ---
     # Fail fast: exit non-zero if no active tenant config exists for this corp.
     # This prevents any archive writes with tenant_id=None.
     engine = create_engine(database_url)
 
     with Session(engine) as session:
         tenant_id: str = _require_tenant_id(session, corp_id)
-        prev_seq: int = _read_seq(session, corp_id, tenant_id)
 
     # --- 3. Initialise WeCom SDK ---
     try:
@@ -200,7 +177,7 @@ def main() -> None:
             pass
         sys.exit(1)
 
-    # --- 4. Call GetChatData ---
+    # --- 4. Allocate the GetChatData output slice ---
     slice_ptr = wecom_sdk.new_slice(lib)
     if not slice_ptr:
         print("[FAIL] NewSlice() returned null", flush=True)
@@ -210,74 +187,9 @@ def main() -> None:
             pass
         sys.exit(1)
 
-    chat_ret = wecom_sdk.get_chat_data(lib, handle, slice_ptr, prev_seq, limit)
-
-    records: list[dict] = []
-    if chat_ret == 0:
-        slice_len = wecom_sdk.get_slice_len(lib, slice_ptr)
-        if slice_len > 0:
-            raw = wecom_sdk.get_content_from_slice(lib, slice_ptr)
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                    records = parsed.get("chatdata", [])
-                except (json.JSONDecodeError, ValueError):
-                    pass  # records stays empty
-
-    # --- 5. Persist records ---
-    inserted = 0
-    skipped = 0
-    max_seq = prev_seq
-
+    # --- 5. Fetch + persist records via the core loop ---
     with Session(engine) as session:
-        for rec in records:
-            msgid = rec.get("msgid", "")
-            if not msgid:
-                continue
-
-            seq_val = rec.get("seq", 0)
-            if seq_val > max_seq:
-                max_seq = seq_val
-
-            # Idempotency check scoped to (tenant_id, msgid) per the unique constraint
-            existing = (
-                session.query(ArchiveMessage)
-                .filter(
-                    ArchiveMessage.msgid == msgid,
-                    ArchiveMessage.tenant_id == tenant_id,
-                )
-                .first()
-            )
-            if existing:
-                skipped += 1
-                continue
-
-            msg = ArchiveMessage(
-                msgid=msgid,
-                seq=seq_val,
-                # Encrypted envelope — store the raw record exactly as returned
-                publickey_ver=rec.get("publickey_ver", 0),
-                raw_encrypted_payload=rec,
-                encrypt_random_key=rec.get("encrypt_random_key", ""),
-                encrypt_chat_msg=rec.get("encrypt_chat_msg", ""),
-                # Decryption state — not yet attempted
-                decrypt_status="pending",
-                tenant_id=tenant_id,
-            )
-            session.add(msg)
-            inserted += 1
-
-        # Only commit if we actually got records back
-        if records:
-            session.commit()
-
-            # --- 6. Update seq cursor after successful commit ---
-            new_seq = max_seq
-            with Session(engine) as update_session:
-                _upsert_seq(update_session, corp_id, new_seq, tenant_id)
-                update_session.commit()
-        else:
-            new_seq = prev_seq
+        summary = run_sync_once(session, tenant_id, corp_id, lib, handle, slice_ptr, limit)
 
     # Always attempt cleanup
     try:
@@ -289,16 +201,16 @@ def main() -> None:
     except Exception:
         pass
 
-    # --- 7. Print safe operational metrics ---
-    print(f"[INFO] return_code: {chat_ret}", flush=True)
-    print(f"[INFO] record_count: {len(records)}", flush=True)
-    print(f"[INFO] inserted: {inserted}", flush=True)
-    print(f"[INFO] skipped_duplicate: {skipped}", flush=True)
-    print(f"[INFO] previous_seq: {prev_seq}", flush=True)
-    print(f"[INFO] new_seq: {new_seq}", flush=True)
+    # --- 6. Print safe operational metrics ---
+    print(f"[INFO] return_code: {summary.return_code}", flush=True)
+    print(f"[INFO] record_count: {summary.record_count}", flush=True)
+    print(f"[INFO] inserted: {summary.inserted}", flush=True)
+    print(f"[INFO] skipped_duplicate: {summary.skipped_duplicate}", flush=True)
+    print(f"[INFO] previous_seq: {summary.previous_seq}", flush=True)
+    print(f"[INFO] new_seq: {summary.new_seq}", flush=True)
 
-    if chat_ret != 0:
-        print(f"[FAIL] GetChatData returned code {chat_ret}", flush=True)
+    if summary.return_code != 0:
+        print(f"[FAIL] GetChatData returned code {summary.return_code}", flush=True)
         sys.exit(1)
 
     print("[PASS] sync_wecom_archive_once completed successfully", flush=True)

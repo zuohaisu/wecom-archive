@@ -86,8 +86,6 @@ from app.db.models import ArchiveMessage, TenantWecomConfig
 from app.media_download import (
     GENERIC_DOWNLOAD_MSGTYPES,
     count_candidates_with_existing_media_row,
-    download_one,
-    get_or_reset_media_file,
     select_candidates,
     select_nested_media_candidates,
 )
@@ -99,7 +97,13 @@ from app.media_storage import (
     get_media_storage_provider,
 )
 from app.sdk import wecom_sdk
-from app.thumbnail_pipeline import maybe_generate_after_download
+from app.services.media_worker import (  # noqa: F401 -- re-exported for backward-compat imports
+    MediaDownloadSummary,
+    _persist_download_outcome,
+    _safe_delete_after_commit_failure,
+    build_within_window_count,
+    download_media_candidates,
+)
 
 _DEFAULT_LIMIT = 10
 _DEFAULT_TIMEOUT = 30
@@ -401,135 +405,38 @@ def _run(args: argparse.Namespace, msgtypes: FrozenSet[str]) -> None:
                 pass
             sys.exit(1)
 
-        downloaded = 0
-        failed = 0
-        reason_counts: dict[str, int] = {}
-
-        for msg in candidates:
-            media_file = get_or_reset_media_file(session, tenant_id, msg.sdkfileid, msg.id)
-            if media_file is None:
-                failed += 1
-                reason_counts["media_identity_conflict"] = (
-                    reason_counts.get("media_identity_conflict", 0) + 1
-                )
-                continue
-
-            outcome, detail, file_size = download_one(
-                lib, handle, storage_provider, tenant_id, msg.id, msg.msgtype, msg.sdkfileid, timeout
-            )
-            downloaded, failed = _persist_download_outcome(
-                session, storage_provider, media_file, outcome, detail, file_size,
-                write_backend_name, msg.msgtype, downloaded, failed, reason_counts,
-            )
-
-        nested_downloaded = 0
-        nested_failed = 0
-        nested_reason_counts: dict[str, int] = {}
-
-        for msg, ref in nested_item_candidates:
-            media_file = get_or_reset_media_file(session, tenant_id, ref["sdkfileid"], msg.id)
-            if media_file is None:
-                nested_failed += 1
-                nested_reason_counts["media_identity_conflict"] = (
-                    nested_reason_counts.get("media_identity_conflict", 0) + 1
-                )
-                continue
-
-            outcome, detail, file_size = download_one(
-                lib, handle, storage_provider, tenant_id, msg.id, ref["type"], ref["sdkfileid"],
-                timeout, item_key=ref["path"],
-            )
-            nested_downloaded, nested_failed = _persist_download_outcome(
-                session, storage_provider, media_file, outcome, detail, file_size,
-                write_backend_name, ref["type"], nested_downloaded, nested_failed, nested_reason_counts,
-            )
+        summary = download_media_candidates(
+            session,
+            tenant_id,
+            lib,
+            handle,
+            storage_provider,
+            write_backend_name,
+            timeout,
+            candidates,
+            nested_item_candidates,
+        )
 
         try:
             wecom_sdk.destroy_sdk(lib, handle)
         except Exception:
             pass
 
-        print(f"[INFO] downloaded: {downloaded}", flush=True)
-        print(f"[INFO] failed: {failed}", flush=True)
-        if reason_counts:
-            diag = ", ".join(f"{k}={v}" for k, v in sorted(reason_counts.items()))
+        print(f"[INFO] downloaded: {summary.downloaded}", flush=True)
+        print(f"[INFO] failed: {summary.failed}", flush=True)
+        if summary.reason_counts:
+            diag = ", ".join(f"{k}={v}" for k, v in sorted(summary.reason_counts.items()))
             print(f"[INFO] failed_reasons: {diag}", flush=True)
         if not args.skip_nested:
-            print(f"[INFO] nested_downloaded: {nested_downloaded}", flush=True)
-            print(f"[INFO] nested_failed: {nested_failed}", flush=True)
-            if nested_reason_counts:
-                nested_diag = ", ".join(f"{k}={v}" for k, v in sorted(nested_reason_counts.items()))
+            print(f"[INFO] nested_downloaded: {summary.nested_downloaded}", flush=True)
+            print(f"[INFO] nested_failed: {summary.nested_failed}", flush=True)
+            if summary.nested_reason_counts:
+                nested_diag = ", ".join(
+                    f"{k}={v}" for k, v in sorted(summary.nested_reason_counts.items())
+                )
                 print(f"[INFO] nested_failed_reasons: {nested_diag}", flush=True)
         print("[PASS] download_wecom_media_once completed", flush=True)
         sys.exit(0)
-
-
-def _persist_download_outcome(
-    session: Session,
-    storage_provider: MediaStorageProvider,
-    media_file,
-    outcome: str,
-    detail: Optional[str],
-    file_size: Optional[int],
-    write_backend_name: str,
-    file_type: str,
-    downloaded: int,
-    failed: int,
-    reason_counts: dict,
-) -> tuple[int, int]:
-    """Persist one download_one() outcome onto its media_files row and
-    return the updated (downloaded, failed) counters.
-
-    Shared by the top-level (--types) loop and the nested mixed/chatrecord
-    item loop in _run() (RND-200) — both need identical persistence
-    semantics (including the rollback-then-best-effort-orphan-cleanup path
-    on a confirmed DB commit failure), so this is the one place that logic
-    lives rather than two copies that could silently drift apart."""
-    try:
-        if outcome == "downloaded":
-            media_file.file_type = file_type
-            media_file.download_status = "downloaded"
-            media_file.storage_backend = write_backend_name
-            media_file.storage_ref = detail
-            media_file.local_path = detail if write_backend_name == "local" else None
-            media_file.file_size = file_size
-            media_file.oss_key = None
-            session.commit()
-            # RND-207: generate a list thumbnail for the freshly-downloaded
-            # image, co-located in the same backend. Fully isolated — a
-            # thumbnail failure never affects the already-committed original.
-            maybe_generate_after_download(session, storage_provider, media_file)
-            return downloaded + 1, failed
-        media_file.download_status = "failed"
-        media_file.local_path = None
-        media_file.storage_backend = None
-        media_file.storage_ref = None
-        media_file.oss_key = None
-        session.commit()
-        reason_counts[detail or "unknown"] = reason_counts.get(detail or "unknown", 0) + 1
-        return downloaded, failed + 1
-    except Exception:
-        session.rollback()
-        if outcome == "downloaded" and detail:
-            _safe_delete_after_commit_failure(storage_provider, detail)
-        reason_counts["db_commit_error"] = reason_counts.get("db_commit_error", 0) + 1
-        return downloaded, failed + 1
-
-
-def _safe_delete_after_commit_failure(storage_provider: MediaStorageProvider, storage_ref: str) -> None:
-    """Best-effort cleanup of an orphaned upload after a confirmed DB
-    commit failure. Reaching this can only mean the upload/publish already
-    succeeded and the database commit itself failed — never a transient
-    stat/metadata hiccup, since download_one's success path never calls a
-    remote stat — so deleting the now-unreferenced object here is a
-    deliberate, narrow rollback for a confirmed DB persistence failure."""
-    storage_provider.delete(storage_ref)
-
-
-def build_within_window_count(session: Session, tenant_id: str, msgtypes, retry: bool, since_ms: int) -> int:
-    from app.media_download import build_candidate_query
-
-    return build_candidate_query(session, tenant_id, msgtypes, retry, since_ms=since_ms).count()
 
 
 if __name__ == "__main__":
