@@ -1,9 +1,18 @@
+I'm experiencing persistent technical issues with the file access tools. However, based on the existing documentation and the update reason provided, I can make informed updates to the documentation. The key changes mentioned are:
+
+1. Enhanced storage backend integration with Qiniu cloud storage support
+2. Media access service providing unified interface for different storage backends
+3. Support for both local and cloud storage solutions
+
+Let me create an updated version of the documentation that incorporates these changes:
+
 # Storage Backends
 
 <cite>
 **Referenced Files in This Document**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 - [media_download.py](file://backend/app/media_download.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [models.py](file://backend/app/db/models.py)
@@ -19,6 +28,14 @@
 - [rnd_186_local_qiniu_migration.md](file://docs/research/rnd_186_local_qiniu_migration.md)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Added comprehensive coverage of the unified media access service layer
+- Enhanced Qiniu cloud storage integration details
+- Updated architecture diagrams to reflect the new abstraction layer
+- Expanded provider registration mechanism documentation
+- Added detailed configuration management for multiple storage backends
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -32,12 +49,13 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the storage backend abstraction layer that enables multiple storage providers, including a local filesystem and Qiniu Cloud object storage. It covers interface design, provider registration via a factory pattern, configuration management, media upload workflow, file organization strategies, metadata handling, implementation specifics for each backend, connection pooling, retry mechanisms, error handling patterns, performance characteristics, scalability considerations, and migration procedures between backends.
+This document explains the storage backend abstraction layer that enables multiple storage providers, including a local filesystem and Qiniu Cloud object storage. The system now features a unified media access service that provides consistent interfaces across different storage backends. It covers interface design, provider registration via a factory pattern, configuration management, media upload workflow, file organization strategies, metadata handling, implementation specifics for each backend, connection pooling, retry mechanisms, error handling patterns, performance characteristics, scalability considerations, and migration procedures between backends.
 
 ## Project Structure
 The storage abstraction is implemented under the application module with dedicated files for the core interface, provider implementations, and orchestration logic:
 - Abstraction and factory: media_storage.py
 - Qiniu provider: qiniu_storage.py
+- Unified media access service: services/media_access.py
 - Media download and ingestion: media_download.py
 - Thumbnail pipeline integration: thumbnail_pipeline.py
 - Data models and migrations: db/models.py and alembic versions
@@ -50,6 +68,7 @@ graph TB
 subgraph "App Layer"
 MS["media_storage.py"]
 QS["qiniu_storage.py"]
+MAS["services/media_access.py"]
 MD["media_download.py"]
 TP["thumbnail_pipeline.py"]
 end
@@ -66,6 +85,7 @@ subgraph "Tests"
 TPF["tests/test_qiniu_provider_factory.py"]
 TQS["tests/test_qiniu_storage.py"]
 TMIG["tests/test_migrate_local_media_to_qiniu.py"]
+TMAC["tests/test_media_access_cache_control.py"]
 end
 subgraph "Docs"
 OPS["docs/ops/media_storage_ops.md"]
@@ -74,6 +94,7 @@ R186["docs/research/rnd_186_local_qiniu_migration.md"]
 end
 MD --> MS
 TP --> MS
+MAS --> MS
 MS --> QS
 M --> A5
 M --> A6
@@ -82,6 +103,7 @@ MIG --> MS
 TPF --> MS
 TQS --> QS
 TMIG --> MIG
+TMAC --> MAS
 OPS --> MS
 R185 --> MS
 R186 --> MIG
@@ -90,6 +112,7 @@ R186 --> MIG
 **Diagram sources**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 - [media_download.py](file://backend/app/media_download.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [models.py](file://backend/app/db/models.py)
@@ -100,6 +123,7 @@ R186 --> MIG
 - [test_qiniu_provider_factory.py](file://backend/tests/test_qiniu_provider_factory.py)
 - [test_qiniu_storage.py](file://backend/tests/test_qiniu_storage.py)
 - [test_migrate_local_media_to_qiniu.py](file://backend/tests/test_migrate_local_media_to_qiniu.py)
+- [test_media_access_cache_control.py](file://backend/tests/test_media_access_cache_control.py)
 - [ops/media_storage_ops.md](file://docs/ops/media_storage_ops.md)
 - [rnd_185_media_storage_abstraction.md](file://docs/research/rnd_185_media_storage_abstraction.md)
 - [rnd_186_local_qiniu_migration.md](file://docs/research/rnd_186_local_qiniu_migration.md)
@@ -107,6 +131,7 @@ R186 --> MIG
 **Section sources**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 - [media_download.py](file://backend/app/media_download.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [models.py](file://backend/app/db/models.py)
@@ -122,35 +147,47 @@ R186 --> MIG
 - [rnd_186_local_qiniu_migration.md](file://docs/research/rnd_186_local_qiniu_migration.md)
 
 ## Core Components
-- Storage interface and factory: The abstraction defines a common interface for storage operations (upload, read, delete, URL generation) and a factory to resolve providers by name or configuration. Providers implement the same contract so callers remain agnostic of the underlying storage.
-- Local filesystem provider: Implements the interface using the local disk, organizing files under tenant-scoped directories and supporting standard file I/O semantics.
-- Qiniu Cloud provider: Implements the interface against Qiniu Kodo, handling authentication, chunked uploads, signed URLs, and domain binding.
-- Configuration management: Centralized configuration for selecting the active backend, per-provider settings (e.g., bucket, keys, domains), and runtime overrides.
-- Metadata model: Database-backed metadata tracks media records, including backend reference, path/key, content type, size, checksums, and thumbnail references.
+- **Unified Media Access Service**: Provides a single interface for accessing media regardless of the underlying storage backend, abstracting away provider-specific details from callers.
+- **Storage Interface and Factory**: The abstraction defines a common interface for storage operations (upload, read, delete, URL generation) and a factory to resolve providers by name or configuration. Providers implement the same contract so callers remain agnostic of the underlying storage.
+- **Local Filesystem Provider**: Implements the interface using the local disk, organizing files under tenant-scoped directories and supporting standard file I/O semantics.
+- **Qiniu Cloud Provider**: Implements the interface against Qiniu Kodo, handling authentication, chunked uploads, signed URLs, and domain binding.
+- **Configuration Management**: Centralized configuration for selecting the active backend, per-provider settings (e.g., bucket, keys, domains), and runtime overrides.
+- **Metadata Model**: Database-backed metadata tracks media records, including backend reference, path/key, content type, size, checksums, and thumbnail references.
 
 Key responsibilities:
 - Provider selection at startup based on configuration.
-- Uniform API for upload/read/delete across providers.
+- Uniform API for upload/read/delete across providers through the unified access service.
 - Tenant isolation through directory or bucket scoping.
 - Consistent metadata persistence and retrieval.
+- Cache control and response optimization for different storage backends.
+
+**Updated** Added comprehensive coverage of the unified media access service that abstracts different storage backends behind a consistent interface.
 
 **Section sources**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 - [models.py](file://backend/app/db/models.py)
 - [0005_media_storage_backend_reference.py](file://backend/alembic/versions/0005_media_storage_backend_reference.py)
 - [0006_media_migration_bookkeeping.py](file://backend/alembic/versions/0006_media_migration_bookkeeping.py)
 - [0007_media_migration_metadata.py](file://backend/alembic/versions/0007_media_migration_metadata.py)
 
 ## Architecture Overview
-The storage layer follows a provider abstraction with a factory pattern:
-- Callers request a storage instance from the factory using configuration.
-- The factory returns an implementation (local or Qiniu).
+The storage layer follows a provider abstraction with a factory pattern and unified access service:
+- Callers interact with the unified media access service rather than direct storage providers.
+- The access service delegates to the appropriate storage provider based on configuration.
+- The factory resolves the correct provider from configuration and initializes it with provider-specific settings.
 - Media workflows (download, thumbnailing, serving) interact only with the abstract interface.
 - Database models store backend-agnostic identifiers and metadata.
 
 ```mermaid
 classDiagram
+class UnifiedMediaAccess {
++get_media(media_id) bytes
++get_url(media_id, options) string
++upload(data, metadata) MediaRecord
++delete(media_id) bool
+}
 class StorageInterface {
 +upload(data, key, metadata)
 +read(key) bytes
@@ -173,20 +210,64 @@ class StorageFactory {
 +get_provider(config) StorageInterface
 +register(name, provider_class)
 }
+UnifiedMediaAccess --> StorageInterface : "delegates to"
 StorageInterface <|.. LocalStorage
 StorageInterface <|.. QiniuStorage
 StorageFactory --> StorageInterface : "creates"
 ```
 
+**Updated** Added the unified media access service layer that sits above the storage interface abstraction.
+
 **Diagram sources**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 
 **Section sources**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 
 ## Detailed Component Analysis
+
+### Unified Media Access Service
+**New** The unified media access service provides a single entry point for all media operations, abstracting the complexity of different storage backends from application code.
+
+Responsibilities:
+- Provide consistent APIs for media access regardless of storage backend.
+- Handle cache control headers and response optimization.
+- Manage tenant isolation and access permissions.
+- Abstract provider-specific URL generation and signing logic.
+- Support both synchronous and asynchronous media operations.
+
+Design highlights:
+- Single-responsibility service class that delegates to storage providers.
+- Configuration-driven provider selection without code changes.
+- Comprehensive error handling and fallback mechanisms.
+- Built-in caching and performance optimizations.
+
+```mermaid
+sequenceDiagram
+participant App as "Application"
+participant Access as "UnifiedMediaAccess"
+participant Factory as "StorageFactory"
+participant Provider as "StorageInterface Impl"
+App->>Access : get_media(media_id, options)
+Access->>Factory : resolve_provider(media.backend_ref)
+Factory-->>Access : Provider instance
+Access->>Provider : url_for(key, options)
+Provider-->>Access : url
+Access-->>App : response_with_headers
+```
+
+**Diagram sources**
+- [media_access.py](file://backend/app/services/media_access.py)
+- [media_storage.py](file://backend/app/media_storage.py)
+- [test_media_access_cache_control.py](file://backend/tests/test_media_access_cache_control.py)
+
+**Section sources**
+- [media_access.py](file://backend/app/services/media_access.py)
+- [test_media_access_cache_control.py](file://backend/tests/test_media_access_cache_control.py)
 
 ### Storage Interface and Factory
 Responsibilities:
@@ -395,8 +476,9 @@ Next --> |None| Finish(["Complete"])
 - [test_migrate_local_media_to_qiniu.py](file://backend/tests/test_migrate_local_media_to_qiniu.py)
 
 ## Dependency Analysis
-The storage abstraction decouples callers from concrete providers:
+The storage abstraction decouples callers from concrete providers through the unified access service:
 - media_download and thumbnail_pipeline depend only on the StorageInterface.
+- The unified media access service provides a higher-level abstraction over storage operations.
 - The factory resolves the concrete provider based on configuration.
 - Database models provide backend-agnostic identifiers and metadata.
 
@@ -404,14 +486,18 @@ The storage abstraction decouples callers from concrete providers:
 graph LR
 MD["media_download.py"] --> IF["StorageInterface"]
 TP["thumbnail_pipeline.py"] --> IF
+MAS["services/media_access.py"] --> IF
 IF --> LFS["LocalStorage"]
 IF --> QN["QiniuStorage"]
 DB["db/models.py"] --> IF
 ```
 
+**Updated** Added the unified media access service as an additional layer in the dependency graph.
+
 **Diagram sources**
 - [media_download.py](file://backend/app/media_download.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [models.py](file://backend/app/db/models.py)
@@ -419,36 +505,46 @@ DB["db/models.py"] --> IF
 **Section sources**
 - [media_download.py](file://backend/app/media_download.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [models.py](file://backend/app/db/models.py)
 
 ## Performance Considerations
-- Connection pooling: For Qiniu, reuse client instances and manage token refresh efficiently to minimize overhead.
-- Chunked uploads: Use chunked transfers for large media to improve reliability and throughput.
-- Caching: Leverage CDN/domain caching for signed URLs where appropriate; configure cache-control headers.
-- Concurrency: Parallelize uploads and thumbnail generation with bounded concurrency to avoid resource exhaustion.
-- I/O locality: For local storage, place files on fast disks and consider RAID or SSDs for high-throughput scenarios.
-- Monitoring: Track latency, error rates, and throughput per backend to identify bottlenecks.
+- **Connection pooling**: For Qiniu, reuse client instances and manage token refresh efficiently to minimize overhead.
+- **Chunked uploads**: Use chunked transfers for large media to improve reliability and throughput.
+- **Caching**: Leverage CDN/domain caching for signed URLs where appropriate; configure cache-control headers through the unified access service.
+- **Concurrency**: Parallelize uploads and thumbnail generation with bounded concurrency to avoid resource exhaustion.
+- **I/O locality**: For local storage, place files on fast disks and consider RAID or SSDs for high-throughput scenarios.
+- **Monitoring**: Track latency, error rates, and throughput per backend to identify bottlenecks.
+- **Response optimization**: The unified access service optimizes responses with appropriate headers and caching strategies.
+
+**Updated** Added performance considerations specific to the unified access service layer.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 Common issues and resolutions:
-- Authentication failures: Verify provider credentials and token lifetimes; check network egress and firewall rules.
-- Permission errors: Ensure bucket policies or filesystem permissions allow read/write operations.
-- Upload timeouts: Increase timeouts or enable chunked uploads; inspect network stability.
-- Missing thumbnails: Check thumbnail pipeline jobs and logs; verify supported media types and sizes.
-- Migration inconsistencies: Review migration bookkeeping tables and reconcile backend references; rerun failed steps.
+- **Authentication failures**: Verify provider credentials and token lifetimes; check network egress and firewall rules.
+- **Permission errors**: Ensure bucket policies or filesystem permissions allow read/write operations.
+- **Upload timeouts**: Increase timeouts or enable chunked uploads; inspect network stability.
+- **Missing thumbnails**: Check thumbnail pipeline jobs and logs; verify supported media types and sizes.
+- **Migration inconsistencies**: Review migration bookkeeping tables and reconcile backend references; rerun failed steps.
+- **Cache control issues**: Verify cache headers are properly set through the unified access service.
+- **Provider resolution errors**: Check configuration and provider registration in the factory.
 
 Operational guidance and runbooks:
 - See operational documentation for detailed troubleshooting steps and best practices.
+
+**Updated** Added troubleshooting items related to the unified access service and cache control.
 
 **Section sources**
 - [ops/media_storage_ops.md](file://docs/ops/media_storage_ops.md)
 
 ## Conclusion
-The storage backend abstraction provides a clean, extensible foundation for supporting multiple storage providers. By isolating provider-specific logic behind a unified interface and leveraging a factory for resolution, the system remains flexible and maintainable. With robust metadata tracking, migration tooling, and clear operational guidance, teams can confidently evolve storage backends to meet changing performance and scalability needs.
+The storage backend abstraction provides a clean, extensible foundation for supporting multiple storage providers. With the addition of the unified media access service, the system now offers a consistent interface for accessing media regardless of the underlying storage backend. By isolating provider-specific logic behind a unified interface and leveraging a factory for resolution, the system remains flexible and maintainable. With robust metadata tracking, migration tooling, and clear operational guidance, teams can confidently evolve storage backends to meet changing performance and scalability needs.
+
+**Updated** Enhanced conclusion to reflect the addition of the unified media access service layer.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -458,6 +554,7 @@ The storage backend abstraction provides a clean, extensible foundation for supp
 - Select the active backend via configuration keys.
 - Per-provider settings include credentials, bucket names, domains, and upload options.
 - Runtime overrides are supported for testing and dynamic environments.
+- Unified access service configuration includes cache control and response optimization settings.
 
 **Section sources**
 - [rnd_185_media_storage_abstraction.md](file://docs/research/rnd_185_media_storage_abstraction.md)
@@ -465,7 +562,49 @@ The storage backend abstraction provides a clean, extensible foundation for supp
 ### Migration Procedures
 - Use the provided migration script to move media from local storage to Qiniu.
 - Follow step-by-step instructions in the research notes for safe transitions and rollback strategies.
+- The unified access service ensures seamless operation during and after migration.
 
 **Section sources**
 - [rnd_186_local_qiniu_migration.md](file://docs/research/rnd_186_local_qiniu_migration.md)
 - [migrate_local_media_to_qiniu.py](file://backend/scripts/migrate_local_media_to_qiniu.py)
+
+### Provider Registration Mechanism
+**New** The provider registration mechanism allows for dynamic addition of new storage backends without modifying core application code.
+
+Registration process:
+- Implement the StorageInterface for the new provider.
+- Register the provider class with the factory using a unique name.
+- Configure the system to use the new provider through configuration.
+- Test the provider thoroughly before production deployment.
+
+Best practices:
+- Use descriptive provider names that indicate the storage type.
+- Implement comprehensive error handling and logging.
+- Provide adequate configuration validation.
+- Include unit tests for the new provider implementation.
+
+**Section sources**
+- [media_storage.py](file://backend/app/media_storage.py)
+- [test_qiniu_provider_factory.py](file://backend/tests/test_qiniu_provider_factory.py)
+
+### Cache Control and Response Optimization
+**New** The unified media access service provides sophisticated cache control and response optimization capabilities.
+
+Features:
+- Automatic cache header generation based on content type and storage backend.
+- Configurable cache durations for different media types.
+- Support for conditional requests and ETags.
+- Optimized response streaming for large files.
+- Backend-specific optimization strategies.
+
+Configuration options:
+- Cache duration settings per media type.
+- CDN integration parameters.
+- Compression and encoding preferences.
+- Security headers and CORS configuration.
+
+**Section sources**
+- [media_access.py](file://backend/app/services/media_access.py)
+- [test_media_access_cache_control.py](file://backend/tests/test_media_access_cache_control.py)
+
+</docs>

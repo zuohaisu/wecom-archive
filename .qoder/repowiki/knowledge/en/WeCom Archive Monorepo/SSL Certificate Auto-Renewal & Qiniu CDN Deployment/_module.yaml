@@ -5,5 +5,4 @@ scope:
     - ssl-renew/
 source_files: []
 depends_on: []
-related_to:
-    - path: deployment_infra
+related_to: []

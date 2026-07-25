@@ -1,0 +1,1 @@
+Shared backend layer providing the canonical message-type registry, structured parsers, listing services, display-name helpers, HTML/i18n asset loading, and idempotent revoke reconciliation used by all higher-level routers.

@@ -1,1 +1,0 @@
-FastAPI application that wires together WeCom archive routers, SQLAlchemy database layer, media pipeline, and the admin web console into a single service with health endpoints and static asset serving.

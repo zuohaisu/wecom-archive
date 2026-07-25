@@ -13,25 +13,36 @@
 - [API.md](file://docs/API.md)
 - [test_media_download.py](file://backend/tests/test_media_download.py)
 - [test_qiniu_worker_integration.py](file://backend/tests/test_qiniu_worker_integration.py)
+- [media_access.py](file://backend/app/services/media_access.py)
+- [conversations.py](file://backend/app/routers/conversations.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated architecture overview to reflect the separation of media download pipeline from conversations router to dedicated media access service
+- Added new section documenting the media access service architecture
+- Updated component relationships to show the new service-based structure
+- Enhanced dependency analysis to reflect the decoupled architecture between conversation handling and media operations
 
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
-5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+5. [Media Access Service Architecture](#media-access-service-architecture)
+6. [Detailed Component Analysis](#detailed-component-analysis)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the media download pipeline for WeCom (Enterprise WeChat) content, focusing on how media is retrieved from WeCom, queued and processed concurrently, validated for integrity, stored across backends, and monitored with progress tracking and retry/backoff strategies. It covers authentication to WeCom, rate limiting, error recovery, storage integration, and end-to-end data flow from initial download to final placement.
+This document explains the media download pipeline for WeCom (Enterprise WeChat) content, focusing on how media is retrieved from WeCom, queued and processed concurrently, validated for integrity, stored across backends, and monitored with progress tracking and retry/backoff strategies. The pipeline has been restructured into a dedicated media access service that operates independently from conversation handling, providing better separation of concerns and improved scalability. It covers authentication to WeCom, rate limiting, error recovery, storage integration, and end-to-end data flow from initial download to final placement.
 
 ## Project Structure
-The media download pipeline spans application modules, scripts, and deployment units:
+The media download pipeline spans application modules, services, scripts, and deployment units:
 - Application modules implement the download orchestration, storage abstraction, and thumbnail generation.
+- A dedicated media access service provides the core functionality for media operations.
 - A dedicated script drives one-shot downloads for historical or manual runs.
 - Systemd units schedule and manage long-running workers.
 - Documentation provides architectural context and API contracts.
@@ -44,6 +55,12 @@ MS["media_storage.py"]
 QS["qiniu_storage.py"]
 TP["thumbnail_pipeline.py"]
 SDK["sdk/wecom_sdk.py"]
+end
+subgraph "Services"
+MAS["services/media_access.py"]
+end
+subgraph "Routers"
+CR["routers/conversations.py"]
 end
 subgraph "Scripts"
 DWO["scripts/download_wecom_media_once.py"]
@@ -60,6 +77,8 @@ MD --> SDK
 MD --> MS
 MS --> QS
 MD --> TP
+MAS --> MD
+CR -.-> MAS
 Svc --> DWO
 Arch -.-> MD
 Api -.-> MD
@@ -71,6 +90,8 @@ Api -.-> MD
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [media_access.py](file://backend/app/services/media_access.py)
+- [conversations.py](file://backend/app/routers/conversations.py)
 - [download_wecom_media_once.py](file://backend/scripts/download_wecom_media_once.py)
 - [wecom-archive-media-download.service](file://deploy/systemd/wecom-archive-media-download.service)
 - [ARCHITECTURE.md](file://docs/ARCHITECTURE.md)
@@ -83,6 +104,7 @@ Api -.-> MD
 ## Core Components
 - WeCom SDK client: encapsulates authentication, token management, and API calls to retrieve media metadata and streams.
 - Media download orchestrator: manages queueing, concurrency, retries, backoff, progress tracking, and validation.
+- Media access service: provides a dedicated interface for media operations, decoupling from conversation handling.
 - Storage abstraction: defines a common interface for storing media bytes and metadata; concrete implementations include local filesystem and Qiniu Kodo.
 - Thumbnail pipeline: generates thumbnails post-download and integrates with storage backends.
 - One-shot downloader script: triggers batch or targeted downloads via the orchestrator.
@@ -95,6 +117,7 @@ Key responsibilities:
 - Integrity checks (size/hash/content-type) and corruption handling.
 - Progress reporting and observability hooks.
 - Pluggable storage backends with consistent semantics.
+- Service-oriented architecture for media operations.
 
 **Section sources**
 - [media_download.py](file://backend/app/media_download.py)
@@ -102,13 +125,15 @@ Key responsibilities:
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [media_access.py](file://backend/app/services/media_access.py)
 - [download_wecom_media_once.py](file://backend/scripts/download_wecom_media_once.py)
 - [wecom-archive-media-download.service](file://deploy/systemd/wecom-archive-media-download.service)
 
 ## Architecture Overview
-The pipeline follows a producer-consumer model:
+The pipeline follows a producer-consumer model with service-oriented architecture:
 - Producers enqueue media tasks derived from WeCom conversations/messages.
 - Consumers pull tasks, authenticate with WeCom, download media, validate, store, and generate thumbnails.
+- The media access service provides a clean interface for media operations, separate from conversation routing.
 - Observability tracks per-task progress and aggregate metrics.
 - Failure paths trigger retries with backoff and notifications upon exhaustion.
 
@@ -121,7 +146,10 @@ participant Worker as "Worker Process"
 participant SDK as "WeCom SDK Client"
 participant Store as "Storage Backend"
 participant Thumb as "Thumbnail Pipeline"
-CLI->>Orchestrator : "Start download job(s)"
+participant MAS as "Media Access Service"
+participant CR as "Conversations Router"
+CR->>MAS : "Request media operation"
+MAS->>Orchestrator : "Delegate to orchestrator"
 Orchestrator->>Queue : "Enqueue media tasks"
 Worker->>Queue : "Dequeue task"
 Worker->>SDK : "Authenticate and fetch media"
@@ -147,7 +175,57 @@ end
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
+- [media_access.py](file://backend/app/services/media_access.py)
+- [conversations.py](file://backend/app/routers/conversations.py)
 - [download_wecom_media_once.py](file://backend/scripts/download_wecom_media_once.py)
+
+## Media Access Service Architecture
+The media access service provides a dedicated interface for all media-related operations, separating these concerns from conversation handling:
+
+### Service Responsibilities
+- **Media Retrieval**: Coordinates the download process from WeCom to storage backends
+- **Task Management**: Handles queuing, scheduling, and concurrent processing of media tasks
+- **Error Handling**: Implements retry logic, backoff strategies, and failure notifications
+- **Progress Tracking**: Monitors download progress and provides status updates
+- **Validation**: Ensures media integrity through size, hash, and content-type verification
+
+### Integration Points
+- **Conversations Router**: Delegates media operations to the media access service
+- **Storage Backends**: Abstracts different storage implementations (local, Qiniu)
+- **WeCom SDK**: Provides authentication and API access for media retrieval
+- **Thumbnail Pipeline**: Integrates thumbnail generation after successful downloads
+
+```mermaid
+classDiagram
+class MediaAccessService {
++download_media(media_id, tenant_id)
++get_media_status(task_id)
++cancel_download(task_id)
++list_pending_tasks()
++retry_failed_tasks()
+}
+class ConversationsRouter {
++handle_conversation_request()
++delegate_to_media_service()
+}
+class MediaDownloadOrchestrator {
++enqueue_task(task)
++process_queue()
++track_progress()
++handle_errors()
+}
+MediaAccessService --> MediaDownloadOrchestrator
+ConversationsRouter --> MediaAccessService
+```
+
+**Diagram sources**
+- [media_access.py](file://backend/app/services/media_access.py)
+- [conversations.py](file://backend/app/routers/conversations.py)
+- [media_download.py](file://backend/app/media_download.py)
+
+**Section sources**
+- [media_access.py](file://backend/app/services/media_access.py)
+- [conversations.py](file://backend/app/routers/conversations.py)
 
 ## Detailed Component Analysis
 
@@ -320,8 +398,9 @@ Restart --> Run
 - [wecom-archive-media-download.service](file://deploy/systemd/wecom-archive-media-download.service)
 
 ## Dependency Analysis
-The pipeline exhibits clear separation of concerns:
+The pipeline exhibits clear separation of concerns with service-oriented architecture:
 - The orchestrator depends on the WeCom SDK for retrieval and on the storage abstraction for persistence.
+- The media access service provides a clean interface between conversation routing and media operations.
 - The storage abstraction decouples implementation details from the orchestrator.
 - The thumbnail pipeline depends on storage and image processing capabilities.
 - The one-shot script depends on the orchestrator for execution.
@@ -334,6 +413,8 @@ Storage --> Local["Local Storage"]
 Storage --> Qiniu["Qiniu Storage"]
 Orchestrator --> Thumb["Thumbnail Pipeline"]
 Script["One-shot Script"] --> Orchestrator
+MAS["Media Access Service"] --> Orchestrator
+CR["Conversations Router"] --> MAS
 ```
 
 **Diagram sources**
@@ -342,6 +423,8 @@ Script["One-shot Script"] --> Orchestrator
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [media_access.py](file://backend/app/services/media_access.py)
+- [conversations.py](file://backend/app/routers/conversations.py)
 - [download_wecom_media_once.py](file://backend/scripts/download_wecom_media_once.py)
 
 **Section sources**
@@ -350,6 +433,8 @@ Script["One-shot Script"] --> Orchestrator
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [wecom_sdk.py](file://backend/app/sdk/wecom_sdk.py)
+- [media_access.py](file://backend/app/services/media_access.py)
+- [conversations.py](file://backend/app/routers/conversations.py)
 - [download_wecom_media_once.py](file://backend/scripts/download_wecom_media_once.py)
 
 ## Performance Considerations
@@ -359,8 +444,7 @@ Script["One-shot Script"] --> Orchestrator
 - Caching: cache WeCom tokens and frequently accessed metadata to reduce latency.
 - Backoff strategy: use exponential backoff with jitter to avoid thundering herds.
 - Validation early: perform quick checks (content-type, size bounds) before full processing.
-
-[No sources needed since this section provides general guidance]
+- Service isolation: dedicate resources to media operations for better performance isolation.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -370,17 +454,18 @@ Common issues and resolutions:
 - Integrity mismatches: re-download and compare hashes; mark corrupted entries for review.
 - Storage write failures: inspect backend permissions, quotas, and network reachability.
 - Thumbnail generation errors: validate input formats and resource availability.
+- Service communication issues: check inter-service communication and health endpoints.
 
 Operational tips:
 - Use the one-shot script with dry-run flags to validate configurations.
 - Monitor system logs for worker health and retry patterns.
 - Inspect storage backend dashboards for upload success rates.
+- Check media access service health and status endpoints.
+- Monitor conversation router to media service communication.
 
 **Section sources**
 - [test_media_download.py](file://backend/tests/test_media_download.py)
 - [test_qiniu_worker_integration.py](file://backend/tests/test_qiniu_worker_integration.py)
 
 ## Conclusion
-The media download pipeline provides a robust, extensible framework for retrieving WeCom media, enforcing reliability through retries and backoff, ensuring integrity via validation, and supporting multiple storage backends. Its modular design enables easy extension and maintenance while offering strong operational visibility and control.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The media download pipeline provides a robust, extensible framework for retrieving WeCom media, enforcing reliability through retries and backoff, ensuring integrity via validation, and supporting multiple storage backends. The migration to a dedicated media access service improves separation of concerns, enhances scalability, and provides better operational visibility. Its modular design enables easy extension and maintenance while offering strong operational control and service-oriented architecture benefits.

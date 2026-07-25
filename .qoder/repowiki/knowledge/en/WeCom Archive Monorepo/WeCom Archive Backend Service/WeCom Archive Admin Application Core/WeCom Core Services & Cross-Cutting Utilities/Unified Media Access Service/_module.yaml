@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: backend_app/app_core/core_services_and_utils/media_access_service
+title: Unified Media Access Service
+scope:
+    - backend/app/services/media_access.py
+source_files: []
+depends_on: []
+related_to: []

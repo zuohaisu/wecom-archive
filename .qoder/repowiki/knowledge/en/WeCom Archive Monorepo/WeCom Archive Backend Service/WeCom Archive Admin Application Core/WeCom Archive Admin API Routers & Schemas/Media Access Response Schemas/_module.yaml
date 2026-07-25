@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: backend_app/app_core/api_routers/media_schemas
+title: Media Access Response Schemas
+scope:
+    - backend/app/schemas/media.py
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,1 @@
+FastAPI (`HTTPException`, `FileResponse`, `Response`) with SQLAlchemy ORM sessions; storage backed by pluggable providers via `app.media_storage` supporting local filesystem and Qiniu Kodo; uses Python `re` for strict nested-media path grammar validation and `datetime`/`timezone` for signed-URL windowing.

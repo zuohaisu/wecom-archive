@@ -2,3 +2,4 @@
 - Alembic migrations are ordered numerically (`0001_*.py`...) and reference only the current model state, not previous versions.
 - One-shot scripts in `scripts/` are idempotent and operate directly on SQLAlchemy sessions rather than calling HTTP endpoints.
 - Tests construct a test FastAPI client and use an in-memory or test-scoped database session mirroring the production setup.
+- All HTTP routers are registered centrally in `app/main.py` and exposed under consistent path prefixes.

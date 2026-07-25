@@ -1,1 +1,0 @@
-Cross-cutting backend utilities providing conversation/contact/account listing, the authoritative WeCom message-type registry with structured parsers, deterministic display-name resolution, HTML helpers, i18n asset loading, and idempotent revoke-event reconciliation.

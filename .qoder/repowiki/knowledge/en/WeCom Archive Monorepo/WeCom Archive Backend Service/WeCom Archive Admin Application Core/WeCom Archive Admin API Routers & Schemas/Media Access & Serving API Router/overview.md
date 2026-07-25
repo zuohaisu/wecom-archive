@@ -1,0 +1,1 @@
+FastAPI router exposing endpoints to serve or obtain signed access descriptors for image and nested media items from WeCom archive conversations, with tenant-scoped authorization and optional thumbnail variants.

@@ -5,6 +5,4 @@ scope:
     - backend/alembic/
 source_files: []
 depends_on: []
-related_to:
-    - path: backend_app/tests
-    - path: deployment_infra
+related_to: []
