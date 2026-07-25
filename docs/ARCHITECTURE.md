@@ -293,6 +293,53 @@ The system is tenant-aware (RND-156): a single deployment can support multiple c
 - Sessions carry `tenant_id` as the authorization scope.
 - Current MVP: single default tenant.
 
+### 7.1 Worker tenant/corp scope contract (RND-222)
+
+The three archive workers (`scripts/sync_wecom_archive_once.py`,
+`scripts/decrypt_wecom_messages_once.py`,
+`scripts/download_wecom_media_once.py`) are thin CLI shells over
+application functions in `backend/app/services/{sync,decrypt,media}_worker.py`.
+Each shell resolves exactly **one** `(tenant_id, corp_id)` pair per
+invocation — `corp_id` from `WECOM_CORP_ID`, `tenant_id` resolved from the
+active `tenant_wecom_configs` row matching it (`_require_tenant_id`,
+duplicated per-script rather than shared — see each script's own copy) —
+and passes `tenant_id` into the service as a **required** parameter with
+no default and no `None` fallback. This is a deliberate code-level
+contract, not just a convention: none of the three `run_*_once()`
+functions can be called without naming a tenant, so a caller can never
+accidentally process every tenant's rows in one run. There is currently
+no "iterate every tenant" mode; a multi-corp deployment runs one worker
+invocation per corp.
+
+**Decrypt tenant-scope audit (RND-222).** Before this ticket,
+`decrypt_wecom_messages_once.py` was the one worker whose pending/failed
+scan, recipient-repair scan (`repair_missing_recipients`), and
+revoke-reconciliation repair scan (`reconcile_pending_revocations`) had no
+tenant filter at all — every decrypt run scanned and could mutate *every*
+tenant's rows, even though it can only ever hold one corp's RSA private
+key. Fixed: `run_decrypt_once()` filters every one of those four
+operations by `tenant_id`. Sync and media were already tenant-scoped and
+are unchanged. See `backend/app/services/decrypt_worker.py`'s module
+docstring for the full analysis.
+
+**Transaction boundaries** (unchanged by the RND-222 extraction — each
+service function preserves its worker's original commit pattern exactly):
+
+| Worker | Commit pattern |
+|--------|-----------------|
+| Sync | Per-run: inserted records commit once, then the seq cursor advances and commits once more. No records fetched → no commit at all. |
+| Decrypt | Per-run, single commit: every row mutation, the recipient-repair scan, and the revoke-reconciliation scan happen in memory/via `flush()`, then one `session.commit()` at the end. A commit failure raises `DecryptCommitError`, which the shell translates to `[FAIL] Database commit failed: …` + exit 1. |
+| Media | Per-candidate: each download outcome is persisted and committed individually, with rollback + best-effort orphan-object cleanup on a confirmed DB commit failure for that one candidate — one bad candidate never blocks the rest of the run. |
+
+**Exit code semantics** are unchanged by this extraction: `0` on success
+(including "nothing to do"), `1` on any fatal failure (missing/invalid
+env, SDK load/init failure, no active tenant for `WECOM_CORP_ID`, or —
+decrypt only — a database commit failure). A worker never partially
+exits; every `[INFO]` summary line is printed before the process exits,
+even on a non-fatal-but-reported failure (e.g. sync's `GetChatData`
+returning a non-zero code still prints the full summary before the
+`[FAIL]` + exit 1).
+
 ---
 
 ## 8. Conversation Model

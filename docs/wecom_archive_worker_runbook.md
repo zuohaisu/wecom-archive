@@ -151,5 +151,6 @@ sudo systemctl disable --now wecom-archive-worker.timer
 |----------------------------------------------------|------------------------------------------|---------------------------------------------------------|
 | `[FAIL] Cannot create lock directory`              | Missing permissions on shared dir        | Run the shared lock directory setup commands above       |
 | `[FAIL] Environment variable not set or empty: …`  | Missing `.env` value                     | Verify `.env` has all required variables                |
+| `[FAIL] No active tenant found for this corp` (from `decrypt_wecom_messages_once.py`) | RND-222: decrypt now resolves and fails fast on a missing/inactive `tenant_wecom_configs` row for `WECOM_CORP_ID`, matching sync/media's existing behavior (previously decrypt had no tenant check at all) | Run `bootstrap_default_tenant.py` or verify the active config row for this corp |
 | Subprocess exits non-zero                          | Sync or decrypt failure                  | Run `sudo journalctl -u wecom-archive-worker.service -n 100 --no-pager` |
 | Timer not firing                                   | Timer not enabled/started                | `sudo systemctl status wecom-archive-worker.timer --no-pager` |
