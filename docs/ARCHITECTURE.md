@@ -369,6 +369,22 @@ Important caveat:
 - some optional variables are script-specific rather than global runtime settings
 - future storage-provider placeholders should not be treated as implemented config
 
+### 9.1 Configuration Architecture (RND-223)
+
+Web-app runtime reads are consolidated behind `backend/app/settings.py`: six
+domain-grouped Typed Settings classes (`DatabaseSettings`, `AuthSettings`,
+`WecomOAuthSettings`, `WecomCallbackSettings`, `MediaStorageSettings`,
+`ThumbnailSettings`), each a `pydantic-settings` `BaseSettings` instantiated
+fresh on every call via a `get_xxx_settings()` factory — never cached — so an
+env var change takes effect on the next read, matching the pre-RND-223
+`os.getenv`/`os.environ.get` semantics the test suite relies on
+(`monkeypatch.setenv` before a request/call). Environment variable names,
+defaults, and fail-loud/degrade behavior are unchanged; only the read
+mechanism moved. `backend/app/main.py` is now a composition root:
+`create_app()` builds and wires the FastAPI instance (middleware, routers,
+health endpoints, static mount), and the module-level `app = create_app()`
+is what `uvicorn app.main:app` serves.
+
 ---
 
 ## 10. Explicit Non-Goals

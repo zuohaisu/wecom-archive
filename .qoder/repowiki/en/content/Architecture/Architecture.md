@@ -11,21 +11,33 @@
 - [auth.py](file://backend/app/auth.py)
 - [conversations.py](file://backend/app/routers/conversations.py)
 - [wecom_events.py](file://backend/app/routers/wecom_events.py)
+- [decrypt_worker.py](file://backend/app/services/decrypt_worker.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
+- [sync_worker.py](file://backend/app/services/sync_worker.py)
 - [ARCHITECTURE.md](file://docs/ARCHITECTURE.md)
 - [DATA_MODEL.md](file://docs/DATA_MODEL.md)
 - [alembic.ini](file://backend/alembic.ini)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Added comprehensive worker service architecture section documenting DecryptWorker, MediaWorker, and SyncWorker services
+- Updated microservices architecture pattern to include dedicated worker services for tenant-scoped operations
+- Enhanced event-driven message processing with structured message processing pipeline
+- Added new diagrams illustrating worker service coordination and tenant isolation patterns
+- Updated dependency analysis to include worker service infrastructure
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
 3. [Core Components](#core-components)
-4. [Architecture Overview](#architecture-overview)
-5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+4. [Worker Service Architecture](#worker-service-architecture)
+5. [Architecture Overview](#architecture-overview)
+6. [Detailed Component Analysis](#detailed-component-analysis)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
 
 ## Introduction
 
@@ -57,6 +69,11 @@ media_storage[Media Storage]
 qiniu[Qiniu Provider]
 thumbnails[Thumbnail Pipeline]
 end
+subgraph "Worker Services"
+decrypt_worker[DecryptWorker]
+media_worker[MediaWorker]
+sync_worker[SyncWorker]
+end
 subgraph "External Services"
 wecom[WeCom API]
 qiniu_cloud[Qiniu Cloud]
@@ -67,6 +84,9 @@ main --> sdk
 main --> db
 main --> web
 routers --> services
+services --> decrypt_worker
+services --> media_worker
+services --> sync_worker
 sdk --> wecom
 services --> media_storage
 media_storage --> qiniu
@@ -77,6 +97,9 @@ thumbnails --> media_storage
 **Diagram sources**
 - [main.py:1-50](file://backend/app/main.py#L1-L50)
 - [models.py:1-100](file://backend/app/db/models.py#L1-L100)
+- [decrypt_worker.py:1-100](file://backend/app/services/decrypt_worker.py#L1-L100)
+- [media_worker.py:1-100](file://backend/app/services/media_worker.py#L1-L100)
+- [sync_worker.py:1-100](file://backend/app/services/sync_worker.py#L1-L100)
 
 **Section sources**
 - [main.py:1-100](file://backend/app/main.py#L1-L100)
@@ -93,6 +116,7 @@ The system implements a microservices architecture with clear service boundaries
 - **Storage Abstraction Service**: Manages data persistence across multiple backends
 - **Thumbnail Generation Service**: Asynchronous media processing pipeline
 - **Web Application Service**: Serves the user interface and management console
+- **Worker Services**: Dedicated background services for specialized tasks
 
 ### Event-Driven Message Processing
 
@@ -104,19 +128,28 @@ participant Client as "WeCom API"
 participant Gateway as "API Gateway"
 participant Processor as "Message Processor"
 participant Queue as "Message Queue"
-participant Worker as "Background Worker"
+participant DecryptWorker as "DecryptWorker"
+participant MediaWorker as "MediaWorker"
+participant SyncWorker as "SyncWorker"
 participant Storage as "Storage Backend"
 Client->>Gateway : POST /api/wecom/events
 Gateway->>Processor : Validate & Parse Event
 Processor->>Queue : Enqueue Message
-Queue-->>Worker : Dequeue Message
-Worker->>Storage : Store Message & Media
-Worker-->>Client : Acknowledge Processing
+Queue-->>DecryptWorker : Dequeue Decryption Task
+DecryptWorker->>Storage : Store Decrypted Message
+Queue-->>MediaWorker : Dequeue Media Task
+MediaWorker->>Storage : Download & Process Media
+Queue-->>SyncWorker : Dequeue Sync Task
+SyncWorker->>Storage : Sync Contact Data
+Storage-->>Client : Acknowledge Processing
 ```
 
 **Diagram sources**
 - [wecom_events.py:1-150](file://backend/app/routers/wecom_events.py#L1-L150)
 - [thumbnail_pipeline.py:1-200](file://backend/app/thumbnail_pipeline.py#L1-L200)
+- [decrypt_worker.py:1-150](file://backend/app/services/decrypt_worker.py#L1-L150)
+- [media_worker.py:1-150](file://backend/app/services/media_worker.py#L1-L150)
+- [sync_worker.py:1-150](file://backend/app/services/sync_worker.py#L1-L150)
 
 ### Multi-Tenant Isolation
 
@@ -126,10 +159,166 @@ The system implements strict tenant isolation at multiple levels:
 - **Storage Level**: Tenant-specific media directories and access controls
 - **API Level**: Tenant context validation and authorization
 - **Cache Level**: Tenant-isolated caching strategies
+- **Worker Level**: Tenant-scoped worker operations and resource isolation
 
 **Section sources**
 - [models.py:1-300](file://backend/app/db/models.py#L1-L300)
 - [auth.py:1-200](file://backend/app/auth.py#L1-L200)
+
+## Worker Service Architecture
+
+The WeCom Archive 365 system implements a comprehensive worker service architecture that handles specialized background tasks with tenant-scoped operations and structured message processing.
+
+### Worker Service Components
+
+The worker service architecture consists of three primary worker types, each responsible for specific processing tasks:
+
+```mermaid
+classDiagram
+class DecryptWorker {
++string tenant_id
++process_message(message) bool
++decrypt_content(content) string
++validate_tenant_access() bool
++handle_encrypted_data(data) dict
+}
+class MediaWorker {
++string tenant_id
++download_media(media_id) bytes
++generate_thumbnails(file_path) list
++upload_to_storage(file_path, key) string
++process_media_types(media_type) bool
+}
+class SyncWorker {
++string tenant_id
++sync_contacts() list
++update_employee_info(user_id) Employee
++sync_conversation_members(conversation_id) list
++maintain_sync_state() void
+}
+class WorkerCoordinator {
++initialize_workers() void
++route_task(task_type, payload) bool
++monitor_worker_health() bool
++scale_workers(worker_count) void
+}
+DecryptWorker --> WorkerCoordinator : "registered with"
+MediaWorker --> WorkerCoordinator : "registered with"
+SyncWorker --> WorkerCoordinator : "registered with"
+```
+
+**Diagram sources**
+- [decrypt_worker.py:1-200](file://backend/app/services/decrypt_worker.py#L1-L200)
+- [media_worker.py:1-200](file://backend/app/services/media_worker.py#L1-L200)
+- [sync_worker.py:1-200](file://backend/app/services/sync_worker.py#L1-L200)
+
+### Tenant-Scoped Operations
+
+Each worker service implements tenant-scoped operations to ensure data isolation and security:
+
+```mermaid
+flowchart TD
+Task["Incoming Worker Task"] --> ValidateTenant["Validate Tenant Context"]
+ValidateTenant --> CheckAccess{"Tenant Has Access?"}
+CheckAccess --> |No| Reject["Reject Task - Unauthorized"]
+CheckAccess --> |Yes| RouteToWorker["Route to Appropriate Worker"]
+RouteToWorker --> DecryptWorker{"Is Decryption Task?"}
+RouteToWorker --> MediaWorker{"Is Media Processing Task?"}
+RouteToWorker --> SyncWorker{"Is Sync Task?"}
+DecryptWorker --> |Yes| DecryptProcess["Decrypt Content"]
+MediaWorker --> |Yes| MediaProcess["Process Media Files"]
+SyncWorker --> |Yes| SyncProcess["Synchronize Data"]
+DecryptProcess --> StoreResult["Store Results"]
+MediaProcess --> StoreResult
+SyncProcess --> StoreResult
+StoreResult --> Complete["Task Complete"]
+Reject --> End([End])
+Complete --> End
+```
+
+**Diagram sources**
+- [decrypt_worker.py:1-150](file://backend/app/services/decrypt_worker.py#L1-L150)
+- [media_worker.py:1-150](file://backend/app/services/media_worker.py#L1-L150)
+- [sync_worker.py:1-150](file://backend/app/services/sync_worker.py#L1-L150)
+
+### Structured Message Processing
+
+The worker services implement structured message processing for handling different message types and content formats:
+
+```mermaid
+sequenceDiagram
+participant Queue as "Message Queue"
+participant Router as "Task Router"
+participant DecryptWorker as "DecryptWorker"
+participant MediaWorker as "MediaWorker"
+participant SyncWorker as "SyncWorker"
+participant Storage as "Storage Backend"
+Queue->>Router : Enqueue Task
+Router->>Router : Analyze Task Type
+Router->>DecryptWorker : Decrypt Text Messages
+Router->>MediaWorker : Process Media Files
+Router->>SyncWorker : Sync Contact Data
+DecryptWorker->>Storage : Store Decrypted Content
+MediaWorker->>Storage : Upload Processed Media
+SyncWorker->>Storage : Update Contact Records
+DecryptWorker-->>Queue : Task Complete
+MediaWorker-->>Queue : Task Complete
+SyncWorker-->>Queue : Task Complete
+```
+
+**Diagram sources**
+- [decrypt_worker.py:1-200](file://backend/app/services/decrypt_worker.py#L1-L200)
+- [media_worker.py:1-200](file://backend/app/services/media_worker.py#L1-L200)
+- [sync_worker.py:1-200](file://backend/app/services/sync_worker.py#L1-L200)
+
+### Worker Coordination and Health Monitoring
+
+The worker service architecture includes coordination mechanisms for managing worker lifecycle and health monitoring:
+
+```mermaid
+graph TB
+subgraph "Worker Management"
+coordinator[Worker Coordinator]
+health_monitor[Health Monitor]
+task_router[Task Router]
+resource_manager[Resource Manager]
+end
+subgraph "Worker Instances"
+decrypt_instances[DecryptWorker Instances]
+media_instances[MediaWorker Instances]
+sync_instances[SyncWorker Instances]
+end
+subgraph "Infrastructure"
+message_queue[Message Queue]
+storage_backend[Storage Backend]
+database[(Database)]
+end
+coordinator --> health_monitor
+coordinator --> task_router
+coordinator --> resource_manager
+health_monitor --> decrypt_instances
+health_monitor --> media_instances
+health_monitor --> sync_instances
+task_router --> decrypt_instances
+task_router --> media_instances
+task_router --> sync_instances
+decrypt_instances --> storage_backend
+media_instances --> storage_backend
+sync_instances --> storage_backend
+decrypt_instances --> database
+media_instances --> database
+sync_instances --> database
+```
+
+**Diagram sources**
+- [decrypt_worker.py:1-100](file://backend/app/services/decrypt_worker.py#L1-L100)
+- [media_worker.py:1-100](file://backend/app/services/media_worker.py#L1-L100)
+- [sync_worker.py:1-100](file://backend/app/services/sync_worker.py#L1-L100)
+
+**Section sources**
+- [decrypt_worker.py:1-300](file://backend/app/services/decrypt_worker.py#L1-L300)
+- [media_worker.py:1-300](file://backend/app/services/media_worker.py#L1-L300)
+- [sync_worker.py:1-300](file://backend/app/services/sync_worker.py#L1-L300)
 
 ## Architecture Overview
 
@@ -155,6 +344,12 @@ storage_abstraction[Storage Abstraction]
 thumbnail_pipeline[Thumbnail Pipeline]
 notification_service[Notification Service]
 end
+subgraph "Worker Services Layer"
+decrypt_worker[DecryptWorker]
+media_worker[MediaWorker]
+sync_worker[SyncWorker]
+worker_coordinator[Worker Coordinator]
+end
 subgraph "Data Layer"
 postgresql[(PostgreSQL)]
 local_storage[Local Filesystem]
@@ -176,11 +371,20 @@ storage_abstraction --> local_storage
 storage_abstraction --> qiniu_storage
 thumbnail_pipeline --> local_storage
 thumbnail_pipeline --> qiniu_storage
+decrypt_worker --> storage_abstraction
+media_worker --> storage_abstraction
+sync_worker --> storage_abstraction
+worker_coordinator --> decrypt_worker
+worker_coordinator --> media_worker
+worker_coordinator --> sync_worker
 ```
 
 **Diagram sources**
 - [main.py:1-100](file://backend/app/main.py#L1-L100)
 - [media_storage.py:1-200](file://backend/app/media_storage.py#L1-L200)
+- [decrypt_worker.py:1-100](file://backend/app/services/decrypt_worker.py#L1-L100)
+- [media_worker.py:1-100](file://backend/app/services/media_worker.py#L1-L100)
+- [sync_worker.py:1-100](file://backend/app/services/sync_worker.py#L1-L100)
 
 ## Detailed Component Analysis
 
@@ -230,10 +434,12 @@ Valid --> |Yes| Parse["Parse Message"]
 Parse --> Classify["Classify Content Type"]
 Classify --> Process["Process Based on Type"]
 Process --> DownloadMedia{"Has Media?"}
-DownloadMedia --> |Yes| Download["Download Media"]
+DownloadMedia --> |Yes| QueueMedia["Queue Media Task"]
 DownloadMedia --> |No| StoreDB["Store to Database"]
-Download --> GenerateThumb["Generate Thumbnail"]
-GenerateThumb --> StoreMedia["Store Media"]
+QueueMedia --> DecryptWorker["DecryptWorker"]
+DecryptWorker --> GenerateThumb["Generate Thumbnail"]
+GenerateThumb --> MediaWorker["MediaWorker"]
+MediaWorker --> StoreMedia["Store Media"]
 StoreMedia --> StoreDB
 StoreDB --> Complete([Complete])
 Reject --> End([End])
@@ -242,6 +448,8 @@ Complete --> End
 
 **Diagram sources**
 - [wecom_events.py:1-200](file://backend/app/routers/wecom_events.py#L1-L200)
+- [decrypt_worker.py:1-150](file://backend/app/services/decrypt_worker.py#L1-L150)
+- [media_worker.py:1-150](file://backend/app/services/media_worker.py#L1-L150)
 
 ### Storage Abstraction Layer
 
@@ -351,6 +559,9 @@ media_routes --> media_service
 - [wecom_sdk.py:1-300](file://backend/app/sdk/wecom_sdk.py#L1-L300)
 - [media_storage.py:1-400](file://backend/app/media_storage.py#L1-L400)
 - [thumbnail_pipeline.py:1-300](file://backend/app/thumbnail_pipeline.py#L1-L300)
+- [decrypt_worker.py:1-300](file://backend/app/services/decrypt_worker.py#L1-L300)
+- [media_worker.py:1-300](file://backend/app/services/media_worker.py#L1-L300)
+- [sync_worker.py:1-300](file://backend/app/services/sync_worker.py#L1-L300)
 
 ## Dependency Analysis
 
@@ -363,6 +574,7 @@ fastapi[FastAPI Framework]
 sqlalchemy[SQLAlchemy ORM]
 pydantic[Pydantic Validation]
 celery[Celery Tasks]
+redis[Redis Client]
 end
 subgraph "Storage Dependencies"
 boto3[Boto3 AWS SDK]
@@ -377,8 +589,9 @@ cryptography[Cryptography Library]
 end
 subgraph "Infrastructure Dependencies"
 psycopg2[PostgreSQL Driver]
-redis[Redis Client]
 alembic[Alembic Migrations]
+asyncio[Async I/O]
+multiprocessing[Multiprocessing]
 end
 fastapi --> sqlalchemy
 fastapi --> pydantic
@@ -389,10 +602,16 @@ thumbnail_pipeline --> pillow
 thumbnail_pipeline --> ffmpeg
 auth --> jwt
 auth --> bcrypt
+decrypt_worker --> cryptography
+media_worker --> pillow
+sync_worker --> asyncio
 ```
 
 **Diagram sources**
 - [requirements.txt:1-100](file://backend/requirements.txt#L1-L100)
+- [decrypt_worker.py:1-100](file://backend/app/services/decrypt_worker.py#L1-L100)
+- [media_worker.py:1-100](file://backend/app/services/media_worker.py#L1-L100)
+- [sync_worker.py:1-100](file://backend/app/services/sync_worker.py#L1-L100)
 
 **Section sources**
 - [requirements.txt:1-150](file://backend/requirements.txt#L1-L150)
@@ -411,11 +630,18 @@ auth --> bcrypt
 - Chunked uploads for large files
 - Compression for storage efficiency
 
+### Worker Service Performance
+- Horizontal scaling of worker instances
+- Load balancing across worker pools
+- Memory-efficient message processing
+- Background task prioritization
+
 ### Scalability Patterns
 - Horizontal scaling of stateless services
 - Database read replicas for query distribution
 - Message queue for load balancing
 - Cache layer for reduced database load
+- Worker auto-scaling based on queue depth
 
 ## Troubleshooting Guide
 
@@ -424,19 +650,34 @@ auth --> bcrypt
 - **Storage Backend Failures**: Fallback mechanisms and retry logic
 - **Memory Issues**: Stream processing for large files
 - **Database Connection Pool Exhaustion**: Proper connection management
+- **Worker Service Crashes**: Health monitoring and automatic restarts
+- **Tenant Isolation Violations**: Strict access control validation
+
+### Worker Service Troubleshooting
+- **Worker Health Checks**: Monitor worker status and performance metrics
+- **Message Queue Backlog**: Track queue depth and processing rates
+- **Tenant-Specific Errors**: Isolate and debug tenant-scoped issues
+- **Resource Contention**: Monitor CPU, memory, and I/O usage per worker
 
 ### Monitoring and Logging
 - Structured logging with correlation IDs
 - Health check endpoints for service monitoring
 - Metrics collection for performance tracking
 - Alerting for critical failures
+- Worker performance dashboards
+- Queue depth monitoring
 
 **Section sources**
 - [auth.py:1-200](file://backend/app/auth.py#L1-L200)
 - [media_storage.py:1-400](file://backend/app/media_storage.py#L1-L400)
+- [decrypt_worker.py:1-200](file://backend/app/services/decrypt_worker.py#L1-L200)
+- [media_worker.py:1-200](file://backend/app/services/media_worker.py#L1-L200)
+- [sync_worker.py:1-200](file://backend/app/services/sync_worker.py#L1-L200)
 
 ## Conclusion
 
 The WeCom Archive 365 system provides a robust, scalable, and secure solution for enterprise message archiving. Its microservices architecture, event-driven design, and multi-tenant isolation make it suitable for large-scale deployments. The flexible storage abstraction allows organizations to choose their preferred storage backend while maintaining consistent APIs and behavior.
 
-The system's comprehensive approach to security, performance, and scalability ensures reliable operation in enterprise environments while providing the necessary tools for compliance and audit requirements.
+The addition of comprehensive worker services (DecryptWorker, MediaWorker, and SyncWorker) significantly enhances the system's capability to handle specialized background tasks with tenant-scoped operations and structured message processing. This worker service architecture ensures efficient processing of decryption, media handling, and synchronization tasks while maintaining strict tenant isolation and providing scalable background processing capabilities.
+
+The system's comprehensive approach to security, performance, and scalability ensures reliable operation in enterprise environments while providing the necessary tools for compliance and audit requirements. The worker service architecture enables horizontal scaling and efficient resource utilization for high-volume message processing scenarios.

@@ -1,0 +1,1 @@
+FastAPI application that composes WeCom archive routers, SQLAlchemy database layer, media pipeline, and admin web console into a single service with health endpoints and versioned static asset serving.

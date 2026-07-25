@@ -1,1 +1,0 @@
-pytest with FastAPI `TestClient`, `unittest.mock.MagicMock` for dependency injection, optional Node.js subprocess execution for embedded JS assertions, and Alembic-backed integration tests driven by a `DATABASE_URL` PostgreSQL DSN.

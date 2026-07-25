@@ -5,6 +5,7 @@
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [media_download.py](file://backend/app/media_download.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
@@ -22,6 +23,13 @@
 - [wecom_archive_worker_runbook.md](file://docs/wecom_archive_worker_runbook.md)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Added dedicated MediaWorker service section for improved reliability and progress tracking
+- Updated media download pipeline architecture to reflect the new worker-based approach
+- Enhanced reliability and monitoring capabilities documentation
+- Updated dependency analysis to include the new MediaWorker component
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -35,10 +43,10 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the storage abstraction layer that unifies media persistence across multiple backends, primarily local filesystem and Qiniu Cloud Object Storage (KODO). It covers the unified interface, backend factory pattern, media download pipeline, thumbnail generation workflow, classification system, access control, CDN integration, migration framework for moving media between backends, backup strategies, disaster recovery procedures, and performance optimizations such as caching, connection pooling, and concurrent operations.
+This document explains the storage abstraction layer that unifies media persistence across multiple backends, primarily local filesystem and Qiniu Cloud Object Storage (KODO). It covers the unified interface, backend factory pattern, enhanced media download pipeline with dedicated MediaWorker service for improved reliability and progress tracking, thumbnail generation workflow, classification system, access control, CDN integration, migration framework for moving media between backends, backup strategies, disaster recovery procedures, and performance optimizations such as caching, connection pooling, and concurrent operations.
 
 ## Project Structure
-The storage abstraction is implemented under the backend application module with dedicated files for storage interfaces, backend implementations, pipelines, and scripts. Alembic migrations provide schema evolution for backend references, migration bookkeeping, metadata, and thumbnails. Operational runbooks and research documents describe design decisions and operational procedures.
+The storage abstraction is implemented under the backend application module with dedicated files for storage interfaces, backend implementations, worker services, pipelines, and scripts. Alembic migrations provide schema evolution for backend references, migration bookkeeping, metadata, and thumbnails. Operational runbooks and research documents describe design decisions and operational procedures.
 
 ```mermaid
 graph TB
@@ -46,10 +54,11 @@ subgraph "App Module"
 A["media_storage.py"]
 B["qiniu_storage.py"]
 C["media_download.py"]
-D["thumbnail_pipeline.py"]
-E["media_thumbnails.py"]
-F["media_classification.py"]
-G["main.py"]
+D["services/media_worker.py"]
+E["thumbnail_pipeline.py"]
+F["media_thumbnails.py"]
+G["media_classification.py"]
+H["main.py"]
 end
 subgraph "Migrations"
 M1["0005_media_storage_backend_reference.py"]
@@ -63,10 +72,12 @@ S2["backfill_thumbnails_once.py"]
 end
 A --> B
 C --> A
+D --> C
 D --> A
 E --> A
 F --> A
 G --> A
+H --> A
 S1 --> A
 S1 --> B
 S2 --> E
@@ -80,6 +91,7 @@ M4 --> E
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [media_download.py](file://backend/app/media_download.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
@@ -100,7 +112,8 @@ M4 --> E
 - Local filesystem backend: Implements the interface using the local disk, suitable for development or small-scale deployments.
 - Qiniu Cloud backend: Implements the interface against Qiniu KODO, including signed URL generation and CDN domain support.
 - Backend factory: Resolves the active storage backend based on configuration, enabling runtime selection without changing callers.
-- Media download pipeline: Orchestrates fetching media from WeCom, classifying content, persisting via the storage interface, and triggering downstream processing.
+- **Enhanced Media Worker Service**: Dedicated service for reliable media processing with progress tracking, retry mechanisms, and error handling.
+- Media download pipeline: Orchestrates fetching media from WeCom, classifying content, persisting via the storage interface, and triggering downstream processing through the MediaWorker.
 - Thumbnail pipeline: Generates thumbnails for supported media types, persists them alongside originals, and updates metadata.
 - Classification system: Determines media type and properties to guide storage paths, thumbnail generation, and access policies.
 - Access control and CDN: Enforces tenant isolation and generates time-limited signed URLs; integrates with CDN domains for efficient delivery.
@@ -109,13 +122,14 @@ M4 --> E
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [media_download.py](file://backend/app/media_download.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
 - [rnd_185_media_storage_abstraction.md](file://docs/research/rnd_185_media_storage_abstraction.md)
 
 ## Architecture Overview
-The storage abstraction layer provides a single entry point for all media operations. Callers use the unified interface without knowing whether data resides locally or on Qiniu. The factory selects the backend at startup based on environment configuration. Downstream components like download and thumbnail pipelines consume this interface uniformly.
+The storage abstraction layer provides a single entry point for all media operations. Callers use the unified interface without knowing whether data resides locally or on Qiniu. The factory selects the backend at startup based on environment configuration. The enhanced architecture now includes a dedicated MediaWorker service that handles media processing tasks with improved reliability, progress tracking, and error recovery. Downstream components like download and thumbnail pipelines consume this interface uniformly while leveraging the worker service for robust processing.
 
 ```mermaid
 classDiagram
@@ -140,17 +154,25 @@ class QiniuStorageBackend {
 +signed_url(media_id, expires_seconds) string
 +exists(media_id) bool
 }
+class MediaWorker {
++process_media(media_id)
++track_progress(media_id)
++handle_errors(media_id, error)
++retry_failed_jobs()
+}
 class StorageFactory {
 +resolve() StorageInterface
 }
 StorageInterface <|.. LocalStorageBackend
 StorageInterface <|.. QiniuStorageBackend
 StorageFactory --> StorageInterface : "returns"
+MediaWorker --> StorageInterface : "uses"
 ```
 
 **Diagram sources**
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 
 **Section sources**
 - [rnd_185_media_storage_abstraction.md](file://docs/research/rnd_185_media_storage_abstraction.md)
@@ -188,30 +210,73 @@ end
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 
+### Enhanced Media Worker Service
+**Updated** The media download pipeline now leverages a dedicated MediaWorker service that provides improved reliability, progress tracking, and error handling capabilities.
+
+- **Reliable Processing**: Implements retry mechanisms with exponential backoff for failed operations
+- **Progress Tracking**: Monitors and reports download/upload progress for long-running operations
+- **Error Recovery**: Automatically recovers from transient failures and network interruptions
+- **Resource Management**: Manages concurrent operations and resource allocation efficiently
+- **Health Monitoring**: Provides status endpoints and metrics for operational visibility
+
+```mermaid
+flowchart TD
+Start(["Media Task Received"]) --> Validate["Validate task parameters"]
+Validate --> Process{"Process task"}
+Process --> |Success| TrackProgress["Track progress"]
+Process --> |Failure| HandleError["Handle error with retry logic"]
+TrackProgress --> Complete{"Task complete?"}
+Complete --> |No| Continue["Continue processing"]
+Complete --> |Yes| Finalize["Finalize and cleanup"]
+HandleError --> Retry{"Retry available?"}
+Retry --> |Yes| Backoff["Apply exponential backoff"]
+Backoff --> Process
+Retry --> |No| Fail["Mark task as failed"]
+Continue --> Process
+Finalize --> End(["Task Complete"])
+Fail --> End
+```
+
+**Diagram sources**
+- [media_worker.py](file://backend/app/services/media_worker.py)
+- [media_download.py](file://backend/app/media_download.py)
+
+**Section sources**
+- [media_worker.py](file://backend/app/services/media_worker.py)
+- [media_download.py](file://backend/app/media_download.py)
+
 ### Media Download Pipeline
+**Updated** The media download pipeline now integrates with the MediaWorker service for enhanced reliability and progress tracking.
+
 - Ingestion: Receives media payloads from WeCom events or scheduled syncs.
 - Classification: Detects media type and attributes to determine storage path and thumbnail needs.
+- **Worker Integration**: Delegates processing to MediaWorker for reliable execution with progress tracking.
 - Persistence: Uses the storage interface to write media with metadata.
-- Post-processing: Triggers thumbnail generation when applicable.
+- Post-processing: Triggers thumbnail generation when applicable through the worker service.
 
 ```mermaid
 flowchart TD
 Start(["Start"]) --> Receive["Receive media payload"]
 Receive --> Classify["Classify media type"]
-Classify --> Persist{"Persist success?"}
-Persist --> |No| HandleError["Handle error and retry/backoff"]
+Classify --> Queue["Queue to MediaWorker"]
+Queue --> WorkerProcess["MediaWorker processes task"]
+WorkerProcess --> Persist{"Persist success?"}
+Persist --> |No| WorkerRetry["Worker retry mechanism"]
+WorkerRetry --> Persist
 Persist --> |Yes| ThumbnailsNeeded{"Thumbnails needed?"}
-ThumbnailsNeeded --> |No| End(["Done"])
-ThumbnailsNeeded --> |Yes| QueueThumb["Queue thumbnail job"]
-QueueThumb --> End
+ThumbnailsNeeded --> |No| Complete["Complete with progress update"]
+ThumbnailsNeeded --> |Yes| QueueThumb["Queue thumbnail job via worker"]
+QueueThumb --> Complete
 ```
 
 **Diagram sources**
 - [media_download.py](file://backend/app/media_download.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 - [media_classification.py](file://backend/app/media_classification.py)
 
 **Section sources**
 - [media_download.py](file://backend/app/media_download.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 - [media_classification.py](file://backend/app/media_classification.py)
 
 ### Thumbnail Generation Workflow
@@ -223,23 +288,27 @@ QueueThumb --> End
 ```mermaid
 sequenceDiagram
 participant DL as "Download Pipeline"
+participant Worker as "MediaWorker"
 participant Thumb as "Thumbnail Pipeline"
 participant Store as "StorageInterface"
 participant DB as "Metadata Store"
 DL->>Store : store(original)
 Store-->>DL : ok
-DL->>Thumb : enqueue(original_id)
+DL->>Worker : enqueue_thumbnail(original_id)
+Worker->>Thumb : process_thumbnail(original_id)
 Thumb->>Store : get(original)
 Thumb->>Thumb : generate(thumbnail variants)
 Thumb->>Store : store(thumbnails)
 Thumb->>DB : update(metadata with thumbnails)
-Thumb-->>DL : done
+Thumb-->>Worker : done
+Worker-->>DL : completion notification
 ```
 
 **Diagram sources**
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_storage.py](file://backend/app/media_storage.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 
 **Section sources**
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
@@ -335,7 +404,7 @@ Report --> End(["End"])
 - [wecom_archive_worker_runbook.md](file://docs/wecom_archive_worker_runbook.md)
 
 ## Dependency Analysis
-The storage layer depends on configuration for backend selection and integrates with WeCom SDK for ingestion, database for metadata, and CDN for delivery. Migrations evolve schema to support backend references and migration bookkeeping.
+**Updated** The storage layer now includes the MediaWorker service as a central component for reliable media processing, integrating with configuration for backend selection, WeCom SDK for ingestion, database for metadata, and CDN for delivery. Migrations evolve schema to support backend references and migration bookkeeping.
 
 ```mermaid
 graph TB
@@ -343,6 +412,8 @@ Main["main.py"] --> Storage["media_storage.py"]
 Storage --> Local["Local FS"]
 Storage --> Qiniu["qiniu_storage.py"]
 Download["media_download.py"] --> Storage
+Download --> Worker["services/media_worker.py"]
+Worker --> Storage
 Thumb["thumbnail_pipeline.py"] --> Storage
 Meta["media_thumbnails.py"] --> Storage
 Classify["media_classification.py"] --> Storage
@@ -357,6 +428,7 @@ DB --> ThumbMeta["thumbnail metadata"]
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [media_download.py](file://backend/app/media_download.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
@@ -369,6 +441,7 @@ DB --> ThumbMeta["thumbnail metadata"]
 - [media_storage.py](file://backend/app/media_storage.py)
 - [qiniu_storage.py](file://backend/app/qiniu_storage.py)
 - [media_download.py](file://backend/app/media_download.py)
+- [media_worker.py](file://backend/app/services/media_worker.py)
 - [thumbnail_pipeline.py](file://backend/app/thumbnail_pipeline.py)
 - [media_thumbnails.py](file://backend/app/media_thumbnails.py)
 - [media_classification.py](file://backend/app/media_classification.py)
@@ -383,6 +456,8 @@ DB --> ThumbMeta["thumbnail metadata"]
 - Streaming: Stream large media to minimize memory footprint during upload/download and thumbnail generation.
 - Chunked transfers: For large objects, implement chunked uploads and resumable downloads.
 - Thumbnail optimization: Generate only necessary sizes and formats; cache thumbnails aggressively.
+- **Worker Optimization**: Leverage MediaWorker's built-in concurrency controls and resource management for optimal throughput.
+- **Progress Tracking**: Utilize worker progress tracking for better user experience and monitoring.
 
 [No sources needed since this section provides general guidance]
 
@@ -392,17 +467,20 @@ DB --> ThumbMeta["thumbnail metadata"]
 - Migration issues: Inspect bookkeeping tables for partial progress; rerun idempotent steps; verify checksums post-copy.
 - Thumbnail generation: Confirm input format support and output constraints; review worker logs for conversion errors.
 - Access control: Ensure tenant scoping in keys and correct ACL settings; test signed URL retrieval with different tenants.
+- **Worker Issues**: Monitor MediaWorker health endpoints, check retry queues, and review error logs for processing failures.
+- **Progress Tracking**: Investigate stuck tasks by examining worker progress logs and queue status.
 
 **Section sources**
 - [wecom_archive_media_download_runbook.md](file://docs/wecom_archive_media_download_runbook.md)
 - [wecom_archive_worker_runbook.md](file://docs/wecom_archive_worker_runbook.md)
 
 ## Conclusion
-The storage abstraction layer delivers a robust, extensible foundation for media management across local and cloud backends. By standardizing operations through a unified interface and factory pattern, it simplifies integration, enables seamless migration, and supports scalable delivery via CDN. Combined with strong access control, comprehensive migration tooling, and operational runbooks, it provides a reliable platform for enterprise-grade media archival and retrieval.
+The storage abstraction layer delivers a robust, extensible foundation for media management across local and cloud backends. By standardizing operations through a unified interface and factory pattern, it simplifies integration, enables seamless migration, and supports scalable delivery via CDN. The enhanced architecture with the dedicated MediaWorker service provides improved reliability, progress tracking, and error recovery capabilities. Combined with strong access control, comprehensive migration tooling, and operational runbooks, it provides a reliable platform for enterprise-grade media archival and retrieval.
 
 ## Appendices
 - Configuration examples: Backend selection, CDN domains, and timeout/pooling parameters.
 - Migration runbook: Step-by-step instructions for moving media between backends safely.
 - Operational checklists: Pre/post migration validations, backup schedules, and DR drills.
+- **Worker Configuration**: MediaWorker setup, scaling parameters, and monitoring configuration.
 
 [No sources needed since this section provides general guidance]

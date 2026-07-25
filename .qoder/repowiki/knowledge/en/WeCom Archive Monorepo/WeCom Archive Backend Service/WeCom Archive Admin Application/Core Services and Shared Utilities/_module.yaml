@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: backend_app/app_core/core_services_and_utils
-title: WeCom Core Services & Cross-Cutting Utilities
+title: Core Services and Shared Utilities
 scope:
     - backend/app/services/
     - backend/app/structured_message_parser.py

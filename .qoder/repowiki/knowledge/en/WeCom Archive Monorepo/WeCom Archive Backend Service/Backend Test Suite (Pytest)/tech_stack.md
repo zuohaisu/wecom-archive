@@ -1,0 +1,1 @@
+pytest with FastAPI `TestClient`, `unittest.mock.MagicMock` for dependency injection, optional Node.js subprocess execution for embedded JS assertions, SQLAlchemy with in-memory SQLite (plus optional PostgreSQL via `DATABASE_URL`) for integration tests, and cryptography library for RSA keypair generation in decrypt-worker tests.

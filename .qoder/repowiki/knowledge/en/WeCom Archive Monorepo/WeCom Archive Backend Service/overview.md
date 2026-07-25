@@ -1,1 +1,1 @@
-FastAPI-based WeCom archive service that wires HTTP routers, SQLAlchemy persistence, Qiniu/local media pipeline, and an embedded admin console into a single deployable unit with Alembic migrations and one-shot maintenance scripts.
+FastAPI-based WeCom archive admin service that composes HTTP routers, SQLAlchemy persistence, Qiniu/local media pipeline, embedded admin console, Alembic migrations, and one-shot maintenance scripts into a single deployable unit.

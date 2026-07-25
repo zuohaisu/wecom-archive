@@ -1,1 +1,0 @@
-Collection of idempotent, single-run Python scripts for database bootstrapping, WeCom archive sync backfills, data integrity checks, and development mock data seeding against the application's SQLAlchemy models.

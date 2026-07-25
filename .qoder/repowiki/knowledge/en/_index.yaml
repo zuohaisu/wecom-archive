@@ -3,7 +3,7 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-07-25T04:45:12Z"
+exported_at: "2026-07-25T11:43:50Z"
 modules:
     "":
         dir_name: WeCom Archive Monorepo
@@ -40,8 +40,8 @@ modules:
         depends_on: []
         related_to: []
     backend_app/app_core:
-        dir_name: WeCom Archive Admin Application Core
-        title: WeCom Archive Admin Application Core
+        dir_name: WeCom Archive Admin Application
+        title: WeCom Archive Admin Application
         scope:
             - backend/app/
         source_files: []
@@ -85,8 +85,8 @@ modules:
         depends_on: []
         related_to: []
     backend_app/app_core/core_services_and_utils:
-        dir_name: WeCom Core Services & Cross-Cutting Utilities
-        title: WeCom Core Services & Cross-Cutting Utilities
+        dir_name: Core Services and Shared Utilities
+        title: Core Services and Shared Utilities
         scope:
             - backend/app/services/
             - backend/app/structured_message_parser.py
@@ -164,8 +164,8 @@ modules:
         depends_on: []
         related_to: []
     backend_app/scripts:
-        dir_name: One-Shot Maintenance & Bootstrap Scripts
-        title: One-Shot Maintenance & Bootstrap Scripts
+        dir_name: One-Shot Database Bootstrap & WeCom Archive Backfill Scripts
+        title: One-Shot Database Bootstrap & WeCom Archive Backfill Scripts
         scope:
             - backend/scripts/
         source_files: []
@@ -174,8 +174,8 @@ modules:
         related_to:
             - path: backend_app/app_core/wecom_integration
     backend_app/tests:
-        dir_name: Pytest Test Suite for WeCom Archive Backend
-        title: Pytest Test Suite for WeCom Archive Backend
+        dir_name: Backend Test Suite (Pytest)
+        title: Backend Test Suite (Pytest)
         scope:
             - backend/tests/
         source_files: []

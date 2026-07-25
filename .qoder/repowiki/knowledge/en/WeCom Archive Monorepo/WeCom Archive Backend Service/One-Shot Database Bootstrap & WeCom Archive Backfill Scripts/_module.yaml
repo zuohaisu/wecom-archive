@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: backend_app/scripts
-title: One-Shot Maintenance & Bootstrap Scripts
+title: One-Shot Database Bootstrap & WeCom Archive Backfill Scripts
 scope:
     - backend/scripts/
 source_files: []
