@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 
 from app.message_type_registry import MESSAGE_TYPE_REGISTRY, MessageSupportStatus
+from app.settings import get_media_storage_settings
 
 _ALLOWED_IMAGE_CONTENT_TYPES = {
     ".jpg": "image/jpeg",
@@ -340,7 +341,7 @@ def _configured_media_root() -> Optional[Path]:
     Not required for app startup — routes that depend on it degrade to a
     safe 404 when it is missing rather than raising at import/startup time.
     """
-    raw = os.environ.get("STORAGE_LOCAL_PATH", "").strip()
+    raw = (get_media_storage_settings().storage_local_path or "").strip()
     if not raw:
         return None
     try:
@@ -357,8 +358,21 @@ def get_media_root() -> Optional[Path]:
     return None
 
 
+# Maps each required QINIU_* env var name to its app.settings.MediaStorageSettings
+# field, so _require_qiniu_env can read the typed settings object while still
+# reporting the original environment variable name in its error message.
+_QINIU_REQUIRED_ENV_TO_SETTINGS_FIELD = {
+    "QINIU_ACCESS_KEY": "qiniu_access_key",
+    "QINIU_SECRET_KEY": "qiniu_secret_key",
+    "QINIU_BUCKET": "qiniu_bucket",
+    "QINIU_DOMAIN": "qiniu_domain",
+}
+
+
 def _require_qiniu_env(name: str) -> str:
-    value = os.environ.get(name, "").strip()
+    settings = get_media_storage_settings()
+    raw = getattr(settings, _QINIU_REQUIRED_ENV_TO_SETTINGS_FIELD[name])
+    value = (raw or "").strip()
     if not value:
         # QiniuConfigurationError import is deferred (see _build_qiniu_provider)
         # so local-mode startup never imports the qiniu package.
@@ -383,8 +397,9 @@ def _build_qiniu_provider() -> MediaStorageProvider:
     secret_key = _require_qiniu_env("QINIU_SECRET_KEY")
     bucket = _require_qiniu_env("QINIU_BUCKET")
     domain = _require_qiniu_env("QINIU_DOMAIN")
-    region = os.environ.get("QINIU_REGION", "").strip() or None
-    timeout_raw = os.environ.get("QINIU_TIMEOUT_SECONDS", "").strip()
+    settings = get_media_storage_settings()
+    region = (settings.qiniu_region or "").strip() or None
+    timeout_raw = (settings.qiniu_timeout_seconds or "").strip()
     timeout = float(timeout_raw) if timeout_raw else 30.0
 
     return QiniuStorageProvider(
@@ -406,14 +421,15 @@ def get_signed_url_ttl_seconds() -> int:
     """Validated MEDIA_SIGNED_URL_TTL_SECONDS accessor (RND-187).
 
     Bounds [60, 3600] seconds, default 900 when unset. Reads the env var
-    fresh on every call — matching every other *_env accessor in this
-    module — rather than caching, so tests can monkeypatch os.environ per
-    case without a process restart. An invalid (non-integer) or
-    out-of-bounds value fails loudly (MediaStorageConfigurationError)
-    rather than silently clamping, matching this module's existing
-    QiniuConfigurationError convention for misconfiguration.
+    fresh on every call via get_media_storage_settings() — matching every
+    other *_env accessor in this module — rather than caching, so tests can
+    monkeypatch os.environ per case without a process restart. An invalid
+    (non-integer) or out-of-bounds value fails loudly
+    (MediaStorageConfigurationError) rather than silently clamping,
+    matching this module's existing QiniuConfigurationError convention for
+    misconfiguration.
     """
-    raw = os.environ.get("MEDIA_SIGNED_URL_TTL_SECONDS", "").strip()
+    raw = (get_media_storage_settings().media_signed_url_ttl_seconds or "").strip()
     if not raw:
         return _SIGNED_URL_TTL_DEFAULT_SECONDS
     try:
@@ -440,7 +456,7 @@ def get_signed_url_window_seconds() -> int:
     Bounded [60, 3600] and fails loudly on an invalid/out-of-range value,
     matching get_signed_url_ttl_seconds().
     """
-    raw = os.environ.get("MEDIA_SIGNED_URL_WINDOW_SECONDS", "").strip()
+    raw = (get_media_storage_settings().media_signed_url_window_seconds or "").strip()
     if not raw:
         return get_signed_url_ttl_seconds()
     try:
@@ -480,9 +496,10 @@ def _resolve_default_provider_name() -> str:
     NEW media is written. MEDIA_STORAGE_PROVIDER is the RND-185 selector;
     STORAGE_BACKEND is honored as a compatibility alias. Defaults to
     "local" when unset."""
+    settings = get_media_storage_settings()
     return (
-        os.environ.get("MEDIA_STORAGE_PROVIDER")
-        or os.environ.get("STORAGE_BACKEND")
+        settings.media_storage_provider
+        or settings.storage_backend
         or "local"
     ).strip().lower()
 

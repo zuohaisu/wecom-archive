@@ -23,7 +23,6 @@ Security notes:
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -52,6 +51,7 @@ from app.auth import (
 from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
+from app.settings import get_auth_settings, get_wecom_oauth_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -307,8 +307,9 @@ def password_login(
 
     logger.info("password_login: attempt received")
 
-    admin_username = os.getenv("ADMIN_USERNAME", "").strip()
-    admin_hash = os.getenv("ADMIN_PASSWORD_HASH", "").strip()
+    auth_settings = get_auth_settings()
+    admin_username = auth_settings.admin_username.strip()
+    admin_hash = auth_settings.admin_password_hash.strip()
 
     if not admin_username or not admin_hash:
         logger.error("password_login: ADMIN_USERNAME or ADMIN_PASSWORD_HASH not configured")
@@ -401,9 +402,10 @@ def password_login(
 @router.get("/api/auth/wecom/login")
 def wecom_login():
     """Redirect the browser to the WeCom OAuth authorization URL."""
-    corp_id = os.getenv("WECOM_CORP_ID", "").strip()
-    agent_id = os.getenv("WECOM_AGENT_ID", "").strip()
-    admin_domain = os.getenv("ADMIN_DOMAIN", "").strip()
+    wecom_oauth_settings = get_wecom_oauth_settings()
+    corp_id = wecom_oauth_settings.wecom_corp_id.strip()
+    agent_id = wecom_oauth_settings.wecom_agent_id.strip()
+    admin_domain = wecom_oauth_settings.admin_domain.strip()
 
     if not corp_id or not agent_id:
         logger.error("wecom_login: WECOM_CORP_ID or WECOM_AGENT_ID not configured")
@@ -459,8 +461,9 @@ def wecom_callback(
         return RedirectResponse("/admin/login?error=invalid_state", status_code=302)
 
     # 2. Load config from env
-    corp_id = os.getenv("WECOM_CORP_ID", "").strip()
-    oauth_secret = os.getenv("WECOM_OAUTH_SECRET", "").strip()
+    wecom_oauth_settings = get_wecom_oauth_settings()
+    corp_id = wecom_oauth_settings.wecom_corp_id.strip()
+    oauth_secret = wecom_oauth_settings.wecom_oauth_secret.strip()
 
     if not corp_id or not oauth_secret:
         logger.error("wecom_callback: WECOM_CORP_ID or WECOM_OAUTH_SECRET not configured")

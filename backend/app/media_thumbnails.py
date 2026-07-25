@@ -29,11 +29,12 @@ Design constraints (all enforced here):
 from __future__ import annotations
 
 import io
-import os
 from dataclasses import dataclass
 from typing import Optional
 
 from PIL import Image, ImageOps
+
+from app.settings import get_thumbnail_settings
 
 # ---------------------------------------------------------------------------
 # Config (read fresh from env on each call, matching media_storage's
@@ -59,14 +60,14 @@ def thumbnails_enabled() -> bool:
     """Whether new-upload thumbnail generation and the backfill are active.
     Defaults to True; any value other than a recognized false-y token
     ("false"/"0"/"no"/"off") is treated as enabled."""
-    raw = os.environ.get("MEDIA_THUMBNAIL_ENABLED", "").strip().lower()
+    raw = (get_thumbnail_settings().media_thumbnail_enabled or "").strip().lower()
     if not raw:
         return True
     return raw not in {"false", "0", "no", "off"}
 
 
 def _max_edge() -> int:
-    raw = os.environ.get("MEDIA_THUMBNAIL_MAX_EDGE", "").strip()
+    raw = (get_thumbnail_settings().media_thumbnail_max_edge or "").strip()
     if not raw:
         return _MAX_EDGE_DEFAULT
     try:
@@ -77,7 +78,7 @@ def _max_edge() -> int:
 
 
 def _jpeg_quality() -> int:
-    raw = os.environ.get("MEDIA_THUMBNAIL_JPEG_QUALITY", "").strip()
+    raw = (get_thumbnail_settings().media_thumbnail_jpeg_quality or "").strip()
     if not raw:
         return _JPEG_QUALITY_DEFAULT
     try:

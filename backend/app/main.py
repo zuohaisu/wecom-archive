@@ -45,31 +45,6 @@ class _RedactOAuthCallbackQueryFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_RedactOAuthCallbackQueryFilter())
 
-app = FastAPI(title="365 WeCom Archive")
-# RND-187: guarantees Cache-Control: no-store on every response (success or
-# error, any status code) for the media access descriptor endpoint — see
-# MediaAccessNoStoreMiddleware's docstring for why this must be a
-# response-side middleware rather than a header set inside the route.
-app.add_middleware(MediaAccessNoStoreMiddleware)
-app.include_router(auth_router)
-app.include_router(conversations_router)
-app.include_router(media_router)
-app.include_router(reachability_audit_router)
-app.include_router(search_router)
-app.include_router(wecom_events_router)
-app.include_router(web_router)
-app.include_router(messages_router)
-
-
-@app.get("/health/live")
-def health_live():
-    """Liveness only: the process can respond to HTTP at all. Does not
-    touch the database — a DB outage must not make this fail, or
-    orchestration tooling would kill/restart a process that isn't the
-    actual problem. Use /health/ready (or /health, see below) to gate
-    deploys and load-balancer readiness."""
-    return {"status": "ok"}
-
 
 def _readiness_body(response: Response) -> dict:
     """RND-227: real readiness, not a static ok. A DB outage or a schema
@@ -94,35 +69,6 @@ def _readiness_body(response: Response) -> dict:
     return {"status": "ok"}
 
 
-@app.get("/health/ready")
-def health_ready(response: Response):
-    return _readiness_body(response)
-
-
-@app.get("/health")
-def health(response: Response):
-    """Kept as an alias for /health/ready (not liveness) for backward
-    compatibility: every existing caller (scripts/deploy_server.sh's
-    public check, external uptime monitoring) already treats this path
-    as "is the service actually usable", and downgrading it to a
-    liveness-only check would silently reintroduce the schema-drift gap
-    this endpoint exists to close."""
-    return _readiness_body(response)
-
-
-# ---------------------------------------------------------------------------
-# RND-216 — admin console static assets (base.css/diagnostics.css,
-# search.js/diagnostics.js, and — since RND-217 split it into 8 modules —
-# web/static/console/*.js). Mounted last so it never shadows an API route.
-# Every template references these through
-# app.web.STATIC_VERSION's `?v=<hash>` query string (see render_template),
-# so a long, immutable Cache-Control here is safe: any content change
-# produces a new URL, and stale-cached responses under the old URL are
-# simply never requested again. This is unrelated to (and does not need an
-# exemption from) app.routers.media.MediaAccessNoStoreMiddleware —
-# that middleware only touches the media-access-descriptor path pattern
-# (see _MEDIA_ACCESS_PATH_RE), never /web/static.
-# ---------------------------------------------------------------------------
 class _VersionedStaticFiles(StaticFiles):
     def file_response(self, *args, **kwargs) -> Response:
         response = super().file_response(*args, **kwargs)
@@ -131,8 +77,71 @@ class _VersionedStaticFiles(StaticFiles):
 
 
 _STATIC_DIR = Path(__file__).parent / "web" / "static"
-app.mount(
-    "/web/static",
-    _VersionedStaticFiles(directory=str(_STATIC_DIR), check_dir=False),
-    name="web-static",
-)
+
+
+def create_app() -> FastAPI:
+    """Composition root: builds and returns a fresh, fully-wired FastAPI
+    instance. Kept as a factory (RND-223) rather than a module-level side
+    effect so tests/tooling can construct an independent app instance; the
+    module-level `app` below is what `uvicorn app.main:app` actually serves."""
+    app = FastAPI(title="365 WeCom Archive")
+    # RND-187: guarantees Cache-Control: no-store on every response (success or
+    # error, any status code) for the media access descriptor endpoint — see
+    # MediaAccessNoStoreMiddleware's docstring for why this must be a
+    # response-side middleware rather than a header set inside the route.
+    app.add_middleware(MediaAccessNoStoreMiddleware)
+    app.include_router(auth_router)
+    app.include_router(conversations_router)
+    app.include_router(media_router)
+    app.include_router(reachability_audit_router)
+    app.include_router(search_router)
+    app.include_router(wecom_events_router)
+    app.include_router(web_router)
+    app.include_router(messages_router)
+
+    @app.get("/health/live")
+    def health_live():
+        """Liveness only: the process can respond to HTTP at all. Does not
+        touch the database — a DB outage must not make this fail, or
+        orchestration tooling would kill/restart a process that isn't the
+        actual problem. Use /health/ready (or /health, see below) to gate
+        deploys and load-balancer readiness."""
+        return {"status": "ok"}
+
+    @app.get("/health/ready")
+    def health_ready(response: Response):
+        return _readiness_body(response)
+
+    @app.get("/health")
+    def health(response: Response):
+        """Kept as an alias for /health/ready (not liveness) for backward
+        compatibility: every existing caller (scripts/deploy_server.sh's
+        public check, external uptime monitoring) already treats this path
+        as "is the service actually usable", and downgrading it to a
+        liveness-only check would silently reintroduce the schema-drift gap
+        this endpoint exists to close."""
+        return _readiness_body(response)
+
+    # -----------------------------------------------------------------------
+    # RND-216 — admin console static assets (base.css/diagnostics.css,
+    # search.js/diagnostics.js, and — since RND-217 split it into 8 modules —
+    # web/static/console/*.js). Mounted last so it never shadows an API route.
+    # Every template references these through
+    # app.web.STATIC_VERSION's `?v=<hash>` query string (see render_template),
+    # so a long, immutable Cache-Control here is safe: any content change
+    # produces a new URL, and stale-cached responses under the old URL are
+    # simply never requested again. This is unrelated to (and does not need an
+    # exemption from) app.routers.media.MediaAccessNoStoreMiddleware —
+    # that middleware only touches the media-access-descriptor path pattern
+    # (see _MEDIA_ACCESS_PATH_RE), never /web/static.
+    # -----------------------------------------------------------------------
+    app.mount(
+        "/web/static",
+        _VersionedStaticFiles(directory=str(_STATIC_DIR), check_dir=False),
+        name="web-static",
+    )
+
+    return app
+
+
+app = create_app()  # 保持 uvicorn app.main:app 完全兼容

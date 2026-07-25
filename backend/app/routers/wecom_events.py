@@ -11,13 +11,14 @@ import base64
 import hashlib
 import hmac
 import logging
-import os
 import re
 import struct
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
+
+from app.settings import get_wecom_callback_settings
 
 logger = logging.getLogger(__name__)
 
@@ -94,14 +95,14 @@ def _extract_encrypt(xml_body: bytes) -> str | None:
 
 
 def _get_token() -> str:
-    token = os.getenv("WECOM_CALLBACK_TOKEN", "").strip()
+    token = get_wecom_callback_settings().wecom_callback_token.strip()
     if not token:
         raise HTTPException(status_code=500, detail="Callback token not configured")
     return token
 
 
 def _get_aes_key() -> bytes:
-    raw = os.getenv("WECOM_CALLBACK_ENCODING_AES_KEY", "").strip()
+    raw = get_wecom_callback_settings().wecom_callback_encoding_aes_key.strip()
     if not raw:
         raise HTTPException(status_code=500, detail="Callback encoding AES key not configured")
     try:
@@ -111,7 +112,7 @@ def _get_aes_key() -> bytes:
 
 
 def _get_corp_id() -> str:
-    return os.getenv("WECOM_CORP_ID", "").strip()
+    return get_wecom_callback_settings().wecom_corp_id.strip()
 
 
 # ---------------------------------------------------------------------------

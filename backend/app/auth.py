@@ -25,7 +25,6 @@ import base64
 import hashlib
 import hmac
 import logging
-import os
 import secrets
 import threading
 import time
@@ -38,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AdminSession, AdminUser
 from app.db.session import get_db
+from app.settings import get_auth_settings
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ def get_auth_mode() -> str:
 
     If AUTH_MODE is unset or unrecognized, defaults to 'wecom' and logs a warning.
     """
-    raw = os.getenv("AUTH_MODE", "").strip().lower()
+    raw = get_auth_settings().auth_mode.strip().lower()
     if raw in _VALID_AUTH_MODES:
         return raw
     if raw:
@@ -318,7 +318,7 @@ def require_html_session(
 
 
 def _is_production() -> bool:
-    return os.getenv("APP_ENV", "development").strip().lower() == "production"
+    return get_auth_settings().app_env.strip().lower() == "production"
 
 
 # Sentinel wecom_user_id prefix used for password-mode AdminUser rows.

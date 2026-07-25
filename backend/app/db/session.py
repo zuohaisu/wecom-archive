@@ -1,8 +1,9 @@
-import os
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
+from app.settings import get_database_settings
 
 _engine = None
 
@@ -10,7 +11,7 @@ _engine = None
 def _get_engine():
     global _engine
     if _engine is None:
-        url = os.environ.get("DATABASE_URL", "").strip()
+        url = get_database_settings().database_url.strip()
         if not url:
             raise RuntimeError("DATABASE_URL environment variable is not set")
         _engine = create_engine(url, pool_size=2, max_overflow=2)
