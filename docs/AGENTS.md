@@ -112,6 +112,17 @@ Full working rules are in [DEV_AGENT_RULES.md](../DEV_AGENT_RULES.md).
 
 ---
 
+## Architecture Boundaries
+
+Business logic must not flow back into `app/main.py` or into a
+service→router reverse dependency — see
+[DEV_AGENT_RULES.md § Architecture Boundaries](../DEV_AGENT_RULES.md#architecture-boundaries)
+for the full rule set. It's enforced automatically by
+[`backend/tests/test_architecture_boundary.py`](../backend/tests/test_architecture_boundary.py)
+under `make test` / CI — a violation fails the build, not just review.
+
+---
+
 ## Standard Handoff Sequence
 
 ```

@@ -172,14 +172,14 @@ Primary message store. Each row is one WeCom conversation archive message. Colum
 | Column | Type | Notes |
 |---|---|---|
 | `decrypt_status` | varchar(16) | `pending` / `success` / `failed` (see note below) |
-| `decrypted_payload` | jsonb | full decrypted message JSON; null when `decrypt_status` is not `success` |
+| `decrypted_payload` | jsonb | reserved for the full decrypted message JSON; in practice never populated by the decrypt worker — a deliberate data-minimization constraint (see "Nullable decrypted_payload" note below). Always null on rows written by the real pipeline. |
 
 #### Extracted fields
 
 | Column | Type | Notes |
 |---|---|---|
 | `content_text` | text | plain-text body extracted from `decrypted_payload`; indexed for FTS |
-| `msgtype` | varchar(32) | message type: `text`, `image`, `voice`, `video`, `file`, `mixed`, … |
+| `msgtype` | varchar(32) | message type as received from WeCom. The canonical list (26 registered types as of RND-224), per-type support tier (`SUPPORTED`/`PARTIAL`/`UNSUPPORTED`), category, and alias resolution (e.g. `weapp`↔`miniprogram`, `audio_archive`↔`meeting_voice_call`) live in `app/message_type_registry.py` — treat it, not this table, as the source of truth. Examples: `text`, `image`, `video`, `voice`, `file`, `location`, `link`, `card`, `markdown`, `news`, `docmsg`, `revoke`, `mixed`, `chatrecord`, `sys`, `vote`, `collect`, `meeting`, `schedule`, `redpacket`, `switch_corp`, … |
 | `sender` | varchar(64) | WeCom user ID of the message sender (`from` field) |
 | `roomid` | varchar(64) | group chat room ID; null for 1:1 messages |
 | `msgtime` | bigint | WeCom message timestamp in milliseconds since epoch |
@@ -187,13 +187,17 @@ Primary message store. Each row is one WeCom conversation archive message. Colum
 | `sdkfileid` | text | WeCom SDK file ID for media messages; null for text |
 | `tenant_id` | varchar(36) FK → `tenants.id` | NOT NULL after bootstrap |
 | `created_at` | timestamptz | row insert time |
+| `structured_content` | jsonb | type-specific sub-payload for in-scope msgtypes (RND-197); set by the same decrypt run, null otherwise |
+| `is_revoked` | boolean | set only as a side effect of revoke reconciliation (`app.revoke_reconciliation`), not by the decrypt step itself |
+| `revoked_at` | timestamptz | nullable; set alongside `is_revoked` |
 
 Indexes:
 - Unique on `(tenant_id, msgid)` — tenant-scoped deduplication
 - B-tree on `seq` — sync cursor pagination
 - B-tree on `msgtype`, `sender`, `roomid`, `msgtime`, `tenant_id`
 - Composite B-tree on `(msgtime, msgtype)`
-- GIN on `decrypted_payload` — JSONB containment
+- GIN on `decrypted_payload` — JSONB containment (see "Nullable decrypted_payload" note: not currently populated, so this index is presently inert on real data)
+- GIN on `structured_content` — JSONB containment (RND-197)
 - GIN on `to_tsvector('simple', coalesce(content_text, ''))` — full-text search
 
 ---
@@ -322,7 +326,7 @@ user-supplied API parameter.
 
 ### Full-text search: `content_text` and the tsvector GIN index
 
-`decrypted_payload` (JSONB) holds the complete decoded message object, and a GIN index on it supports key-path and containment queries. It does not support keyword full-text search efficiently.
+`decrypted_payload` (JSONB) is reserved to hold the complete decoded message object, with a GIN index supporting key-path and containment queries — though see the "Nullable decrypted_payload" note below: the column is not currently populated by the decrypt worker, so this index is presently inert on real data. It would not support keyword full-text search efficiently even if populated.
 
 `content_text` is a plain-text column populated by the sync layer with the human-readable body of the message (e.g. `text.content` for text messages, filenames for file messages). A GIN index using `to_tsvector('simple', coalesce(content_text, ''))` enables PostgreSQL `@@` full-text search queries.
 
@@ -343,8 +347,10 @@ The WeCom SDK returns an encrypted envelope JSON object containing both `encrypt
 | Value | Meaning | `decrypted_payload` |
 |---|---|---|
 | `pending` | Inserted but decryption not yet attempted | null |
-| `success` | Decryption succeeded | populated |
+| `success` | Decryption succeeded | null — see note below |
 | `failed` | Decryption failed (wrong key, corrupt data) | null |
+
+`decrypted_payload` is deliberately never written by `run_decrypt_once()` (`backend/app/services/decrypt_worker.py`), even on `success` — a data-minimization decision (see the `# SF-1` comment at the point it's skipped) enforced by a regression test (`backend/tests/test_decrypt_structured_content.py::test_decrypted_payload_column_is_still_never_assigned_in_the_decrypt_script`). The column and its GIN index remain in the schema but are not populated by the production pipeline; the normalized fields below (`content_text`, `msgtype`, `sender`, `roomid`, `msgtime`, `tolist`, `sdkfileid`, `structured_content`) are populated instead. Only `backend/scripts/mock_ingest.py`, a test-fixture generator, ever sets this column directly.
 
 ### Key rotation support
 

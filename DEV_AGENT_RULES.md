@@ -200,6 +200,66 @@ Rules:
 
 ---
 
+## Architecture Boundaries
+
+RND-224: the RND-212 refactor chain split business logic out of `app/main.py`
+and out of an all-in-one router. These rules exist to stop that logic from
+flowing back in — if it does, the context an AI agent has to load to touch
+any one feature balloons again, which is exactly what RND-212 fixed.
+
+The single enforceable source of truth for these rules is
+`backend/tests/test_architecture_boundary.py`, which runs under `make test`
+and CI's "Offline / SQLite-compatible tests" step automatically (any test
+under `backend/tests/` is picked up — no CI config change needed). This
+section is the human-readable summary; if it and the test ever disagree,
+the test is authoritative and this section is out of date.
+
+Layering and dependency direction:
+
+- `main` (composition root: `app/main.py` / `create_app()`) → `routers` →
+  `services/domain` → `db`. Schemas may be depended on by routers and
+  services.
+- Service/domain layer must not import `app.routers.*`.
+- Routers must not import `app.main`.
+- The composition root may depend on anything (routers, services, db) —
+  it's the one place allowed to see the whole graph.
+- "Service/domain layer" means `app/services/*` plus an explicit list of
+  flat single-file domain modules living directly under `app/` (e.g.
+  `media_download.py`, `structured_message_parser.py`, `auth.py`) — see the
+  `_FLAT_SERVICE_MODULES` constant in the guardrail test for the exact,
+  current list. A new flat domain module isn't covered by this rule until
+  it's added there.
+
+Composition root purity (`app/main.py` / `create_app()`):
+
+- No new business routes. The only routes allowed directly in the
+  composition root are the health probes (`/health`, `/health/live`,
+  `/health/ready`). Everything else must live in `app/routers/*` and be
+  wired in with `app.include_router(...)`.
+- No direct SQLAlchemy queries (`.query(...)`, `.execute(...)`,
+  `select(...)`). DB access belongs in the db layer or a service.
+- No inline HTML/CSS/JS string literals. Frontend assets belong in
+  `app/web/templates` + `app/web/static`.
+
+Explicitly allowed (do not "fix" these):
+
+- Simple queries or simple CRUD directly inside a router. Not every
+  endpoint needs a dedicated service — split by functional cohesion (one
+  domain = one service + interface), not because a file got long.
+- No line-count, function-length, or route-body-length threshold exists
+  anywhere in this rule or its guardrail test, and none should be added.
+  Reasonable code is never blocked on size.
+
+Exceptions:
+
+- The health-probe whitelist is the only built-in exception. Any other
+  exception (a service legitimately needing something router-shaped, a new
+  composition-root route) requires Haisu's explicit approval, an entry in
+  the guardrail test's `ALLOWED_EXCEPTIONS` (with the reason recorded
+  inline), and should generally get its own ADR under `docs/adr/`.
+
+---
+
 ## Secrets and Sensitive Data
 
 Never commit:

@@ -188,8 +188,8 @@ GET /api/conversations/{conversation_id}/messages/{msgid}/media/access
 ```
 
 - 鉴权与权限校验顺序与既有 `.../media` 代理路由完全一致，且共享同一份权限
-  校验代码（`_resolve_authorized_media` / `_resolve_servable_backend_and_ref`，
-  `backend/app/routers/conversations.py`）：
+  校验代码（`resolve_authorized_media` / `_resolve_servable_backend_and_ref`，
+  `backend/app/services/media_access.py`——RND-221 从 `conversations.py` 抽出并合并）：
   登录校验 → 解析 session tenant_id → tenant 范围内查找 message/media_files
   行 → 归属校验，全部通过后才会触碰任何 storage provider 或签名逻辑。
 - Qiniu 媒体额外增加一次 object key tenant 前缀校验
@@ -230,9 +230,17 @@ GET /api/conversations/{conversation_id}/messages/{msgid}/media/access
 超出范围或非整数值会在请求时抛出配置错误（HTTP 500，`MediaStorageConfigurationError`），
 不会静默 clamp。读取逻辑见 `backend/app/media_storage.py:get_signed_url_ttl_seconds`。
 
+自 RND-207 起，签发的 `expires_at` 并非简单的“签发时刻 + TTL”，而是通过
+`MEDIA_SIGNED_URL_WINDOW_SECONDS`（未设置时默认等于 TTL，范围同为 60~3600 秒，
+读取逻辑见 `get_signed_url_window_seconds`）把过期时间对齐到固定窗口
+（`compute_signed_url_deadline`），使同一窗口内的重复请求得到字节相同的 URL，
+从而被浏览器 HTTP 缓存复用；实际剩余有效期落在 `(window, 2*window]` 区间内，
+而非精确等于 TTL。
+
 ### 前端过期恢复行为
 
-管理台（`backend/app/main.py` 内嵌 JS，无独立前端工程）不再直接把
+管理台（`backend/app/web/static/console/*.js`，RND-216 从 `main.py` 内嵌
+JS 外置、RND-217 拆分为 8 个模块，无独立前端工程）不再直接把
 `media_url` 设为 `<img src>`，而是先请求 `.../media/access` 拿到统一访问
 描述，再据此设置真实 `src`（`hydrateMediaImages` / `loadMediaImage`）。
 图片加载失败（含 Signed URL 已过期）时最多自动重新请求一次访问描述并重试，

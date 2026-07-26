@@ -70,7 +70,7 @@ The archive worker runs sync **then** decrypt. If only sync runs (decrypt fails)
 
 ### Media Download
 
-- The media download worker only handles **images** by scope (RND-151). Voice, video, and file downloads are not implemented.
+- The media download worker is a single unified pipeline covering image/voice/video/file/emotion (RND-147 image, RND-199 voice/video/file/emotion).
 - The timer uses `--since-hours 72` to limit candidates — old messages may have expired WeCom download windows.
 - `--retry` is intentionally **not** used by the timer — retries are manual only.
 

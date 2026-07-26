@@ -95,9 +95,11 @@ run_archive_worker_once.py
   │     └── Stores encrypted envelope + metadata in archive_messages
   │
   └── decrypt_wecom_messages_once.py
-        ├── Reads pending archive_messages rows
+        ├── Reads pending/failed archive_messages rows
         ├── Decrypts with RSA private key (WECOM_PRIVATE_KEY_PATH)
-        ├── Populates decrypted_payload + content_text + extracted fields
+        ├── Populates content_text + extracted fields (structured_content, msgtype,
+        │     sender, roomid, msgtime, tolist, sdkfileid) — decrypted_payload itself
+        │     is deliberately never populated (data-minimization; see DATA_MODEL.md)
         └── Creates archive_message_recipients rows from tolist
 ```
 
