@@ -245,3 +245,6 @@ ssl-renew/.env*
 !ssl-renew/lib/
 !ssl-renew/lib/*.sh
 .DS_Store
+
+# WorkBuddy agent workspace — internal only, not for open source
+.workbuddy/
