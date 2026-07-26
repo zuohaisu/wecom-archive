@@ -51,7 +51,6 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 
 import pytest
 
@@ -77,6 +76,7 @@ from app.message_type_registry import (
     is_known_message_type,
     resolve,
 )
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_js_source, search_page_html
 
 NODE = shutil.which("node")
@@ -740,7 +740,7 @@ var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};
 {src}
 process.stdout.write(JSON.stringify(MessageTypeRegistry.entries));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return json.loads(result.stdout)
 

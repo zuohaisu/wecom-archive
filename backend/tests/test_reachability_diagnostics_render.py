@@ -24,10 +24,10 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 
 import pytest
 
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import diagnostics_js_source
 
 _DIAGNOSTICS_JS = diagnostics_js_source()
@@ -104,7 +104,7 @@ var document = {{
 renderReport({json.dumps(data)});
 process.stdout.write(capturedHtml);
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return result.stdout
 
@@ -301,7 +301,7 @@ var document = {{
 applyStaticI18n();
 process.stdout.write(capturedTitle);
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return result.stdout
 

@@ -32,10 +32,10 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 
 import pytest
 
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_js_source
 
 _REVIEW_CONSOLE_JS = review_console_js_source()
@@ -273,7 +273,7 @@ def _run(scenario: dict) -> dict:
     js = _HARNESS.replace("__REAL_FNS__", _bundle_real_fns()).replace(
         "__SCENARIO__", json.dumps(scenario)
     )
-    result = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=60)
+    result = run_node(js, timeout=60)
     if result.returncode != 0:
         raise AssertionError("node harness failed (%s):\n%s" % (result.returncode, result.stderr))
     return json.loads(result.stdout)

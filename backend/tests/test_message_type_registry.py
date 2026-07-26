@@ -30,11 +30,11 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 
 import pytest
 
 from app.routers.web import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_js_source
 
 _REVIEW_CONSOLE_JS = review_console_js_source()
@@ -156,7 +156,7 @@ def _run(js_body: str) -> object:
 {_bundle()}
 {js_body}
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return json.loads(result.stdout)
 

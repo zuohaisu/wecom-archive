@@ -44,7 +44,6 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 
 import pytest
 
@@ -61,6 +60,7 @@ from app.structured_message_parser import (
     parse_card_message,
     parse_structured_content,
 )
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_js_source
 from tests.test_media_access_descriptor import _authed, client  # noqa: F401
 from tests.test_reachability_audit import (  # noqa: F401
@@ -306,7 +306,7 @@ var msg = {{
 }};
 process.stdout.write(renderCardMessage(msg));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return result.stdout
 
@@ -321,7 +321,7 @@ var msg = {{
 }};
 process.stdout.write(renderAudioArchiveMessage(msg));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return result.stdout
 
@@ -389,7 +389,7 @@ process.stdout.write(JSON.stringify({{
   audio_doc: STRUCTURED_CARD_RENDERERS.audio_doc && STRUCTURED_CARD_RENDERERS.audio_doc.name
 }}));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     mapping = json.loads(result.stdout)
     assert mapping["card"] == "renderCardMessage"

@@ -24,13 +24,13 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 from unittest.mock import MagicMock
 
 import pytest
 
 from app.db.models import ArchiveMessageRecipient
 from app.routers.web import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_js_source
 from tests.test_reachability_audit import (  # noqa: F401 -- db is a pytest fixture
     _TENANT_A,
@@ -188,7 +188,7 @@ def _render_graded_placeholder(type_label: str, status: str) -> str:
         f"{_graded_placeholder_bundle()}\n"
         f"process.stdout.write(renderGradedMediaPlaceholder({json.dumps(type_label)},{json.dumps(status)}));"
     )
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return result.stdout
 
@@ -283,7 +283,7 @@ var auditMode={json.dumps(audit_mode)};
 var selectedMsgId={json.dumps(selected_msg_id)};
 process.stdout.write(timelineRowHtml({json.dumps(msg)}));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return result.stdout
 
@@ -413,7 +413,7 @@ var convTypeFilter={json.dumps(filter_value)};
 var result = applyConvTypeFilter({json.dumps(convs)});
 process.stdout.write(JSON.stringify(result.map(function(c){{return c.conversation_id;}})));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return json.loads(result.stdout)
 
@@ -463,7 +463,7 @@ I18N.setLocale('zh-CN');
 {header_src}
 process.stdout.write(structuredCardHeader('messageType.todo','todo',CARD_DOT_COLORS.todo));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     html = result.stdout
     assert "sc-hd-dot" in html

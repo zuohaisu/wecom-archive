@@ -19,11 +19,11 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_html, review_console_js_source
 
 _REVIEW_CONSOLE_HTML = review_console_html()
@@ -58,7 +58,7 @@ var I18N_SOURCE={json.dumps(_I18N_JS_SOURCE)};
 eval(I18N_SOURCE);
 {js_body}
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return json.loads(result.stdout)
 
@@ -416,7 +416,7 @@ var endHtml=historyStatusHtml;
 var retryHtmlStr=historyRetryHtml();
 process.stdout.write(JSON.stringify({{loading:loadingHtml,end:endHtml,retry:retryHtmlStr}}));
 """
-        result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+        result = run_node(harness)
         assert result.returncode == 0, f"[{code}] node harness failed: {result.stderr}"
         out = json.loads(result.stdout)
         assert loading_sub in out["loading"], f"[{code}] {out['loading']!r}"

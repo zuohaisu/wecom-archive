@@ -31,10 +31,10 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 
 import pytest
 
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import search_js_source
 
 _SEARCH_JS = search_js_source()
@@ -62,7 +62,7 @@ process.stdout.write(JSON.stringify({{
   staff: collectParticipants('staff')
 }}));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return json.loads(result.stdout)
 

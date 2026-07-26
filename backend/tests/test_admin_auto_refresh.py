@@ -27,10 +27,10 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 
 import pytest
 
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_html, review_console_js_source
 
 _REVIEW_CONSOLE_HTML = review_console_html()
@@ -131,7 +131,7 @@ def _run_merge(existing: list[dict], incoming: list[dict]) -> list[dict]:
 {src}
 process.stdout.write(JSON.stringify(mergeMessagesByMsgid({json.dumps(existing)}, {json.dumps(incoming)})));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return json.loads(result.stdout)
 
@@ -205,7 +205,7 @@ var document = {{
 }};
 process.stdout.write(JSON.stringify(isNearBottom()));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return json.loads(result.stdout)
 
@@ -297,7 +297,7 @@ renderConvList({json.dumps(convs)});
 var activeAfterRender = Object.keys(cardEls).filter(function(k) {{ return cardEls[k].active; }});
 process.stdout.write(JSON.stringify(activeAfterRender));
 """
-    result = subprocess.run([NODE, "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     return json.loads(result.stdout)
 

@@ -38,10 +38,10 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 
 import pytest
 
+from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_html, review_console_js_source
 
 _REVIEW_CONSOLE_JS = review_console_js_source()
@@ -169,7 +169,7 @@ setTimeout(function(){
   }));
 }, 10);
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert out["filterAfter"] == "all"
@@ -194,7 +194,7 @@ var document={getElementById:function(){return {querySelectorAll:function(){retu
 focusMessage('m-1','conv-1','direct','staff_alice','staff');
 setTimeout(function(){ process.stdout.write(JSON.stringify(setConvTypeFilterCalls)); }, 10);
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     assert json.loads(result.stdout) == []
 
@@ -284,7 +284,7 @@ setTimeout(function(){{
   }}));
 }}, 200);
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert out["finalMode"] == "staff"
@@ -321,7 +321,7 @@ setTimeout(function(){{
   process.stdout.write(JSON.stringify({{finalMode: mode, finalEntity: selEntityId}}));
 }}, 300);
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert out["finalMode"] == "contact"
@@ -342,7 +342,7 @@ document = makeStubDocument({json.dumps(_STUB_IDS)});
 var ret = loadEntityList();
 process.stdout.write(JSON.stringify(typeof ret==='object' && typeof ret.then==='function'));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     assert json.loads(result.stdout) is True
 
@@ -375,7 +375,7 @@ process.stdout.write(JSON.stringify({{
   selectedMsgId: selectedMsgId
 }}));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert "console.loading" not in out["infoBody"]
@@ -409,7 +409,7 @@ process.stdout.write(JSON.stringify({{
   loadEntityListCalls: loadEntityListCalls
 }}));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert out["selectedMsgId"] is None
@@ -450,7 +450,7 @@ var out={{}};
 }});
 process.stdout.write(JSON.stringify(out));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert out["zh-CN"] != "search.enterHintShort"
@@ -504,7 +504,7 @@ process.stdout.write(JSON.stringify({{
   scopeLabel: __elements['scope-label'].textContent
 }}));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert out["placeholder"] == "Search contacts or messages..."
@@ -584,7 +584,7 @@ process.stdout.write(JSON.stringify({{
   scopeAvatar: __elements['scope-avatar'].textContent
 }}));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert out["scopeLabel"] == "console.pickScope"
@@ -652,7 +652,7 @@ process.stdout.write(JSON.stringify({{
   auditBody: __elements['panel-audit-body'].innerHTML
 }}));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert "Select a conversation" in out["infoBody"]
@@ -709,7 +709,7 @@ I18N.setLocale('en');
 applyLocale();
 process.stdout.write(JSON.stringify({{before: before, after: __elements['focus-banner'].textContent}}));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     assert out["before"] == "返回搜索结果" or "返回" in out["before"]
@@ -740,7 +740,7 @@ document = {{
 applyLocale();
 process.stdout.write('ok');
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     assert result.stdout == "ok"
 
@@ -780,7 +780,7 @@ document = makeStubDocument({json.dumps(["scope-label", "scope-avatar"])});
 updateScopeButton('Alice');
 process.stdout.write(JSON.stringify(__elements['scope-label'].textContent));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     label = json.loads(result.stdout)
     assert label == "Monitored account: Alice"
@@ -799,7 +799,7 @@ var out={{}};
 }});
 process.stdout.write(JSON.stringify(out));
 """
-    result = subprocess.run([shutil.which("node"), "-e", harness], capture_output=True, text=True, timeout=30)
+    result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     out = json.loads(result.stdout)
     for loc in ("zh-CN", "zh-TW", "en"):
