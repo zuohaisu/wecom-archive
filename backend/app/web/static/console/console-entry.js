@@ -413,6 +413,31 @@ function focusMessage(msgid, convId, convType, entityId, entityType){
   // of the current filter.
   if(convTypeFilter!=='all')setConvTypeFilter('all');
   var targetMode=(entityType==='staff')?'staff':'contact';
+  // RND-240: if the target entity/conversation is already the active
+  // selection, skip the entire re-fetch chain below (setMode -> reload
+  // entity list -> waitForEntity poll -> reload conversation list ->
+  // waitForConv poll) -- that chain redundantly re-pulls data the console
+  // already has on screen, and its polling fallbacks are what stretched a
+  // same-conversation locate to ~8s. Only short-circuit when the filter is
+  // already 'all' too, so this never bypasses the setConvTypeFilter call
+  // above.
+  if(mode===targetMode&&selEntityId===entityId&&convTypeFilter==='all'){
+    var cb=document.getElementById('conv-body');
+    var cards=cb?cb.querySelectorAll('.conv-card'):[];
+    var hit=null;
+    Array.prototype.forEach.call(cards,function(card){
+      if(card.dataset.id===convId)hit=card;
+    });
+    if(hit){
+      focusMsgId=msgid;
+      if(timelineConvId===convId&&timelineMsgs.length){
+        focusCheckRow();
+      }else{
+        onConvClick(hit);
+      }
+      return;
+    }
+  }
   setMode(targetMode);
   var focusAttempts=0;
   var waitForEntity=function(){

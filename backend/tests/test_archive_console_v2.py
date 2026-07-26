@@ -28,7 +28,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.db.models import ArchiveMessageRecipient
+from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.routers.web import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON
 from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_js_source
@@ -161,6 +161,111 @@ def test_conversation_detail_is_tenant_scoped(client, db) -> None:
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 404
+
+
+def test_rnd240_detail_aggregation_matches_full_row_computation(client, db) -> None:
+    """RND-240: get_conversation_detail was rewritten to resolve membership
+    as bare ids + a load_only projection instead of materializing every
+    full ArchiveMessage row, to avoid the large raw_encrypted_payload/
+    decrypted_payload/structured_content columns on conversations with
+    thousands of messages. This proves the new path's response is
+    field-for-field identical to what the OLD full-row computation would
+    have produced, on a conversation large enough (300 messages, mixed
+    decrypt_status, two distinct participants) that the two code paths'
+    query shapes genuinely differ -- not just a small fixture that happens
+    to agree either way."""
+    from app.conversation_membership import (
+        _fetch_conversation_messages,
+        _load_recipients_map,
+        _load_display_names_for_ids,
+        _staff_ids_for_participants,
+    )
+    from app.main import app
+    from app.services.listing_service import _build_conversation_list
+
+    room = "rnd240-large-room"
+    n = 300
+    rows = []
+    for i in range(n):
+        sender = "staff_alice" if i % 2 == 0 else "contact_bob"
+        rows.append(
+            ArchiveMessage(
+                msgid=f"rnd240-{i}",
+                seq=i,
+                publickey_ver=1,
+                encrypt_random_key="x",
+                encrypt_chat_msg="y",
+                decrypt_status="success" if i % 3 else "pending",
+                content_text=f"message body {i}",
+                msgtype="text",
+                sender=sender,
+                roomid=room,
+                msgtime=1000 + i,
+                tenant_id=_TENANT_A,
+            )
+        )
+    db.bulk_save_objects(rows, return_defaults=True)
+    db.commit()
+
+    msg_ids = [
+        row[0]
+        for row in db.query(ArchiveMessage.id).filter(ArchiveMessage.roomid == room).all()
+    ]
+    recipient_rows = [
+        ArchiveMessageRecipient(
+            message_id=mid,
+            receiver_userid="contact_bob" if idx % 2 == 0 else "staff_alice",
+            receiver_type="user",
+            tenant_id=_TENANT_A,
+        )
+        for idx, mid in enumerate(msg_ids)
+    ]
+    db.bulk_save_objects(recipient_rows)
+    db.commit()
+
+    # New path: the actual HTTP endpoint.
+    _authed(app, db, _TENANT_A)
+    try:
+        resp = client.get(f"/api/conversations/{room}/detail")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    new_body = resp.json()
+
+    # Old path: byte-for-byte reimplementation of the pre-RND-240 body,
+    # using the full-row _fetch_conversation_messages this endpoint used
+    # to call directly.
+    old_messages = _fetch_conversation_messages(db, room, _TENANT_A)
+    old_recipients_map = _load_recipients_map(db, _TENANT_A, [m.id for m in old_messages])
+    old_participant_ids: set[str] = {m.sender for m in old_messages if m.sender}
+    for recipient_ids in old_recipients_map.values():
+        old_participant_ids.update(recipient_ids)
+    old_display_names = _load_display_names_for_ids(db, _TENANT_A, old_participant_ids)
+    old_staff_ids = _staff_ids_for_participants(db, _TENANT_A, old_participant_ids)
+    old_buckets = _build_conversation_list(
+        old_messages, old_recipients_map, old_display_names, old_staff_ids
+    )
+    old_bucket = next(
+        (b for b in old_buckets if b["conversation_id"] == room), old_buckets[0]
+    )
+    old_participants = [
+        {"id": sid, "raw_id": sid, "display_name": name, "role": "staff"}
+        for sid, name in zip(
+            old_bucket["monitored_account_ids"], old_bucket["monitored_account_display_names"]
+        )
+    ] + [
+        {"id": cid, "raw_id": cid, "display_name": name, "role": "contact"}
+        for cid, name in zip(old_bucket["contact_ids"], old_bucket["contact_display_names"])
+    ]
+    old_decrypted_count = sum(1 for m in old_messages if m.decrypt_status == "success")
+    old_body = {
+        "conversation_id": room,
+        "message_count": len(old_messages),
+        "decrypted_percent": round(old_decrypted_count * 100.0 / len(old_messages), 1),
+        "participants": old_participants,
+    }
+
+    assert new_body == old_body
 
 
 # ---------------------------------------------------------------------------

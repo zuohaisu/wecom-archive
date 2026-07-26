@@ -760,3 +760,200 @@ def _fetch_conversation_messages(
         raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
 
     return _fetch_group_room_messages(db, conversation_id, tenant_id)
+
+
+
+# ---------------------------------------------------------------------------
+# RND-240: id-only membership resolution
+#
+# The functions below answer the exact same "which messages belong to this
+# conversation_id" question as _fetch_conversation_messages above, using the
+# exact same branch ordering, but never materialize a full ArchiveMessage ORM
+# row (raw_encrypted_payload/decrypted_payload/structured_content are large
+# JSONB columns, and content_text/sdkfileid can be sizeable Text columns too)
+# just to answer it. Used ONLY by get_conversation_detail(), which never
+# receives mode/entity_id (that endpoint takes no such query params), so
+# these mirror _fetch_conversation_messages's entity-unscoped path only --
+# the entity-scoped collision-disambiguation branches (mode+entity_id
+# supplied) are intentionally not replicated here.
+# ---------------------------------------------------------------------------
+
+
+def _group_room_message_ids(db: Session, roomid: str, tenant_id: str) -> list[int]:
+    """id-only counterpart to _fetch_group_room_messages."""
+    return [
+        row[0]
+        for row in db.query(ArchiveMessage.id)
+        .filter(
+            ArchiveMessage.roomid == roomid,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    ]
+
+
+def _direct_pair_message_ids(db: Session, uid_a: str, uid_b: str, tenant_id: str) -> list[int]:
+    """id-only counterpart to _fetch_direct_pair_messages."""
+    ids_a_to_b = (
+        db.query(ArchiveMessage.id)
+        .join(
+            ArchiveMessageRecipient,
+            ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+        )
+        .filter(
+            ArchiveMessage.sender == uid_a,
+            ArchiveMessageRecipient.receiver_userid == uid_b,
+            or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    ids_b_to_a = (
+        db.query(ArchiveMessage.id)
+        .join(
+            ArchiveMessageRecipient,
+            ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+        )
+        .filter(
+            ArchiveMessage.sender == uid_b,
+            ArchiveMessageRecipient.receiver_userid == uid_a,
+            or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    seen: set[int] = {row[0] for row in ids_a_to_b} | {row[0] for row in ids_b_to_a}
+    return list(seen)
+
+
+def _null_sender_candidate_message_ids(
+    db: Session,
+    conversation_id: str,
+    tokens: "str | list[str]",
+    tenant_id: str,
+    *,
+    require_null_sender: bool = False,
+) -> list[int]:
+    """id-only counterpart to _fetch_null_sender_candidate_messages. Still
+    has to project sender/roomid (not just id) for the candidate rows,
+    since _derive_conversation_membership needs them to verify each
+    candidate actually canonicalizes to conversation_id -- but that is a
+    3-column projection, not a full-row fetch, and this candidate set is
+    bounded/narrow by construction (see the sibling function's docstring),
+    never the thousands-of-rows case _group_room_message_ids /
+    _direct_pair_message_ids exist to keep lean."""
+    token_list = [tokens] if isinstance(tokens, str) else list(tokens)
+    token_list = [t for t in token_list if t]
+    if not token_list:
+        return []
+
+    filters = [
+        ArchiveMessage.tenant_id == tenant_id,
+        or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+    ]
+    if require_null_sender:
+        filters.append(or_(ArchiveMessage.sender.is_(None), ArchiveMessage.sender == ""))
+        filters.append(
+            and_(
+                ArchiveMessageRecipient.receiver_userid.in_(token_list),
+                ArchiveMessageRecipient.tenant_id == tenant_id,
+            )
+        )
+    else:
+        filters.append(
+            or_(
+                ArchiveMessage.sender.in_(token_list),
+                and_(
+                    ArchiveMessageRecipient.receiver_userid.in_(token_list),
+                    ArchiveMessageRecipient.tenant_id == tenant_id,
+                ),
+            )
+        )
+
+    candidates = (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+        .outerjoin(
+            ArchiveMessageRecipient,
+            ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+        )
+        .filter(*filters)
+        .distinct()
+        .all()
+    )
+    if not candidates:
+        return []
+
+    candidate_ids = [c[0] for c in candidates]
+    recipients_map = _load_recipients_map(db, tenant_id, candidate_ids)
+
+    participant_ids: set[str] = set()
+    for cid, sender, _roomid in candidates:
+        if sender:
+            participant_ids.add(sender)
+        participant_ids.update(recipients_map.get(cid, []))
+    staff_ids = _staff_ids_for_participants(db, tenant_id, participant_ids)
+
+    def _is_staff(uid: str) -> bool:
+        return uid in staff_ids
+
+    matched: list[int] = []
+    for cid, sender, roomid in candidates:
+        recipients = recipients_map.get(cid, [])
+        conv_id, _conv_type, _staff_set, _contact_set = _derive_conversation_membership(
+            sender, roomid, recipients, _is_staff
+        )
+        if conv_id == conversation_id:
+            matched.append(cid)
+    return matched
+
+
+def _resolve_conversation_message_ids(
+    db: Session, conversation_id: str, tenant_id: str
+) -> list[int]:
+    """id-only counterpart to _fetch_conversation_messages(db, conversation_id,
+    tenant_id) (no mode/entity_id -- see module note above), used ONLY by
+    get_conversation_detail(). Same branch ordering/control flow as that
+    function's docstring (steps 1-6); ambiguous direct/group collisions
+    still raise the same 400, since this callsite never has entity context
+    to disambiguate with either."""
+    if conversation_id.startswith("direct__"):
+        rest = conversation_id[len("direct__"):]
+        parts = rest.split("___", 1)
+
+        group_ids = _group_room_message_ids(db, conversation_id, tenant_id)
+
+        direct_ids: set[int] = set()
+        if len(parts) == 2:
+            uid_a, uid_b = parts
+            direct_ids = set(_direct_pair_message_ids(db, uid_a, uid_b, tenant_id))
+            null_sender_extra = _null_sender_candidate_message_ids(
+                db, conversation_id, [uid_a, uid_b], tenant_id, require_null_sender=True
+            )
+            direct_ids.update(null_sender_extra)
+
+        if group_ids and direct_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Conversation ID is ambiguous: it matches both a direct "
+                    "conversation and a group room. Provide mode and "
+                    "staff_id/contact_id to resolve it unambiguously."
+                ),
+            )
+
+        if group_ids:
+            return list(group_ids)
+
+        if len(parts) == 2:
+            return list(direct_ids)
+
+        if rest:
+            orphan_ids = _null_sender_candidate_message_ids(db, conversation_id, rest, tenant_id)
+            if orphan_ids:
+                return orphan_ids
+
+        raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
+
+    return _group_room_message_ids(db, conversation_id, tenant_id)

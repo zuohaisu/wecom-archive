@@ -50,7 +50,8 @@ import os
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, load_only
 
 from app.auth import get_current_user
 from app.db.models import (
@@ -94,6 +95,7 @@ from app.conversation_membership import (
     _load_display_names_for_ids,  # noqa: F401
     _staff_ids_for_participants,  # noqa: F401
     _direct_conv_id,  # noqa: F401
+    _resolve_conversation_message_ids,
 )
 from app.schemas.listing import (
     ContactOut,
@@ -479,33 +481,70 @@ def get_conversation_detail(
     inferred participants for the review console's 会话信息 panel. Additive:
     does not change GET /api/conversations or any other existing endpoint.
 
-    Reuses _fetch_conversation_messages (the exact tenant-scoped message
-    resolution the timeline endpoint uses) and _build_conversation_list
-    (the exact staff/contact aggregation GET /api/conversations uses) —
-    see app.conversation_membership / app.services.listing_service —
-    instead of a parallel reimplementation.
+    Reuses _resolve_conversation_message_ids (RND-240: an id-only mirror of
+    _fetch_conversation_messages's exact tenant-scoped membership
+    resolution -- see its docstring for why this endpoint can't just call
+    _fetch_conversation_messages directly and still be fast) and
+    _build_conversation_list (the exact staff/contact aggregation
+    GET /api/conversations uses) — see app.conversation_membership /
+    app.services.listing_service — instead of a parallel reimplementation.
 
     `participants` is explicitly an INFERENCE over archived messages (every
     distinct sender/recipient observed among this conversation's resolved
     messages), never a live WeCom room roster — this system has no such
     sync, and the frontend labels it accordingly (never presented as
     ground truth). `decrypted_percent` is computed only from
-    ArchiveMessage.decrypt_status among those same resolved messages — no
-    new query beyond what was already fetched to build `participants`.
+    ArchiveMessage.decrypt_status among those same resolved messages, via a
+    SQL aggregate rather than materializing every row.
+
+    RND-240: for a conversation with thousands of messages, the previous
+    implementation (`_fetch_conversation_messages` -> full ArchiveMessage
+    ORM rows, including the large raw_encrypted_payload/decrypted_payload/
+    structured_content JSONB columns nothing here ever reads) was the
+    dominant cost of loading this panel. This resolves membership as bare
+    ids first (`_resolve_conversation_message_ids`), computes
+    `decrypted_percent` with a COUNT aggregate, and only re-fetches
+    `ArchiveMessage` rows through a `load_only` projection restricted to
+    the columns `_build_conversation_list` actually reads
+    (id/sender/roomid/msgtime/content_text) to build `participants`.
     """
     _, tenant_id = auth
-    messages = _fetch_conversation_messages(db, conversation_id, tenant_id)
-    if not messages:
+    ids = _resolve_conversation_message_ids(db, conversation_id, tenant_id)
+    if not ids:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
-    participant_ids: set[str] = {m.sender for m in messages if m.sender}
+    total = len(ids)
+    decrypted_count = (
+        db.query(func.count(ArchiveMessage.id))
+        .filter(ArchiveMessage.id.in_(ids), ArchiveMessage.decrypt_status == "success")
+        .scalar()
+        or 0
+    )
+    decrypted_percent = round(decrypted_count * 100.0 / total, 1)
+
+    slim_messages = (
+        db.query(ArchiveMessage)
+        .options(
+            load_only(
+                ArchiveMessage.id,
+                ArchiveMessage.sender,
+                ArchiveMessage.roomid,
+                ArchiveMessage.msgtime,
+                ArchiveMessage.content_text,
+            )
+        )
+        .filter(ArchiveMessage.id.in_(ids))
+        .all()
+    )
+
+    recipients_map = _load_recipients_map(db, tenant_id, ids)
+    participant_ids: set[str] = {m.sender for m in slim_messages if m.sender}
     for recipient_ids in recipients_map.values():
         participant_ids.update(recipient_ids)
     display_names = _load_display_names_for_ids(db, tenant_id, participant_ids)
     staff_ids = _staff_ids_for_participants(db, tenant_id, participant_ids)
 
-    buckets = _build_conversation_list(messages, recipients_map, display_names, staff_ids)
+    buckets = _build_conversation_list(slim_messages, recipients_map, display_names, staff_ids)
     bucket = next(
         (b for b in buckets if b["conversation_id"] == conversation_id),
         buckets[0],
@@ -521,12 +560,9 @@ def get_conversation_detail(
         for cid, name in zip(bucket["contact_ids"], bucket["contact_display_names"])
     ]
 
-    decrypted_count = sum(1 for m in messages if m.decrypt_status == "success")
-    decrypted_percent = round(decrypted_count * 100.0 / len(messages), 1)
-
     return ConversationDetailOut(
         conversation_id=conversation_id,
-        message_count=len(messages),
+        message_count=total,
         decrypted_percent=decrypted_percent,
         participants=participants,
     )
