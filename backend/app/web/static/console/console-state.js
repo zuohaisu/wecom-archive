@@ -63,3 +63,34 @@ var focusPending=false;
 
 // RND-159: Search
 var searchTimer=null,searchLastQ='';
+
+// Archive Console v2 (design import): new UI state.
+// auditMode: gates the per-row msgtype badge + audit line in timelineRowHtml.
+//   Default false -- previously the msgtype badge was always shown for
+//   non-text messages; this is an intentional visible behavior change.
+var auditMode=false;
+// panelOpen/panelTab: the new right-hand info/audit panel.
+var panelOpen=true, panelTab='info';
+// selectedMsgId: the timeline row currently selected for the audit tab.
+var selectedMsgId=null;
+// scopePopoverOpen: the "监控范围" popover replacing the old always-visible
+// entity column; entity-header/entity-body/mode-tabs render inside it.
+var scopePopoverOpen=false;
+// convTypeFilter: client-side filter over the already-fetched conversation
+// list ('all'|'group'|'direct') -- no new API call, ConversationOut already
+// carries conversation_type.
+var convTypeFilter='all';
+// searchHits: ordered array of the last /api/search/messages result rows
+// (msgid/conversation_id/conversation_type/entity_id/entity_type), used by
+// the locator bar's prev/next stepping. locatorIndex is 1-based, 0 = none.
+var searchHits=[],locatorIndex=0;
+// conversation detail cache for the panel's 会话信息 tab, keyed by
+// conversation_id, populated by loadConversationDetail() in api-client.js.
+var convDetailCache={};
+// Inline search filters, real params passed to /api/search/messages (see
+// backend/app/routers/search.py) -- not decorative. searchDateRange is one
+// of null|'1d'|'7d'|'30d'|'90d'; searchAllTypes toggles between the
+// backend's default (text-only, msgtype omitted) and every registered
+// msgtype (via RND216_MSGTYPE_OPTIONS' rawValues, reused from the
+// standalone search page's own catalog).
+var searchDateRange=null,searchAllTypes=false;

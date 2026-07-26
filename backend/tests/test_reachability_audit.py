@@ -25,6 +25,7 @@ end without requiring a live Postgres instance.
 
 from __future__ import annotations
 
+import itertools
 from unittest.mock import MagicMock
 
 import pytest
@@ -192,6 +193,18 @@ def db():
 _TENANT_A = "tenant-a"
 _TENANT_B = "tenant-b"
 
+# QA fix: the auto-generated msgid used to be f"msg-{seq}-{id(defaults)}" --
+# id() is a memory address, which CPython can and does reuse once the
+# previous `defaults` dict it belonged to is garbage-collected. Under
+# full-suite memory pressure (many tests, many short-lived dicts) two
+# unrelated _insert_message() calls could get the same address and thus
+# the same msgid, which test_search_messages_pagination's cross-page
+# uniqueness assertion (correctly) flagged as "overlapping results" --
+# the messages were never actually duplicated, the TEST DATA was. A
+# monotonically increasing counter can never repeat within a test-process
+# run, unlike a recycled memory address.
+_msgid_counter = itertools.count(1)
+
 
 def _insert_message(db: Session, **kwargs) -> ArchiveMessage:
     defaults = dict(
@@ -203,7 +216,7 @@ def _insert_message(db: Session, **kwargs) -> ArchiveMessage:
         tenant_id=_TENANT_A,
     )
     defaults.update(kwargs)
-    defaults.setdefault("msgid", f"msg-{defaults['seq']}-{id(defaults)}")
+    defaults.setdefault("msgid", f"msg-{defaults['seq']}-{next(_msgid_counter)}")
     msg = ArchiveMessage(**defaults)
     db.add(msg)
     db.commit()
@@ -1107,3 +1120,30 @@ def test_invalid_membership_derivation_is_caught_and_audit_continues(monkeypatch
     # neither call raised and the scan completed for both.
     assert by_id[also_needs_check.id]["reachability_status"] == "unreachable_membership"
     assert by_id[also_needs_check.id]["reason_code"] == "conversation_membership_lookup_errored"
+
+
+# ---------------------------------------------------------------------------
+# QA fix: _insert_message()'s auto-generated msgid must never repeat within
+# a test run. The previous f"msg-{seq}-{id(defaults)}" scheme used a
+# recycled memory address, which caused an intermittent, full-suite-only
+# cross-page msgid collision in test_search_api.py's pagination test
+# (flagged in QA review). A monotonic counter can't repeat.
+# ---------------------------------------------------------------------------
+
+
+def test_insert_message_auto_generated_msgids_never_collide(db) -> None:
+    # Same seq on every call (the realistic worst case for the old id()-based
+    # scheme, which folded seq + a possibly-reused address into one string)
+    # -- uniqueness must come entirely from the counter, not from variety in
+    # the other fields.
+    msgs = [_insert_message(db, seq=1, sender="staff_a", msgtime=i) for i in range(50)]
+    msgids = [m.msgid for m in msgs]
+    assert len(set(msgids)) == len(msgids), "duplicate auto-generated msgid within one test run"
+    assert all(mid.startswith("msg-1-") for mid in msgids)
+
+
+def test_insert_message_respects_an_explicit_msgid(db) -> None:
+    # setdefault() must not override a caller-supplied msgid -- many
+    # existing tests rely on choosing their own deterministic ids.
+    msg = _insert_message(db, msgid="custom-explicit-id", sender="staff_a")
+    assert msg.msgid == "custom-explicit-id"

@@ -138,6 +138,13 @@ var timelineConvId = null, timelineMsgs = [], timelineHasOlder = false,
     timelineEntityId = null;
 
 function setMode(m){ mode = m; }
+// Archive Console v2 (design import): focusMessage() now resets the
+// 全部/群聊/单聊 filter to 'all' before locating (a non-'all' filter can
+// hide the target conversation's card entirely) -- declare the real
+// setConvTypeFilter()'s minimal contract here since this harness stubs
+// setMode/onEntityClick/onConvClick rather than extracting them for real.
+var convTypeFilter = 'all';
+function setConvTypeFilter(t){ convTypeFilter = t; }
 function onEntityClick(el){ selEntityId = el.dataset.id; }
 function onConvClick(el){ selConvId = el.dataset.id; selConvName = el.dataset.name; loadTimeline(selConvId, el.dataset.type); }
 function esc(s){ return s == null ? '' : String(s); }

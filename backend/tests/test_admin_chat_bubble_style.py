@@ -123,15 +123,19 @@ def test_bubble_radius_matches_wecom_range() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Media / placeholder styling: unaffected by this recolor
+# Media / placeholder styling: restyled by Archive Console v2 (design
+# import) to a white dashed-border card (matching the Message Types spec's
+# graded media-unavailable states) -- no longer the old flat grey box this
+# test's original name asserted was "unchanged". Bubble recolor logic above
+# (this file's actual RND-154 subject) is untouched.
 # ---------------------------------------------------------------------------
 
 
-def test_base_media_placeholder_style_unchanged() -> None:
+def test_base_media_placeholder_style_updated_for_console_v2() -> None:
     css = _extract_style_block()
     base_rule = _extract_rule(css, ".media-placeholder")
-    assert "#fafafa" in base_rule
-    assert "#d9d9d9" in base_rule
+    assert "#fff" in base_rule
+    assert "#d9dde3" in base_rule
 
 
 # ---------------------------------------------------------------------------

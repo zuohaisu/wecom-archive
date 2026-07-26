@@ -6,31 +6,88 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--bubble-self-bg:#cfe6fd;--bubble-self-text:#000;--bubble-other-bg:#fff;--bubble-other-text:#000;--link-color:#417ce8}
-body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh;display:flex;flex-direction:column;overflow:hidden}
-.top-bar{height:44px;background:#001529;color:#fff;display:flex;align-items:center;padding:0 1rem;gap:1rem;flex-shrink:0}
-.top-bar h1{font-size:.95rem;font-weight:600;letter-spacing:.01em}
-.top-bar a{color:#8ca0b3;font-size:.82rem;text-decoration:none}
-.top-bar a:hover{color:#fff}
-.top-bar-user{margin-left:auto;font-size:.8rem;color:#8ca0b3;display:flex;align-items:center;gap:.75rem}
-.tz-note{font-size:.72rem;color:#5c7185}
-.btn-logout{background:transparent;border:1px solid #3a4a5a;color:#8ca0b3;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem}
-.btn-logout:hover{border-color:#8ca0b3;color:#fff}
-.refresh-bar{display:flex;align-items:center;gap:.5rem;font-size:.76rem;color:#8ca0b3;flex-shrink:0}
+body{font-family:system-ui,sans-serif;color:#1f2329;background:#e9ebef;height:100vh;overflow:hidden}
+a{color:var(--link-color)}
+
+.shell{display:flex;height:100vh}
+
+/* ------------------------------------------------------------------ */
+/* Side nav (Archive Console v2 "1a" shell)                            */
+/* ------------------------------------------------------------------ */
+.side-nav{width:212px;flex-shrink:0;background:#f4f7fb;border-right:1px solid #e6eaf0;display:flex;flex-direction:column;overflow:hidden}
+.side-nav-brand{display:flex;align-items:center;gap:9px;padding:18px 18px 16px;flex-shrink:0}
+.side-nav-logo{width:24px;height:24px;border-radius:7px;background:#1677ff;flex-shrink:0}
+.side-nav-title{font-size:14.5px;font-weight:700;letter-spacing:-.01em}
+.side-nav-scroll{flex:1;overflow-y:auto;padding:0 10px 10px;display:flex;flex-direction:column;gap:3px}
+.side-nav-group{font-size:10.5px;color:#a3a9b3;letter-spacing:.06em;padding:12px 8px 4px;font-weight:600;text-transform:uppercase}
+.side-nav-item{padding:7px 10px;border-radius:7px;font-size:13px;cursor:pointer;color:#3d4552;text-decoration:none;display:flex;align-items:center;gap:6px}
+.side-nav-item:hover{background:#eef1f5}
+.side-nav-item.active{background:#e8f1fd;color:#0958d9;font-weight:600}
+.side-nav-item.active:hover{background:#e8f1fd}
+.side-nav-item.side-nav-disabled{color:#c0c6cf;cursor:default}
+.side-nav-item.side-nav-disabled:hover{background:transparent}
+.side-nav-item.side-nav-disabled em{font-style:normal;font-size:10px;color:#b6bcc5;border:1px solid #eef1f5;border-radius:3px;padding:0 4px;margin-left:auto;flex-shrink:0}
+.side-nav-user{border-top:1px solid #e6eaf0;padding:12px 16px;display:flex;flex-direction:column;gap:8px;flex-shrink:0;font-size:12.5px;color:#3d4552}
+.side-nav-user-row{display:flex;align-items:center;gap:8px}
+
+/* ------------------------------------------------------------------ */
+/* Console main column                                                 */
+/* ------------------------------------------------------------------ */
+.console-main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+
+.top-bar{height:52px;flex-shrink:0;background:#fff;border-bottom:1px solid #eceff3;display:flex;align-items:center;gap:12px;padding:0 18px;color:#1f2329}
+.tz-note{font-size:11.5px;color:#8a8f99;white-space:nowrap}
+.refresh-bar{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#8a8f99;flex-shrink:0}
 .refresh-status{white-space:nowrap}
-.refresh-status .refresh-status-error{color:#ff7875}
-.btn-refresh{background:transparent;border:1px solid #3a4a5a;color:#8ca0b3;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem}
-.btn-refresh:hover{border-color:#8ca0b3;color:#fff}
+.refresh-status .refresh-status-error{color:#d4436b}
+.btn-refresh{height:28px;padding:0 11px;border:1px solid #e3e7ee;border-radius:7px;background:#fff;color:#3d4552;cursor:pointer;font-size:12px;white-space:nowrap}
+.btn-refresh:hover{background:#f6f8fb}
+
+.search-bar{position:relative;flex:0 1 380px;min-width:0}
+.search-bar input{width:100%;height:32px;padding:0 76px 0 12px;border:1px solid #e3e7ee;border-radius:8px;background:#f6f8fb;font-size:13px;outline:none;color:#1f2329;box-sizing:border-box}
+.search-bar input:focus{border-color:#1677ff;background:#fff}
+.search-bar input::placeholder{color:#a6adb8}
+.search-bar .enter-hint{position:absolute;right:9px;top:8px;font-size:10.5px;color:#a6adb8;border:1px solid #e3e7ee;border-radius:4px;padding:1px 5px;pointer-events:none}
+
+.top-bar-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.btn-toggle{height:28px;padding:0 11px;border:1px solid #e3e7ee;border-radius:7px;background:#fff;color:#3d4552;cursor:pointer;font-size:12px;white-space:nowrap}
+.btn-toggle:hover{background:#f6f8fb}
+.btn-toggle.active{border-color:#1677ff;background:#e8f1fd;color:#0958d9}
+
+.lang-switch{position:relative}
+.btn-lang{height:28px;padding:0 11px;border:1px solid #e3e7ee;border-radius:7px;background:#fff;color:#3d4552;cursor:pointer;font-size:12px}
+.btn-lang:hover{background:#f6f8fb}
+.lang-menu{position:absolute;top:135%;right:0;background:#fff;border:1px solid #e8e8e8;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.18);min-width:7rem;overflow:hidden;z-index:50}
+.lang-option{padding:.4rem .7rem;font-size:.8rem;color:#333;cursor:pointer;white-space:nowrap}
+.lang-option:hover{background:#f5f5f5}
+.lang-option.active{color:#1677ff;font-weight:600;background:#e8f1fd}
+.btn-logout{height:28px;padding:0 11px;border:1px solid #e3e7ee;border-radius:7px;background:#fff;color:#3d4552;cursor:pointer;font-size:12px}
+.btn-logout:hover{background:#f6f8fb}
+
 .layout{display:flex;flex:1;overflow:hidden}
-.col{display:flex;flex-direction:column;overflow:hidden;background:#fff;border-right:1px solid #e8e8e8}
-.col-left{width:220px;flex-shrink:0}
-.col-mid{width:304px;flex-shrink:0}
-.col-right{flex:1;border-right:none;position:relative}
+.col{display:flex;flex-direction:column;overflow:hidden;background:#fff}
 .col-header{padding:.4rem .75rem;font-size:.74rem;font-weight:600;color:#666;background:#fafafa;border-bottom:1px solid #ebebeb;text-transform:uppercase;letter-spacing:.05em;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.col-body{flex:1;overflow-y:auto}
+.empty-state{padding:2.5rem 1rem;text-align:center;color:#ccc;font-size:.83rem}
+.loading{padding:1rem;text-align:center;color:#bbb;font-size:.82rem}
+.error-msg{margin:.5rem;padding:.6rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:3px;font-size:.8rem}
+
+/* ------------------------------------------------------------------ */
+/* Left column: monitoring-scope popover + conv-type tabs + conv list   */
+/* ------------------------------------------------------------------ */
+.col-conv{width:328px;flex-shrink:0;border-right:1px solid #eceff3;position:relative}
+.scope-bar{padding:10px 12px;border-bottom:1px solid #eceff3;flex-shrink:0;position:relative}
+.scope-btn{width:100%;height:30px;padding:0 10px;border:1px solid #e3e7ee;border-radius:7px;background:#f6f8fb;font-size:12.5px;color:#3d4552;cursor:pointer;display:flex;align-items:center;gap:6px;text-align:left}
+.scope-btn:hover{background:#eef1f5}
+.scope-avatar{width:18px;height:18px;border-radius:50%;background:#1677ff;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.scope-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scope-caret{color:#a6adb8;font-size:10px;flex-shrink:0}
+.scope-popover{position:absolute;top:100%;left:12px;right:12px;background:#fbfcfe;border:1px solid #e8e8e8;border-radius:8px;box-shadow:0 6px 20px rgba(15,23,42,.14);max-height:320px;overflow:hidden;display:flex;flex-direction:column;z-index:220}
+.scope-popover-body{overflow-y:auto;max-height:220px}
 .mode-tabs{display:flex;flex-shrink:0;border-bottom:1px solid #e8e8e8}
 .mode-tab{flex:1;padding:.45rem 0;font-size:.83rem;text-align:center;cursor:pointer;border:none;background:transparent;color:#666;border-bottom:2px solid transparent}
-.mode-tab.active{color:#1890ff;border-bottom-color:#1890ff;font-weight:600}
+.mode-tab.active{color:#1677ff;border-bottom-color:#1677ff;font-weight:600}
 .mode-tab:hover:not(.active){background:#f5f5f5}
-.col-body{flex:1;overflow-y:auto}
 .entity-item{display:flex;align-items:center;gap:.45rem;padding:.45rem .75rem;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:.83rem}
 .entity-item:hover{background:#f0f5ff}
 .entity-item.active{background:#e6f4ff;color:#0958d9}
@@ -40,9 +97,15 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .seat-badge{font-size:.62rem;padding:.05rem .35rem;border-radius:2px;margin-left:.3rem;font-weight:600;flex-shrink:0}
 .seat-badge-active{background:#f6ffed;color:#389e0d;border:1px solid #b7eb8f}
 .seat-badge-history{background:#f5f5f5;color:#999;border:1px solid #e8e8e8}
+
+.conv-type-tabs{display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid #eceff3;flex-shrink:0}
+.ctab{height:26px;padding:0 10px;border-radius:6px;border:1px solid #e3e7ee;background:#fff;color:#6b7280;font-size:12px;cursor:pointer}
+.ctab:hover{background:#f6f8fb}
+.ctab.active{border-color:#1677ff;background:#e8f1fd;color:#0958d9}
+
 .conv-card{padding:.55rem .75rem;border-bottom:1px solid #f0f0f0;cursor:pointer}
 .conv-card:hover{background:#f5f8ff}
-.conv-card.active{background:#e6f4ff;border-left:3px solid #1890ff}
+.conv-card.active{background:#e6f4ff;border-left:3px solid #1677ff}
 .conv-top{display:flex;align-items:baseline;gap:.3rem;margin-bottom:.15rem}
 .conv-name{font-weight:600;font-size:.83rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conv-time{font-size:.7rem;color:#bbb;white-space:nowrap;flex-shrink:0}
@@ -55,22 +118,68 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .badge-count{background:#f5f5f5;color:#999;border:1px solid #e8e8e8}
 .badge-account{font-size:.68rem;color:#888}
 .badge-revoked{background:#fafafa;color:#aaa;border:1px solid #eee;font-style:italic}
+
+/* Search-in-sidebar (replaces the old floating .search-results dropdown) */
+.search-results{position:static;background:#fff;border:none;box-shadow:none;max-height:none;overflow-y:auto;flex:1;display:none}
+.search-filters{padding:8px 12px;border-bottom:1px solid #eceff3;flex-shrink:0}
+.sr-section{padding:.3rem 0}
+.sr-section-header{padding:.2rem .6rem;font-size:.72rem;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:.03em}
+.sr-item{padding:.5rem .75rem;cursor:pointer;font-size:.8rem;color:#333;display:flex;flex-direction:column;gap:.15rem;border-bottom:1px solid #f6f8fb}
+.sr-item:hover{background:#e6f4ff}
+.sr-item-main{display:flex;align-items:center;gap:.4rem}
+.sr-item-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-item-raw{font-size:.7rem;color:#bbb;flex-shrink:0}
+.sr-item-snippet{font-size:.75rem;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.4}
+.sr-item-time{font-size:.7rem;color:#bbb}
+.sr-item-conv{font-size:.72rem;color:#888}
+.sr-highlight{background:#fff3cd;color:#b45309;font-weight:600;border-radius:2px;padding:0 1px}
+.sr-empty,.sr-loading,.sr-error{padding:.6rem;text-align:center;font-size:.8rem;color:#ccc}
+.sr-error{color:#cf1322;background:#fff2f0}
+.sr-loading{color:#888}
+.sr-divider{height:1px;background:#f0f0f0;margin:0}
+.chip{height:26px;padding:0 10px;border-radius:6px;border:1px solid #e3e7ee;background:#fff;color:#6b7280;font-size:11.5px;cursor:pointer}
+.chip:hover{background:#f6f8fb}
+.chip.active{border-color:#1677ff;background:#e8f1fd;color:#0958d9}
+
+/* ------------------------------------------------------------------ */
+/* Middle column: timeline                                              */
+/* ------------------------------------------------------------------ */
+.col-timeline{flex:1;min-width:0;background:#f5f6f8;position:relative}
+.timeline-header-bar{height:52px;flex-shrink:0;background:#fff;border-bottom:1px solid #eceff3;display:flex;align-items:center;padding:0 18px}
+.timeline-title{font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.timeline-footer{height:40px;flex-shrink:0;background:#fff;border-top:1px solid #eceff3;display:flex;align-items:center;padding:0 18px;font-size:12px;color:#8a8f99}
+
+.locator-bar{flex-shrink:0;background:#e8f1fd;border-bottom:1px solid #cfe1fb;padding:8px 18px;display:flex;align-items:center;gap:10px;font-size:12.5px;color:#0958d9}
+/* QA fix: at narrow viewports this span would shrink below its text's
+   natural width with no white-space rule, and CJK text wraps at every
+   character boundary once that happens -- truncate with an ellipsis
+   instead, and never let the prev/next/dismiss buttons shrink to make
+   room for it. */
+.locator-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.locator-actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex-shrink:0}
+.locator-btn{height:26px;padding:0 10px;border:1px solid #a9c9f5;border-radius:6px;background:#fff;font-size:12px;color:#0958d9;cursor:pointer}
+.locator-btn:hover{background:#f4f8ff}
+.locator-dismiss{height:26px;padding:0 9px;border:none;background:none;font-size:12px;color:#4b7fc4;cursor:pointer}
+
 .timeline{padding:.6rem .75rem;display:flex;flex-direction:column;gap:.65rem}
 .tl-msg{display:flex;flex-direction:column;gap:.12rem}
-.tl-row{display:flex;flex-direction:column;gap:.12rem;max-width:100%}
+.tl-row{display:flex;flex-direction:column;gap:.12rem;max-width:100%;cursor:pointer;border-radius:8px;padding:2px 4px}
 .tl-row-self{align-items:flex-end}
 .tl-row-other{align-items:flex-start}
+.tl-row.audit-selected{background:#f8fafd}
 .tl-meta{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
 .tl-sender{font-size:.78rem;font-weight:600;color:#555}
 .tl-staff{color:#0958d9}
 .tl-sender-raw{font-size:.7rem;color:#bbb;font-weight:400}
 .tl-time{font-size:.72rem;color:#bbb}
-.tl-bubble{background:#f0f0f0;border-radius:11px;padding:.35rem .6rem;font-size:.83rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-width:580px}
+.tl-bare{max-width:520px}
+.tl-bubble{background:#f0f0f0;border-radius:11px;padding:.35rem .6rem;font-size:.83rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-width:520px}
 .tl-bubble a{color:var(--link-color)}
-.tl-bubble-staff{background:#e6f4ff;border-left:3px solid #1890ff}
+.tl-bubble-staff{background:#e6f4ff;border-left:3px solid #1677ff}
 .tl-bubble-self{background:var(--bubble-self-bg);color:var(--bubble-self-text)}
 .tl-bubble-other{background:var(--bubble-other-bg);color:var(--bubble-other-text);border:1px solid #e8e8e8}
 .tl-rcpt{font-size:.7rem;color:#ccc}
+.tl-audit-line{font-size:10.5px;color:#c0c6cf;font-family:ui-monospace,monospace;margin-top:4px}
 #timeline-top-sentinel{height:1px}
 .history-status{margin:0 0 .5rem;padding:.35rem .6rem;text-align:center;font-size:.75rem;border-radius:3px}
 .history-loading{color:#888}
@@ -78,18 +187,19 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .history-error{color:#cf1322;background:#fff2f0;border:1px solid #ffccc7}
 .history-retry-btn{margin-left:.5rem;padding:.15rem .6rem;font-size:.72rem;border:1px solid #d9d9d9;border-radius:3px;background:#fff;color:#555;cursor:pointer}
 .history-retry-btn:hover{background:#f5f5f5}
-.empty-state{padding:2.5rem 1rem;text-align:center;color:#ccc;font-size:.83rem}
-.loading{padding:1rem;text-align:center;color:#bbb;font-size:.82rem}
-.error-msg{margin:.5rem;padding:.6rem .75rem;background:#fff2f0;color:#cf1322;border:1px solid #ffccc7;border-radius:3px;font-size:.8rem}
-.media-placeholder{background:#fafafa;border:1px dashed #d9d9d9;border-radius:4px;padding:.35rem .6rem;font-size:.8rem;color:#888;font-style:italic}
+.media-placeholder{background:#fff;border:1px dashed #d9dde3;border-radius:9px;padding:.55rem .7rem;font-size:.8rem;color:#7a828f;max-width:290px}
+.media-placeholder-title{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:500;color:#3d4552;margin-bottom:4px}
+.media-placeholder-dot{width:18px;height:18px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.media-placeholder-reason{font-size:11.5px;color:#8a8f99;line-height:1.6}
 .revoke-time{font-size:.7rem;color:#bbb;margin-top:.2rem}
-.media-preview{max-width:280px;max-height:280px;border-radius:4px;display:block}
+.media-preview{max-width:280px;max-height:280px;border-radius:8px;display:block}
 [data-msgid]{scroll-margin-top:1rem}
-[data-msgid].target-active{border-left:3px solid #1890ff;background:#e6f4ff}
+[data-msgid].target-active{border-left:3px solid #1677ff;background:#e6f4ff}
 [data-msgid].target-flash{animation:msgFlash 1.6s ease-out both}
-@keyframes msgFlash{0%{box-shadow:0 0 0 0 rgba(24,144,255,.55);border-left-color:#1890ff;background:#fffbe6}35%{box-shadow:0 0 0 8px rgba(24,144,255,0);border-left-color:#1890ff;background:#e6f4ff}100%{box-shadow:0 0 0 0 rgba(24,144,255,0);border-left-color:#1890ff;background:#e6f4ff}}
+@keyframes msgFlash{0%{box-shadow:0 0 0 0 rgba(22,119,255,.55);border-left-color:#1677ff;background:#fffbe6}35%{box-shadow:0 0 0 8px rgba(22,119,255,0);border-left-color:#1677ff;background:#e6f4ff}100%{box-shadow:0 0 0 0 rgba(22,119,255,0);border-left-color:#1677ff;background:#e6f4ff}}
 @media (prefers-reduced-motion: reduce){[data-msgid].target-flash{animation:none}}
-.structured-card{background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:.5rem .65rem;font-size:.8rem;max-width:320px;overflow:hidden}
+
+.structured-card{background:#fff;border:1px solid #e8e8e8;border-radius:9px;padding:.5rem .65rem;font-size:.8rem;max-width:300px;overflow:hidden}
 .structured-card-title{font-weight:600;margin-bottom:.2rem;word-break:break-word}
 .structured-card-desc{color:#666;font-size:.76rem;margin-bottom:.3rem;word-break:break-word}
 .structured-card-img{max-width:100%;max-height:180px;border-radius:4px;display:block;margin-bottom:.3rem;object-fit:cover}
@@ -103,36 +213,66 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .structured-card-news-item:first-child{border-top:none;padding-top:0;margin-top:0}
 .structured-card-markdown ul{margin:.2rem 0 .2rem 1.1rem}
 .structured-card-markdown li{margin-bottom:.1rem}
-.new-msg-indicator{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:#1890ff;color:#fff;border:none;border-radius:999px;padding:.35rem 1rem;font-size:.78rem;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+
+/* Unified interactive/business card header — dot + type label + raw msgtype
+   badge, shared by todo/vote/collect/meeting/schedule/switch_corp/
+   audio_archive/audio_doc (see message-renderers.js's structuredCardHeader). */
+.sc-hd{display:flex;align-items:center;gap:8px;padding:9px 12px;margin:-.5rem -.65rem .5rem;background:#f8fafd;border-bottom:1px solid #eef1f5;border-radius:9px 9px 0 0}
+.sc-hd-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.sc-hd-label{font-size:11.5px;font-weight:600;color:#3d4552}
+.sc-hd-raw{margin-left:auto;font-size:10.5px;color:#a6adb8;font-family:ui-monospace,monospace}
+
+/* Redpacket keeps its own warm-gradient header (spec: distinct from the
+   plain-dot card system, mirrors WeCom's native orange bubble). */
+.structured-card-redpacket{padding:0;border-color:#f0d9c4}
+.redpacket-hd{display:flex;align-items:center;gap:9px;padding:11px 12px;background:linear-gradient(135deg,#f4a765,#e5844d);color:#fff;border-radius:9px 9px 0 0}
+.redpacket-hd-icon{width:22px;height:18px;border-radius:3px;background:rgba(255,255,255,.9);flex-shrink:0}
+.redpacket-hd-label{font-size:12.5px;font-weight:600}
+.redpacket-hd-raw{margin-left:auto;font-size:10px;color:rgba(255,255,255,.8);font-family:ui-monospace,monospace}
+.redpacket-body{padding:10px 12px 11px}
+
+.new-msg-indicator{position:absolute;left:50%;bottom:52px;transform:translateX(-50%);background:#1677ff;color:#fff;border:none;border-radius:999px;padding:.35rem 1rem;font-size:.78rem;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .new-msg-indicator:hover{background:#0958d9}
-.lang-switch{position:relative}
-.btn-lang{background:transparent;border:1px solid #3a4a5a;color:#8ca0b3;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem}
-.btn-lang:hover{border-color:#8ca0b3;color:#fff}
-.lang-menu{position:absolute;top:135%;right:0;background:#fff;border:1px solid #e8e8e8;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.18);min-width:7rem;overflow:hidden;z-index:50}
-.lang-option{padding:.4rem .7rem;font-size:.8rem;color:#333;cursor:pointer;white-space:nowrap}
-.lang-option:hover{background:#f5f5f5}
-.lang-option.active{color:#1890ff;font-weight:600;background:#e6f4ff}
-.media-video{max-width:320px;max-height:320px;border-radius:4px;display:block;background:#000}
+
+.media-video{max-width:320px;max-height:320px;border-radius:8px;display:block;background:#000}
 .media-audio{width:260px;display:block}
-.media-rich-loading{background:#fafafa;border:1px dashed #d9d9d9;border-radius:4px;padding:.35rem .6rem;font-size:.8rem;color:#888}
-.file-card{display:flex;align-items:center;gap:.5rem;background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:.5rem .65rem;max-width:280px;text-decoration:none;color:inherit}
+.media-rich-loading{background:#fff;border:1px dashed #d9dde3;border-radius:9px;padding:.4rem .65rem;font-size:.8rem;color:#8a8f99}
+.file-card{display:flex;align-items:center;gap:.5rem;background:#fff;border:1px solid #e6eaf0;border-radius:9px;padding:.55rem .7rem;max-width:290px;text-decoration:none;color:inherit}
 .file-card:hover{background:#f5f8ff}
 .file-card-icon{font-size:1.3rem;flex-shrink:0}
 .file-card-info{flex:1;min-width:0}
-.file-card-type{font-size:.8rem;font-weight:600;word-break:break-word}
+.file-card-name{font-size:.8rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-card-type{font-size:.72rem;color:#999}
 .file-card-meta{font-size:.72rem;color:#999}
-.file-card-download{font-size:.72rem;color:#417ce8;flex-shrink:0}
-.emotion-preview{max-width:150px;max-height:150px;border-radius:4px;display:block;cursor:zoom-in}
-.chatrecord-card{background:#fff;border:1px solid #e8e8e8;border-radius:6px;padding:.5rem .65rem;max-width:300px;cursor:pointer}
-.chatrecord-card:hover{background:#f5f8ff}
-.chatrecord-card-title{font-weight:600;font-size:.83rem;margin-bottom:.15rem}
-.chatrecord-card-summary{font-size:.78rem;color:#888;margin-bottom:.15rem;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.chatrecord-card-count{font-size:.72rem;color:#aaa}
-.composite-wrap{display:flex;flex-direction:column;gap:.3rem;max-width:400px}
+.file-card-download{font-size:.72rem;color:var(--link-color);flex-shrink:0}
+.emotion-preview{max-width:150px;max-height:150px;border-radius:8px;display:block;cursor:zoom-in}
+
+/* Chatrecord: in-place expandable transcript instead of overlay-only. */
+.chatrecord-card{background:#fff;border:1px solid #e6eaf0;border-radius:9px;width:340px;max-width:100%;overflow:hidden}
+.chatrecord-card-hd{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#f8fafd;border-bottom:1px solid #eef1f5}
+.chatrecord-card-icon{width:16px;height:16px;border-radius:4px;background:#e8f1fd;border:1px solid #cfe1fb;flex-shrink:0}
+.chatrecord-card-title{font-weight:600;font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chatrecord-card-count{font-size:11px;color:#a6adb8;flex-shrink:0}
+.chatrecord-card-toggle{font-size:11.5px;color:var(--link-color);cursor:pointer;flex-shrink:0;background:none;border:none;font-family:inherit}
+.chatrecord-card-rows{padding:4px 0}
+.chatrecord-row{display:flex;gap:9px;padding:8px 12px;border-bottom:1px solid #f6f8fb}
+.chatrecord-row:last-child{border-bottom:none}
+.chatrecord-row-avatar{width:22px;height:22px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:9px}
+.chatrecord-row-body{flex:1;min-width:0}
+.chatrecord-row-meta{display:flex;align-items:baseline;gap:6px;margin-bottom:2px}
+.chatrecord-row-sender{font-size:12px;font-weight:600;color:#3d4552}
+.chatrecord-row-time{font-size:10.5px;color:#b6bcc5}
+.chatrecord-row-kind{font-size:10px;color:#7c8797;background:#eef1f5;border-radius:3px;padding:0 4px;font-family:ui-monospace,monospace}
+.chatrecord-row-text{font-size:12.5px;color:#4b5563;line-height:1.6}
+.chatrecord-row-nested{border-left:2px solid #e3e7ee;padding:2px 0 2px 9px;margin-top:2px}
+.chatrecord-viewer-link{font-size:11px;color:var(--link-color);cursor:pointer;padding:6px 12px;border-top:1px solid #f6f8fb;display:block;width:100%;text-align:left;background:none;border-left:none;border-right:none;border-bottom:none;font-family:inherit}
+
+.composite-wrap{display:flex;flex-direction:column;gap:.5rem;max-width:400px}
 .composite-node{}
 .composite-node-text{white-space:pre-wrap;word-break:break-word}
 .composite-node-meta{font-size:.7rem;color:#aaa;margin-bottom:.1rem}
 .composite-unknown{font-size:.78rem;color:#999;font-style:italic}
+
 .v-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center}
 .v-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.82)}
 .v-close{position:absolute;top:16px;right:20px;z-index:2;background:transparent;border:none;color:#fff;font-size:2rem;line-height:1;cursor:pointer}
@@ -149,76 +289,172 @@ body{font-family:system-ui,sans-serif;color:#222;background:#f0f2f5;height:100vh
 .v-chatrecord-node:last-child{border-bottom:none}
 .v-chatrecord-sender{font-size:.78rem;font-weight:600;color:#555}
 .v-chatrecord-time{font-size:.7rem;color:#bbb;margin-left:.4rem}
-/* RND-159 search */
-.search-bar{position:relative;flex:0 1 300px;min-width:0}
-.search-bar input{width:100%;padding:.22rem .6rem;border:1px solid #3a4a5a;border-radius:4px;background:#0a1a2e;color:#ddd;font-size:.8rem;outline:none;box-sizing:border-box}
-.search-bar input:focus{border-color:#1890ff;background:#0d2137}
-.search-bar input::placeholder{color:#5c7185}
-.search-bar input{padding-right:3.4rem}
-.search-bar .enter-hint{position:absolute;right:.5rem;top:50%;transform:translateY(-50%);font-size:.66rem;color:#5c7185;border:1px solid #3a4a5a;border-radius:3px;padding:0 .3rem;pointer-events:none}
-.search-results{position:absolute;top:115%;left:0;right:0;background:#fff;border:1px solid #e8e8e8;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);max-height:460px;overflow-y:auto;z-index:200;display:none}
-.sr-section{padding:.3rem 0}
-.sr-section-header{padding:.2rem .6rem;font-size:.72rem;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:.03em}
-.sr-item{padding:.35rem .6rem;cursor:pointer;font-size:.8rem;color:#333;display:flex;flex-direction:column;gap:.08rem}
-.sr-item:hover{background:#e6f4ff}
-.sr-item-main{display:flex;align-items:center;gap:.4rem}
-.sr-item-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sr-item-raw{font-size:.7rem;color:#bbb;flex-shrink:0}
-.sr-item-snippet{font-size:.75rem;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.4}
-.sr-item-time{font-size:.7rem;color:#bbb}
-.sr-item-conv{font-size:.72rem;color:#888}
-.sr-highlight{color:#e00;font-weight:600}
-.sr-empty,.sr-loading,.sr-error{padding:.6rem;text-align:center;font-size:.8rem;color:#ccc}
-.sr-error{color:#cf1322;background:#fff2f0}
-.sr-loading{color:#888}
-.sr-divider{height:1px;background:#f0f0f0;margin:0}
+
+/* ------------------------------------------------------------------ */
+/* Right column: 会话信息 / 消息详情 panel                               */
+/* ------------------------------------------------------------------ */
+.col-panel{width:300px;flex-shrink:0;border-left:1px solid #eceff3}
+.panel-tabs{display:flex;flex-shrink:0;border-bottom:1px solid #eceff3}
+.panel-tab{flex:1;height:40px;border:none;background:none;cursor:pointer;font-size:12.5px;color:#6b7280;border-bottom:2px solid transparent}
+.panel-tab.active{color:#0958d9;font-weight:600;border-bottom-color:#1677ff}
+.panel-tab:hover:not(.active){background:#f8fafd}
+.panel-section{padding:14px 16px;border-bottom:1px solid #f6f8fb}
+.panel-section-title{font-size:11.5px;color:#8a8f99;margin-bottom:8px}
+.panel-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.panel-stat{background:#f8fafd;border:1px solid #eef1f5;border-radius:8px;padding:9px 10px}
+.panel-stat-k{font-size:10.5px;color:#8a8f99;margin-bottom:3px}
+.panel-stat-v{font-size:15px;font-weight:600}
+.panel-participants-note{font-size:11px;color:#a6adb8;line-height:1.6;margin-top:6px}
+.panel-participant{display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:6px}
+.panel-participant-name{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.panel-participant-tag{font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0}
+.panel-participant-tag-staff{background:#e8f1fd;color:#0958d9}
+.panel-participant-tag-contact{background:#f6f8fb;color:#8a8f99}
+.panel-audit-preview{background:#f8fafd;border:1px solid #eef1f5;border-radius:8px;padding:10px 11px;font-size:12.5px;line-height:1.65;color:#3d4552;max-height:120px;overflow:hidden;word-break:break-word;margin-bottom:12px}
+.panel-audit-row{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #f6f8fb;font-size:11.5px}
+.panel-audit-row:last-child{border-bottom:none}
+.panel-audit-k{color:#8a8f99;width:92px;flex-shrink:0}
+.panel-audit-v{color:#3d4552;font-family:ui-monospace,monospace;flex:1;word-break:break-all}
+.panel-audit-actions{margin-top:10px}
+.panel-copy-btn{height:28px;padding:0 11px;border:1px solid #e3e7ee;border-radius:7px;background:#fff;font-size:12px;color:#3d4552;cursor:pointer}
+.panel-copy-btn:hover{background:#f6f8fb}
+
+/* QA fix: side-nav (212px) + col-conv (328px) + col-panel (300px) are all
+   fixed-width with no breakpoint, so at common laptop widths (~1024-1366px)
+   the timeline -- the one flexible column -- was squeezed down to as
+   little as ~184px. Shrink the three fixed columns at narrower viewports
+   instead of hiding any of them outright (hiding the panel would fight the
+   user's own 详情面板 toggle state). */
+@media (max-width: 1300px){
+  .side-nav{width:170px}
+  .col-conv{width:260px}
+  .col-panel{width:260px}
+}
 </style>
 </head>
 <body>
 __I18N_SCRIPT__
 <script>var RND216_MTR_ENTRIES = __MTR_ENTRIES_JSON__;</script>
-<div class="top-bar">
-  <h1 data-i18n="app.subtitle">对话审阅控制台</h1>
-  <span class="tz-note" data-i18n="console.tzNote">时间均为北京时间 (UTC+8)</span>
-  <div class="refresh-bar">
-    <span id="refresh-status" class="refresh-status"></span>
-    <button class="btn-refresh" id="btn-refresh" onclick="refreshNow('manual')" data-i18n="refresh.manual">刷新</button>
+<script>var RND216_MSGTYPE_OPTIONS = __MSGTYPE_OPTIONS_JSON__;</script>
+<div class="shell">
+
+<nav class="side-nav">
+  <div class="side-nav-brand">
+    <div class="side-nav-logo"></div>
+    <div class="side-nav-title" data-i18n="app.subtitle">对话审阅控制台</div>
   </div>
-  <div class="search-bar" id="search-bar">
-    <input type="text" id="search-input" placeholder="搜索联系人或聊天内容…" autocomplete="off">
-    <span class="enter-hint">↵ 结果页</span>
-    <div class="search-results" id="search-results"></div>
+  <div class="side-nav-scroll">
+    <div class="side-nav-group" data-i18n="nav.group.review">审阅</div>
+    <a class="side-nav-item active" href="/admin/conversations" data-i18n="nav.conversationsReview">对话审阅</a>
+    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.globalSearch">全局搜索</span><em data-i18n="nav.comingSoon">即将推出</em></span>
+    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.reviewTasks">审阅任务与标记</span><em data-i18n="nav.comingSoon">即将推出</em></span>
+    <div class="side-nav-group" data-i18n="nav.group.data">数据</div>
+    <a class="side-nav-item" href="/admin/messages" data-i18n="nav.messages">消息记录</a>
+    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.mediaAttachments">媒体与附件</span><em data-i18n="nav.comingSoon">即将推出</em></span>
+    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.exportRecords">导出记录</span><em data-i18n="nav.comingSoon">即将推出</em></span>
+    <div class="side-nav-group" data-i18n="nav.group.directory">通讯录</div>
+    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.staffSeats">员工与坐席</span><em data-i18n="nav.comingSoon">即将推出</em></span>
+    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.externalContacts">外部联系人</span><em data-i18n="nav.comingSoon">即将推出</em></span>
+    <div class="side-nav-group" data-i18n="nav.group.system">系统</div>
+    <a class="side-nav-item" href="/admin/diagnostics/reachability" data-i18n="nav.diagnostics">消息可达性诊断</a>
+    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.syncTasks">同步与任务</span><em data-i18n="nav.comingSoon">即将推出</em></span>
+    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.settings">设置</span><em data-i18n="nav.comingSoon">即将推出</em></span>
   </div>
-  <div class="top-bar-user">
+  <div class="side-nav-user">
     <span id="current-user"></span>
-    <a href="/admin/messages"><span data-i18n="nav.messages">消息记录</span> ↗</a>
-    <a href="/admin/diagnostics/reachability"><span data-i18n="nav.diagnostics">系统诊断</span> ↗</a>
-    <div class="lang-switch" id="lang-switch">
-      <button class="btn-lang" id="btn-lang-toggle" type="button" onclick="toggleLangMenu()" data-i18n="nav.language">语言</button>
-      <div class="lang-menu" id="lang-menu" style="display:none"></div>
+    <div class="side-nav-user-row">
+      <div class="lang-switch" id="lang-switch">
+        <button class="btn-lang" id="btn-lang-toggle" type="button" onclick="toggleLangMenu()" data-i18n="nav.language">语言</button>
+        <div class="lang-menu" id="lang-menu" style="display:none"></div>
+      </div>
+      <button class="btn-logout" onclick="doLogout()" data-i18n="nav.logout">退出登录</button>
     </div>
-    <button class="btn-logout" onclick="doLogout()" data-i18n="nav.logout">退出登录</button>
+  </div>
+</nav>
+
+<div class="console-main">
+  <div class="top-bar">
+    <span class="tz-note" data-i18n="console.tzNote">时间均为北京时间 (UTC+8)</span>
+    <div class="refresh-bar">
+      <span id="refresh-status" class="refresh-status"></span>
+      <button class="btn-refresh" id="btn-refresh" onclick="refreshNow('manual')" data-i18n="refresh.manual">刷新</button>
+    </div>
+    <div class="search-bar" id="search-bar">
+      <input type="text" id="search-input" placeholder="搜索联系人或聊天内容…" autocomplete="off">
+      <span class="enter-hint" data-i18n="search.enterHintShort">↵ 结果页</span>
+    </div>
+    <div class="top-bar-actions">
+      <button type="button" class="btn-toggle" id="btn-audit-mode" onclick="toggleAuditMode()" data-i18n="console.auditMode">审阅模式</button>
+      <button type="button" class="btn-toggle active" id="btn-panel-toggle" onclick="togglePanel()" data-i18n="console.detailPanel">详情面板</button>
+    </div>
+  </div>
+
+  <div class="layout">
+
+    <div class="col col-conv">
+      <div class="scope-bar">
+        <button type="button" class="scope-btn" id="scope-btn" onclick="toggleScopePopover()">
+          <span class="scope-avatar" id="scope-avatar">?</span>
+          <!-- QA fix: no data-i18n here on purpose -- once an entity is
+               selected, updateScopeButton() owns this element's text
+               ("监控账号：Alice"). A data-i18n attribute would make every
+               applyStaticI18n() call (any locale switch) stomp that back
+               to the generic placeholder below. applyLocale() refreshes
+               this element explicitly instead (updateScopeButton() when
+               an entity is selected, the placeholder text otherwise). -->
+          <span class="scope-label" id="scope-label">选择监控账号或联系人</span>
+          <span class="scope-caret">▾</span>
+        </button>
+        <div class="scope-popover" id="scope-popover" style="display:none">
+          <div class="mode-tabs">
+            <button class="mode-tab active" id="tab-staff" onclick="setMode('staff')" data-i18n="nav.staff">员工</button>
+            <button class="mode-tab" id="tab-contact" onclick="setMode('contact')" data-i18n="nav.contact">联系人</button>
+          </div>
+          <div class="col-header" id="entity-header" data-i18n="console.monitoredAccounts">监控账号</div>
+          <div class="scope-popover-body" id="entity-body"><div class="loading" data-i18n="console.loading">加载中…</div></div>
+        </div>
+      </div>
+      <div class="conv-type-tabs" id="conv-type-tabs">
+        <button type="button" class="ctab active" data-type="all" onclick="setConvTypeFilter('all')" data-i18n="console.convTypeAll">全部</button>
+        <button type="button" class="ctab" data-type="group" onclick="setConvTypeFilter('group')" data-i18n="convList.groupBadge">群聊</button>
+        <button type="button" class="ctab" data-type="direct" onclick="setConvTypeFilter('direct')" data-i18n="convList.directBadge">单聊</button>
+      </div>
+      <div class="col-header" id="conv-header" data-i18n="nav.conversations">会话</div>
+      <div class="col-body" id="conv-body"><div class="empty-state" data-i18n="console.selectAccountOrContact">请选择账号或联系人</div></div>
+      <div class="search-filters" id="search-filters" style="display:none"></div>
+      <div class="search-results" id="search-results" style="display:none"></div>
+    </div>
+
+    <div class="col col-timeline">
+      <div class="timeline-header-bar">
+        <div class="timeline-title" id="timeline-header" data-i18n="console.timelineHeader">消息时间线</div>
+      </div>
+      <div class="locator-bar" id="locator-bar" style="display:none">
+        <span class="locator-text" id="locator-text"></span>
+        <div class="locator-actions">
+          <button type="button" class="locator-btn" onclick="locatorPrev()" data-i18n="locator.prev">‹ 上一条</button>
+          <button type="button" class="locator-btn" onclick="locatorNext()" data-i18n="locator.next">下一条 ›</button>
+          <button type="button" class="locator-dismiss" onclick="clearLocator()" data-i18n="locator.dismiss">收起</button>
+        </div>
+      </div>
+      <div class="col-body" id="timeline-body"><div class="empty-state" data-i18n="console.selectConversation">请选择会话</div></div>
+      <button class="new-msg-indicator" id="new-msg-indicator" style="display:none" onclick="scrollTimelineToBottom()"><span data-i18n="refresh.newMessages">有新消息</span> ↓</button>
+      <div class="timeline-footer" data-i18n="console.readOnlyNote">归档只读 · 不可发送消息</div>
+    </div>
+
+    <div class="col col-panel" id="panel-col">
+      <div class="panel-tabs">
+        <button type="button" class="panel-tab active" id="panel-tab-info" onclick="setPanelTab('info')" data-i18n="panel.info">会话信息</button>
+        <button type="button" class="panel-tab" id="panel-tab-audit" onclick="setPanelTab('audit')" data-i18n="panel.audit">消息详情</button>
+      </div>
+      <div class="col-body" id="panel-info-body"><div class="empty-state" data-i18n="console.selectConversation">请选择会话</div></div>
+      <div class="col-body" id="panel-audit-body" style="display:none"><div class="empty-state" data-i18n="panel.noSelection">点击任意消息查看审计元数据</div></div>
+    </div>
+
   </div>
 </div>
-<div class="layout">
-  <div class="col col-left">
-    <div class="mode-tabs">
-      <button class="mode-tab active" id="tab-staff" onclick="setMode('staff')" data-i18n="nav.staff">员工</button>
-      <button class="mode-tab" id="tab-contact" onclick="setMode('contact')" data-i18n="nav.contact">联系人</button>
-    </div>
-    <div class="col-header" id="entity-header" data-i18n="console.monitoredAccounts">监控账号</div>
-    <div class="col-body" id="entity-body"><div class="loading" data-i18n="console.loading">加载中…</div></div>
-  </div>
-  <div class="col col-mid">
-    <div class="col-header" id="conv-header" data-i18n="nav.conversations">会话</div>
-    <div class="col-body" id="conv-body"><div class="empty-state" data-i18n="console.selectAccountOrContact">请选择账号或联系人</div></div>
-  </div>
-  <div class="col col-right">
-    <div class="col-header" id="timeline-header" data-i18n="console.timelineHeader">消息时间线</div>
-    <div class="col-body" id="timeline-body"><div class="empty-state" data-i18n="console.selectConversation">请选择会话</div></div>
-    <button class="new-msg-indicator" id="new-msg-indicator" style="display:none" onclick="scrollTimelineToBottom()"><span data-i18n="refresh.newMessages">有新消息</span> ↓</button>
-  </div>
 </div>
+
 <script src="/web/static/console/console-state.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/api-client.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/conversation-list.js?v=__STATIC_VERSION__"></script>

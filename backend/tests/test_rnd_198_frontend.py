@@ -43,6 +43,13 @@ def _bundle() -> str:
         _extract(r"function pad\(n\)\{.*?\}", "pad()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # Archive Console v2 (design import): the static media_status
+        # placeholder renderMessageBody falls back to is now graded by
+        # recoverability instead of one flat "label · status" line.
+        _extract(
+            r"var MEDIA_STATUS_DOT=\{.*?\nfunction renderGradedMediaPlaceholder\(typeLabel,status\)\{.*?\n\}",
+            "renderGradedMediaPlaceholder",
+        ),
         # RND-216: the MessageTypeRegistry IIFE now reads its `entries` off
         # a page-level RND216_MTR_ENTRIES global (injected by
         # templates/review_console.html ahead of the externalized
@@ -62,6 +69,14 @@ def _bundle() -> str:
         _extract(r"function renderMarkdownCard\(m\)\{.*?\n\}", "renderMarkdownCard()"),
         _extract(r"function renderNewsCard\(m\)\{.*?\n\}", "renderNewsCard()"),
         _extract(r"function renderMiniprogramCard\(m\)\{.*?\n\}", "renderMiniprogramCard()"),
+        # Archive Console v2 (design import): todo/vote/collect/meeting/
+        # schedule/switch_corp (+ audio_archive/audio_doc, stubbed below)
+        # now share one card header (structuredCardHeader) instead of a
+        # bare type-label div.
+        _extract(
+            r"var CARD_DOT_COLORS=\{.*?\nfunction structuredCardHeader\(labelKey,rawType,dotColor\)\{.*?\n\}",
+            "structuredCardHeader",
+        ),
         _extract(r"function renderVoteCard\(m\)\{.*?\n\}", "renderVoteCard()"),
         _extract(r"function renderTodoCard\(m\)\{.*?\n\}", "renderTodoCard()"),
         _extract(r"function renderCollectCard\(m\)\{.*?\n\}", "renderCollectCard()"),

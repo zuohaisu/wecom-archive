@@ -59,6 +59,11 @@ def _bundle(extra: list[str] | None = None) -> str:
         _extract(r"function handleUnauth\(r\)\{.*?\n\}", "handleUnauth()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # Archive Console v2 (design import): graded media_status placeholder.
+        _extract(
+            r"var MEDIA_STATUS_DOT=\{.*?\nfunction renderGradedMediaPlaceholder\(typeLabel,status\)\{.*?\n\}",
+            "renderGradedMediaPlaceholder",
+        ),
         f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};",
         _extract(r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"),
         _extract(r"function isSafeUrl\(u\)\{.*?\n\}", "isSafeUrl()"),

@@ -4,6 +4,30 @@ function rebuildMediaLabels(){
   MEDIA_LABELS={image:I18N.t('media.image'),video:I18N.t('media.video'),voice:I18N.t('media.voice'),file:I18N.t('media.file')};
   MEDIA_STATUS_LABELS={not_downloaded:I18N.t('media.status.notDownloaded'),unsupported:I18N.t('media.status.unsupported'),unknown:I18N.t('media.status.unknown'),failed:I18N.t('media.status.failed')};
 }
+// Archive Console v2 (Message Types spec, section 七 · 媒体状态): grade the
+// STATIC media_status placeholder (a backend classifier signal, checked
+// BEFORE any descriptor fetch is even attempted) by recoverability instead
+// of one uniform grey line -- not_downloaded/failed/unsupported each get
+// distinct explanatory copy. This is separate from, and does not change,
+// the live descriptor-fetch error path (classifyMediaError/buildErrorBox
+// below), which already has its own correct 401/403/404/network handling
+// and retry-once behavior. No "retry download"/"view failure detail"
+// click actions are wired here -- there is no backend endpoint to trigger
+// either of those yet, and this file's own convention is to never render a
+// non-functional action rather than fabricate one.
+var MEDIA_STATUS_DOT={not_downloaded:['#c2703a','#fdf0e6','…'],failed:['#d4436b','#fdeaef','!'],unsupported:['#7a828f','#f1f3f7','—'],unknown:['#7a828f','#f1f3f7','?']};
+var MEDIA_STATUS_REASON_KEYS={not_downloaded:'media.status.notDownloaded.reason',failed:'media.status.failed.reason',unsupported:'media.status.unsupported.reason'};
+function renderGradedMediaPlaceholder(typeLabel,status){
+  var dot=MEDIA_STATUS_DOT[status]||MEDIA_STATUS_DOT.unsupported;
+  var statusLabel=MEDIA_STATUS_LABELS[status]||I18N.t('media.status.unsupported');
+  var reasonKey=MEDIA_STATUS_REASON_KEYS[status];
+  var html='<div class="media-placeholder">'
+    +'<div class="media-placeholder-title"><span class="media-placeholder-dot" style="color:'+dot[0]+';background:'+dot[1]+'">'+dot[2]+'</span>'
+    +esc(typeLabel)+' · '+esc(statusLabel)+'</div>';
+  if(reasonKey)html+='<div class="media-placeholder-reason">'+esc(I18N.t(reasonKey))+'</div>';
+  html+='</div>';
+  return html;
+}
 var MessageTypeRegistry=(function(){
   var entries=RND216_MTR_ENTRIES;
   var FALLBACK={category:'placeholder',placeholderKey:'placeholder.unsupported'};
@@ -181,13 +205,26 @@ function renderMiniprogramCard(m){
   html+='</div>';
   return html;
 }
+// Archive Console v2 (Message Types spec, section 四 · 互动业务类): a
+// single shared card header (color dot + type label + raw msgtype badge)
+// for every interactive/business card type below plus audio_archive/
+// audio_doc -- "share one card system," not a bespoke header per type.
+// redpacket is the one deliberate exception (keeps its own warm-gradient
+// header, see renderRedpacketCard) -- the spec calls that out explicitly
+// as mirroring WeCom's native orange bubble rather than the plain-dot card.
+var CARD_DOT_COLORS={todo:'#e5844d',vote:'#0891b2',collect:'#8b5cf6',meeting:'#1677ff',schedule:'#8b5cf6',switch_corp:'#98a0ab',audio_archive:'#0891b2',audio_doc:'#0891b2'};
+function structuredCardHeader(labelKey,rawType,dotColor){
+  return '<div class="sc-hd"><div class="sc-hd-dot" style="background:'+esc(dotColor)+'"></div>'
+    +'<span class="sc-hd-label">'+esc(I18N.t(labelKey))+'</span>'
+    +'<span class="sc-hd-raw">'+esc(rawType||'')+'</span></div>';
+}
 // RND-198: business card renderers for interactive message types.
 function renderVoteCard(m){
   var f=m.structured_content&&m.structured_content.fields;
   if(!f)return renderStructuredFallback(m);
   var title=f.title||I18N.t('messageType.vote');
   var html='<div class="structured-card structured-card-vote">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.vote'))+'</div>'
+    +structuredCardHeader('messageType.vote',m.msgtype,CARD_DOT_COLORS.vote)
     +'<div class="structured-card-title">'+esc(title)+'</div>';
   if(f.type)html+='<div class="structured-card-meta">'+esc(I18N.t('card.vote.type'))+esc(f.type)+'</div>';
   if(Array.isArray(f.items)&&f.items.length){
@@ -209,7 +246,7 @@ function renderTodoCard(m){
   if(!f)return renderStructuredFallback(m);
   var title=f.title||I18N.t('messageType.todo');
   var html='<div class="structured-card structured-card-todo">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.todo'))+'</div>'
+    +structuredCardHeader('messageType.todo',m.msgtype,CARD_DOT_COLORS.todo)
     +'<div class="structured-card-title">'+esc(title)+'</div>';
   if(f.content)html+='<div class="structured-card-desc">'+esc(f.content)+'</div>';
   html+='</div>';
@@ -220,7 +257,7 @@ function renderCollectCard(m){
   if(!f)return renderStructuredFallback(m);
   var title=f.title||I18N.t('messageType.collect');
   var html='<div class="structured-card structured-card-collect">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.collect'))+'</div>'
+    +structuredCardHeader('messageType.collect',m.msgtype,CARD_DOT_COLORS.collect)
     +'<div class="structured-card-title">'+esc(title)+'</div>';
   if(Array.isArray(f.details)&&f.details.length){
     html+='<div class="structured-card-meta">'+esc(f.details.length+' '+I18N.t('card.collect.entries'))+'</div>';
@@ -233,7 +270,7 @@ function renderMeetingCard(m){
   if(!f)return renderStructuredFallback(m);
   var title=f.title||I18N.t('messageType.meeting');
   var html='<div class="structured-card structured-card-meeting">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.meeting'))+'</div>'
+    +structuredCardHeader('messageType.meeting',m.msgtype,CARD_DOT_COLORS.meeting)
     +'<div class="structured-card-title">'+esc(title)+'</div>';
   if(f.time)html+='<div class="structured-card-meta">'+esc(I18N.t('card.meeting.time'))+fmtTime(f.time)+'</div>';
   if(f.place)html+='<div class="structured-card-meta">'+esc(I18N.t('card.meeting.place'))+esc(f.place)+'</div>';
@@ -246,7 +283,7 @@ function renderScheduleCard(m){
   if(!f)return renderStructuredFallback(m);
   var title=f.title||I18N.t('messageType.schedule');
   var html='<div class="structured-card structured-card-schedule">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.schedule'))+'</div>'
+    +structuredCardHeader('messageType.schedule',m.msgtype,CARD_DOT_COLORS.schedule)
     +'<div class="structured-card-title">'+esc(title)+'</div>';
   if(f.starttime)html+='<div class="structured-card-meta">'+esc(I18N.t('card.schedule.start'))+fmtTime(f.starttime)+'</div>';
   if(f.endtime)html+='<div class="structured-card-meta">'+esc(I18N.t('card.schedule.end'))+fmtTime(f.endtime)+'</div>';
@@ -255,17 +292,23 @@ function renderScheduleCard(m){
   html+='</div>';
   return html;
 }
+// Redpacket keeps its own warm-gradient header (spec: "归档台保留可辨识的
+// 暖色卡头" -- mirrors WeCom's native orange bubble) instead of the shared
+// plain-dot structuredCardHeader every other business card above uses.
+// Still never shows monetary amounts (security) -- unchanged from before.
 function renderRedpacketCard(m){
   var f=m.structured_content&&m.structured_content.fields;
-  // Redpacket card never shows monetary amounts (security).
   var label=I18N.t('card.redpacket.label');
   var wishing=f&&f.wishing||null;
   var html='<div class="structured-card structured-card-redpacket">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.redpacket'))+'</div>'
-    +'<div class="structured-card-title">'+esc(label)+'</div>';
+    +'<div class="redpacket-hd"><div class="redpacket-hd-icon"></div>'
+    +'<span class="redpacket-hd-label">'+esc(label)+'</span>'
+    +'<span class="redpacket-hd-raw">'+esc(m.msgtype||'')+'</span></div>'
+    +'<div class="redpacket-body">';
   if(wishing)html+='<div class="structured-card-desc">'+esc(wishing)+'</div>';
   if(f&&typeof f.totalnum==='number')html+='<div class="structured-card-meta">'+esc(f.totalnum+' '+I18N.t('card.redpacket.nPackets'))+'</div>';
-  html+='</div>';
+  if(!wishing&&!(f&&typeof f.totalnum==='number'))html+='<div class="structured-card-degraded">'+esc(I18N.t('card.generic.unavailable'))+'</div>';
+  html+='</div></div>';
   return html;
 }
 function renderSwitchCorpCard(m){
@@ -273,7 +316,7 @@ function renderSwitchCorpCard(m){
   if(!f)return renderStructuredFallback(m);
   var corpName=f.corp_name||'';
   var html='<div class="structured-card structured-card-switchcorp">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.switchCorp'))+'</div>';
+    +structuredCardHeader('messageType.switchCorp',m.msgtype,CARD_DOT_COLORS.switch_corp);
   if(corpName)html+='<div class="structured-card-title">'+esc(I18N.t('card.switchCorp.switchedTo'))+esc(corpName)+'</div>';
   html+='</div>';
   return html;
@@ -321,7 +364,7 @@ function renderAudioArchiveMessage(m){
   // when the value looks like seconds (defensive for either unit).
   if(et&&et<1e12)et=et*1000;
   var html='<div class="structured-card structured-card-audioarchive">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.audioArchive'))+'</div>';
+    +structuredCardHeader('messageType.audioArchive',m.msgtype,CARD_DOT_COLORS.audio_archive);
   if(et)html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.endedAt'))+esc(fmtTime(et))+'</div>';
   html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.playbackUnavailable'))+'</div>';
   html+='</div>';
@@ -336,7 +379,7 @@ function renderAudioDocMessage(m){
   if(!f)return renderStructuredFallback(m);
   var title=f.title||f.docid||I18N.t('messageType.audioDoc');
   var html='<div class="structured-card structured-card-audiodoc">'
-    +'<div class="structured-card-type-label">'+esc(I18N.t('messageType.audioDoc'))+'</div>'
+    +structuredCardHeader('messageType.audioDoc',m.msgtype,CARD_DOT_COLORS.audio_doc)
     +'<div class="structured-card-title">'+esc(title)+'</div>';
   if(f.url&&isSafeUrl(f.url))html+='<a class="structured-card-link-action" href="'+esc(f.url)+'" target="_blank" rel="noopener noreferrer">'+esc(I18N.t('link.openLink'))+'</a>';
   html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.playbackUnavailable'))+'</div>';
@@ -763,8 +806,7 @@ function renderCompositeNodeMedia(node){
   if(!media||typeof media!=='object')return '<div class="composite-unknown">'+esc(I18N.t('composite.unknownChild'))+'</div>';
   if(media.status!=='available'||!media.access_url){
     var label=MEDIA_LABELS[media.media_type]||I18N.t('media.generic');
-    var statusLabel=MEDIA_STATUS_LABELS[media.status]||MEDIA_STATUS_LABELS.unsupported||I18N.t('media.status.unsupported');
-    return '<div class="media-placeholder">'+esc(label)+' · '+esc(statusLabel)+'</div>';
+    return renderGradedMediaPlaceholder(label,media.status);
   }
   var kind=node.type;
   if(kind==='image')return renderNestedImageSlot(media.access_url,thumbSlotOpts(media));
@@ -822,7 +864,12 @@ function renderCompositeNode(node,depth){
       // label, same spirit as the top-level unknown-type handling.
       body='<div class="composite-node-text">'+esc(node.text)+'</div>';
     }else{
-      body='<div class="composite-unknown">'+esc(I18N.t('composite.unknownChild'))+'</div>';
+      // Archive Console v2 (Message Types spec, mixed section): a segment
+      // whose type is genuinely unsupported (not just "no media object at
+      // all", handled above) must say so explicitly and note the original
+      // type is preserved -- distinct copy from the generic
+      // composite.unknownChild used by the no-media/empty-items cases.
+      body='<div class="composite-unknown">'+esc(I18N.t('composite.unsupportedSegment'))+'</div>';
     }
     return '<div class="composite-node">'+meta+body+'</div>';
   }catch(e){
@@ -859,21 +906,53 @@ function renderMixedMessage(m){
   html+='</div>';
   return html;
 }
-// chatrecord: a compact summary card in the timeline (depth 0 -- this is
-// the recursion root); full nested content (sender/timestamp/nested media/
-// nested chatrecord, all reusing renderCompositeNode) opens in the shared
-// Viewer on click, via the exact same renderChatrecordCard() a nested
-// chatrecord/mixed node uses.
+// Archive Console v2 (Message Types spec, chatrecord section): the
+// PREVIOUS implementation was a compact summary card, click-to-open-
+// overlay only -- a black box during review. The TOP-LEVEL chatrecord
+// message now renders an in-place transcript card instead: the first
+// CHATRECORD_PREVIEW_COUNT items expanded by default (reusing the exact
+// same per-node renderer nested/composite content already uses --
+// renderCompositeNode -- one rendering path, not a second one), a
+// expand-all/collapse toggle for the rest, and a secondary link into the
+// existing overlay Viewer for deep nested drill-down (arbitrary-depth
+// nested chatrecord/media hydration already works correctly there -- no
+// need to reimplement it inline). A nested chatrecord/mixed node found
+// INSIDE another composite message keeps the original compact
+// overlay-only renderChatrecordCard() -- only the top-level timeline
+// message gets the inline preview.
+var CHATRECORD_PREVIEW_COUNT=2;
 function renderChatrecordMessage(m){
   var fields=m.structured_content&&m.structured_content.fields;
   var items=(fields&&fields.items)||[];
   var title=(fields&&fields.title)||I18N.t('chatrecord.title');
-  var firstText='';
-  for(var i=0;i<items.length&&!firstText;i++){
-    if(items[i]&&items[i].text)firstText=items[i].text;
-  }
   var node={fields:fields,children:items};
-  return renderChatrecordCard(node,0,title,firstText,items.length);
+  var previewCount=Math.min(CHATRECORD_PREVIEW_COUNT,items.length);
+  var previewHtml='',restHtml='';
+  for(var i=0;i<items.length;i++){
+    var rowHtml='<div class="v-chatrecord-node">'+renderCompositeNode(items[i],1)+'</div>';
+    if(i<previewCount)previewHtml+=rowHtml;else restHtml+=rowHtml;
+  }
+  var hasMore=items.length>previewCount;
+  var toggleBtn=hasMore
+    ?'<button type="button" class="chatrecord-card-toggle" onclick="toggleChatrecordRows(&quot;'+esc(m.msgid)+'&quot;,this)">'+esc(I18N.t('chatrecord.expandAll'))+'</button>'
+    :'';
+  return '<div class="chatrecord-card">'
+    +'<div class="chatrecord-card-hd"><div class="chatrecord-card-icon"></div>'
+    +'<span class="chatrecord-card-title">'+esc(title)+'</span>'
+    +'<span class="chatrecord-card-count">'+esc(items.length+' '+I18N.t('chatrecord.itemsSuffix'))+'</span>'
+    +toggleBtn+'</div>'
+    +'<div class="chatrecord-card-rows">'+previewHtml
+    +'<div id="cr-rows-'+esc(m.msgid)+'" style="display:none">'+restHtml+'</div></div>'
+    +'<button type="button" class="chatrecord-viewer-link" data-node="'+esc(JSON.stringify(node))+'" '
+    +'onclick="openChatrecordViewer(JSON.parse(this.getAttribute(&quot;data-node&quot;)),0)">'+esc(I18N.t('chatrecord.viewInViewer'))+'</button>'
+    +'</div>';
+}
+function toggleChatrecordRows(msgid,btn){
+  var el=document.getElementById('cr-rows-'+msgid);
+  if(!el)return;
+  var isHidden=el.style.display==='none';
+  el.style.display=isHidden?'block':'none';
+  if(btn)btn.textContent=isHidden?I18N.t('chatrecord.collapse'):I18N.t('chatrecord.expandAll');
 }
 function renderCompositeMessage(m){
   if(m.normalized_type==='chatrecord')return renderChatrecordMessage(m);
@@ -926,9 +1005,7 @@ function renderMessageBody(m){
     return renderViewableMediaSlot('image', m.media_access_url, I18N.t('media.image'), 'viewer.loading', thumbSlotOpts(m));
   }
   if(mediaType==='image'){
-    var imgLabel=MEDIA_LABELS.image||I18N.t('media.generic');
-    var imgStatusLabel=MEDIA_STATUS_LABELS[m.media_status]||I18N.t('media.status.unsupported');
-    return '<div class="media-placeholder">'+esc(imgLabel)+' · '+esc(imgStatusLabel)+'</div>';
+    return renderGradedMediaPlaceholder(MEDIA_LABELS.image||I18N.t('media.generic'),m.media_status);
   }
   // RND-206 QA fix #2: video/voice/file are gated by renderer_strategy==
   // "media_preview" -- the authoritative Message Type Registry's own
@@ -942,9 +1019,7 @@ function renderMessageBody(m){
   // still shows a clear, type-specific status instead of a broken player.
   if(m.renderer_strategy==='media_preview'&&MEDIA_PREVIEW_KINDS[mediaType]){
     if(m.media_status==='available'&&m.media_access_url)return renderMediaPreviewByKind(mediaType,m.media_access_url);
-    var mLabel=MEDIA_LABELS[mediaType]||I18N.t('media.generic');
-    var mStatusLabel=MEDIA_STATUS_LABELS[m.media_status]||I18N.t('media.status.unsupported');
-    return '<div class="media-placeholder">'+esc(mLabel)+' · '+esc(mStatusLabel)+'</div>';
+    return renderGradedMediaPlaceholder(MEDIA_LABELS[mediaType]||I18N.t('media.generic'),m.media_status);
   }
   // RND-206 QA fix #2: emotion (sticker/GIF) preview, gated the same way --
   // renderer_strategy=="media_preview" is the registry's capability signal

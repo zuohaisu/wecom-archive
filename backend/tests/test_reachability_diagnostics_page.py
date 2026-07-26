@@ -31,6 +31,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.i18n_assets import I18N_JS_SOURCE
 from tests._rnd216_web_shims import (
     diagnostics_html,
     diagnostics_js_source,
@@ -136,8 +137,19 @@ def test_diagnostics_page_sets_document_title_via_i18n() -> None:
 
 
 def test_diagnostics_page_has_no_message_list_or_detail_rendering() -> None:
-    """Out of scope per RND-180: no message list, no message detail drawer."""
-    lowered = _DIAGNOSTICS_HTML.lower()
+    """Out of scope per RND-180: no message list, no message detail drawer.
+
+    i18n.js is a SHARED asset embedded in every admin page (search/console/
+    diagnostics/login) -- a UI label added for a completely different page
+    (e.g. the review console's audit panel "复制 msgid" copy-msgid button)
+    can incidentally contain one of these substrings as translated COPY,
+    not actual message data reaching the diagnostics page. Excise the
+    shared i18n script block before checking, so this keeps asserting what
+    it actually means: the diagnostics page's OWN markup/logic never
+    renders message-level detail.
+    """
+    page_without_i18n = _DIAGNOSTICS_HTML.replace(I18N_JS_SOURCE, "")
+    lowered = page_without_i18n.lower()
     for banned in ("msgid", "sdkfileid", "media_key", "local_path", "oss_key", "content_text"):
         assert banned not in lowered, f"unexpected {banned!r} reference in diagnostics page"
 

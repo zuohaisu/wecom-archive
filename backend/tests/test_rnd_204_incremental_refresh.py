@@ -62,6 +62,11 @@ def _state_vars_block() -> str:
     return _extract(
         r"var mode=.*?\nvar lastRenderedTimelineSignature=null;",
         "timeline/viewer state vars",
+    ) + (
+        # Archive Console v2 (design import): declared even later in
+        # console-state.js (outside this extractor's range), read
+        # unconditionally by timelineRowHtml()/renderConvList().
+        "\nvar auditMode = false;\nvar selectedMsgId = null;\nvar convTypeFilter = 'all';"
     )
 
 
@@ -76,6 +81,11 @@ def _bundle() -> str:
         _extract(r"function handleUnauth\(r\)\{.*?\n\}", "handleUnauth()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # Archive Console v2 (design import): graded media_status placeholder.
+        _extract(
+            r"var MEDIA_STATUS_DOT=\{.*?\nfunction renderGradedMediaPlaceholder\(typeLabel,status\)\{.*?\n\}",
+            "renderGradedMediaPlaceholder",
+        ),
         f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};",
         _extract(r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"),
         _extract(r"function isSafeUrl\(u\)\{.*?\n\}", "isSafeUrl()"),
@@ -129,6 +139,9 @@ def _bundle() -> str:
         _extract(r"function entityListSignature\(items\)\{.*?\n\}", "entityListSignature()"),
         _extract(r"function convListSignature\(convs\)\{.*?\n\}", "convListSignature()"),
         _extract(r"function renderEntityList\(items\)\{.*?\n\}", "renderEntityList()"),
+        # Archive Console v2 (design import): renderConvList() now filters
+        # through applyConvTypeFilter() (client-side 全部/群聊/单聊 tabs).
+        _extract(r"function applyConvTypeFilter\(convs\)\{.*?\n\}", "applyConvTypeFilter()"),
         _extract(r"function renderConvList\(convs\)\{.*?\n\}", "renderConvList()"),
         _extract(r"function refreshEntityList\(\)\{.*?\n\}", "refreshEntityList()"),
         _extract(r"function refreshConversationList\(\)\{.*?\n\}", "refreshConversationList()"),

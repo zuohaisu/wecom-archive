@@ -1,7 +1,7 @@
 """Response schemas for the monitored-accounts / contacts / conversation-list
 endpoints (RND-219 — moved verbatim out of app.routers.conversations, no
-field/type/default changes).
-"""
+field/type/default changes), plus ConversationParticipantOut/
+ConversationDetailOut (Archive Console v2 design import — additive)."""
 
 from __future__ import annotations
 
@@ -50,3 +50,26 @@ class ConversationOut(BaseModel):
     review_status: Optional[str] = None
     ai_status: Optional[str] = None
     ai_summary: Optional[str] = None
+
+
+class ConversationParticipantOut(BaseModel):
+    """One participant INFERRED from this conversation's archived messages
+    (every distinct sender/recipient observed among them) -- never a live
+    WeCom room roster, which this system has no sync for. See
+    GET /api/conversations/{conversation_id}/detail."""
+
+    id: str
+    raw_id: str
+    display_name: str
+    role: str  # "staff" | "contact"
+
+
+class ConversationDetailOut(BaseModel):
+    """Archive Console v2 (design import) -- conversation-level stats and
+    inferred participants for the review console's 会话信息 panel. Additive:
+    does not change ConversationOut or any other existing response shape."""
+
+    conversation_id: str
+    message_count: int
+    decrypted_percent: float
+    participants: list[ConversationParticipantOut]

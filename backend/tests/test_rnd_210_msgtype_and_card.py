@@ -282,6 +282,13 @@ def _bundle() -> str:
         _extract(r"function pad\(n\)\{.*?\n\}", "pad()"),
         _extract(r"function renderStructuredFallback\(m\)\{.*?\n\}", "renderStructuredFallback()"),
         _extract(r"function renderCardMessage\(m\)\{.*?\n\}", "renderCardMessage()"),
+        # Archive Console v2 (design import): audio_archive/audio_doc now
+        # share the one structuredCardHeader (dot + label + raw msgtype)
+        # every other business card uses.
+        _extract(
+            r"var CARD_DOT_COLORS=\{.*?\nfunction structuredCardHeader\(labelKey,rawType,dotColor\)\{.*?\n\}",
+            "structuredCardHeader",
+        ),
         _extract(r"function renderAudioArchiveMessage\(m\)\{.*?\n\}", "renderAudioArchiveMessage()"),
         _extract(r"function renderAudioDocMessage\(m\)\{.*?\n\}", "renderAudioDocMessage()"),
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),

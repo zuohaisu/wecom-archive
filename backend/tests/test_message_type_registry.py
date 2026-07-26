@@ -85,6 +85,11 @@ def _bundle() -> str:
         _extract(r"function pad\(n\)\{.*?\}", "pad()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # Archive Console v2 (design import): graded media_status placeholder.
+        _extract(
+            r"var MEDIA_STATUS_DOT=\{.*?\nfunction renderGradedMediaPlaceholder\(typeLabel,status\)\{.*?\n\}",
+            "renderGradedMediaPlaceholder",
+        ),
         # RND-216: the MessageTypeRegistry IIFE now reads its `entries` off
         # a page-level `RND216_MTR_ENTRIES` global (injected by
         # templates/review_console.html into a small <script> ahead of the
@@ -478,6 +483,7 @@ def test_timeline_continues_rendering_after_an_unknown_message() -> None:
         f"""
 I18N.setLocale('en');
 var mode='staff', selEntityId=null, timelineHasOlder=false, timelineHistoryError=null;
+var auditMode=false, selectedMsgId=null;
 var timelineMsgs={json.dumps([known_before, unknown, known_after])};
 var capturedHtml=null;
 var timelineBodyEl={{

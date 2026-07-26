@@ -316,7 +316,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 33  # RND-159: +2 for /api/search/contacts, /api/search/messages; RND-229: +1 for /admin/search
+    assert route_count == 34  # RND-159: +2 for /api/search/contacts, /api/search/messages; RND-229: +1 for /admin/search; Archive Console v2 design import: +1 for /api/conversations/{conversation_id}/detail
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -341,6 +341,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/auth/wecom/login",
             "/api/contacts",
             "/api/conversations",
+            "/api/conversations/{conversation_id}/detail",
             "/api/conversations/{conversation_id}/messages",
             "/api/conversations/{conversation_id}/messages/{msgid}/media",
             "/api/conversations/{conversation_id}/messages/{msgid}/media/access",
@@ -405,6 +406,12 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/auth/wecom/login", frozenset({"GET"}), "None", "None"),
         ("/api/contacts", frozenset({"GET"}), "list[ContactOut]", "None"),
         ("/api/conversations", frozenset({"GET"}), "list[ConversationOut]", "None"),
+        (
+            "/api/conversations/{conversation_id}/detail",
+            frozenset({"GET"}),
+            "ConversationDetailOut",
+            "None",
+        ),
         (
             "/api/conversations/{conversation_id}/messages",
             frozenset({"GET"}),

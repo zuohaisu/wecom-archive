@@ -66,6 +66,14 @@ def _extract_render_timeline_bundle() -> str:
     media_status_labels_src = _extract(
         r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"
     )
+    # Archive Console v2 (design import): the static media_status placeholder
+    # is now graded by recoverability (renderGradedMediaPlaceholder) instead
+    # of one flat "label · status" line — renderMessageBody's image/
+    # media_preview branches depend on it.
+    graded_media_placeholder_src = _extract(
+        r"var MEDIA_STATUS_DOT=\{.*?\nfunction renderGradedMediaPlaceholder\(typeLabel,status\)\{.*?\n\}",
+        "renderGradedMediaPlaceholder",
+    )
     # RND-173: renderMessageBody() now resolves unsupported/placeholder types
     # through MessageTypeRegistry instead of an inline generic string.
     # RND-216: MessageTypeRegistry now reads its `entries` data off a
@@ -109,6 +117,7 @@ def _extract_render_timeline_bundle() -> str:
             pad_src,
             media_labels_src,
             media_status_labels_src,
+            graded_media_placeholder_src,
             mtr_entries_src,
             message_type_registry_src,
             rnd206_block_src,
@@ -133,6 +142,12 @@ var mode = {json.dumps(mode)};
 var selEntityId = null;
 var timelineMsgs = {json.dumps(messages)};
 var timelineHasOlder = false;
+// Archive Console v2 (design import): timelineRowHtml() now reads these
+// (audit-mode msgtype badge/audit line gating, per-row audit-selected
+// class) -- declared here since this harness extracts a subset of the
+// real bundle rather than loading console-state.js.
+var auditMode = false;
+var selectedMsgId = null;
 
 var capturedHtml = null;
 var timelineBodyEl = {{

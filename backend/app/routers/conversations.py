@@ -95,7 +95,13 @@ from app.conversation_membership import (
     _staff_ids_for_participants,  # noqa: F401
     _direct_conv_id,  # noqa: F401
 )
-from app.schemas.listing import ContactOut, ConversationOut, MonitoredAccountOut
+from app.schemas.listing import (
+    ContactOut,
+    ConversationDetailOut,
+    ConversationOut,
+    ConversationParticipantOut,
+    MonitoredAccountOut,
+)
 from app.services import listing_service
 from app.services.listing_service import (
     # RND-219: monitored-accounts / contacts / conversation-list logic moved
@@ -103,6 +109,12 @@ from app.services.listing_service import (
     # listing_service.list_* directly. These six names are re-exported
     # (not redefined) purely for backward compatibility with existing
     # direct-import test call sites — no code in this module calls them.
+    #
+    # Archive Console v2 (design import): get_conversation_detail below is
+    # a FOURTH caller of _build_conversation_list -- reused, not
+    # reimplemented, to derive the 会话信息 panel's participants from the
+    # exact same staff/contact aggregation GET /api/conversations already
+    # uses, scoped to one already-resolved conversation's messages.
     _build_conversation_list,  # noqa: F401
     _compact_entity_messages,  # noqa: F401
     _count_entity_conversations,  # noqa: F401
@@ -451,4 +463,71 @@ def get_conversation_messages(
 # moved to app.routers.media (RND-221). Authorization, storage-backend/
 # provider resolution, byte-response serving, and access-descriptor
 # construction are unified there in app.services.media_access.
+
+
+@router.get(
+    "/api/conversations/{conversation_id}/detail",
+    response_model=ConversationDetailOut,
+)
+def get_conversation_detail(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
+    """
+    Archive Console v2 (design import) -- conversation-level stats and
+    inferred participants for the review console's 会话信息 panel. Additive:
+    does not change GET /api/conversations or any other existing endpoint.
+
+    Reuses _fetch_conversation_messages (the exact tenant-scoped message
+    resolution the timeline endpoint uses) and _build_conversation_list
+    (the exact staff/contact aggregation GET /api/conversations uses) —
+    see app.conversation_membership / app.services.listing_service —
+    instead of a parallel reimplementation.
+
+    `participants` is explicitly an INFERENCE over archived messages (every
+    distinct sender/recipient observed among this conversation's resolved
+    messages), never a live WeCom room roster — this system has no such
+    sync, and the frontend labels it accordingly (never presented as
+    ground truth). `decrypted_percent` is computed only from
+    ArchiveMessage.decrypt_status among those same resolved messages — no
+    new query beyond what was already fetched to build `participants`.
+    """
+    _, tenant_id = auth
+    messages = _fetch_conversation_messages(db, conversation_id, tenant_id)
+    if not messages:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
+    participant_ids: set[str] = {m.sender for m in messages if m.sender}
+    for recipient_ids in recipients_map.values():
+        participant_ids.update(recipient_ids)
+    display_names = _load_display_names_for_ids(db, tenant_id, participant_ids)
+    staff_ids = _staff_ids_for_participants(db, tenant_id, participant_ids)
+
+    buckets = _build_conversation_list(messages, recipients_map, display_names, staff_ids)
+    bucket = next(
+        (b for b in buckets if b["conversation_id"] == conversation_id),
+        buckets[0],
+    )
+
+    participants = [
+        ConversationParticipantOut(id=sid, raw_id=sid, display_name=name, role="staff")
+        for sid, name in zip(
+            bucket["monitored_account_ids"], bucket["monitored_account_display_names"]
+        )
+    ] + [
+        ConversationParticipantOut(id=cid, raw_id=cid, display_name=name, role="contact")
+        for cid, name in zip(bucket["contact_ids"], bucket["contact_display_names"])
+    ]
+
+    decrypted_count = sum(1 for m in messages if m.decrypt_status == "success")
+    decrypted_percent = round(decrypted_count * 100.0 / len(messages), 1)
+
+    return ConversationDetailOut(
+        conversation_id=conversation_id,
+        message_count=len(messages),
+        decrypted_percent=decrypted_percent,
+        participants=participants,
+    )
 

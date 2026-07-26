@@ -40,7 +40,7 @@ _SEARCH_MSGTYPE_OPTIONS_JSON = json.dumps(build_filterable_type_options())
 def admin_conversations(
     tenant_id: Optional[str] = Depends(require_html_session),
 ):
-    """Three-column conversation review console. Requires valid session."""
+    """Conversation review console. Requires valid session."""
     if tenant_id is None:
         return RedirectResponse("/admin/login", status_code=302)
     return HTMLResponse(
@@ -48,6 +48,13 @@ def admin_conversations(
             "review_console",
             i18n_script=I18N_SCRIPT_TAG,
             mtr_entries_json=_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON,
+            # Archive Console v2 (design import): the inline sidebar search's
+            # "全部类型" filter chip needs the same normalizedType -> rawValues
+            # catalog the standalone search page's msgtype filter already
+            # uses, to expand into a real `msgtype=...` query list instead of
+            # a decorative no-op chip. Reuses the exact same pre-built JSON,
+            # not a second computation.
+            msgtype_options_json=_SEARCH_MSGTYPE_OPTIONS_JSON,
         )
     )
 

@@ -208,7 +208,19 @@ function timelineRowHtml(m){
   var sc='tl-sender'+(isStaff?' tl-staff':'');
   var bc='tl-bubble '+(isSelf?'tl-bubble-self':(mode==='staff'?'tl-bubble-other':(isStaff?'tl-bubble-staff':'')));
   var text=safeRenderMessageBody(m);
-  var mt=(m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
+  // Archive Console v2 (Message Types visual refresh): only text and
+  // available voice keep the classic chat-bubble chrome (padding/border/
+  // background). Every other renderer (bare image/video/emotion, file/
+  // link/structured/system/composite cards, and every graded media-
+  // unavailable placeholder) already supplies its own box -- wrapping
+  // those in .tl-bubble too produced a redundant double-boxed look.
+  var isRevokeStandalone=!!(m.revoke_association_status&&m.revoke_association_status!=='linked');
+  var isUnavailableMedia=!!(m.media_status&&m.media_status!=='available'&&m.media_type&&m.media_type!=='text');
+  var wrapInBubble=!isRevokeStandalone&&(m.media_type==='text'||(m.media_type==='voice'&&!isUnavailableMedia));
+  var bodyHtml=wrapInBubble?('<div class="'+bc+'">'+text+'</div>'):('<div class="tl-bare">'+text+'</div>');
+  if(selectedMsgId===m.msgid)rowCls+=' audit-selected';
+  var mt=(auditMode&&m.msgtype&&m.msgtype!=='text')?' <span class="badge badge-count" style="font-size:.67rem">'+esc(m.msgtype)+'</span>':'';
+  var auditLine=auditMode?'<div class="tl-audit-line">'+esc(m.msgid)+' · '+esc(m.normalized_type||'-')+' · '+esc(m.msgtype||'-')+'</div>':'';
   var grp=m.roomid?' <span class="badge badge-group" style="font-size:.65rem">'+esc(I18N.t('timeline.groupBadge'))+'</span>':'';
   // RND-201: secondary "已撤回" indicator on an original message that a
   // linked revoke event targets — deliberately visually secondary (a
@@ -231,11 +243,11 @@ function timelineRowHtml(m){
   }else if(rcptNames.length){
     rcpt='<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>';
   }
-  return '<div class="'+rowCls+'" data-msgid="'+esc(m.msgid)+'" data-msgsig="'+esc(timelineSignature([m]))+'">'
+  return '<div class="'+rowCls+'" data-msgid="'+esc(m.msgid)+'" data-msgsig="'+esc(timelineSignature([m]))+'" onclick="selectMessageForAudit(&quot;'+esc(m.msgid)+'&quot;)">'
     +'<div class="tl-meta"><span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
     +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+revokedBadge+'</div>'
-    +'<div class="'+bc+'">'+text+'</div>'
-    +rcpt+'</div>';
+    +bodyHtml
+    +rcpt+auditLine+'</div>';
 }
 function renderTimeline(scrollToBottom){
   var body=document.getElementById('timeline-body');
@@ -360,4 +372,65 @@ function applyTimelineRefresh(prevScrollTop,wasNearBottom,hasNew){
   lastRenderedTimelineSignature=timelineSignature(timelineMsgs);
   syncHistoryStatus();
   applyRefreshScroll(prevScrollTop,wasNearBottom,hasNew);
+}
+
+// ---------------------------------------------------------------------------
+// Archive Console v2 — 消息详情 (audit) panel tab. Entirely frontend-only:
+// every field rendered here already exists on the TimelineMessageOut row
+// (see backend/app/schemas/timeline.py) -- no new API call. selectedMsgId/
+// setPanelTab live in console-state.js/console-entry.js respectively.
+// ---------------------------------------------------------------------------
+// Shared by selectMessageForAudit() and applyLocale() (the latter needs to
+// re-render the currently-selected message's audit fields in the new
+// language after a locale switch).
+function findTimelineMessage(msgid){
+  for(var i=0;i<timelineMsgs.length;i++){
+    if(timelineMsgs[i].msgid===msgid)return timelineMsgs[i];
+  }
+  return null;
+}
+function selectMessageForAudit(msgid){
+  selectedMsgId=msgid;
+  document.querySelectorAll('[data-msgid]').forEach(function(el){
+    el.classList.toggle('audit-selected',el.getAttribute('data-msgid')===msgid);
+  });
+  var m=findTimelineMessage(msgid);
+  if(!panelOpen)togglePanel();
+  setPanelTab('audit');
+  if(m)renderPanelAudit(m);
+}
+function renderPanelAuditEmpty(){
+  var body=document.getElementById('panel-audit-body');
+  if(body)body.innerHTML='<div class="empty-state">'+I18N.t('panel.noSelection')+'</div>';
+}
+function renderPanelAudit(m){
+  var body=document.getElementById('panel-audit-body');
+  if(!body)return;
+  var preview=m.content_text
+    ||(m.structured_content&&m.structured_content.fields&&(m.structured_content.fields.title||m.structured_content.fields.name))
+    ||('['+(m.normalized_type||m.msgtype||'?')+']');
+  var rows=[
+    [I18N.t('panel.field.msgid'),m.msgid],
+    [I18N.t('panel.field.rawMsgtype'),m.msgtype||'-'],
+    [I18N.t('panel.field.normalized'),m.normalized_type||'-'],
+    [I18N.t('panel.field.support'),m.support_status||'-'],
+    [I18N.t('panel.field.renderer'),m.renderer_strategy||'-'],
+    [I18N.t('panel.field.mediaStatus'),m.media_status||'—'],
+    [I18N.t('panel.field.sender'),m.sender_raw_id||m.sender||'—'],
+    [I18N.t('panel.field.conversation'),m.roomid||selConvId||'—'],
+    [I18N.t('panel.field.msgtime'),fmtTime(m.msgtime)],
+    [I18N.t('panel.field.revoked'),m.is_revoked?('true · '+fmtTime(m.revoked_at)):'false']
+  ];
+  var rowsHtml=rows.map(function(r){
+    return '<div class="panel-audit-row"><span class="panel-audit-k">'+esc(r[0])+'</span><span class="panel-audit-v">'+esc(r[1])+'</span></div>';
+  }).join('');
+  body.innerHTML='<div class="panel-audit-preview">'+esc(preview)+'</div>'
+    +rowsHtml
+    +'<div class="panel-audit-actions"><button type="button" class="panel-copy-btn" onclick="copyMsgid()">'+esc(I18N.t('panel.copyMsgid'))+'</button></div>';
+}
+function copyMsgid(){
+  if(!selectedMsgId)return;
+  if(typeof navigator!=='undefined'&&navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(selectedMsgId).catch(function(){});
+  }
 }

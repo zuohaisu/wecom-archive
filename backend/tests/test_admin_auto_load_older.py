@@ -117,6 +117,11 @@ def _bundle() -> str:
         _extract(r"function handleUnauth\(r\)\{.*?\n\}", "handleUnauth()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # Archive Console v2 (design import): graded media_status placeholder.
+        _extract(
+            r"var MEDIA_STATUS_DOT=\{.*?\nfunction renderGradedMediaPlaceholder\(typeLabel,status\)\{.*?\n\}",
+            "renderGradedMediaPlaceholder",
+        ),
         # RND-206: fetchOlderMessages/fetchTimelinePage/loadTimeline/
         # refreshTimelineIfSelected all read this generation-token guard now.
         _extract(r"var timelineRequestGen=0;", "timelineRequestGen"),
@@ -210,6 +215,8 @@ def _fixture_preamble(
     return f"""
 mode='staff';
 selEntityId=null;
+auditMode=false;
+selectedMsgId=null;
 window={{location:{{href:''}}}};
 timelineConvId='conv-1';
 timelineMsgs={json.dumps(timeline_msgs or [])};

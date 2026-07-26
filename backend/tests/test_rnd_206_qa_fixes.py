@@ -62,7 +62,12 @@ def _state_vars_block() -> str:
     return _extract(
         r"var mode=.*?\nvar lastRenderedTimelineSignature=null;",
         "timeline/viewer state vars",
-    ) + "\nvar focusMsgId = null;\nvar focusPending = false;"
+    ) + "\nvar focusMsgId = null;\nvar focusPending = false;" + (
+        # Archive Console v2 (design import): auditMode/selectedMsgId are
+        # declared even later in console-state.js (outside this extractor's
+        # range too) and read unconditionally by timelineRowHtml.
+        "\nvar auditMode = false;\nvar selectedMsgId = null;"
+    )
 
 
 def _bundle(extra=None) -> str:
@@ -76,6 +81,11 @@ def _bundle(extra=None) -> str:
         _extract(r"function handleUnauth\(r\)\{.*?\n\}", "handleUnauth()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # Archive Console v2 (design import): graded media_status placeholder.
+        _extract(
+            r"var MEDIA_STATUS_DOT=\{.*?\nfunction renderGradedMediaPlaceholder\(typeLabel,status\)\{.*?\n\}",
+            "renderGradedMediaPlaceholder",
+        ),
         f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};",
         _extract(r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"),
         _extract(r"function isSafeUrl\(u\)\{.*?\n\}", "isSafeUrl()"),

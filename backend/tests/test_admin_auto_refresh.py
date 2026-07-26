@@ -235,6 +235,12 @@ def _run_render_conv_list_active(convs: list[dict], sel_conv_id: str) -> list[st
     esc_src = _extract(r"function esc\(s\)\{.*?\n\}", "esc()")
     fmt_time_src = _extract(r"function fmtTime\(ms\)\{.*?\n\}", "fmtTime()")
     pad_src = _extract(r"function pad\(n\)\{.*?\}", "pad()")
+    # Archive Console v2 (design import): renderConvList() now filters
+    # through applyConvTypeFilter() (client-side 全部/群聊/单聊 tabs) before
+    # rendering.
+    apply_conv_type_filter_src = _extract(
+        r"function applyConvTypeFilter\(convs\)\{.*?\n\}", "applyConvTypeFilter()"
+    )
     render_conv_list_src = _extract(r"function renderConvList\(convs\)\{.*?\n\}", "renderConvList()")
     # RND-204: renderConvList() now records a content signature (used to skip
     # unchanged background refreshes), so pull convListSignature() in too.
@@ -247,10 +253,12 @@ def _run_render_conv_list_active(convs: list[dict], sel_conv_id: str) -> list[st
 {fmt_time_src}
 {pad_src}
 {conv_list_signature_src}
+{apply_conv_type_filter_src}
 {render_conv_list_src}
 
 var mode = 'staff';
 var selConvId = {json.dumps(sel_conv_id)};
+var convTypeFilter = 'all';
 var cardEls = {{}};
 
 var bodyEl = {{

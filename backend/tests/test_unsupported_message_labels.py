@@ -66,6 +66,11 @@ def _bundle() -> str:
         _extract(r"function pad\(n\)\{.*?\}", "pad()"),
         _extract(r"var MEDIA_LABELS=\{.*?\};", "MEDIA_LABELS"),
         _extract(r"var MEDIA_STATUS_LABELS=\{.*?\};", "MEDIA_STATUS_LABELS"),
+        # Archive Console v2 (design import): graded media_status placeholder.
+        _extract(
+            r"var MEDIA_STATUS_DOT=\{.*?\nfunction renderGradedMediaPlaceholder\(typeLabel,status\)\{.*?\n\}",
+            "renderGradedMediaPlaceholder",
+        ),
         f"var RND216_MTR_ENTRIES = {_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON};",
         _extract(
             r"var MessageTypeRegistry=\(function\(\)\{.*?\n\}\)\(\);", "MessageTypeRegistry"
@@ -218,6 +223,7 @@ def test_no_generic_legacy_placeholder_anywhere_in_a_rendered_timeline() -> None
         f"""
 I18N.setLocale('zh-CN');
 var mode='staff', selEntityId=null, timelineHasOlder=false, timelineHistoryError=null;
+var auditMode=false, selectedMsgId=null;
 var timelineMsgs={json.dumps(msgs)};
 var capturedHtml=null;
 var timelineBodyEl={{
@@ -267,7 +273,13 @@ def test_voice_not_downloaded_status_renders_specific_placeholder() -> None:
         renderer_strategy="media_preview",
     )
     html = _render("zh-CN", msg)
-    assert html == '<div class="media-placeholder">语音消息 · 未下载</div>'
+    # Archive Console v2 (design import): not_downloaded is now a GRADED
+    # placeholder (icon dot + explanatory reason line) instead of one flat
+    # "label · status" line -- the type+status text itself is unchanged,
+    # just no longer the whole of the markup, so this checks the substring
+    # rather than exact HTML equality.
+    assert "语音消息 · 未下载" in html
+    assert "media-placeholder-reason" in html
     assert GENERIC_LEGACY_STRING not in html
 
 
@@ -292,6 +304,7 @@ def test_timeline_continues_rendering_before_and_after_voice() -> None:
         f"""
 I18N.setLocale('zh-CN');
 var mode='staff', selEntityId=null, timelineHasOlder=false, timelineHistoryError=null;
+var auditMode=false, selectedMsgId=null;
 var timelineMsgs={json.dumps([before, voice, after])};
 var capturedHtml=null;
 var timelineBodyEl={{
@@ -324,6 +337,7 @@ def test_group_context_and_sender_metadata_survive_unsupported_rendering() -> No
         f"""
 I18N.setLocale('zh-CN');
 var mode='staff', selEntityId=null, timelineHasOlder=false, timelineHistoryError=null;
+var auditMode=false, selectedMsgId=null;
 var timelineMsgs={json.dumps([msg])};
 var capturedHtml=null;
 var timelineBodyEl={{

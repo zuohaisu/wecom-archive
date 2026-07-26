@@ -100,6 +100,10 @@ def review_console_html() -> str:
         "review_console",
         i18n_script=I18N_SCRIPT_TAG,
         mtr_entries_json=_MESSAGE_TYPE_REGISTRY_ENTRIES_JSON,
+        # Archive Console v2 (design import): review_console.html now also
+        # injects the search msgtype catalog (reused, unchanged, from the
+        # standalone search page) for its inline "全部类型" filter chip.
+        msgtype_options_json=_SEARCH_MSGTYPE_OPTIONS_JSON,
     )
 
 
