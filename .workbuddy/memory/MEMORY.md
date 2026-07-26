@@ -40,3 +40,11 @@
   - **RND-228 (backend search scalability): MERGED + DEPLOYED 2026-07-24** via PR #5 (merge commit `f37a42a`), CI/CD green (CI Test Suite ~3m15s, Deploy to ECS 16s). Scope: `backend/app/routers/search.py` (SQL-level LIMIT + dedup shared helper), `backend/tests/test_rnd_228_search_scalability.py`, prompt doc only. No schema / config / frontend change. GitHub Actions Node 20 deprecation warning (functional, non-blocking).
   - **RND-229 (frontend search results page + jump-to-message): MERGED + DEPLOYED 2026-07-24** via GitHub PR; GitHub Actions CI/CD all checks passed. Scope: `backend/app/main.py` — dedicated `/admin/search` results page + click→jump back with auto-scroll/highlight (`focusMessage`, globals `focusMsgId`/`focusPending`). The `focusPending is not defined` QA-test risk was resolved before merge (test preamble fix applied → `make verify` green). Frontend-only, no schema change. **Unblocks RND-230.**
   - RND-230 (multi-filter on results page): still Backlog, **now UNBLOCKED** (RND-229 shipped). Next natural search-cluster task.
+
+## Status Update (2026-07-26)
+- **开源准备 epic RND-232**（Todo, P2）已建，含 6 子任务：RND-233 去域名、RND-234 删官网、RND-239 迁官网到私有仓、RND-236 清 .qoder、RND-237 发布包装、RND-238 不重写历史(已决策关闭)。
+  - 关键决策：RND-238 **不重写 git 历史**（force push 代价大，仅基础设施名非密钥）；RND-233 域名脱敏采用**读环境变量**策略（部署脚本读 .env，.env.example 用 example.com 占位符，文档/测试用 example.com；审计发现 3 主机名 media./qwhhcd./admin@）。**RND-239 方向变更（2026-07-26 17:19）**：取消「迁私有仓库」，改为**在项目内构建前端营销网站（含官网）**，`company_homepage` 保留项目内；RND-234 由「泄露应急」重定性为「品牌化决策」。新草案 rnd-239-marketing-site-plan.md（待澄清技术栈/品牌/范围）。
+  - 交付：5 份执行/计划提示词在 `.workbuddy/prompts/`（`rnd-232-execution-plan.md`、`rnd-233-*`、`rnd-236-*`、`rnd-237-*`、`rnd-239-migration-plan.md`）。Agent 只产提示词、不改动源码、不 commit/push（用户操作）。
+- **RND-212 重构 epic 收口**：12 子任务全部 Done（RND-213/214/215 地基 + RND-216~222 主体 + RND-223/224 收口）；`main.py` 收敛为 composition root，边界由 import-boundary 测试 + AGENTS.md 锁定。
+- **RND-240**（Todo, P2）搜索点击→聊天详情 ~8s 性能问题已建 ticket + 两份提示词（`rnd-240-execution-prompt.md`/`rnd-240-qa-prompt.md`）；前端重链 + 后端聚合 SQL 两路修，未改代码。
+- **硬规则重申**：agent 绝不 commit/push；交付物=「开发提示词+验收提示词」由用户决定何时交给开发/QA agent 执行。
