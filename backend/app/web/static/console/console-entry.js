@@ -309,6 +309,9 @@ function onSearchHitClick(){
   setSearchActive(false);
   searchLastQ='';
   showLocatorBar();
+  // Bug fix: this is an in-page locate, not a cross-page arrival -- see
+  // focusIsUrlArrival's declaration comment in console-state.js.
+  focusIsUrlArrival=false;
   focusMessage(hit.msgid,hit.convId,hit.convType,hit.entityId,hit.entityType);
 }
 
@@ -341,6 +344,7 @@ function locatorPrev(){
   var hit=searchHits[locatorIndex-1];
   if(!hit)return;
   updateLocatorText();
+  focusIsUrlArrival=false; // in-page locate -- see console-state.js
   focusMessage(hit.msgid,hit.convId,hit.convType,hit.entityId,hit.entityType);
 }
 function locatorNext(){
@@ -349,6 +353,7 @@ function locatorNext(){
   var hit=searchHits[locatorIndex-1];
   if(!hit)return;
   updateLocatorText();
+  focusIsUrlArrival=false; // in-page locate -- see console-state.js
   focusMessage(hit.msgid,hit.convId,hit.convType,hit.entityId,hit.entityType);
 }
 
@@ -442,7 +447,14 @@ function focusCheckRow(){
     row.scrollIntoView({behavior:'smooth',block:'center'});
     row.classList.add('target-flash');
     row.addEventListener('animationend',function(){row.classList.add('target-active');},{once:true});
-    showFocusBanner();
+    // Bug fix: only show the "← 返回搜索结果" banner (history.back()) for a
+    // genuine cross-page arrival from /admin/search -- see
+    // focusIsUrlArrival's declaration in console-state.js. An in-page
+    // locate already has the locator bar as its "return" UI; showing this
+    // banner too was sending users to whatever page preceded this tab
+    // (typically /admin/login) when they clicked it after an in-page
+    // search hit, since no actual page navigation had occurred to undo.
+    if(focusIsUrlArrival)showFocusBanner();
     return;
   }
   if(timelineHasOlder){
@@ -469,6 +481,10 @@ function readFocusFromUrl(){
   var p=new URLSearchParams(location.search);
   var f=p.get('focus');
   if(!f)return;
+  // A real cross-page arrival -- the previous history entry is the
+  // standalone search-results page, so history.back() (the banner's
+  // action) is correct here. See focusIsUrlArrival's declaration comment.
+  focusIsUrlArrival=true;
   focusMessage(f,p.get('conv'),p.get('convType'),p.get('entityId'),p.get('entityType'));
 }
 

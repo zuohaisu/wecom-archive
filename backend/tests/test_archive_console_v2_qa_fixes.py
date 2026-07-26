@@ -806,3 +806,81 @@ process.stdout.write(JSON.stringify(out));
         assert out[loc]["staff"] != "console.scopeLabelStaffPrefix"
         assert out[loc]["contact"] != "console.scopeLabelContactPrefix"
     assert "：" not in out["en"]["staff"] and "：" not in out["en"]["contact"]
+
+
+# ---------------------------------------------------------------------------
+# Bug fix -- "return to search results" banner sent users to the login page
+#
+# focusCheckRow() showed the "← 返回搜索结果" banner (history.back()) after
+# ANY successful in-page locate, including ones from the NEW inline
+# search/locator bar (onSearchHitClick/locatorPrev/locatorNext), which never
+# navigate to a new page at all. Clicking that banner then popped browser
+# history back to whatever page preceded this tab being opened -- typically
+# /admin/login -- instead of anywhere related to search. The banner (and
+# history.back()) is only correct for a genuine cross-page arrival from the
+# standalone /admin/search results page (readFocusFromUrl()).
+# ---------------------------------------------------------------------------
+
+
+def _focus_check_row_bundle() -> str:
+    return "\n".join([
+        _extract(r"function focusCheckRow\(\)\{.*?\n\}", "focusCheckRow()"),
+        _extract(r"function showFocusBanner\(\)\{.*?\n\}", "showFocusBanner()"),
+    ])
+
+
+def _run_focus_check_row(focus_is_url_arrival: bool) -> bool:
+    """Returns whether a #focus-banner element was created."""
+    bundle = _focus_check_row_bundle()
+    harness = f"""
+{bundle}
+var I18N={{t:function(k){{return k;}}}};
+var focusMsgId='m-1';
+var focusIsUrlArrival={json.dumps(focus_is_url_arrival)};
+var timelineHasOlder=false;
+var bannerCreated=false;
+var fakeRow={{
+  scrollIntoView:function(){{}},
+  classList:{{add:function(){{}}}},
+  addEventListener:function(){{}}
+}};
+var document={{
+  querySelector:function(sel){{ return sel.indexOf('m-1')>=0 ? fakeRow : null; }},
+  getElementById:function(id){{ return (id==='focus-banner'&&bannerCreated) ? {{}} : null; }},
+  createElement:function(){{ bannerCreated=true; return {{style:{{}},classList:{{}}}}; }},
+  body:{{appendChild:function(){{}}}}
+}};
+focusCheckRow();
+process.stdout.write(JSON.stringify(bannerCreated));
+"""
+    result = run_node(harness)
+    assert result.returncode == 0, f"node harness failed: {result.stderr}"
+    return json.loads(result.stdout)
+
+
+def test_focus_check_row_shows_banner_only_for_url_arrival() -> None:
+    assert _run_focus_check_row(focus_is_url_arrival=True) is True
+
+
+def test_focus_check_row_suppresses_banner_for_in_page_locate() -> None:
+    """The exact bug repro: an in-page search-hit/locator locate must never
+    show the history.back() banner -- there was no navigation to undo, and
+    clicking it was sending users back to the login page."""
+    assert _run_focus_check_row(focus_is_url_arrival=False) is False
+
+
+def test_search_hit_click_marks_locate_as_in_page() -> None:
+    src = _extract(r"function onSearchHitClick\(\)\{.*?\n\}", "onSearchHitClick()")
+    assert "focusIsUrlArrival=false" in src
+
+
+def test_locator_prev_and_next_mark_locate_as_in_page() -> None:
+    prev_src = _extract(r"function locatorPrev\(\)\{.*?\n\}", "locatorPrev()")
+    next_src = _extract(r"function locatorNext\(\)\{.*?\n\}", "locatorNext()")
+    assert "focusIsUrlArrival=false" in prev_src
+    assert "focusIsUrlArrival=false" in next_src
+
+
+def test_read_focus_from_url_marks_locate_as_url_arrival() -> None:
+    src = _extract(r"function readFocusFromUrl\(\)\{.*?\n\}", "readFocusFromUrl()")
+    assert "focusIsUrlArrival=true" in src

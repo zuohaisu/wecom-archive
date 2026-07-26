@@ -132,6 +132,12 @@ var __scrollCalled = false;
 
 var mode = 'staff', selEntityId = null, selConvId = null, selConvName = null;
 var focusMsgId = null, focusPending = false;
+// Bug fix: focusCheckRow() only shows the "return to search results"
+// banner (history.back()) for a genuine cross-page arrival -- this
+// harness simulates exactly that scenario (see module docstring: "jump
+// back from the search results page"), matching what the real
+// readFocusFromUrl() sets before calling focusMessage().
+var focusIsUrlArrival = true;
 var timelineConvId = null, timelineMsgs = [], timelineHasOlder = false,
     timelineNextBefore = null, timelineRequestGen = 0, timelineLoadingOlder = false,
     timelineHistoryError = null, timelineConvType = null, timelineMode = null,

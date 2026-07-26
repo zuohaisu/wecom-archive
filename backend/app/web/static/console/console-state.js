@@ -60,6 +60,21 @@ var focusMsgId=null; // RND-229: set by readFocusFromUrl() during init, read by 
 // once the target conversation is selected; consumed by fetchTimelinePage
 // on its initial render-completion.
 var focusPending=false;
+// Bug fix: showFocusBanner()'s "← 返回搜索结果" wires history.back() --
+// correct ONLY when the current focusMessage() call arrived via a cross-
+// page redirect from the standalone /admin/search results page
+// (readFocusFromUrl(), where the previous history entry really is that
+// search page). The in-page inline-search/locator-bar flows
+// (onSearchHitClick/locatorPrev/locatorNext) call focusMessage() too, but
+// never navigate anywhere -- for them, history.back() pops whatever page
+// was open BEFORE this console tab was ever loaded (typically
+// /admin/login), which is how "click a search hit, then click the banner"
+// was sending users back to the login screen. Each focusMessage() caller
+// sets this explicitly right before calling; focusCheckRow() only shows
+// the banner when it's true. The locator bar itself (prev/next/收起) is
+// the correct "return" UI for the in-page case, so no replacement banner
+// is needed there.
+var focusIsUrlArrival=false;
 
 // RND-159: Search
 var searchTimer=null,searchLastQ='';
