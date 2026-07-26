@@ -57,7 +57,7 @@ def _patch_sdk_env(monkeypatch, expected_pubkey_ver=1):
     monkeypatch.setattr(
         backfill_script,
         "_load_optional_sdk_env",
-        lambda: (_FakePrivateKey(), _FakeLib(), object(), expected_pubkey_ver),
+        lambda: (_FakePrivateKey(), _FakeLib(), object(), expected_pubkey_ver, "fake-lib-path"),
     )
 
 
@@ -103,7 +103,7 @@ def test_recover_returns_structured_content_on_success(db, monkeypatch) -> None:
     row = _insert_historical_revoke_row(db, seq=1, publickey_ver=1)
     monkeypatch.setattr(backfill_script, "_rsa_decrypt_encrypt_key", lambda *a: "plain-key")
     monkeypatch.setattr(
-        backfill_script, "_decrypt_message", lambda *a: (0, '{"msgtype":"revoke","revoke":{"pre_msgid":"orig-1"}}')
+        backfill_script, "_decrypt_message", lambda *a, **k: (0, '{"msgtype":"revoke","revoke":{"pre_msgid":"orig-1"}}')
     )
     outcome, structured_content = backfill_script.recover_historical_revoke_structured_content(
         _FakePrivateKey(), _FakeLib(), 1, row
@@ -139,7 +139,7 @@ def test_recover_reports_rsa_failure(db, monkeypatch) -> None:
 def test_recover_reports_sdk_decrypt_failure(db, monkeypatch) -> None:
     row = _insert_historical_revoke_row(db, seq=1, publickey_ver=1)
     monkeypatch.setattr(backfill_script, "_rsa_decrypt_encrypt_key", lambda *a: "plain-key")
-    monkeypatch.setattr(backfill_script, "_decrypt_message", lambda *a: (90002, None))
+    monkeypatch.setattr(backfill_script, "_decrypt_message", lambda *a, **k: (90002, None))
     outcome, structured_content = backfill_script.recover_historical_revoke_structured_content(
         _FakePrivateKey(), _FakeLib(), 1, row
     )
@@ -150,7 +150,7 @@ def test_recover_reports_sdk_decrypt_failure(db, monkeypatch) -> None:
 def test_recover_reports_invalid_json(db, monkeypatch) -> None:
     row = _insert_historical_revoke_row(db, seq=1, publickey_ver=1)
     monkeypatch.setattr(backfill_script, "_rsa_decrypt_encrypt_key", lambda *a: "plain-key")
-    monkeypatch.setattr(backfill_script, "_decrypt_message", lambda *a: (0, "{not valid json"))
+    monkeypatch.setattr(backfill_script, "_decrypt_message", lambda *a, **k: (0, "{not valid json"))
     outcome, structured_content = backfill_script.recover_historical_revoke_structured_content(
         _FakePrivateKey(), _FakeLib(), 1, row
     )
@@ -177,7 +177,7 @@ def test_recover_never_fabricates_pre_msgid_when_decrypted_payload_lacks_revoke_
     never invent a value."""
     row = _insert_historical_revoke_row(db, seq=1, publickey_ver=1)
     monkeypatch.setattr(backfill_script, "_rsa_decrypt_encrypt_key", lambda *a: "plain-key")
-    monkeypatch.setattr(backfill_script, "_decrypt_message", lambda *a: (0, '{"msgtype":"revoke","revoke":{}}'))
+    monkeypatch.setattr(backfill_script, "_decrypt_message", lambda *a, **k: (0, '{"msgtype":"revoke","revoke":{}}'))
     outcome, structured_content = backfill_script.recover_historical_revoke_structured_content(
         _FakePrivateKey(), _FakeLib(), 1, row
     )
@@ -256,7 +256,7 @@ def test_main_recovers_historical_row_and_links_it_on_apply(tmp_path, monkeypatc
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("recovered", {"fields": {"pre_msgid": "orig-1"}, "raw": {}, "parse_warnings": []}),
+        lambda *a, **k: ("recovered", {"fields": {"pre_msgid": "orig-1"}, "raw": {}, "parse_warnings": []}),
     )
 
     import pytest
@@ -291,7 +291,7 @@ def test_main_dry_run_recovery_does_not_persist_structured_content(tmp_path, mon
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("recovered", {"fields": {"pre_msgid": "orig-1"}, "raw": {}, "parse_warnings": []}),
+        lambda *a, **k: ("recovered", {"fields": {"pre_msgid": "orig-1"}, "raw": {}, "parse_warnings": []}),
     )
 
     import pytest
@@ -325,7 +325,7 @@ def test_main_preserves_all_other_columns_on_the_recovered_row(tmp_path, monkeyp
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("recovered", {"fields": {"pre_msgid": "orig-1"}, "raw": {}, "parse_warnings": []}),
+        lambda *a, **k: ("recovered", {"fields": {"pre_msgid": "orig-1"}, "raw": {}, "parse_warnings": []}),
     )
 
     import pytest
@@ -356,7 +356,7 @@ def test_main_recovery_failure_leaves_row_untouched_and_retryable(tmp_path, monk
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("rsa_failed", None),
+        lambda *a, **k: ("rsa_failed", None),
     )
 
     import pytest
@@ -403,7 +403,7 @@ def test_a_row_that_fails_recovery_then_succeeds_on_a_later_run_still_links(tmp_
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("sdk_decrypt_failed", None),
+        lambda *a, **k: ("sdk_decrypt_failed", None),
     )
     with pytest.raises(SystemExit):
         main()
@@ -413,7 +413,7 @@ def test_a_row_that_fails_recovery_then_succeeds_on_a_later_run_still_links(tmp_
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("recovered", {"fields": {"pre_msgid": "orig-1"}, "raw": {}, "parse_warnings": []}),
+        lambda *a, **k: ("recovered", {"fields": {"pre_msgid": "orig-1"}, "raw": {}, "parse_warnings": []}),
     )
     with pytest.raises(SystemExit):
         main()
@@ -453,7 +453,7 @@ def test_a_row_with_genuinely_no_pre_msgid_in_its_real_payload_becomes_malformed
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("recovered", {"fields": None, "raw": {}, "parse_warnings": ["missing_pre_msgid"]}),
+        lambda *a, **k: ("recovered", {"fields": None, "raw": {}, "parse_warnings": ["missing_pre_msgid"]}),
     )
     with pytest.raises(SystemExit):
         main()
@@ -482,7 +482,7 @@ def test_main_recovery_key_mismatch_is_reported_separately_from_generic_failure(
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("key_mismatch", None),
+        lambda *a, **k: ("key_mismatch", None),
     )
 
     import pytest
@@ -534,7 +534,7 @@ def test_main_skip_historical_recovery_flag_bypasses_recovery_even_with_sdk_conf
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: (_ for _ in ()).throw(AssertionError("recovery should not run")),
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("recovery should not run")),
     )
 
     import pytest
@@ -581,7 +581,7 @@ def test_main_tenant_scoped_recovery_does_not_touch_other_tenants(tmp_path, monk
     monkeypatch.setattr(
         backfill_script,
         "recover_historical_revoke_structured_content",
-        lambda *a: ("recovered", {"fields": {"pre_msgid": "never-exists"}, "raw": {}, "parse_warnings": []}),
+        lambda *a, **k: ("recovered", {"fields": {"pre_msgid": "never-exists"}, "raw": {}, "parse_warnings": []}),
     )
 
     import pytest

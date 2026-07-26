@@ -20,6 +20,8 @@ import sys
 
 import pytest
 
+from app.services import decrypt_worker as decrypt_worker_module
+from app.services.decrypt_isolation import IsolatedDecryptResult
 from tests.fakes import (
     FakeWecomSdk,
     _TENANT_A,
@@ -31,6 +33,34 @@ from tests.fakes import (
     worker_engine,  # noqa: F401 -- pytest fixture, must be imported to be discovered
     write_private_key_pem,
 )
+
+
+def _install_fake_decrypt_isolated(monkeypatch, fake: FakeWecomSdk) -> None:
+    """RND-231: scripts/decrypt_wecom_messages_once.py's main() always
+    passes WECOM_SDK_LIB_PATH through to run_decrypt_once() as lib_path,
+    which routes DecryptData through
+    app.services.decrypt_isolation.decrypt_message_isolated() — a real
+    subprocess spawn that loads the SDK fresh and so can never see an
+    in-process monkeypatch of app.sdk.wecom_sdk (the CLI shell's own SDK
+    lifecycle calls — Init/GetChatData family — still go through that
+    module directly and stay faked the old way). This bridges
+    decrypt_message_isolated to the SAME FakeWecomSdk instance the test
+    already configures via fake.set_decrypt_response(...), so this test
+    keeps exercising the CLI shell's [INFO]/[FAIL]/[PASS] contract without
+    spawning a real child process or needing a real .so.
+    """
+
+    def _fake_decrypt_isolated(lib_path, encrypt_key, encrypt_msg, timeout=15.0):
+        ret = fake.decrypt_data(fake.lib, encrypt_key, encrypt_msg, "isolated-slice")
+        if ret != 0:
+            return IsolatedDecryptResult("sdk_decrypt_failed", ret, None)
+        length = fake.get_slice_len(fake.lib, "isolated-slice")
+        if length <= 0:
+            return IsolatedDecryptResult("sdk_decrypt_failed", ret, None, "empty result")
+        content = fake.get_content_from_slice(fake.lib, "isolated-slice")
+        return IsolatedDecryptResult("success", ret, content.decode("utf-8"))
+
+    monkeypatch.setattr(decrypt_worker_module, "decrypt_message_isolated", _fake_decrypt_isolated)
 
 
 def _set_required_env(monkeypatch, tmp_path, private_key) -> None:
@@ -99,6 +129,7 @@ def test_main_decrypts_pending_row_and_prints_expected_summary(
     monkeypatch.setattr(script.wecom_sdk, "decrypt_data", fake.decrypt_data)
     monkeypatch.setattr(script.wecom_sdk, "get_slice_len", fake.get_slice_len)
     monkeypatch.setattr(script.wecom_sdk, "get_content_from_slice", fake.get_content_from_slice)
+    _install_fake_decrypt_isolated(monkeypatch, fake)
 
     monkeypatch.setattr(sys, "argv", ["prog"])
 

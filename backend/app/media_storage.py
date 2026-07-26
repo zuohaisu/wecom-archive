@@ -798,11 +798,19 @@ _ALLOWED_FILE_CONTENT_TYPES = {
 # mapping rather than a pluralization rule, matching the exact paths named
 # in the RND-186 ticket (tenants/{tenant}/{videos,voice,...}/...) — "voice"
 # is intentionally singular, not "voices".
+#
+# RND-202: audio_archive (enterprise meeting_voice_call recordings) gets
+# its own "call_recordings" segment — a distinct directory from regular
+# "voice" messages even though both are downloaded/detected as the same
+# "voice" byte-signature category (see
+# app.media_download._SIGNATURE_CATEGORY_BY_MSGTYPE), so a recording never
+# shares storage space with an ordinary voice message.
 MEDIA_TYPE_KEY_CATEGORIES = {
     "image": "images",
     "video": "videos",
     "voice": "voice",
     "file": "files",
+    "audio_archive": "call_recordings",
 }
 
 # The media_types a migration/download tool may act on (text/unsupported
@@ -818,12 +826,15 @@ MEDIA_TYPE_KEY_CATEGORIES = {
 # above is *not* replaced by the registry: it encodes a storage-specific
 # fact (the RND-186 ticket's exact, non-pluralized object-key path
 # segment) that the registry has no reason to own. Deliberately not
-# derived as "every SUPPORTED/PARTIAL registry entry" either — e.g.
-# audio_archive is PARTIAL in the registry but has no byte-signature
-# detector or ticket-approved path segment here, so it stays out of
-# migration scope until a future ticket adds real support for it; adding
-# it automatically the moment the registry gains that entry would let
-# storage silently start migrating a media type it cannot actually detect.
+# derived as "every SUPPORTED/PARTIAL registry entry" either — a future
+# PARTIAL/SUPPORTED registry entry with no byte-signature detector or
+# approved path segment here must stay out of migration scope until a
+# ticket adds real support for it (audio_archive itself was exactly such
+# a type until RND-202 added its "voice"-category signature detection —
+# see app.media_download — and the "call_recordings" segment above);
+# adding a type here automatically the moment the registry gains its
+# entry would let storage silently start migrating a media type it
+# cannot actually detect.
 _UNREGISTERED_OR_UNSUPPORTED_STORAGE_TYPES = {
     media_type
     for media_type in MEDIA_TYPE_KEY_CATEGORIES

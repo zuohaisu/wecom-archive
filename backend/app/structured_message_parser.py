@@ -694,14 +694,28 @@ def parse_card_message(payload: dict) -> tuple[dict, list[str]]:
 
 
 def parse_meetingvoicecall_message(payload: dict) -> tuple[dict, list[str]]:
-    """RND-210: WeCom 音频存档 (audio archive / meeting voice call) message.
+    """RND-210/RND-202: WeCom 音频存档 (audio archive / meeting voice call)
+    message.
 
     Raw msgtype is "meeting_voice_call" (the precise official spelling; a
     no-underscore "meetingvoicecall" variant also appears) — both are
     aliased to the audio_archive definition. Key fields per WeCom docs:
-    voiceid, endtime (epoch-seconds), sdkfileid (primary media reference).
-    Shared-doc / screen-share metadata is extracted defensively only when
-    present; nothing is fabricated.
+    voiceid, endtime (epoch-seconds), sdkfileid (primary media reference),
+    demofiledata/sharescreendata (optional). Call participants (caller/
+    callee) are NOT parsed here — they are the message envelope's own
+    `sender`/`tolist` fields, already extracted generically by
+    _normalise_fields() for every message type, not something this
+    audio_archive-specific parser needs to duplicate.
+
+    RND-202: WeCom's official schema does not document a start-time or
+    duration field for this message type (only voiceid/endtime/sdkfileid/
+    demofiledata/sharescreendata are confirmed — see the RND-210 QA round
+    4 finding referenced below). `starttime` is therefore extracted only
+    defensively (candidate key probe, same discipline as shared_doc below)
+    and `duration_seconds` is derived ONLY when both a real starttime and
+    endtime are present and endtime is after starttime — never computed
+    from msgtime (the archive record's own timestamp, not a confirmed
+    call-start proxy) and never fabricated when starttime is absent.
     """
     warnings: list[str] = []
     payload = payload if isinstance(payload, dict) else {}
@@ -714,11 +728,25 @@ def parse_meetingvoicecall_message(payload: dict) -> tuple[dict, list[str]]:
     if not sdkfileid:
         warnings.append("missing_sdkfileid")
 
+    # RND-202: unconfirmed schema — probe candidate keys defensively
+    # (mirrors shared_doc's own multi-key probe just below) rather than
+    # asserting a single official field name. Absent in every fixture
+    # this project has seen so far; when present, surfaced as-is.
+    starttime = _safe_int(
+        payload.get("starttime")
+        if payload.get("starttime") is not None
+        else payload.get("begintime")
+    )
+
     fields = {
         "voiceid": voiceid,
         "endtime": endtime,
         "sdkfileid": sdkfileid,
     }
+    if starttime is not None:
+        fields["starttime"] = starttime
+        if endtime is not None and endtime > starttime:
+            fields["duration_seconds"] = endtime - starttime
 
     # Optional shared document / screen-share — unconfirmed exact key, so
     # probe defensively and only surface when actually present.
@@ -1209,8 +1237,18 @@ def parse_structured_content(msgtype: Optional[str], decrypted: dict) -> Optiona
         # dropped. No other fields move: the sub-object stays the source of truth
         # for endtime/sdkfileid/etc. The no-underscore "meetingvoicecall" variant
         # is covered too (its envelope also carries voiceid at the top level).
+        # RND-202: "audio_archive" is this definition's raw_type (the
+        # canonical/primary spelling in message_type_registry.py, not
+        # merely an alias target) -- a real payload using that exact raw
+        # msgtype string carries voiceid at the top level the same way the
+        # other two spellings do, so it must get the same merge or
+        # voiceid would silently drop for that one spelling only.
         parser_input = sub_payload
-        if msgtype in ("meeting_voice_call", "meetingvoicecall") and isinstance(decrypted, dict):
+        if msgtype in (
+            "meeting_voice_call",
+            "meetingvoicecall",
+            "audio_archive",
+        ) and isinstance(decrypted, dict):
             top_voiceid = decrypted.get("voiceid")
             if top_voiceid is not None and "voiceid" not in sub_payload:
                 parser_input = {**sub_payload, "voiceid": top_voiceid}

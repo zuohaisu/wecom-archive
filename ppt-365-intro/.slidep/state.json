@@ -1,0 +1,70 @@
+{
+  "filePath": "/Users/zuohaisu/Documents/code/wecom-archive-365/ppt-365-intro/365企微会话存档产品介绍.pptx",
+  "lastCommit": {
+    "slide_01_cover": {
+      "revisionId": "57b8b3934bb719a76955aec17e1050acd9686cf5",
+      "version": 1,
+      "at": "2026-07-26 17:27:20.480"
+    },
+    "slide_02_catalog": {
+      "revisionId": "b550d2ccceb3f8d50a54bc4be30f42e52c7957e3",
+      "version": 2,
+      "at": "2026-07-26 17:29:24.430"
+    },
+    "slide_03_why": {
+      "revisionId": "7f50c2b5d89e087f8325688022ddbc9943d3a2ae",
+      "version": 3,
+      "at": "2026-07-26 17:30:38.443"
+    },
+    "slide_04_pain": {
+      "revisionId": "60bab9ebc1baf1857c14590203881b8e47b370d9",
+      "version": 5,
+      "at": "2026-07-26 17:35:07.523"
+    },
+    "slide_05_position": {
+      "revisionId": "9cafb490e0d7486b7f85763b8a6f3de4a583782c",
+      "version": 6,
+      "at": "2026-07-26 17:38:37.250"
+    },
+    "slide_06_capabilities": {
+      "revisionId": "5436b8f8459eaeaa095f6bf459e0e431c90217b2",
+      "version": 15,
+      "at": "2026-07-26 18:01:46.638"
+    },
+    "slide_07_archive": {
+      "revisionId": "a993bf066ff1e3afc9afdf687b49d23af8c4e4c9",
+      "version": 8,
+      "at": "2026-07-26 17:44:42.952"
+    },
+    "slide_08_search": {
+      "revisionId": "58a77a5f2f9db1dd9d0910051858119ffa301963",
+      "version": 9,
+      "at": "2026-07-26 17:48:44.453"
+    },
+    "slide_09_console": {
+      "revisionId": "aa3b621bacdb0bbc3346a8a650893f69916f1119",
+      "version": 10,
+      "at": "2026-07-26 17:51:17.991"
+    },
+    "slide_10_security": {
+      "revisionId": "f3f6d8809c9d138373699651dcdb629248d53393",
+      "version": 11,
+      "at": "2026-07-26 17:55:06.701"
+    },
+    "slide_11_scenario": {
+      "revisionId": "4e2b5f0f3fb17dec4dfe0d6af3285347a3e78d57",
+      "version": 12,
+      "at": "2026-07-26 17:56:43.396"
+    },
+    "slide_12_architecture": {
+      "revisionId": "f521bdaaa604b59aa3469c200381507e4b143a07",
+      "version": 13,
+      "at": "2026-07-26 17:58:11.413"
+    },
+    "slide_13_ending": {
+      "revisionId": "d9ecaab6ca041265bd732eb0e441539c4a0cc1e1",
+      "version": 14,
+      "at": "2026-07-26 17:58:35.139"
+    }
+  }
+}

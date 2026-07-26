@@ -29,6 +29,8 @@ import inspect
 import pytest
 
 from app.db.models import ArchiveMessageRecipient, MessageRevocation
+from app.services import decrypt_worker as decrypt_worker_module
+from app.services.decrypt_isolation import IsolatedDecryptResult
 from app.services.decrypt_worker import DecryptCommitError, run_decrypt_once
 from tests.fakes import (
     FakeWecomSdk,
@@ -189,6 +191,120 @@ def test_tenant_a_failures_never_mutate_tenant_b_committed_data(worker_db, rsa_k
     assert a_msg.decrypt_status == "failed"
     assert b_msg.decrypt_status == "success"
     assert b_msg.content_text == "already decrypted"
+
+
+# ---------------------------------------------------------------------------
+# RND-231 — isolated DecryptData: a sigsegv on one row must not stop the
+# batch, and must be classified distinctly from an ordinary SDK failure.
+# Exercised via the decrypt_message_isolated seam (monkeypatched here,
+# exactly like the sdk= injection pattern used everywhere else in this
+# file) rather than by actually spawning a subprocess -- the subprocess
+# mechanism itself (real SIGSEGV containment) is covered end-to-end by
+# tests/test_decrypt_isolation.py; this file's job is proving
+# run_decrypt_once's LOOP behavior around that seam.
+# ---------------------------------------------------------------------------
+
+
+def test_sigsegv_on_one_row_is_counted_and_batch_continues(worker_db, rsa_keys, monkeypatch) -> None:
+    priv, pub = rsa_keys
+
+    msg_ok = _make_pending(worker_db, _TENANT_A, pub, "payload-ok", seq=1)
+    msg_crash = _make_pending(worker_db, _TENANT_A, pub, "payload-crash", seq=2)
+    msg_ok2 = _make_pending(worker_db, _TENANT_A, pub, "payload-ok2", seq=3)
+
+    def _fake_isolated(lib_path, encrypt_key, encrypt_msg, timeout=15.0):
+        if encrypt_msg == "payload-crash":
+            return IsolatedDecryptResult("sigsegv", None, None, "signal 11")
+        return IsolatedDecryptResult(
+            "success",
+            0,
+            (
+                '{"msgtype":"text","from":"staff_a","tolist":["contact_a"],'
+                '"roomid":"","msgtime":100,"text":{"content":"hi"}}'
+            ),
+        )
+
+    monkeypatch.setattr(decrypt_worker_module, "decrypt_message_isolated", _fake_isolated)
+
+    summary = run_decrypt_once(
+        worker_db, _TENANT_A, "fake-lib", priv, _PUBKEY_VER, lib_path="/fake/lib.so"
+    )
+
+    # The crashed row is one more counted failure -- the loop reached and
+    # finished processing every row in the batch, it did not stop early.
+    assert summary.scanned == 3
+    assert summary.success == 2
+    assert summary.failed == 1
+    assert summary.sigsegv == 1
+
+    worker_db.refresh(msg_ok)
+    worker_db.refresh(msg_crash)
+    worker_db.refresh(msg_ok2)
+    assert msg_ok.decrypt_status == "success"
+    assert msg_crash.decrypt_status == "failed"
+    assert msg_ok2.decrypt_status == "success"
+
+
+def test_isolation_other_outcome_is_counted_distinctly_from_sigsegv(worker_db, rsa_keys, monkeypatch) -> None:
+    priv, pub = rsa_keys
+    _make_pending(worker_db, _TENANT_A, pub, "payload-timeout", seq=1)
+
+    monkeypatch.setattr(
+        decrypt_worker_module,
+        "decrypt_message_isolated",
+        lambda *a, **k: IsolatedDecryptResult("other", None, None, "timeout"),
+    )
+
+    summary = run_decrypt_once(
+        worker_db, _TENANT_A, "fake-lib", priv, _PUBKEY_VER, lib_path="/fake/lib.so"
+    )
+
+    assert summary.failed == 1
+    assert summary.sigsegv == 0
+    assert summary.isolation_other == 1
+
+
+def test_malformed_input_is_rejected_before_isolated_call_and_counted(worker_db, rsa_keys, monkeypatch) -> None:
+    from app.services.decrypt_isolation import MalformedDecryptInput
+
+    priv, pub = rsa_keys
+    _make_pending(worker_db, _TENANT_A, pub, "payload-bad", seq=1)
+
+    def _raise_malformed(*a, **k):
+        raise MalformedDecryptInput("bad input")
+
+    monkeypatch.setattr(decrypt_worker_module, "decrypt_message_isolated", _raise_malformed)
+
+    summary = run_decrypt_once(
+        worker_db, _TENANT_A, "fake-lib", priv, _PUBKEY_VER, lib_path="/fake/lib.so"
+    )
+
+    assert summary.failed == 1
+    assert summary.malformed_input == 1
+
+
+def test_lib_path_omitted_uses_in_process_path_unchanged(worker_db, rsa_keys, monkeypatch) -> None:
+    """Regression guard: every caller that omits lib_path (the default)
+    must be completely unaffected by RND-231 -- decrypt_message_isolated
+    must never even be consulted."""
+    priv, pub = rsa_keys
+    sdk = FakeWecomSdk()
+    _make_pending(worker_db, _TENANT_A, pub, "payload-a", seq=1)
+    sdk.set_decrypt_response(
+        "payload-a",
+        {
+            "msgtype": "text", "from": "staff_a", "tolist": ["contact_a"],
+            "roomid": "", "msgtime": 100, "text": {"content": "hi"},
+        },
+    )
+
+    def _boom(*a, **k):
+        raise AssertionError("decrypt_message_isolated must not be called without lib_path")
+
+    monkeypatch.setattr(decrypt_worker_module, "decrypt_message_isolated", _boom)
+
+    summary = run_decrypt_once(worker_db, _TENANT_A, "fake-lib", priv, _PUBKEY_VER, sdk=sdk)
+    assert summary.success == 1
 
 
 # ---------------------------------------------------------------------------

@@ -105,6 +105,7 @@ from app.revoke_reconciliation import (
     reconcile_revoke_event,
 )
 from app.sdk import wecom_sdk
+from app.services.decrypt_isolation import SIGSEGV_SENTINEL
 from scripts.decrypt_wecom_messages_once import (
     _decrypt_message,
     _load_private_key,
@@ -234,9 +235,11 @@ def _load_optional_sdk_env():
     required credential is missing or fails to load, since recovery is
     optional: the rest of this script's reconciliation work must still
     run without WeCom SDK access at all (e.g. a pure dry-run association
-    audit). Returns (private_key, lib, handle, expected_pubkey_ver) on
-    success; caller is responsible for wecom_sdk.destroy_sdk(lib, handle)
-    when done.
+    audit). Returns (private_key, lib, handle, expected_pubkey_ver,
+    lib_path) on success; caller is responsible for
+    wecom_sdk.destroy_sdk(lib, handle) when done. lib_path (RND-231) is
+    threaded through so recover_historical_revoke_structured_content can
+    run DecryptData isolated in a subprocess instead of in-process.
     """
     required = (
         "WECOM_SDK_LIB_PATH",
@@ -274,11 +277,15 @@ def _load_optional_sdk_env():
     except Exception:
         return None
 
-    return private_key, lib, handle, expected_pubkey_ver
+    return private_key, lib, handle, expected_pubkey_ver, values["WECOM_SDK_LIB_PATH"]
 
 
 def recover_historical_revoke_structured_content(
-    private_key, lib, expected_pubkey_ver: int, row: ArchiveMessage
+    private_key,
+    lib,
+    expected_pubkey_ver: int,
+    row: ArchiveMessage,
+    lib_path: "str | None" = None,
 ) -> "tuple[str, dict | None]":
     """Re-decrypt ONE historical revoke row's still-retained encrypted
     envelope, reusing the exact same RSA-decrypt + WeCom SDK DecryptData
@@ -288,9 +295,16 @@ def recover_historical_revoke_structured_content(
 
     Returns (outcome, structured_content_or_None). outcome is one of:
     "recovered", "key_mismatch", "missing_envelope", "rsa_failed",
-    "sdk_decrypt_failed", "invalid_json". structured_content is only
-    non-None for "recovered" — every other outcome means the caller must
-    leave the row completely untouched (no fabricated pre_msgid).
+    "sdk_decrypt_failed", "sigsegv", "invalid_json". structured_content is
+    only non-None for "recovered" — every other outcome means the caller
+    must leave the row completely untouched (no fabricated pre_msgid).
+
+    RND-231: lib_path, when given, routes DecryptData through
+    app.services.decrypt_isolation's subprocess isolation (same mechanism
+    scripts/decrypt_wecom_messages_once.py's live loop uses via
+    run_decrypt_once) so one historical row crashing the SDK is reported
+    as outcome="sigsegv" and this script's caller loop moves on to the
+    next row instead of the whole process dying.
     """
     if row.publickey_ver != expected_pubkey_ver:
         return "key_mismatch", None
@@ -301,7 +315,11 @@ def recover_historical_revoke_structured_content(
     if encrypt_key is None:
         return "rsa_failed", None
 
-    ret, decrypted_str = _decrypt_message(lib, encrypt_key, row.encrypt_chat_msg)
+    ret, decrypted_str = _decrypt_message(
+        lib, encrypt_key, row.encrypt_chat_msg, lib_path=lib_path
+    )
+    if ret == SIGSEGV_SENTINEL:
+        return "sigsegv", None
     if ret != 0 or decrypted_str is None:
         return "sdk_decrypt_failed", None
 
@@ -345,6 +363,7 @@ def main() -> None:
     recovery_key_mismatch = 0
     recovery_failed = 0
     recovery_skipped_no_sdk = 0
+    recovery_sigsegv = 0
 
     with Session(engine) as session:
         # --- Historical recovery pass (RND-201 round 2 QA fix) — must
@@ -361,17 +380,24 @@ def main() -> None:
             if sdk_env is None:
                 recovery_skipped_no_sdk = len(historical_candidates)
             else:
-                private_key, lib, handle, expected_pubkey_ver = sdk_env
+                private_key, lib, handle, expected_pubkey_ver, lib_path = sdk_env
                 try:
                     for row in historical_candidates:
                         outcome, structured_content = recover_historical_revoke_structured_content(
-                            private_key, lib, expected_pubkey_ver, row
+                            private_key, lib, expected_pubkey_ver, row, lib_path=lib_path
                         )
                         if outcome == "recovered":
                             row.structured_content = structured_content
                             recovered += 1
                         elif outcome == "key_mismatch":
                             recovery_key_mismatch += 1
+                        elif outcome == "sigsegv":
+                            # RND-231: counted separately for operator
+                            # visibility, but still just one more
+                            # "leave the row untouched, move to the next
+                            # row" outcome -- no different from any other
+                            # non-"recovered" branch here.
+                            recovery_sigsegv += 1
                         else:
                             recovery_failed += 1
                     session.flush()
@@ -443,6 +469,8 @@ def main() -> None:
     print(f"[INFO] backfill historical_recovered: {recovered}", flush=True)
     if recovery_key_mismatch:
         print(f"[INFO] backfill historical_recovery_key_mismatch: {recovery_key_mismatch}", flush=True)
+    if recovery_sigsegv:
+        print(f"[INFO] backfill historical_recovery_sigsegv: {recovery_sigsegv}", flush=True)
     if recovery_failed:
         print(f"[INFO] backfill historical_recovery_failed: {recovery_failed}", flush=True)
     if recovery_skipped_no_sdk:

@@ -349,26 +349,56 @@ function renderCardMessage(m){
   html+='</div>';
   return html;
 }
-// RND-210 (+ QA FAIL remediation): audio-archive (meeting_voice_call /
-// audio_archive) renderer. Previously audio_archive was a PLACEHOLDER type
-// excluded from the frontend registry, so it collapsed into the generic
-// "unknown message type". As a STRUCTURED_CARD it now shows the audio-
-// archive type label, the call end time (when present), and an explicit
-// "not playable" status — never an unknown placeholder. Full playback is
-// RND-202 scope, so no <audio> element is rendered here.
+// RND-210 (+ QA FAIL remediation) / RND-202: audio-archive
+// (meeting_voice_call / audio_archive) renderer. Previously audio_archive
+// was a PLACEHOLDER type excluded from the frontend registry, so it
+// collapsed into the generic "unknown message type"; RND-210 added the
+// type label + end time + an explicit "not playable" status. RND-202 adds
+// real playback: when this row's own media_status/media_access_url are
+// "available" (set generically by the timeline API once a recording has
+// been downloaded through the unified media pipeline — see
+// app.media_download._SIGNATURE_CATEGORY_BY_MSGTYPE), the card renders a
+// real lazily-hydrated <audio> element via the EXACT same richMediaPlaceholder
+// ('voice', ...) -> hydrateRichMedia -> swapRichMediaPlaceholder path
+// RND-206 already built for ordinary voice messages — no new hydration
+// code. Call participants are NOT duplicated here: the caller is already
+// shown by the standard per-message sender header every row gets; the
+// callee (m.recipient_display_names) is not otherwise shown for a 1:1
+// row, so it is surfaced here. starttime/duration are shown only when the
+// (unconfirmed-schema, defensively-parsed — see
+// parse_meetingvoicecall_message) fields are actually present; nothing is
+// fabricated when absent, matching every other structured card in this
+// file. Missing enterprise call-recording permission (no sdkfileid, or a
+// tenant without archive-call access) degrades to the existing
+// "not playable" placeholder — never a crash, never a fabricated player.
 function renderAudioArchiveMessage(m){
   var f=m.structured_content&&m.structured_content.fields;
   if(!f)return renderStructuredFallback(m);
-  var et=f.endtime;
-  // WeCom endtime is epoch-seconds; fmtTime expects epoch-ms — convert only
-  // when the value looks like seconds (defensive for either unit).
+  var st=f.starttime,et=f.endtime;
+  // WeCom endtime/starttime are epoch-seconds; fmtTime expects epoch-ms —
+  // convert only when the value looks like seconds (defensive for either
+  // unit).
+  if(st&&st<1e12)st=st*1000;
   if(et&&et<1e12)et=et*1000;
   var html='<div class="structured-card structured-card-audioarchive">'
     +structuredCardHeader('messageType.audioArchive',m.msgtype,CARD_DOT_COLORS.audio_archive);
+  if(st)html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.startedAt'))+esc(fmtTime(st))+'</div>';
   if(et)html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.endedAt'))+esc(fmtTime(et))+'</div>';
-  html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.playbackUnavailable'))+'</div>';
+  if(f.duration_seconds!=null)html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.duration'))+esc(fmtDurationSeconds(f.duration_seconds))+'</div>';
+  if(m.recipient_display_names&&m.recipient_display_names.length)html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.callee'))+esc(m.recipient_display_names.join('、'))+'</div>';
+  if(m.media_status==='available'&&m.media_access_url){
+    html+=richMediaPlaceholder('voice',m.media_access_url,'voice.loading');
+  }else{
+    html+='<div class="structured-card-meta">'+esc(I18N.t('audioArchive.playbackUnavailable'))+'</div>';
+  }
   html+='</div>';
   return html;
+}
+function fmtDurationSeconds(totalSeconds){
+  var s=Math.max(0,Math.round(totalSeconds));
+  var m=Math.floor(s/60);
+  var r=s%60;
+  return m+':'+String(r).padStart(2,'0');
 }
 // RND-210 (+ QA FAIL remediation): audio-shared-doc (voip_doc_share /
 // audio_doc) renderer. Shows the shared document title (when the parser

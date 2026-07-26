@@ -57,12 +57,23 @@ from app.sdk import wecom_sdk
 # category is "image" even though the WeCom message type is "emotion" —
 # content is never trusted from the msgtype/sdkfileid, only from the
 # bytes themselves.
+#
+# RND-202: audio_archive (meeting_voice_call recordings) is downloaded
+# through this exact SAME pipeline — the enterprise call-recording bytes
+# WeCom's GetMediaData returns are ordinary voice-format audio (AMR/SILK/
+# WAV/MP3), the same formats a regular "voice" message uses, so the
+# accepted signature category is "voice" even though the WeCom message
+# type is "audio_archive" — mirrors the emotion/image precedent above
+# exactly. The object-key path segment stays distinct (see
+# app.media_storage.MEDIA_TYPE_KEY_CATEGORIES["audio_archive"]) so call
+# recordings never share a directory with regular voice messages on disk.
 _SIGNATURE_CATEGORY_BY_MSGTYPE = {
     "image": "image",
     "voice": "voice",
     "video": "video",
     "file": "file",
     "emotion": "image",
+    "audio_archive": "voice",
 }
 
 # Object-key path segment for a msgtype this module downloads that is not

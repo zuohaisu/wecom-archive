@@ -694,16 +694,24 @@ def test_media_storage_raises_at_import_if_it_drifts_from_the_registry() -> None
     assert drifted == {"emotion"}
 
 
-def test_audio_archive_is_partial_but_intentionally_excluded_from_migration() -> None:
+def test_audio_archive_is_partial_and_now_included_in_migration_since_rnd_202() -> None:
     """audio_archive is PARTIAL in the registry (same tier as
-    video/voice/file) but has no byte-signature detector or RND-186
-    ticket-approved object-key path segment — it must stay out of
-    migration scope until a future ticket adds real support, not be
-    silently swept in just because the registry allows it."""
+    video/voice/file) — before RND-202 it had no byte-signature detector
+    or object-key path segment and was intentionally excluded from
+    migration scope (see git history for that guard). RND-202 gave it a
+    real "voice"-category byte-signature detector (call recordings are
+    ordinary voice-format audio — see
+    app.media_download._SIGNATURE_CATEGORY_BY_MSGTYPE) and a dedicated
+    "call_recordings" object-key path segment, so it is now a real,
+    downloadable/servable/migratable media type, not swept in by
+    accident — this test guards that the inclusion is intentional and
+    that the registry/storage import-time consistency guard (see
+    app.media_storage's _UNREGISTERED_OR_UNSUPPORTED_STORAGE_TYPES) still
+    passes for it."""
     from app.media_storage import SUPPORTED_MIGRATION_MEDIA_TYPES
 
     assert resolve("audio_archive").support_status == MessageSupportStatus.PARTIAL
-    assert "audio_archive" not in SUPPORTED_MIGRATION_MEDIA_TYPES
+    assert "audio_archive" in SUPPORTED_MIGRATION_MEDIA_TYPES
 
 
 # ---------------------------------------------------------------------------

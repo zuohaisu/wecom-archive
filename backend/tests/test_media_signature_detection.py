@@ -153,11 +153,16 @@ def test_media_key_category_raises_for_unsupported_type() -> None:
 def test_supported_migration_media_types_matches_classifier_recognized_types() -> None:
     """SUPPORTED_MIGRATION_MEDIA_TYPES must line up exactly with
     app.media_classification's own recognized (non-text) media types —
-    image/video/voice/file — so a future download worker for any of these
-    types is automatically migratable with zero further changes."""
+    image/video/voice/file, plus audio_archive since RND-202 gave it a
+    real byte-signature detector (the "voice" category — see
+    app.media_download._SIGNATURE_CATEGORY_BY_MSGTYPE) and object-key path
+    segment ("call_recordings") — so a future download worker for any of
+    these types is automatically migratable with zero further changes."""
     from app.media_storage import SUPPORTED_MIGRATION_MEDIA_TYPES
 
-    assert SUPPORTED_MIGRATION_MEDIA_TYPES == frozenset({"image", "video", "voice", "file"})
+    assert SUPPORTED_MIGRATION_MEDIA_TYPES == frozenset(
+        {"image", "video", "voice", "file", "audio_archive"}
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -256,7 +256,12 @@ def main() -> None:
     with Session(engine) as session:
         try:
             summary = run_decrypt_once(
-                session, tenant_id, lib, private_key, expected_pubkey_ver
+                session,
+                tenant_id,
+                lib,
+                private_key,
+                expected_pubkey_ver,
+                lib_path=lib_path,
             )
         except DecryptCommitError as exc:
             print(f"[FAIL] Database commit failed: {exc}", flush=True)
@@ -278,6 +283,12 @@ def main() -> None:
         print(f"[INFO] decrypt key_version_mismatch: {summary.key_mismatch}", flush=True)
     if summary.rsa_failed:
         print(f"[INFO] decrypt rsa_decrypt_failed: {summary.rsa_failed}", flush=True)
+    if summary.sigsegv:
+        print(f"[INFO] decrypt sigsegv: {summary.sigsegv}", flush=True)
+    if summary.isolation_other:
+        print(f"[INFO] decrypt isolation_other: {summary.isolation_other}", flush=True)
+    if summary.malformed_input:
+        print(f"[INFO] decrypt malformed_input: {summary.malformed_input}", flush=True)
     if summary.recipient_upsert_failed:
         print(
             f"[INFO] decrypt recipient_upsert_failed: {summary.recipient_upsert_failed}",

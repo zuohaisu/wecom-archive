@@ -38,6 +38,13 @@ from app.revoke_reconciliation import (
     reconcile_revoke_event,
 )
 from app.sdk import wecom_sdk as _default_sdk
+from app.services.decrypt_isolation import (
+    MALFORMED_INPUT_SENTINEL,
+    OTHER_SENTINEL,
+    SIGSEGV_SENTINEL,
+    MalformedDecryptInput,
+    decrypt_message_isolated,
+)
 from app.structured_message_parser import parse_structured_content
 
 
@@ -63,6 +70,14 @@ class DecryptRunSummary:
     revoke_reconcile_failed: int = 0
     revocations_reconciled: int = 0
     return_codes: dict = field(default_factory=dict)
+    # RND-231: observability for the isolated-DecryptData defensive layer.
+    # sigsegv/isolation_other/malformed_input rows are still counted into
+    # `failed` above (same as any other decrypt failure) — these are
+    # additive classification detail, never a second source of truth for
+    # decrypt_status.
+    sigsegv: int = 0
+    isolation_other: int = 0
+    malformed_input: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +112,7 @@ def _rsa_decrypt_encrypt_key(
 
 
 def _decrypt_message(
-    lib, encrypt_key: str, encrypt_msg: str, sdk=_default_sdk
+    lib, encrypt_key: str, encrypt_msg: str, sdk=_default_sdk, lib_path: "str | None" = None
 ) -> "tuple[int, str | None]":
     """
     Call the C SDK DecryptData and return (return_code, decrypted_json_string).
@@ -110,7 +125,35 @@ def _decrypt_message(
     scripts/backfill_revoke_associations_once.py's
     `_decrypt_message(lib, encrypt_key, row.encrypt_chat_msg)` — keep
     working unchanged, always against the real SDK.
+
+    RND-231: when lib_path is given, DecryptData runs in an isolated
+    subprocess (app.services.decrypt_isolation.decrypt_message_isolated)
+    instead of the in-process call below, so a SIGSEGV inside the C SDK
+    kills only that child process. Every existing caller that omits
+    lib_path (all current tests, which pass a FakeWecomSdk with no real
+    ctypes library to crash) is completely unaffected — same in-process
+    path as before. A sigsegv/timeout/crash is folded back into this
+    function's existing (return_code, decrypted_json) contract via the
+    SIGSEGV_SENTINEL/OTHER_SENTINEL return codes so callers that only
+    understand "ret != 0 means failed" (e.g.
+    scripts/backfill_revoke_associations_once.py's
+    recover_historical_revoke_structured_content) keep working unchanged;
+    run_decrypt_once below additionally recognizes the sentinels for
+    granular summary counters.
     """
+    if lib_path is not None:
+        try:
+            result = decrypt_message_isolated(lib_path, encrypt_key, encrypt_msg)
+        except MalformedDecryptInput:
+            return MALFORMED_INPUT_SENTINEL, None
+        if result.outcome == "success":
+            return result.return_code, result.decrypted_json
+        if result.outcome == "sigsegv":
+            return SIGSEGV_SENTINEL, None
+        if result.outcome == "sdk_decrypt_failed":
+            return (result.return_code if result.return_code is not None else OTHER_SENTINEL), None
+        return OTHER_SENTINEL, None
+
     slice_ptr = sdk.new_slice(lib)
     if not slice_ptr:
         return -2, None  # custom error: alloc failed
@@ -381,6 +424,7 @@ def run_decrypt_once(
     private_key: rsa.RSAPrivateKey,
     expected_pubkey_ver: int,
     sdk=_default_sdk,
+    lib_path: "str | None" = None,
 ) -> DecryptRunSummary:
     """Decrypt every pending/failed archive_messages row for *tenant_id*,
     run the recipient/revocation repair scans, and commit.
@@ -394,6 +438,16 @@ def run_decrypt_once(
     revoke-repair failures) is counted into the returned summary instead,
     exactly as scripts/decrypt_wecom_messages_once.py's original main()
     counted them before this extraction.
+
+    RND-231: lib_path is optional and, when given, is threaded into every
+    _decrypt_message() call this loop makes so DecryptData runs isolated
+    (see that function's docstring). Omitted (the default — every existing
+    test) keeps the original in-process call path with zero behavior
+    change. When given, a SIGSEGV or other crash inside DecryptData for
+    one row is folded into the existing "ret != 0 -> failed, continue"
+    branch below exactly like any other decrypt failure — the loop never
+    stops early — with summary.sigsegv/isolation_other/malformed_input
+    providing granular counts for operator visibility.
     """
     summary = DecryptRunSummary()
 
@@ -436,12 +490,24 @@ def run_decrypt_once(
             continue
 
         # --- C SDK DecryptData ---
-        ret, decrypted_str = _decrypt_message(lib, encrypt_key, encrypt_msg, sdk=sdk)
+        ret, decrypted_str = _decrypt_message(
+            lib, encrypt_key, encrypt_msg, sdk=sdk, lib_path=lib_path
+        )
         summary.return_codes[ret] = summary.return_codes.get(ret, 0) + 1
 
         if ret != 0 or decrypted_str is None:
             record.decrypt_status = "failed"
             summary.failed += 1
+            # RND-231: additive classification detail only — these rows
+            # are already counted into summary.failed above via the same
+            # branch every other decrypt failure takes, so the loop
+            # continues to the next record exactly as it always has.
+            if ret == SIGSEGV_SENTINEL:
+                summary.sigsegv += 1
+            elif ret == MALFORMED_INPUT_SENTINEL:
+                summary.malformed_input += 1
+            elif ret == OTHER_SENTINEL:
+                summary.isolation_other += 1
             continue
 
         # --- Parse decrypted JSON ---
