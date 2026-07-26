@@ -1,4 +1,0 @@
-- Document filenames follow kebab-case with issue/task prefixes (e.g. `rnd-207-migration-runbook.md`, `RND-229-230-search-design-spec.md`) so they sort chronologically and remain traceable to Linear tickets.
-- Design specs explicitly enumerate which existing UI tokens, CSS classes, and API endpoints are reused versus what is new, ensuring zero visual regression against the Conversation Review Console.
-- Runbooks and ops docs use a consistent structure: problem statement → steps → verification, and always call out environment variables or paths that must exist on the host.
-- ADRs and research notes are stored under dedicated subdirectories (`adr/`, `research/`) with descriptive filenames rather than ad-hoc naming, keeping decision history discoverable.

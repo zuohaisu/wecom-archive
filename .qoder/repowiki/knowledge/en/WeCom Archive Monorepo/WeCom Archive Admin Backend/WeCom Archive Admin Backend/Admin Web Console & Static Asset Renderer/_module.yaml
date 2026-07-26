@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: backend_app/app_core/web_console
-title: Admin Web Console & Static Asset Renderer
-scope:
-    - backend/app/web/
-source_files: []
-depends_on: []
-related_to: []

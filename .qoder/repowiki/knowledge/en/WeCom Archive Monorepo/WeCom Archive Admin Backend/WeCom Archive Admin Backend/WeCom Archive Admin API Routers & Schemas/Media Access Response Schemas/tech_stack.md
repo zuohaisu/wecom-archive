@@ -1,1 +1,0 @@
-Pydantic v2 `BaseModel` with `from __future__ import annotations` for forward-compatible type hints; all fields use `Optional[...]` with explicit `None` defaults.

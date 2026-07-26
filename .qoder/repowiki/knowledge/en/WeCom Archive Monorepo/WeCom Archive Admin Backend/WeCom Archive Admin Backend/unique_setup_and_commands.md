@@ -1,1 +1,0 @@
-Application entry point is `backend/app/main.py`; the service is started via uvicorn pointing at this module. Deployment readiness is validated through `/health/ready` which performs a full DB schema check before accepting traffic.

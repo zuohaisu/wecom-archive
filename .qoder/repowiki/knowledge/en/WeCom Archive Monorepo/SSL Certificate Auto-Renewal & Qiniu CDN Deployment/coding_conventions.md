@@ -1,6 +1,0 @@
-- All scripts source `lib/common.sh` via `SCRIPT_DIR` resolution and use its exported constants (`EXIT_OK=0`, `EXIT_GENERIC_FAILURE=1`, `EXIT_USAGE_ERROR=2`) instead of hard-coding exit codes.
-- Secrets are never passed as command-line arguments or printed to stdout/stderr — AK/SK flow through inherited environment variables only, and `filter_secrets()` sed-based redaction is applied before any log output or webhook payload.
-- Dry-run mode is controlled by the `DRY_RUN` / `ACME_STAGING` environment flags checked via `is_dry_run()` / `is_staging()` helpers, and every state-changing function branches on these flags to print `[DRY-RUN]` plans without making network calls.
-- Each shell script follows the same argument-parsing pattern: `while [ $# -gt 0 ]; do case "$1" in ... esac; done` with a `usage()` heredoc and explicit `unknown option` handling returning `EXIT_USAGE_ERROR`.
-- External tool invocations are wrapped in `run_with_timeout` which prefers GNU `timeout`/`gtimeout`, falling back to a background-process + kill implementation when neither is available.
-- Per-domain isolation is enforced by deriving `CERT_DIR`/`STATE_DIR` from the domain name and using `flock`-based locking on a `.renew.lock` file to prevent concurrent renewals.

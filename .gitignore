@@ -248,3 +248,20 @@ ssl-renew/.env*
 
 # WorkBuddy agent workspace — internal only, not for open source
 .workbuddy/
+
+# IDE / agent wiki artifacts — not for open source
+.qoder/
+.trae/
+
+# Generated presentation (PPTX) + IDE caches — not project source
+ppt-365-intro/
+
+# Static marketing site embeds real company legal identity (RND-239 scope)
+static_site/
+
+# Internal working docs (task checklists, QA snapshots) — not for open source
+TASK_TRACKING.md
+PROJECT_DOCUMENTATION_REPORT.md
+
+# Internal IP-protection plan — untracked, keep out of open source
+docs/ip-protection-plan-365huifang.md

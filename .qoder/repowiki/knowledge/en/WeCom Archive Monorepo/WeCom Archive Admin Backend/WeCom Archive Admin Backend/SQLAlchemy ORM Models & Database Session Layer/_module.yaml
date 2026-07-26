@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: backend_app/app_core/database_layer
-title: SQLAlchemy ORM Models & Database Session Layer
-scope:
-    - backend/app/db/
-source_files: []
-depends_on: []
-related_to: []

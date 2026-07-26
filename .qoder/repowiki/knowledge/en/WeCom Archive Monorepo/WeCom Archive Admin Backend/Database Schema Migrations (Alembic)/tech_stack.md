@@ -1,1 +1,0 @@
-Alembic + SQLAlchemy against PostgreSQL; uses `sqlalchemy.dialects.postgresql.JSONB` for JSON columns, GIN indexes for full-text search on `content_text` with the `simple` tsvector dictionary, and `server_default=sa.text('NOW()')` / `sa.func.now()` for timestamp defaults.

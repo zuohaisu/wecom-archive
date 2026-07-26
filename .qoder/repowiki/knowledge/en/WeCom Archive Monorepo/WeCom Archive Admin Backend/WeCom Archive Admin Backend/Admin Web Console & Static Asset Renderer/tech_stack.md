@@ -1,1 +1,0 @@
-Vanilla JavaScript (ES5-style, no framework), plain HTML templates with a custom `__TOKEN__` placeholder renderer, CSS variables for theming, and MD5-based static asset cache-busting computed at Python import time from all files under `static/`.
