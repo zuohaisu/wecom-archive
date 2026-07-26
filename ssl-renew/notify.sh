@@ -3,7 +3,7 @@
 # notify.sh — Generic webhook alerting for SSL renewal events.
 #
 # Usage:   notify.sh <LEVEL> <DOMAIN> <MESSAGE...>
-# Example: notify.sh ERROR media.crowntime.cn "certID mismatch"
+# Example: notify.sh ERROR media.example.com "certID mismatch"
 #
 # Behavior:
 #   - If ALERT_WEBHOOK_URL is unset: logs the alert with a [DEGRADED] tag

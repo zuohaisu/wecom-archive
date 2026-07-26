@@ -158,7 +158,12 @@ MV_BIN="${MV_BIN:-mv}"
 # the P0-D note below on why a public-only failure does not trigger a
 # code rollback.
 INTERNAL_HEALTH="${INTERNAL_HEALTH:-http://127.0.0.1:8035/health/ready}"
-PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://qwhhcd.crowntime.cn/health}"
+# ARCHIVE_DOMAIN — the public hostname this deployment serves the archive
+# app on. Set the real value via backend/.env (already sourced below) or
+# the calling shell's environment; PUBLIC_HEALTH can also be set directly
+# to override independently of ARCHIVE_DOMAIN.
+ARCHIVE_DOMAIN="${ARCHIVE_DOMAIN:-archive.example.com}"
+PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://${ARCHIVE_DOMAIN}/health}"
 
 # P0-D: retry/timeout knobs, each a single named variable (no
 # per-callsite hardcoding) shared by the internal, public, and
@@ -572,8 +577,12 @@ fi
 # successful static copy can never mask a backend deploy failure.
 echo "[8/8] Deploying company homepage static files …"
 STATIC_SRC="$DEPLOY_DIR/static_site/company_homepage"
-SHARED_DST="/srv/apps/wecom-archive-365/shared/www/crowntime"
-NGINX_DST="/var/www/crowntime"
+# STATIC_SITE_DIR_NAME — the directory name (under shared/www and nginx's
+# webroot) this deployment's static homepage is copied to. Set the real
+# value via backend/.env or the calling shell's environment.
+STATIC_SITE_DIR_NAME="${STATIC_SITE_DIR_NAME:-site}"
+SHARED_DST="/srv/apps/wecom-archive-365/shared/www/$STATIC_SITE_DIR_NAME"
+NGINX_DST="/var/www/$STATIC_SITE_DIR_NAME"
 
 if [ -d "$STATIC_SRC" ]; then
     # Copy to shared (wecomarchive-owned) first

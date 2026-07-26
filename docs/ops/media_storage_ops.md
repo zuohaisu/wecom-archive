@@ -24,7 +24,7 @@ QINIU_ACCESS_KEY=<access_key>
 QINIU_SECRET_KEY=<secret_key>
 QINIU_BUCKET=365-wecom-media
 QINIU_REGION=z2
-QINIU_DOMAIN=https://media.crowntime.cn
+QINIU_DOMAIN=https://media.example.com
 MEDIA_STORAGE_PROVIDER=qiniu_kodo
 
 # RND-187 — 可选，Qiniu Signed URL 有效期（秒）。未设置时默认 900（15 分钟），
@@ -71,7 +71,7 @@ curl -fsS http://127.0.0.1:8035/health
 curl http://127.0.0.1:8035/health
 
 # 外部
-curl https://qwhhcd.crowntime.cn/health
+curl https://archive.example.com/health
 ```
 
 预期响应：`{"status":"ok"}`
@@ -214,7 +214,7 @@ GET /api/conversations/{conversation_id}/messages/{msgid}/media/access
     `expires_at=null`（该 URL 本身不携带时效凭证，仍由 session cookie 鉴权）。
   - Qiniu 媒体：`access_type="signed_url"`，`url` 是七牛官方 SDK
     （`qiniu.Auth.private_download_url`）签发的短期私有下载 URL，浏览器直连
-    `media.crowntime.cn`，图片内容不再经过 FastAPI 转发。
+    `media.example.com`，图片内容不再经过 FastAPI 转发。
 - 响应头 `Cache-Control: no-store`——该响应是逐用户、短时效的，不得被共享
   代理/CDN 缓存。
 - 既有 `.../media` 原始代理路由**未删除**：Local 媒体仍然只走这条路由；

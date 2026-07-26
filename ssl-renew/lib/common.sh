@@ -32,7 +32,7 @@ is_dry_run() { [ -n "$DRY_RUN" ] && [ "$DRY_RUN" != "0" ]; }
 is_staging() { [ -n "$ACME_STAGING" ] && [ "$ACME_STAGING" != "0" ]; }
 
 # ── Logging ──────────────────────────────────────────────────────────────
-# LOG_TAG may be set by the caller (e.g. "[media.crowntime.cn]"). Exported
+# LOG_TAG may be set by the caller (e.g. "[media.example.com]"). Exported
 # so it's consistent if a caller forks a helper process that also logs.
 export LOG_TAG="${LOG_TAG:-}"
 

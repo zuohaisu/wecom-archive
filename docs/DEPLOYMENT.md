@@ -377,7 +377,7 @@ are script variables (defaults: 10 retries, 2s apart, 5s timeout), not
 hardcoded per call site.
 
 After the internal check passes, the script also retries the **public**
-URL (`https://qwhhcd.crowntime.cn/health`, through Nginx/DNS/TLS) as an
+URL (`https://archive.example.com/health`, through Nginx/DNS/TLS) as an
 end-to-end confirmation. If the internal check passed but the public
 check still fails, the application itself is proven healthy — that
 points at the reverse proxy / DNS / TLS layer, which a code rollback

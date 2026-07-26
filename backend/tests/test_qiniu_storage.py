@@ -105,21 +105,21 @@ def test_get_download_url_empty_ref_raises_object_not_found() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_get_download_url_success_uses_media_crowntime_domain(monkeypatch) -> None:
-    provider = _make_provider(domain="https://media.crowntime.cn")
+def test_get_download_url_success_uses_media_example_domain(monkeypatch) -> None:
+    provider = _make_provider(domain="https://media.example.com")
     seen = {}
 
     def _fake_private_download_url(url, expires=3600):
         seen["url"] = url
         seen["expires"] = expires
-        return "https://media.crowntime.cn/tenants/t1/images/1.jpg?e=1234567890&token=fake-token"
+        return "https://media.example.com/tenants/t1/images/1.jpg?e=1234567890&token=fake-token"
 
     monkeypatch.setattr(provider._auth, "private_download_url", _fake_private_download_url)
 
     url = provider.get_download_url("tenants/t1/images/1.jpg", expires_in=900)
 
-    assert seen["url"] == "https://media.crowntime.cn/tenants/t1/images/1.jpg"
-    assert url.startswith("https://media.crowntime.cn/")
+    assert seen["url"] == "https://media.example.com/tenants/t1/images/1.jpg"
+    assert url.startswith("https://media.example.com/")
     assert "token=" in url
 
 
@@ -231,18 +231,18 @@ def test_get_download_url_object_key_cannot_alter_host(monkeypatch) -> None:
 
 
 def test_redact_signed_url_for_log_replaces_query_values() -> None:
-    url = "https://media.crowntime.cn/tenants/t1/images/1.jpg?e=1735689600&token=super-secret-token"
+    url = "https://media.example.com/tenants/t1/images/1.jpg?e=1735689600&token=super-secret-token"
     redacted = redact_signed_url_for_log(url)
 
     assert "super-secret-token" not in redacted
     assert "1735689600" not in redacted
     assert "token=[REDACTED]" in redacted
     assert "e=[REDACTED]" in redacted
-    assert redacted.startswith("https://media.crowntime.cn/tenants/t1/images/1.jpg?")
+    assert redacted.startswith("https://media.example.com/tenants/t1/images/1.jpg?")
 
 
 def test_redact_signed_url_for_log_handles_no_query() -> None:
-    url = "https://media.crowntime.cn/tenants/t1/images/1.jpg"
+    url = "https://media.example.com/tenants/t1/images/1.jpg"
     assert redact_signed_url_for_log(url) == url
 
 

@@ -43,7 +43,7 @@ from tests.test_reachability_audit import (
 from tests.test_tenant_media_access import _insert_media_file
 
 _FAKE_SIGNED_URL = (
-    "https://media.crowntime.cn/tenants/tenant-a/images/1.jpg"
+    "https://media.example.com/tenants/tenant-a/images/1.jpg"
     "?e=1999999999&token=fake-signed-token-should-never-leak"
 )
 
@@ -265,7 +265,7 @@ def test_local_media_never_generates_qiniu_signed_url(client, db, monkeypatch, t
 
     assert resp.status_code == 200
     assert resp.json()["access_type"] == "proxy"
-    assert "media.crowntime.cn" not in resp.json()["url"]
+    assert "media.example.com" not in resp.json()["url"]
 
 
 # ---------------------------------------------------------------------------

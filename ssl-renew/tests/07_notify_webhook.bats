@@ -12,8 +12,8 @@ teardown() { common_teardown; }
 
 # ── 告警触发 ───────────────────────────────────────────────────────────
 @test "notify.sh always logs the alert locally regardless of webhook state" {
-    run "$NOTIFY" ERROR media.crowntime.cn "certID mismatch"
-    [[ "$output" == *"[NOTIFY] [ERROR] [media.crowntime.cn] certID mismatch"* ]]
+    run "$NOTIFY" ERROR media.example.com "certID mismatch"
+    [[ "$output" == *"[NOTIFY] [ERROR] [media.example.com] certID mismatch"* ]]
 }
 
 @test "notify.sh POSTs a JSON payload with domain/hostname/failed_stage/timestamp/error_summary" {
@@ -22,11 +22,11 @@ teardown() { common_teardown; }
     export ALERT_WEBHOOK_URL="http://127.0.0.1:$port/hook"
     export ALERT_WEBHOOK_TIMEOUT=5
     export CURRENT_STAGE="qiniu_upload"
-    run "$NOTIFY" ERROR media.crowntime.cn "upload failed"
+    run "$NOTIFY" ERROR media.example.com "upload failed"
     [ "$status" -eq 0 ]
     [ -f "$TEST_TMPDIR/req.json" ]
     payload=$(cat "$TEST_TMPDIR/req.json")
-    [[ "$payload" == *'"domain": "media.crowntime.cn"'* ]]
+    [[ "$payload" == *'"domain": "media.example.com"'* ]]
     [[ "$payload" == *'"hostname":'* ]]
     [[ "$payload" == *'"failed_stage": "qiniu_upload"'* ]]
     [[ "$payload" == *'"timestamp":'* ]]
@@ -37,7 +37,7 @@ teardown() { common_teardown; }
     port=$(find_free_port)
     start_mock_server "$port" --status 200 >/dev/null
     export ALERT_WEBHOOK_URL="http://127.0.0.1:$port/hook" ALERT_WEBHOOK_TIMEOUT=5
-    run "$NOTIFY" WARN media.crowntime.cn "propagation delay"
+    run "$NOTIFY" WARN media.example.com "propagation delay"
     [ "$status" -eq 0 ]
     [[ "$output" == *"[OK] webhook delivered (HTTP 200)"* ]]
 }
@@ -47,7 +47,7 @@ teardown() { common_teardown; }
     port=$(find_free_port)
     start_mock_server "$port" --status 500 >/dev/null
     export ALERT_WEBHOOK_URL="http://127.0.0.1:$port/hook" ALERT_WEBHOOK_TIMEOUT=5
-    run "$NOTIFY" WARN media.crowntime.cn "propagation delay"
+    run "$NOTIFY" WARN media.example.com "propagation delay"
     [ "$status" -eq 0 ]
     [[ "$output" == *"non-2xx: HTTP 500"* ]]
 }
@@ -58,7 +58,7 @@ teardown() { common_teardown; }
     start_mock_server "$port" --status 200 --delay 5 >/dev/null
     export ALERT_WEBHOOK_URL="http://127.0.0.1:$port/hook" ALERT_WEBHOOK_TIMEOUT=1
     start=$(date +%s)
-    run "$NOTIFY" WARN media.crowntime.cn "slow endpoint"
+    run "$NOTIFY" WARN media.example.com "slow endpoint"
     end=$(date +%s)
     [ "$status" -eq 0 ]
     [[ "$output" == *"timed out"* ]]
@@ -69,7 +69,7 @@ teardown() { common_teardown; }
 @test "notify.sh handles a webhook connection failure without changing its own exit code" {
     port=$(find_free_port)
     export ALERT_WEBHOOK_URL="http://127.0.0.1:$port/hook" ALERT_WEBHOOK_TIMEOUT=3
-    run "$NOTIFY" WARN media.crowntime.cn "unreachable webhook"
+    run "$NOTIFY" WARN media.example.com "unreachable webhook"
     [ "$status" -eq 0 ]
     [[ "$output" == *"connection error"* || "$output" == *"failed"* ]]
 }
@@ -77,7 +77,7 @@ teardown() { common_teardown; }
 # ── Webhook 未配置 → 明确降级 ───────────────────────────────────────────
 @test "notify.sh degrades to a clearly-labeled log-only mode when ALERT_WEBHOOK_URL is unset" {
     unset ALERT_WEBHOOK_URL
-    run "$NOTIFY" INFO media.crowntime.cn "no webhook here"
+    run "$NOTIFY" INFO media.example.com "no webhook here"
     [ "$status" -eq 0 ]
     [[ "$output" == *"[DEGRADED]"* ]]
     [[ "$output" == *"not configured"* ]]
@@ -88,7 +88,7 @@ teardown() { common_teardown; }
     port=$(find_free_port)
     start_mock_server "$port" --status 200 --log-file "$TEST_TMPDIR/req.json" >/dev/null
     export ALERT_WEBHOOK_URL="http://127.0.0.1:$port/hook" ALERT_WEBHOOK_TIMEOUT=5
-    run "$NOTIFY" ERROR media.crowntime.cn "upload failed QINIU_SECRET_KEY=leaked-secret-xyz"
+    run "$NOTIFY" ERROR media.example.com "upload failed QINIU_SECRET_KEY=leaked-secret-xyz"
     [[ "$output" != *"leaked-secret-xyz"* ]]
     payload=$(cat "$TEST_TMPDIR/req.json")
     [[ "$payload" != *"leaked-secret-xyz"* ]]
@@ -96,6 +96,6 @@ teardown() { common_teardown; }
 
 @test "notify.sh does not print ALERT_WEBHOOK_URL itself in any log line" {
     export ALERT_WEBHOOK_URL="http://127.0.0.1:1/super-secret-path-token-abc"
-    run "$NOTIFY" WARN media.crowntime.cn "test"
+    run "$NOTIFY" WARN media.example.com "test"
     [[ "$output" != *"super-secret-path-token-abc"* ]]
 }

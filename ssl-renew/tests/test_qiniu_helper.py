@@ -118,11 +118,11 @@ def auth():
 
 def test_parity_get_no_body(auth):
     # qiniu-python-sdk 7.18.0, Auth.token_of_request(
-    #   "http://api.qiniu.com/domain/media.crowntime.cn/httpsconf", None, None)
+    #   "http://api.qiniu.com/domain/media.example.com/httpsconf", None, None)
     token = auth.token_of_request(
-        "http://api.qiniu.com/domain/media.crowntime.cn/httpsconf", None, None
+        "http://api.qiniu.com/domain/media.example.com/httpsconf", None, None
     )
-    assert token == "fake-test-ak-1234567890:qc14ztudUP0CBbo9dYEp3hMBdss="
+    assert token == "fake-test-ak-1234567890:C-_wfWeTr4ZKB6fItEu93ruFgIg="
 
 
 def test_parity_post_json_body(auth):
@@ -149,20 +149,20 @@ def test_parity_post_form_body(auth):
 
 def test_parity_path_with_query(auth):
     token = auth.token_of_request(
-        "http://api.qiniu.com/domain/media.crowntime.cn/httpsconf?ssl=true&x=1", None, None
+        "http://api.qiniu.com/domain/media.example.com/httpsconf?ssl=true&x=1", None, None
     )
-    assert token == "fake-test-ak-1234567890:6kUuFXXn2CmwprSDXflpdPjaQqY="
+    assert token == "fake-test-ak-1234567890:TNOKguUW6a3DaWEVeKdlcB7zSZg="
 
 
 def test_parity_empty_body(auth):
     # An empty JSON-content-type body signs identically to no body at all
     # (same reason as test_parity_post_json_body: JSON is never signed).
     token = auth.token_of_request(
-        "http://api.qiniu.com/domain/media.crowntime.cn/httpsconf", "", "application/json"
+        "http://api.qiniu.com/domain/media.example.com/httpsconf", "", "application/json"
     )
-    assert token == "fake-test-ak-1234567890:qc14ztudUP0CBbo9dYEp3hMBdss="
+    assert token == "fake-test-ak-1234567890:C-_wfWeTr4ZKB6fItEu93ruFgIg="
     assert token == auth.token_of_request(
-        "http://api.qiniu.com/domain/media.crowntime.cn/httpsconf", None, None
+        "http://api.qiniu.com/domain/media.example.com/httpsconf", None, None
     )
 
 

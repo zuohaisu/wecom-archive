@@ -178,7 +178,7 @@ ssl-test:
 ## Runs renew.sh in dry-run mode against a throwaway scratch HOME and a
 ## documentation-reserved example domain — prints the plan, touches
 ## nothing real, makes no network calls, and never uses production
-## credentials or the real crowntime.cn domain.
+## credentials or a real production domain.
 ssl-dry-run:
 	@tmp="$$(mktemp -d)"; \
 	trap 'rm -rf "$$tmp"' EXIT; \

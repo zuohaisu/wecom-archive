@@ -14,9 +14,9 @@ setup() {
     SECRET_SK="SUPERSECRETSK-argvtest-11111111"
     export QINIU_ACCESS_KEY="$SECRET_AK" QINIU_SECRET_KEY="$SECRET_SK"
     mkdir -p "$TEST_TMPDIR/cert"
-    gen_cert media.crowntime.cn \
+    gen_cert media.example.com \
         "$TEST_TMPDIR/cert/fullchain.cer" \
-        "$TEST_TMPDIR/cert/media.crowntime.cn.key"
+        "$TEST_TMPDIR/cert/media.example.com.key"
 }
 teardown() { common_teardown; }
 
@@ -29,9 +29,9 @@ teardown() { common_teardown; }
     export QINIU_API_HOST="http://127.0.0.1:$port"
 
     "$QINIU_HELPER_PYTHON" "$QINIU_HELPER_SCRIPT" upload \
-        --domain media.crowntime.cn \
+        --domain media.example.com \
         --cert-file "$TEST_TMPDIR/cert/fullchain.cer" \
-        --key-file "$TEST_TMPDIR/cert/media.crowntime.cn.key" \
+        --key-file "$TEST_TMPDIR/cert/media.example.com.key" \
         --timeout 10 &
     child_pid=$!
 
@@ -60,9 +60,9 @@ teardown() { common_teardown; }
     export QINIU_API_HOST="http://127.0.0.1:$port"
 
     run "$QINIU_HELPER_PYTHON" "$QINIU_HELPER_SCRIPT" upload \
-        --domain media.crowntime.cn \
+        --domain media.example.com \
         --cert-file "$TEST_TMPDIR/cert/fullchain.cer" \
-        --key-file "$TEST_TMPDIR/cert/media.crowntime.cn.key" \
+        --key-file "$TEST_TMPDIR/cert/media.example.com.key" \
         --timeout 10
     [ "$status" -eq 0 ]
     [[ "$output" != *"$SECRET_AK"* ]]
@@ -76,9 +76,9 @@ teardown() { common_teardown; }
     export QINIU_API_HOST="http://127.0.0.1:$port"
 
     run "$QINIU_HELPER_PYTHON" "$QINIU_HELPER_SCRIPT" upload \
-        --domain media.crowntime.cn \
+        --domain media.example.com \
         --cert-file "$TEST_TMPDIR/cert/fullchain.cer" \
-        --key-file "$TEST_TMPDIR/cert/media.crowntime.cn.key" \
+        --key-file "$TEST_TMPDIR/cert/media.example.com.key" \
         --timeout 10
     [ "$status" -ne 0 ]
     [[ "$output" == *"HTTP 401"* ]]
@@ -96,14 +96,14 @@ teardown() { common_teardown; }
     mkdir -p "$HOME/.acme.sh"
     cat >"$HOME/.acme.sh/acme.sh" <<EOF
 #!/usr/bin/env bash
-mkdir -p "$HOME/.acme.sh/media.crowntime.cn"
-cp "$TEST_TMPDIR/cert/fullchain.cer" "$HOME/.acme.sh/media.crowntime.cn/fullchain.cer"
-cp "$TEST_TMPDIR/cert/media.crowntime.cn.key" "$HOME/.acme.sh/media.crowntime.cn/media.crowntime.cn.key"
+mkdir -p "$HOME/.acme.sh/media.example.com"
+cp "$TEST_TMPDIR/cert/fullchain.cer" "$HOME/.acme.sh/media.example.com/fullchain.cer"
+cp "$TEST_TMPDIR/cert/media.example.com.key" "$HOME/.acme.sh/media.example.com/media.example.com.key"
 exit 0
 EOF
     chmod +x "$HOME/.acme.sh/acme.sh"
 
-    "$SSL_RENEW_ROOT/renew.sh" media.crowntime.cn >"$TEST_TMPDIR/renew.log" 2>&1 || true
+    "$SSL_RENEW_ROOT/renew.sh" media.example.com >"$TEST_TMPDIR/renew.log" 2>&1 || true
 
     [[ "$(cat "$TEST_TMPDIR/renew.log")" != *"$SECRET_AK"* ]]
     [[ "$(cat "$TEST_TMPDIR/renew.log")" != *"$SECRET_SK"* ]]
@@ -117,7 +117,7 @@ EOF
     export QINIU_API_HOST="http://127.0.0.1:$unused_port"
 
     run "$QINIU_HELPER_PYTHON" "$QINIU_HELPER_SCRIPT" bind \
-        --domain media.crowntime.cn --cert-id certid-123 --timeout 3
+        --domain media.example.com --cert-id certid-123 --timeout 3
     [ "$status" -ne 0 ]
     [[ "$output" != *"$SECRET_AK"* ]]
     [[ "$output" != *"$SECRET_SK"* ]]
@@ -132,9 +132,9 @@ EOF
     export QINIU_HELPER_DEBUG=1
 
     run "$QINIU_HELPER_PYTHON" "$QINIU_HELPER_SCRIPT" upload \
-        --domain media.crowntime.cn \
+        --domain media.example.com \
         --cert-file "$TEST_TMPDIR/cert/fullchain.cer" \
-        --key-file "$TEST_TMPDIR/cert/media.crowntime.cn.key" \
+        --key-file "$TEST_TMPDIR/cert/media.example.com.key" \
         --timeout 10
     [[ "$output" != *"$SECRET_AK"* ]]
     [[ "$output" != *"$SECRET_SK"* ]]

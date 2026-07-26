@@ -36,16 +36,16 @@
 
 ```bash
 # dry-run: 打印计划，不产生任何副作用，退出码可预测 (0=计划成功, 2=用法/配置错误)
-DRY_RUN=1 ./renew.sh media.crowntime.cn
+DRY_RUN=1 ./renew.sh media.example.com
 # 或
-./renew.sh media.crowntime.cn --dry-run
+./renew.sh media.example.com --dry-run
 
 # staging: 验证 acme.sh + DNSPod 链路，不部署到七牛
-./renew.sh media.crowntime.cn --staging
+./renew.sh media.example.com --staging
 
 # production: 真实续期 + 部署 (需要真实凭证)
 export QINIU_ACCESS_KEY=... QINIU_SECRET_KEY=...
-./renew.sh media.crowntime.cn
+./renew.sh media.example.com
 ```
 
 dry-run 保证:
@@ -103,7 +103,7 @@ export ALERT_WEBHOOK_TIMEOUT=10   # 秒, 默认 10
 POST 的 JSON payload:
 ```json
 {
-  "domain": "media.crowntime.cn",
+  "domain": "media.example.com",
   "hostname": "ali-xy-qw",
   "failed_stage": "qiniu_upload",
   "timestamp": "2026-07-10T12:00:00Z",
@@ -121,12 +121,12 @@ POST 的 JSON payload:
 
 ```bash
 # 1. 复制模板
-cp examples/domain.env.example /etc/qiniu-ssl-renew/api.crowntime.cn.env
+cp examples/domain.env.example /etc/qiniu-ssl-renew/api.example.com.env
 # 2. 编辑 DOMAIN / QINIU_ACCESS_KEY / QINIU_SECRET_KEY / ALERT_WEBHOOK_URL 等
-vi /etc/qiniu-ssl-renew/api.crowntime.cn.env
-chmod 600 /etc/qiniu-ssl-renew/api.crowntime.cn.env
+vi /etc/qiniu-ssl-renew/api.example.com.env
+chmod 600 /etc/qiniu-ssl-renew/api.example.com.env
 # 3. 首次签发 + 启用 timer (见 DEPLOYMENT_GUIDE.md)
-systemctl enable --now qiniu-ssl-renew@api.crowntime.cn.timer
+systemctl enable --now qiniu-ssl-renew@api.example.com.timer
 ```
 
 每个域名的状态文件 (`.deployed_fp` / `.tls_verified` / `.renew.lock`) 都存放在该域名自己的
@@ -168,7 +168,7 @@ docker run --rm -v "$(pwd)/..":/workspace -w /workspace ssl-renew-verify \
 
 ```bash
 # 对任意已上线域名做一次只读检查 (不修改任何状态)
-./verify_https.sh media.crowntime.cn --min-days 15
+./verify_https.sh media.example.com --min-days 15
 echo "exit=$?"   # 见 ARCHITECTURE.md 第 6.2 节退出码表
 ```
 

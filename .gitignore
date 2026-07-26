@@ -256,8 +256,9 @@ ssl-renew/.env*
 # Generated presentation (PPTX) + IDE caches — not project source
 ppt-365-intro/
 
-# Static marketing site embeds real company legal identity (RND-239 scope)
-static_site/
+# Old company_homepage embeds real legal identity (RND-234/RND-239) — keep
+# out of open source. The NEW marketing site lives in static_site/ (tracked, built by RND-239).
+static_site/company_homepage/
 
 # Internal working docs (task checklists, QA snapshots) — not for open source
 TASK_TRACKING.md

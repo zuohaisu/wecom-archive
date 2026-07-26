@@ -20,7 +20,7 @@
 ## 0. Scope & key facts
 
 - The media access domain is **100% driven by the `QINIU_DOMAIN` environment
-  variable** — there is **no hardcoded `media.crowntime.cn`** anywhere in the
+  variable** — there is **no hardcoded `media.example.com`** anywhere in the
   code. Switching from the CDN domain to an origin domain is therefore a
   **value change to one env var**, with no code deploy required for the domain
   switch itself.
@@ -28,7 +28,7 @@
   (Qiniu `private_download_url`) built from `QINIU_DOMAIN`. The bucket stays
   **private** — this migration never makes it public.
 - Decision (approved): **Scheme B** — introduce a **new** origin domain
-  `media-origin.crowntime.cn` **in parallel** with the existing CDN domain,
+  `media-origin.example.com` **in parallel** with the existing CDN domain,
   verify, cut over, and only then retire the CDN domain. Lowest risk,
   parallel-verifiable, rollback = revert one env var.
 
@@ -58,7 +58,7 @@
 
 Record, in a private ops note (never paste full signed URLs / tokens / AK/SK):
 
-- [ ] Current CDN domain (`media.crowntime.cn`) status & bound bucket.
+- [ ] Current CDN domain (`media.example.com`) status & bound bucket.
 - [ ] Current DNS records for the media domain (type, value, TTL).
 - [ ] Current TLS certificate (issuer, expiry) on the media domain.
 - [ ] Bucket name (`365-wecom-media`) and region (`z2`).
@@ -72,12 +72,12 @@ Record, in a private ops note (never paste full signed URLs / tokens / AK/SK):
 
 ## 2. New origin domain — **Miss Hermes**
 
-- [ ] In the Qiniu console, create/bind **`media-origin.crowntime.cn`** to the
+- [ ] In the Qiniu console, create/bind **`media-origin.example.com`** to the
       `365-wecom-media` bucket as an **origin/source** domain (NOT a new CDN
       acceleration domain). *(exact console location/field names —
       `REQUIRES EXTERNAL VERIFICATION`.)*
 - [ ] Add the required DNS record (type/value per the console) for
-      `media-origin.crowntime.cn`.
+      `media-origin.example.com`.
 - [ ] Configure/verify an HTTPS certificate for the new domain.
 - [ ] **Private signed-URL verification** without leaking secrets: generate a
       signed URL for one known private object via the app's own path (see
@@ -88,7 +88,7 @@ Record, in a private ops note (never paste full signed URLs / tokens / AK/SK):
 
 ### 2.1 Safe signed-URL check (no secrets in output) — **Haisu**
 
-From a staging/test shell with `QINIU_DOMAIN=https://media-origin.crowntime.cn`
+From a staging/test shell with `QINIU_DOMAIN=https://media-origin.example.com`
 set, use the app's provider to mint a URL and curl it, printing only the
 status code and safe headers:
 
@@ -105,7 +105,7 @@ curl -sS -o /dev/null -D - "$SIGNED_URL" | grep -iE '^HTTP/|^cache-control:|^eta
 The new origin domain and the old CDN domain can be validated in parallel
 because only `QINIU_DOMAIN` selects which one the app signs against.
 
-1. [ ] **Test/staging first:** set `QINIU_DOMAIN=https://media-origin.crowntime.cn`
+1. [ ] **Test/staging first:** set `QINIU_DOMAIN=https://media-origin.example.com`
        in the staging `.env`, restart, and verify **every media type** loads:
        image (list thumbnail + viewer original), emotion/sticker, GIF, video,
        audio, file, mixed & chatrecord nested media, revoke original view, and

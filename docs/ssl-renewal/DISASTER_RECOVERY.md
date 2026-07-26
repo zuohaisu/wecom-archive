@@ -10,15 +10,15 @@
 
 ```bash
 # 1. 重新颁发证书 (无需重新安装 acme.sh)
-~/.acme.sh/acme.sh --issue --dns dns_dp -d media.crowntime.cn
+~/.acme.sh/acme.sh --issue --dns dns_dp -d media.example.com
 
 # 2. 清除旧状态文件
-rm -f ~/.acme.sh/media.crowntime.cn/.deployed_fp
-rm -f ~/.acme.sh/media.crowntime.cn/.tls_verified
-rm -f ~/.acme.sh/media.crowntime.cn/.tls_mismatch_days
+rm -f ~/.acme.sh/media.example.com/.deployed_fp
+rm -f ~/.acme.sh/media.example.com/.tls_verified
+rm -f ~/.acme.sh/media.example.com/.tls_mismatch_days
 
 # 3. 重新部署
-/srv/apps/wecom-archive-365/current/ssl-renew/renew.sh media.crowntime.cn
+/srv/apps/wecom-archive-365/current/ssl-renew/renew.sh media.example.com
 ```
 
 ### 场景 2: Qiniu CDN 证书被误删 / 域名解除绑定
@@ -29,14 +29,14 @@ rm -f ~/.acme.sh/media.crowntime.cn/.tls_mismatch_days
 
 ```bash
 # 1. 确认本地证书完好
-ls ~/.acme.sh/media.crowntime.cn/fullchain.cer
+ls ~/.acme.sh/media.example.com/fullchain.cer
 
 # 2. 清除部署状态 (强制重新上传)
-rm -f ~/.acme.sh/media.crowntime.cn/.deployed_fp
-rm -f ~/.acme.sh/media.crowntime.cn/.tls_verified
+rm -f ~/.acme.sh/media.example.com/.deployed_fp
+rm -f ~/.acme.sh/media.example.com/.tls_verified
 
 # 3. 重新部署
-/srv/apps/wecom-archive-365/current/ssl-renew/renew.sh media.crowntime.cn
+/srv/apps/wecom-archive-365/current/ssl-renew/renew.sh media.example.com
 ```
 
 ### 场景 3: 证书绑定到错误的 certID (Qiniu 控制台误操作)
@@ -52,7 +52,7 @@ Authorization header 会明文出现在 `curl` 的命令行参数里，被同机
 # 1. 通过 qiniu_helper.py 查看当前绑定的 certId（不经过 curl，不暴露 Authorization）
 cd /srv/apps/wecom-archive-365/current/ssl-renew
 QINIU_ACCESS_KEY=... QINIU_SECRET_KEY=... \
-    python3 qiniu_helper.py verify --domain media.crowntime.cn --expected-cert-id "" \
+    python3 qiniu_helper.py verify --domain media.example.com --expected-cert-id "" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["certId"])'
 
 # 2. 查看 Qiniu 证书列表, 找到正确的证书 —— 官方 SDK 未封装这个只读接口，用
@@ -69,8 +69,8 @@ for cert in resp.json().get("certs", []):
 EOF
 
 # 3. 强制重新上传 + 绑定 (通过 renew.sh，同样走 qiniu_helper.py + 官方 SDK 签名)
-rm -f ~/.acme.sh/media.crowntime.cn/.deployed_fp
-/srv/apps/wecom-archive-365/current/ssl-renew/renew.sh media.crowntime.cn
+rm -f ~/.acme.sh/media.example.com/.deployed_fp
+/srv/apps/wecom-archive-365/current/ssl-renew/renew.sh media.example.com
 ```
 
 ### 场景 4: DNSPod Token 泄露 / 轮换
@@ -89,7 +89,7 @@ export DP_Id="新 Token ID"
 export DP_Key="新 Token"
 
 # 3. 测试
-~/.acme.sh/acme.sh --renew --dns dns_dp -d media.crowntime.cn
+~/.acme.sh/acme.sh --renew --dns dns_dp -d media.example.com
 ```
 
 ### 场景 5: 服务器完全重建 / 操作系统重装
@@ -99,7 +99,7 @@ export DP_Key="新 Token"
 ```bash
 # 1. 重新安装依赖
 sudo yum install -y openssl curl jq coreutils
-curl https://get.acme.sh | sh -s email=admin@crowntime.cn
+curl https://get.acme.sh | sh -s email=admin@example.com
 
 # 2. 恢复 secrets
 #    编辑 ~/.acme.sh/account.conf (DP_Id, DP_Key — 全局共享)
@@ -107,18 +107,18 @@ curl https://get.acme.sh | sh -s email=admin@crowntime.cn
 #    ssl-renew/examples/domain.env.example
 
 # 3. 重新颁发证书
-~/.acme.sh/acme.sh --issue --dns dns_dp -d media.crowntime.cn
+~/.acme.sh/acme.sh --issue --dns dns_dp -d media.example.com
 
 # 4. 用 install.sh 重建目录结构 + systemd unit (幂等, 可直接 --apply)
 cd /srv/apps/wecom-archive-365/current/ssl-renew
 sudo ./install.sh --apply
 
 # 5. dry-run 确认配置无误, 再正式部署
-DOMAIN=media.crowntime.cn ./renew.sh --dry-run
-DOMAIN=media.crowntime.cn ./renew.sh
+DOMAIN=media.example.com ./renew.sh --dry-run
+DOMAIN=media.example.com ./renew.sh
 
 # 6. 启用 timer (对每个需要恢复的域名重复)
-sudo systemctl enable --now qiniu-ssl-renew@media.crowntime.cn.timer
+sudo systemctl enable --now qiniu-ssl-renew@media.example.com.timer
 ```
 
 ---
@@ -140,7 +140,7 @@ cd /srv/apps/wecom-archive-365/current/ssl-renew
 
 # 2. 重新绑定旧证书
 QINIU_ACCESS_KEY=... QINIU_SECRET_KEY=... \
-    python3 qiniu_helper.py bind --domain media.crowntime.cn --cert-id <old_certID>
+    python3 qiniu_helper.py bind --domain media.example.com --cert-id <old_certID>
 ```
 
 ### 手动上传证书 (绕过 acme.sh)
@@ -151,13 +151,13 @@ QINIU_ACCESS_KEY=... QINIU_SECRET_KEY=... \
 
 ```bash
 cd /srv/apps/wecom-archive-365/current/ssl-renew
-CERT_DIR=~/.acme.sh/media.crowntime.cn
+CERT_DIR=~/.acme.sh/media.example.com
 
 QINIU_ACCESS_KEY=... QINIU_SECRET_KEY=... \
     python3 qiniu_helper.py upload \
-    --domain media.crowntime.cn \
+    --domain media.example.com \
     --cert-file "$CERT_DIR/fullchain.cer" \
-    --key-file "$CERT_DIR/media.crowntime.cn.key"
+    --key-file "$CERT_DIR/media.example.com.key"
 # 输出 {"ok":true,"certID":"..."} — 记下 certID，用上面"回滚证书"的 bind 命令绑定它
 ```
 

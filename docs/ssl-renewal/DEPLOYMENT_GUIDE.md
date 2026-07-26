@@ -12,8 +12,8 @@
 
 ### 外部服务
 - **DNSPod**: 域名 DNS 托管, 已创建 API Token (ID + Token)
-- **Qiniu**: CDN 域名 `media.crowntime.cn` 已配置, 已创建 AK/SK
-- **Let's Encrypt**: 需注册邮箱 (例如 `admin@crowntime.cn`)
+- **Qiniu**: CDN 域名 `media.example.com` 已配置, 已创建 AK/SK
+- **Let's Encrypt**: 需注册邮箱 (例如 `admin@example.com`)
 
 ---
 
@@ -37,7 +37,7 @@ ssh ali-xy-qw
 sudo su - wecomarchive
 
 # 安装 acme.sh
-curl https://get.acme.sh | sh -s email=admin@crowntime.cn
+curl https://get.acme.sh | sh -s email=admin@example.com
 
 # 设置默认 CA 为 Let's Encrypt
 ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
@@ -91,22 +91,22 @@ export DP_Key="你的 DNSPod Token"
 修改任何核心脚本：
 
 ```bash
-sudo cp examples/domain.env.example /etc/qiniu-ssl-renew/media.crowntime.cn.env
-sudo vi /etc/qiniu-ssl-renew/media.crowntime.cn.env
+sudo cp examples/domain.env.example /etc/qiniu-ssl-renew/media.example.com.env
+sudo vi /etc/qiniu-ssl-renew/media.example.com.env
 ```
 
 必填内容 (`DOMAIN` 必须与文件名/systemd instance 名一致，脚本会校验):
 
 ```bash
-DOMAIN=media.crowntime.cn
+DOMAIN=media.example.com
 QINIU_ACCESS_KEY=你的AK
 QINIU_SECRET_KEY=你的SK
 # 可选: ALERT_WEBHOOK_URL=https://your-endpoint/hooks/ssl-renew
 ```
 
 ```bash
-sudo chmod 600 /etc/qiniu-ssl-renew/media.crowntime.cn.env
-sudo chown wecomarchive:wecomarchive /etc/qiniu-ssl-renew/media.crowntime.cn.env
+sudo chmod 600 /etc/qiniu-ssl-renew/media.example.com.env
+sudo chown wecomarchive:wecomarchive /etc/qiniu-ssl-renew/media.example.com.env
 ```
 
 ## 4. 首次证书颁发
@@ -114,35 +114,35 @@ sudo chown wecomarchive:wecomarchive /etc/qiniu-ssl-renew/media.crowntime.cn.env
 ```bash
 # 以 wecomarchive 用户执行
 # 仅颁发证书 (不部署, 先验证 DNS 挑战能否通过)
-~/.acme.sh/acme.sh --issue --dns dns_dp -d media.crowntime.cn
+~/.acme.sh/acme.sh --issue --dns dns_dp -d media.example.com
 
 # 成功后检查
-ls ~/.acme.sh/media.crowntime.cn/
-# 应包含: fullchain.cer, media.crowntime.cn.key
+ls ~/.acme.sh/media.example.com/
+# 应包含: fullchain.cer, media.example.com.key
 ```
 
 建议先用 staging CA 验证一遍 DNS-01 链路，不消耗正式 CA 配额:
 
 ```bash
 cd /srv/apps/wecom-archive-365/current/ssl-renew
-DOMAIN=media.crowntime.cn bash renew.sh --staging
+DOMAIN=media.example.com bash renew.sh --staging
 # 确认 acme.sh --renew ... --staging 成功后，再执行下面的正式 dry-run / 部署
 ```
 
 ## 5. 部署前最后一次 dry-run（针对真实凭证/真实域名，但零外部写请求）
 
 ```bash
-DOMAIN=media.crowntime.cn bash renew.sh --dry-run
+DOMAIN=media.example.com bash renew.sh --dry-run
 ```
 
-确认输出的计划符合预期（会读取 `/etc/qiniu-ssl-renew/media.crowntime.cn.env`，打印将要执行的
+确认输出的计划符合预期（会读取 `/etc/qiniu-ssl-renew/media.example.com.env`，打印将要执行的
 upload/bind/verify 步骤，但不会真正调用）。
 
 ## 6. 部署并验证
 
 ```bash
 cd /srv/apps/wecom-archive-365/current/ssl-renew
-DOMAIN=media.crowntime.cn bash renew.sh
+DOMAIN=media.example.com bash renew.sh
 ```
 
 预期输出:
@@ -154,7 +154,7 @@ DOMAIN=media.crowntime.cn bash renew.sh
 [INFO] local_fp != deployed_fp (...) 
 [INFO] proceeding to deploy ...
 [INFO] certificate uploaded to Qiniu — certID=...
-[INFO] certID=... bound to media.crowntime.cn
+[INFO] certID=... bound to media.example.com
 [INFO] API certID=... confirmed
 [INFO] HTTPS verification passed
 [OK]  deployment complete
@@ -166,10 +166,10 @@ DOMAIN=media.crowntime.cn bash renew.sh
 `daemon-reload`。只需启用对应域名的 timer：
 
 ```bash
-sudo systemctl enable --now qiniu-ssl-renew@media.crowntime.cn.timer
+sudo systemctl enable --now qiniu-ssl-renew@media.example.com.timer
 
 # 验证
-sudo systemctl status qiniu-ssl-renew@media.crowntime.cn.timer
+sudo systemctl status qiniu-ssl-renew@media.example.com.timer
 sudo systemctl list-timers | grep qiniu-ssl-renew
 ```
 
@@ -191,10 +191,10 @@ EOF
 
 ```bash
 # 手动触发一次, 确认 timer 能正常工作
-sudo systemctl start qiniu-ssl-renew@media.crowntime.cn.service
+sudo systemctl start qiniu-ssl-renew@media.example.com.service
 
 # 查看日志
-sudo journalctl -u qiniu-ssl-renew@media.crowntime.cn.service --no-pager -n 30
+sudo journalctl -u qiniu-ssl-renew@media.example.com.service --no-pager -n 30
 tail -30 /var/log/qiniu-ssl-renew/renew.log
 ```
 
@@ -204,21 +204,21 @@ tail -30 /var/log/qiniu-ssl-renew/renew.log
 
 ```bash
 # 1. 新增该域名的配置文件
-sudo cp examples/domain.env.example /etc/qiniu-ssl-renew/api.crowntime.cn.env
-sudo vi /etc/qiniu-ssl-renew/api.crowntime.cn.env   # DOMAIN=api.crowntime.cn, 该域名的 AK/SK...
-sudo chmod 600 /etc/qiniu-ssl-renew/api.crowntime.cn.env
+sudo cp examples/domain.env.example /etc/qiniu-ssl-renew/api.example.com.env
+sudo vi /etc/qiniu-ssl-renew/api.example.com.env   # DOMAIN=api.example.com, 该域名的 AK/SK...
+sudo chmod 600 /etc/qiniu-ssl-renew/api.example.com.env
 
 # 2. 颁发首张证书
-~/.acme.sh/acme.sh --issue --dns dns_dp -d api.crowntime.cn
+~/.acme.sh/acme.sh --issue --dns dns_dp -d api.example.com
 
 # 3. (建议) dry-run 确认配置无误
-DOMAIN=api.crowntime.cn bash /srv/apps/wecom-archive-365/current/ssl-renew/renew.sh --dry-run
+DOMAIN=api.example.com bash /srv/apps/wecom-archive-365/current/ssl-renew/renew.sh --dry-run
 
 # 4. 启用 timer (状态文件按域名自动隔离，不会与其他域名冲突)
-sudo systemctl enable --now qiniu-ssl-renew@api.crowntime.cn.timer
+sudo systemctl enable --now qiniu-ssl-renew@api.example.com.timer
 
 # 5. 首次部署
-sudo systemctl start qiniu-ssl-renew@api.crowntime.cn.service
+sudo systemctl start qiniu-ssl-renew@api.example.com.service
 ```
 
 ---

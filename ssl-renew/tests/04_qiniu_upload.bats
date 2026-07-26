@@ -15,9 +15,9 @@ setup() {
     source "$SSL_RENEW_ROOT/lib/qiniu.sh"
     export QINIU_ACCESS_KEY=testak QINIU_SECRET_KEY=testsk
     mkdir -p "$TEST_TMPDIR/cert"
-    gen_cert media.crowntime.cn \
+    gen_cert media.example.com \
         "$TEST_TMPDIR/cert/fullchain.cer" \
-        "$TEST_TMPDIR/cert/media.crowntime.cn.key"
+        "$TEST_TMPDIR/cert/media.example.com.key"
 }
 teardown() { common_teardown; }
 
@@ -25,18 +25,18 @@ teardown() { common_teardown; }
 @test "deploy_to_qiniu invokes qiniu_helper.py upload with domain + file paths (no secret content)" {
     use_mock_qiniu_helper success 200 "$TEST_TMPDIR/helper.log"
     export MOCK_QINIU_CERT_ID="certid-123"
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 0 ]
     grep -q -- "upload" "$TEST_TMPDIR/helper.log"
-    grep -q -- "--domain media.crowntime.cn" "$TEST_TMPDIR/helper.log"
+    grep -q -- "--domain media.example.com" "$TEST_TMPDIR/helper.log"
     grep -q -- "--cert-file $TEST_TMPDIR/cert/fullchain.cer" "$TEST_TMPDIR/helper.log"
-    grep -q -- "--key-file $TEST_TMPDIR/cert/media.crowntime.cn.key" "$TEST_TMPDIR/helper.log"
+    grep -q -- "--key-file $TEST_TMPDIR/cert/media.example.com.key" "$TEST_TMPDIR/helper.log"
 }
 
 @test "deploy_to_qiniu fails clearly when fullchain.cer is missing (never invokes the helper)" {
     rm -f "$TEST_TMPDIR/cert/fullchain.cer"
     use_mock_qiniu_helper success 200 "$TEST_TMPDIR/helper.log"
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 1 ]
     [[ "$output" == *"fullchain.cer not found"* ]]
     [ ! -f "$TEST_TMPDIR/helper.log" ]
@@ -46,7 +46,7 @@ teardown() { common_teardown; }
 @test "deploy_to_qiniu returns the certID on a successful response" {
     use_mock_qiniu_helper success
     export MOCK_QINIU_CERT_ID="certid-abc-987"
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 0 ]
     [ "$output" = "certid-abc-987" ]
 }
@@ -54,7 +54,7 @@ teardown() { common_teardown; }
 # ── 七牛上传失败 ───────────────────────────────────────────────────────
 @test "deploy_to_qiniu fails when the helper reports a server error" {
     use_mock_qiniu_helper http_error 500
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 1 ]
     [[ "$output" == *"Qiniu upload failed"* ]]
 }
@@ -62,7 +62,7 @@ teardown() { common_teardown; }
 # ── HTTP 401/403 ─────────────────────────────────────────────────────────
 @test "deploy_to_qiniu treats HTTP 401 as an auth failure, not a generic error" {
     use_mock_qiniu_helper http_error 401
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 1 ]
     [[ "$output" == *"HTTP 401"* ]]
     [[ "$output" == *"check AK/SK"* ]]
@@ -70,7 +70,7 @@ teardown() { common_teardown; }
 
 @test "deploy_to_qiniu treats HTTP 403 as an auth failure" {
     use_mock_qiniu_helper http_error 403
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 1 ]
     [[ "$output" == *"HTTP 403"* ]]
 }
@@ -79,7 +79,7 @@ teardown() { common_teardown; }
 @test "deploy_to_qiniu surfaces a network timeout as a clean failure" {
     use_mock_qiniu_helper network_error
     export MOCK_QINIU_ERROR="Qiniu upload request failed (network error / timeout): ReadTimeout"
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 1 ]
     [[ "$output" == *"timeout"* ]]
 }
@@ -87,7 +87,7 @@ teardown() { common_teardown; }
 @test "deploy_to_qiniu surfaces a connection failure as a clean failure" {
     use_mock_qiniu_helper network_error
     export MOCK_QINIU_ERROR="Qiniu upload request failed (network error / timeout): ConnectionError"
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 1 ]
     [[ "$output" == *"network error"* ]]
 }
@@ -96,7 +96,7 @@ teardown() { common_teardown; }
 @test "deploy_to_qiniu in dry-run mode never invokes the helper" {
     export DRY_RUN=1
     use_mock_qiniu_helper success 200 "$TEST_TMPDIR/helper.log"
-    run deploy_to_qiniu media.crowntime.cn "$TEST_TMPDIR/cert"
+    run deploy_to_qiniu media.example.com "$TEST_TMPDIR/cert"
     [ "$status" -eq 0 ]
     [[ "$output" == *"DRY-RUN-CERTID"* ]]
     [ ! -f "$TEST_TMPDIR/helper.log" ]

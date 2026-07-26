@@ -1,7 +1,7 @@
 # SSL 证书自动续期 — 架构设计 (修订版 6)
 
 > 项目: wecom-archive-365
-> 域名: media.crowntime.cn
+> 域名: media.example.com
 > 版本: v6 — RND-189 第三轮开发修复 (Qiniu 签名 + Secret 运行时安全)
 > 状态: **Development complete — Developer acceptance pending**
 
@@ -29,7 +29,7 @@
 
 ## 0. 域名角色
 
-`media.crowntime.cn` 是 Qiniu CDN 加速域名。证书服务于 CDN 边缘节点的 TLS 握手，本文档（SSL 自动续期子系统）与该域名如何被访问无关——域名访问模式的权威说明见
+`media.example.com` 是 Qiniu CDN 加速域名。证书服务于 CDN 边缘节点的 TLS 握手，本文档（SSL 自动续期子系统）与该域名如何被访问无关——域名访问模式的权威说明见
 `docs/ops/media_storage_ops.md`。
 
 截至本文档最后更新时，实际访问模式为：Bucket 始终保持私有；历史上（RND-174）该域名仅用于后端 SDK 内部签名请求，客户端从不直连。RND-187（本地开发已完成，独立验收待定，**尚未部署生产**）为已完成登录 + tenant + 媒体归属校验的浏览器新增了短期、单对象 Signed URL 直连能力——RND-187 上线后，该域名会成为已授权浏览器可直接访问的 CDN 域名，但仍然：Bucket 保持私有；浏览器只拿到时效极短（默认 15 分钟，60~3600 秒可配）且仅对单个 object 有效的 Signed URL；AK/SK 从不下发给客户端；未完成认证与 tenant 校验的请求不得签发 URL。这一变化不影响本文档描述的证书续期/绑定流程。

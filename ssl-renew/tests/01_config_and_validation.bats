@@ -13,7 +13,7 @@ teardown() { common_teardown; }
 # ── 配置加载成功 ───────────────────────────────────────────────────────
 @test "load_config sources CONFIG_FILE and populates variables" {
     cat >"$TEST_TMPDIR/domain.env" <<'EOF'
-DOMAIN=media.crowntime.cn
+DOMAIN=media.example.com
 QINIU_ACCESS_KEY=someak
 QINIU_SECRET_KEY=somesk
 EOF
@@ -21,7 +21,7 @@ EOF
     run load_config
     [ "$status" -eq 0 ]
     source "$TEST_TMPDIR/domain.env"
-    [ "$DOMAIN" = "media.crowntime.cn" ]
+    [ "$DOMAIN" = "media.example.com" ]
     [ "$QINIU_ACCESS_KEY" = "someak" ]
 }
 
@@ -57,7 +57,7 @@ EOF
 
 @test "renew.sh refuses to start without Qiniu credentials (non-dry-run)" {
     unset QINIU_ACCESS_KEY QINIU_SECRET_KEY SAVED_QINIU_AK SAVED_QINIU_SK
-    run "$SSL_RENEW_ROOT/renew.sh" media.crowntime.cn
+    run "$SSL_RENEW_ROOT/renew.sh" media.example.com
     [ "$status" -eq "$EXIT_USAGE_ERROR" ]
     [[ "$output" == *"missing required Qiniu credentials"* ]]
 }
@@ -69,13 +69,13 @@ EOF
     # dry-run, so this must run the real (pre-network) validation path.
     # It will still fail later (no real acme.sh in the test sandbox) —
     # what matters is it does NOT fail on the credentials check.
-    run "$SSL_RENEW_ROOT/renew.sh" media.crowntime.cn
+    run "$SSL_RENEW_ROOT/renew.sh" media.example.com
     [[ "$output" != *"missing required Qiniu credentials"* ]]
 }
 
 # ── 域名格式校验 ───────────────────────────────────────────────────────
 @test "validate_domain accepts a normal FQDN" {
-    run validate_domain "media.crowntime.cn"
+    run validate_domain "media.example.com"
     [ "$status" -eq 0 ]
 }
 
@@ -95,9 +95,9 @@ EOF
 }
 
 @test "validate_domain rejects a label starting or ending with a hyphen" {
-    run validate_domain "-media.crowntime.cn"
+    run validate_domain "-media.example.com"
     [ "$status" -eq 1 ]
-    run validate_domain "media-.crowntime.cn"
+    run validate_domain "media-.example.com"
     [ "$status" -eq 1 ]
 }
 
@@ -129,8 +129,8 @@ EOF
 }
 
 @test "filter_secrets leaves ordinary log text untouched" {
-    result=$(printf 'deployment complete for media.crowntime.cn\n' | filter_secrets)
-    [ "$result" = "deployment complete for media.crowntime.cn" ]
+    result=$(printf 'deployment complete for media.example.com\n' | filter_secrets)
+    [ "$result" = "deployment complete for media.example.com" ]
 }
 
 @test "run_with_timeout kills a command that outlives its budget" {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # 幂等执行, 多域名配置, 当前有效证书保护 — renew.sh state-machine behavior.
 #
-# NOTE: these tests never use a real crowntime.cn (production) hostname —
+# NOTE: these tests never use a real production hostname —
 # only RFC 2606 reserved *.example.test names, which are guaranteed to
 # never resolve to a real service. TLS_VERIFY_TIMEOUT/RETRIES are kept
 # tiny wherever the full deploy path runs a (fast-failing) HTTPS check.

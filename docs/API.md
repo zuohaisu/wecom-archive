@@ -130,7 +130,7 @@ constructs a Qiniu/CDN URL itself.
     "media_id": 207,
     "storage_backend": "qiniu_kodo",
     "access_type": "signed_url",
-    "url": "https://media.crowntime.cn/<redacted-path>?e=<redacted>&token=<redacted>",
+    "url": "https://media.example.com/<redacted-path>?e=<redacted>&token=<redacted>",
     "expires_at": "2026-07-12T10:15:00+00:00",
     "content_type": "image/jpeg",
     "size_bytes": 333287

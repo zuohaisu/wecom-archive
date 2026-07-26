@@ -14,7 +14,7 @@ class MediaAccessOut(BaseModel):
     """Unified media access descriptor (RND-187) — the one shape the
     frontend consumes regardless of storage_backend, so it never needs to
     understand Qiniu vs local storage details, read storage_ref, or
-    construct a media.crowntime.cn URL itself.
+    construct a media.example.com URL itself.
 
     access_type="signed_url": url is a short-lived, browser-usable Qiniu
     signed URL good until expires_at; the browser fetches it directly, no
