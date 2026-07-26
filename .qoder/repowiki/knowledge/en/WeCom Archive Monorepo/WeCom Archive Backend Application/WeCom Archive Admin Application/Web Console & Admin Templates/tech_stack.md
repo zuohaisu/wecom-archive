@@ -1,1 +1,0 @@
-Vanilla JavaScript (ES5-style, no framework), plain HTML templates with a custom `__TOKEN__` placeholder renderer, and CSS variables for theming. Static asset cache-busting uses an MD5 digest of all files under `static/` computed at import time.

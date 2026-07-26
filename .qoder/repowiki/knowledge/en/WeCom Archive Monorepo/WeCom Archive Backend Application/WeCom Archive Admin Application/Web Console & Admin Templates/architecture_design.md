@@ -1,6 +1,0 @@
-The module is a flat Flask-adjacent web package with three layers:
-- `__init__.py` provides a custom `render_template(name, **ctx)` that performs single-pass `__TOKEN__` substitution over raw `.html` files (no Jinja2 or other engine), plus an MD5-based `STATIC_VERSION` computed at import time from all files under `static/` for cache-busting.
-- `templates/` holds plain HTML templates (`review_console.html`, `messages.html`, `message_detail.html`, `diagnostics.html`, `search.html`) that use `__TOKEN__` placeholders injected by the Python layer and `data-i18n` attributes consumed by client-side i18n.
-- `static/console/` is a vanilla-JS SPA composed of small modules loaded in dependency order: `console-state.js` (global state), `api-client.js` (fetch wrappers to `/api/*`), `conversation-list.js`, `timeline.js`, `message-renderers.js`, `media-viewer.js`, `refresh.js`, and `console-entry.js` as the bootstrap entrypoint. Additional static assets `base.css`, `diagnostics.css`, `diagnostics.js`, and `search.js` are served directly.
-
-Dependency direction is strictly one-way: Python renders templates → browser loads JS modules → JS calls backend REST endpoints (`/api/auth/me`, `/api/monitored-accounts`, `/api/contacts`, `/api/conversations`, `/api/search/*`). There is no build step; static asset hashing is recomputed on each process start.

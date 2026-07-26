@@ -1,0 +1,1 @@
+Serves the admin review console, message list, search, and diagnostics pages through a minimal Python template renderer and hand-authored HTML/CSS/JS assets with vanilla JavaScript modules.

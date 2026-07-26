@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: backend_app/tests
-title: Pytest Test Suite for WeCom Archive Backend
+title: WeCom Archive Backend Test Suite
 scope:
     - backend/tests/
 source_files: []

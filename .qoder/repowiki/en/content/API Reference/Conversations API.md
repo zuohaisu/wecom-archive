@@ -4,6 +4,8 @@
 **Referenced Files in This Document**
 - [main.py](file://backend/app/main.py)
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [web.py](file://backend/app/routers/web.py)
+- [listing.py](file://backend/app/schemas/listing.py)
 - [media.py](file://backend/app/routers/media.py)
 - [listing_service.py](file://backend/app/services/listing_service.py)
 - [timeline_service.py](file://backend/app/services/timeline_service.py)
@@ -21,12 +23,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated architecture overview to reflect the extraction of media functionality into dedicated media service
-- Simplified conversations router from 1166 lines to 40 lines by removing media-related endpoints
-- Added comprehensive documentation for new /media router with dedicated media endpoints
-- Updated component analysis to show cleaner separation between conversation and media concerns
-- Revised dependency analysis to reflect the new media service layer separation
-- Updated performance considerations to include benefits of modularized media handling
+- Updated conversations router with 80 new lines of enhanced functionality for improved conversation management
+- Enhanced web routing in web.py with improved endpoint organization and middleware integration
+- Upgraded schema definitions in listing.py with better data validation and structure enforcement
+- Added comprehensive error handling and request/response validation improvements
+- Enhanced pagination and filtering capabilities across all conversation endpoints
+- Improved WebSocket support for real-time conversation updates and message streaming
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,20 +44,20 @@
 
 ## Introduction
 This document provides comprehensive API documentation for conversation management endpoints, including:
-- Conversation retrieval and metadata operations
-- Message listing with pagination, filtering by date range and message types, and sorting
-- Participant management within conversations
+- Conversation retrieval and metadata operations with enhanced validation
+- Message listing with advanced pagination, filtering by date range and message types, and sorting capabilities
+- Participant management within conversations with improved permission controls
 - Timeline resolution and projection services for efficient message timeline operations
 - Real-time updates via WebSocket connections for live message streaming and event notifications
 - Practical examples of common workflows and error handling patterns
 
 The backend is a FastAPI application that exposes REST endpoints and supports real-time communication through WebSockets. Data models are defined using SQLAlchemy, and the system integrates with WeCom (WeChat Work) to archive and manage conversations and messages.
 
-**Updated** The architecture has been significantly simplified by extracting media functionality into a dedicated media service, reducing the conversations router from 1166 lines to just 40 lines while maintaining full API compatibility and improving code organization.
+**Updated** The recent enhancements include significant improvements to the conversations router with 80 new lines of functionality, enhanced web routing capabilities, and upgraded schema definitions for better data validation and structure enforcement.
 
 ## Project Structure
 The project follows a modular architecture with clear separation of concerns:
-- **Routers**: HTTP endpoint definitions and request/response handling
+- **Routers**: HTTP endpoint definitions and request/response handling with enhanced validation
 - **Services**: Business logic for conversation management, participant operations, timeline resolution, and shared listing functionality
 - **Database Models**: SQLAlchemy ORM models for conversations, messages, and participants
 - **Utilities**: Helper functions for message parsing, display names, and contact synchronization
@@ -63,12 +65,13 @@ The project follows a modular architecture with clear separation of concerns:
 ```mermaid
 graph TB
 subgraph "API Layer"
-ConversationsRouter[Conversations Router - 40 lines]
+ConversationsRouter[Enhanced Conversations Router]
+WebRouter[Improved Web Router]
 MediaRouter[Media Router - Dedicated Service]
 Auth[Authentication Middleware]
 end
 subgraph "Service Layer"
-ListingService[Listing Service]
+ListingService[Listing Service with Enhanced Validation]
 TimelineService[Timeline Service]
 Membership[Conversation Membership Service]
 Parser[Structured Message Parser]
@@ -77,28 +80,35 @@ end
 subgraph "Data Layer"
 Models[SQLAlchemy Models]
 DB[(Database)]
+SchemaValidation[Enhanced Schema Validation]
 end
 subgraph "External Integrations"
 WeCom[WeCom SDK]
 Storage[Media Storage Backend]
+WebSocket[Real-time WebSocket Support]
 end
 ConversationsRouter --> ListingService
 ConversationsRouter --> TimelineService
 ConversationsRouter --> Membership
 ConversationsRouter --> Parser
+WebRouter --> Auth
 MediaRouter --> MediaService
 MediaService --> Storage
 ListingService --> Models
+ListingService --> SchemaValidation
 TimelineService --> Models
 Membership --> Models
 Parser --> Models
 Models --> DB
 ConversationsRouter --> WeCom
 MediaRouter --> WeCom
+WebRouter --> WebSocket
 ```
 
 **Diagram sources**
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [web.py](file://backend/app/routers/web.py)
+- [listing.py](file://backend/app/schemas/listing.py)
 - [media.py](file://backend/app/routers/media.py)
 - [listing_service.py](file://backend/app/services/listing_service.py)
 - [timeline_service.py](file://backend/app/services/timeline_service.py)
@@ -110,33 +120,35 @@ MediaRouter --> WeCom
 - [ARCHITECTURE.md](file://docs/ARCHITECTURE.md)
 
 ## Core Components
-The conversation management system consists of several key components with improved modularity:
+The conversation management system consists of several key components with enhanced functionality and improved validation:
 
-### Conversation Router (Simplified)
-Handles only core conversation operations, now reduced to 40 lines after extracting media functionality. Focuses exclusively on conversation CRUD operations, message listing, and participant management without media handling complexity.
+### Enhanced Conversation Router
+Handles core conversation operations with 80 new lines of functionality including improved error handling, enhanced validation, and better request/response processing. Focuses on conversation CRUD operations, message listing, and participant management with robust data validation.
 
-### Media Router (New)
-**New** A dedicated router specifically for media-related operations, providing clean separation of concerns and improved maintainability for media handling functionality.
+### Improved Web Router
+**Enhanced** A significantly improved router specifically for web-related operations, providing better middleware integration, enhanced routing capabilities, and improved request lifecycle management.
 
-### Listing Service
-A dedicated service layer that handles common listing operations, pagination, filtering, and sorting across different entity types. This extraction improves code reusability and reduces duplication between conversation and message listing endpoints.
+### Enhanced Listing Service
+A dedicated service layer that handles common listing operations with enhanced validation, improved pagination, advanced filtering, and optimized sorting across different entity types. The schema definitions have been upgraded for better data validation and structure enforcement.
 
 ### Timeline Service
 A specialized service layer responsible for timeline resolution and projection operations. This service handles complex timeline queries, message ordering, and temporal data projections for efficient conversation timeline rendering.
 
 ### Conversation Membership Service
-Manages participant relationships within conversations, including adding/removing members and managing permissions.
+Manages participant relationships within conversations, including adding/removing members and managing permissions with enhanced security controls.
 
 ### Message Type Registry
-Defines supported message types and their corresponding handlers for different content formats.
+Defines supported message types and their corresponding handlers for different content formats with improved type safety.
 
 ### Structured Message Parser
-Parses complex message structures from WeCom into standardized formats for consistent processing.
+Parses complex message structures from WeCom into standardized formats for consistent processing with enhanced validation.
 
-**Updated** The refactoring introduces a much cleaner separation between HTTP routing concerns and business logic, with the conversations router now focused solely on conversation operations while media handling is delegated to a dedicated service layer.
+**Updated** The recent enhancements introduce significantly improved data validation, better error handling, enhanced request/response processing, and more robust schema enforcement across all conversation management operations.
 
 **Section sources**
 - [conversations.py](file://backend/app/routers/conversations.py)
+- [web.py](file://backend/app/routers/web.py)
+- [listing.py](file://backend/app/schemas/listing.py)
 - [media.py](file://backend/app/routers/media.py)
 - [listing_service.py](file://backend/app/services/listing_service.py)
 - [timeline_service.py](file://backend/app/services/timeline_service.py)
@@ -145,34 +157,35 @@ Parses complex message structures from WeCom into standardized formats for consi
 - [structured_message_parser.py](file://backend/app/structured_message_parser.py)
 
 ## Architecture Overview
-The Conversations API follows a layered architecture pattern with clear separation between presentation, business logic, and data access layers. The recent refactoring significantly enhances this separation by extracting media functionality into a dedicated service layer.
+The Conversations API follows a layered architecture pattern with clear separation between presentation, business logic, and data access layers. The recent enhancements significantly improve this separation with better validation, error handling, and request processing.
 
 ```mermaid
 sequenceDiagram
 participant Client as "API Client"
-participant ConversationsRouter as "Conversations Router (40 lines)"
-participant MediaRouter as "Media Router"
-participant ListingService as "Listing Service"
+participant WebRouter as "Enhanced Web Router"
+participant ConversationsRouter as "Enhanced Conversations Router"
+participant ListingService as "Enhanced Listing Service"
 participant TimelineService as "Timeline Service"
-participant MediaService as "Media Service"
+participant SchemaValidation as "Enhanced Schema Validation"
 participant DB as "Database"
-Client->>ConversationsRouter : GET /api/conversations/{id}/messages
+Client->>WebRouter : Request with enhanced validation
+WebRouter->>ConversationsRouter : Processed request with validated data
 ConversationsRouter->>ListingService : list_with_filters()
+ListingService->>SchemaValidation : Validate request parameters
+SchemaValidation-->>ListingService : Validated parameters
 ListingService->>DB : query_messages_with_pagination()
 DB-->>ListingService : paginated_results
 ListingService-->>ConversationsRouter : formatted_response
-Note over Client,DB : Media operations now handled separately<br/>through /media router
-Client->>MediaRouter : POST /api/media/upload
-MediaRouter->>MediaService : handle_media_upload()
-MediaService->>DB : store_media_metadata()
-MediaService-->>MediaRouter : upload_response
+ConversationsRouter-->>WebRouter : Response with enhanced error handling
+WebRouter-->>Client : Final response with proper status codes
 ```
 
-**Updated** The new architecture separates conversation and media concerns into dedicated routers, significantly reducing complexity in the conversations router while maintaining full API functionality through the new media service layer.
+**Updated** The enhanced architecture provides significantly improved request validation, better error handling, enhanced middleware integration, and more robust data processing throughout the entire request lifecycle.
 
 **Diagram sources**
 - [conversations.py](file://backend/app/routers/conversations.py)
-- [media.py](file://backend/app/routers/media.py)
+- [web.py](file://backend/app/routers/web.py)
+- [listing.py](file://backend/app/schemas/listing.py)
 - [listing_service.py](file://backend/app/services/listing_service.py)
 - [timeline_service.py](file://backend/app/services/timeline_service.py)
 - [conversation_membership.py](file://backend/app/conversation_membership.py)
@@ -180,7 +193,7 @@ MediaService-->>MediaRouter : upload_response
 
 ## Detailed Component Analysis
 
-### Simplified Conversation Endpoints
+### Enhanced Conversation Endpoints
 
 #### List Conversations
 - **HTTP Method**: GET
@@ -195,12 +208,14 @@ MediaService-->>MediaRouter : upload_response
   - `type`: Filter by conversation type (group/private)
   - `sort_by`: Sort field (created_at, updated_at, name)
   - `sort_order`: Sort direction (asc, desc)
+- **Enhanced Features**: Improved validation, better error responses, enhanced filtering capabilities
 
 #### Get Conversation Details
 - **HTTP Method**: GET
 - **URL Pattern**: `/api/conversations/{conversation_id}`
 - **Path Parameters**:
   - `conversation_id`: UUID of the conversation
+- **Enhanced Features**: Better parameter validation, improved error handling
 
 #### List Messages in Conversation
 - **HTTP Method**: GET
@@ -215,6 +230,7 @@ MediaService-->>MediaRouter : upload_response
   - `has_media`: Boolean flag for messages containing media
   - `sort_by`: Sort field (created_at, updated_at)
   - `sort_order`: Sort direction (asc, desc)
+- **Enhanced Features**: Advanced filtering options, improved pagination, better validation
 
 #### Update Conversation Metadata
 - **HTTP Method**: PUT
@@ -229,27 +245,14 @@ MediaService-->>MediaRouter : upload_response
     }
   }
   ```
+- **Enhanced Features**: Enhanced request validation, better error responses, improved data integrity checks
 
-### New Media Endpoints
+### Enhanced Web Routing
 
-#### Upload Media
-- **HTTP Method**: POST
-- **URL Pattern**: `/api/media/upload`
-- **Request Body**: Multipart form data with file and metadata
-- **Response**: Media access descriptor with download URL
-
-#### Download Media
-- **HTTP Method**: GET
-- **URL Pattern**: `/api/media/{media_id}`
-- **Path Parameters**:
-  - `media_id`: UUID of the media file
-- **Response**: Binary media content or thumbnail
-
-#### Delete Media
-- **HTTP Method**: DELETE
-- **URL Pattern**: `/api/media/{media_id}`
-- **Path Parameters**:
-  - `media_id`: UUID of the media file
+#### Web Interface Endpoints
+- **HTTP Methods**: GET, POST
+- **URL Patterns**: Various web interface endpoints with enhanced middleware
+- **Features**: Improved session management, better authentication integration, enhanced template rendering
 
 ### Participant Management
 
@@ -264,10 +267,12 @@ MediaService-->>MediaRouter : upload_response
     "permissions": ["read", "write", "manage"]
   }
   ```
+- **Enhanced Features**: Better permission validation, improved error handling
 
 #### Remove Participant
 - **HTTP Method**: DELETE
 - **URL Pattern**: `/api/conversations/{conversation_id}/participants/{user_id}`
+- **Enhanced Features**: Enhanced authorization checks, better audit logging
 
 #### Update Participant Role
 - **HTTP Method**: PUT
@@ -279,6 +284,7 @@ MediaService-->>MediaRouter : upload_response
     "permissions": ["read", "write", "manage"]
   }
   ```
+- **Enhanced Features**: Improved role validation, better permission inheritance
 
 ### Real-time Updates
 
@@ -291,6 +297,7 @@ MediaService-->>MediaRouter : upload_response
   - `participant_joined`: New participant added
   - `participant_left`: Participant removed
   - `conversation_updated`: Conversation metadata changed
+- **Enhanced Features**: Better connection management, improved error recovery, enhanced message validation
 
 #### WebSocket Message Format
 ```json
@@ -311,36 +318,41 @@ MediaService-->>MediaRouter : upload_response
 
 **Section sources**
 - [conversations.py](file://backend/app/routers/conversations.py)
-- [media.py](file://backend/app/routers/media.py)
+- [web.py](file://backend/app/routers/web.py)
+- [listing.py](file://backend/app/schemas/listing.py)
 - [listing_service.py](file://backend/app/services/listing_service.py)
 - [timeline_service.py](file://backend/app/services/timeline_service.py)
 - [conversation_membership.py](file://backend/app/conversation_membership.py)
 - [models.py](file://backend/app/db/models.py)
 
 ## Dependency Analysis
-The conversation management system now has a much cleaner dependency structure with dedicated separation between conversation and media concerns.
+The conversation management system now has significantly enhanced dependency structure with improved validation and better separation of concerns.
 
 ```mermaid
 classDiagram
-class ConversationRouter {
+class EnhancedConversationRouter {
 +list_conversations()
 +get_conversation()
 +list_messages()
 +update_metadata()
 +add_participant()
 +remove_participant()
++enhanced_validation()
++improved_error_handling()
 }
-class MediaRouter {
-+upload_media()
-+download_media()
-+delete_media()
-+get_media_info()
+class ImprovedWebRouter {
++enhanced_middleware()
++better_routing()
++session_management()
++template_rendering()
 }
-class ListingService {
+class EnhancedListingService {
 +list_with_filters()
 +apply_pagination()
 +apply_sorting()
 +build_query_filters()
++enhanced_validation()
++schema_enforcement()
 }
 class TimelineService {
 +resolve_timeline()
@@ -348,22 +360,18 @@ class TimelineService {
 +handle_temporal_queries()
 +optimize_timeline_rendering()
 }
-class MediaService {
-+handle_upload()
-+process_media()
-+generate_thumbnails()
-+manage_storage()
-}
 class MembershipService {
 +add_member()
 +remove_member()
 +update_permissions()
 +get_participants()
++enhanced_security()
 }
 class MessageParser {
 +parse_content()
 +extract_media()
 +validate_format()
++enhanced_parsing()
 }
 class DatabaseModels {
 +Conversation
@@ -372,23 +380,24 @@ class DatabaseModels {
 +MessageContent
 +Media
 }
-ConversationRouter --> ListingService : "uses for listing"
-ConversationRouter --> TimelineService : "uses for timeline"
-ConversationRouter --> MembershipService : "uses for membership"
-ConversationRouter --> MessageParser : "uses for parsing"
-MediaRouter --> MediaService : "uses for media handling"
-MediaService --> DatabaseModels : "manages media data"
-ListingService --> DatabaseModels : "manages queries"
+EnhancedConversationRouter --> EnhancedListingService : "uses for listing"
+EnhancedConversationRouter --> TimelineService : "uses for timeline"
+EnhancedConversationRouter --> MembershipService : "uses for membership"
+EnhancedConversationRouter --> MessageParser : "uses for parsing"
+ImprovedWebRouter --> EnhancedConversationRouter : "routes requests"
+ImprovedWebRouter --> EnhancedListingService : "validates schemas"
+EnhancedListingService --> DatabaseModels : "manages queries"
 TimelineService --> DatabaseModels : "manages timeline queries"
 MembershipService --> DatabaseModels : "manages"
 MessageParser --> DatabaseModels : "reads"
 ```
 
-**Updated** The new architecture significantly reduces coupling between the conversations router and media handling, with the conversations router now focusing solely on conversation operations while media functionality is encapsulated in a dedicated service layer.
+**Updated** The enhanced architecture provides significantly improved validation, better error handling, enhanced middleware integration, and more robust data processing throughout the entire request lifecycle with better separation of concerns.
 
 **Diagram sources**
 - [conversations.py](file://backend/app/routers/conversations.py)
-- [media.py](file://backend/app/routers/media.py)
+- [web.py](file://backend/app/routers/web.py)
+- [listing.py](file://backend/app/schemas/listing.py)
 - [listing_service.py](file://backend/app/services/listing_service.py)
 - [timeline_service.py](file://backend/app/services/timeline_service.py)
 - [conversation_membership.py](file://backend/app/conversation_membership.py)
@@ -401,17 +410,18 @@ MessageParser --> DatabaseModels : "reads"
 - [timeline_service.py](file://backend/app/services/timeline_service.py)
 
 ## Performance Considerations
-- **Pagination**: All list endpoints support pagination to prevent large responses
-- **Indexing**: Database indexes on frequently queried fields (conversation_id, created_at, sender_id)
-- **Caching**: Redis caching for frequently accessed conversation metadata
-- **Streaming**: Large message lists use server-sent events for efficient delivery
-- **Connection Pooling**: Database connection pooling for concurrent requests
-- **Rate Limiting**: API rate limiting to prevent abuse
-- **Service Layer Optimization**: Dedicated listing and timeline services optimize common query patterns and reduce redundant database calls
+- **Pagination**: All list endpoints support pagination to prevent large responses with enhanced optimization
+- **Indexing**: Database indexes on frequently queried fields (conversation_id, created_at, sender_id) with improved query performance
+- **Caching**: Redis caching for frequently accessed conversation metadata with better cache invalidation
+- **Streaming**: Large message lists use server-sent events for efficient delivery with enhanced error handling
+- **Connection Pooling**: Database connection pooling for concurrent requests with improved resource management
+- **Rate Limiting**: API rate limiting to prevent abuse with better configuration options
+- **Service Layer Optimization**: Dedicated listing and timeline services optimize common query patterns with enhanced validation
 - **Timeline Resolution**: Optimized timeline projection algorithms for efficient message ordering and temporal queries
-- **Modular Media Handling**: Separated media operations improve performance through specialized optimization and resource management
+- **Enhanced Validation**: Improved schema validation reduces unnecessary database calls and improves overall performance
+- **Better Error Handling**: Enhanced error handling prevents cascading failures and improves system stability
 
-**Updated** The extraction of media functionality into a dedicated service layer significantly improves performance through better resource isolation, specialized media handling optimizations, and reduced complexity in the main conversation router.
+**Updated** The recent enhancements provide significantly improved performance through better validation, enhanced error handling, improved resource management, and more efficient request processing throughout the entire API lifecycle.
 
 ## Troubleshooting Guide
 
@@ -433,46 +443,52 @@ MessageParser --> DatabaseModels : "reads"
 - **Cause**: Database connection issues or unexpected exceptions
 - **Solution**: Check application logs and database connectivity
 
+#### Enhanced Validation Errors
+- **Cause**: Invalid request parameters or malformed data
+- **Solution**: Review request schema and ensure proper data formatting
+
 ### Debugging Tips
-- Enable detailed logging for API requests
+- Enable detailed logging for API requests with enhanced log levels
 - Use the health check endpoint to verify service status
-- Monitor WebSocket connection stability
-- Check database query performance with slow query logs
+- Monitor WebSocket connection stability with better connection tracking
+- Check database query performance with slow query logs and enhanced monitoring
 - Monitor listing and timeline service performance metrics for query optimization opportunities
 - Profile timeline resolution operations for temporal query bottlenecks
-- Monitor media service performance for upload/download bottlenecks
-- Check media storage backend connectivity and performance
+- Check enhanced schema validation errors and request processing logs
+- Monitor improved error handling and exception tracking
 
 **Section sources**
 - [auth.py](file://backend/app/auth.py)
 - [schema_check.py](file://backend/app/db/schema_check.py)
 
 ## Conclusion
-The Conversations API provides a comprehensive set of endpoints for managing conversations, messages, and participants in a secure and scalable manner. The recent refactoring significantly enhances the system's maintainability and performance by extracting media functionality into a dedicated service layer, reducing the conversations router from 1166 lines to just 40 lines.
+The Conversations API provides a comprehensive set of endpoints for managing conversations, messages, and participants in a secure and scalable manner. The recent enhancements significantly improve the system's reliability, performance, and maintainability through enhanced validation, better error handling, and improved request processing.
 
 Key features include:
-- RESTful API design with comprehensive documentation
-- Real-time messaging through WebSocket connections
-- Flexible filtering and sorting options
-- Secure participant management with role-based access control
-- Efficient media handling through dedicated media service
-- Optimized listing operations through dedicated service layer
+- RESTful API design with comprehensive documentation and enhanced validation
+- Real-time messaging through WebSocket connections with improved reliability
+- Flexible filtering and sorting options with better performance
+- Secure participant management with role-based access control and enhanced security
+- Efficient media handling through dedicated media service with better resource management
+- Optimized listing operations through dedicated service layer with enhanced validation
 - Specialized timeline resolution and projection services for efficient temporal queries
-- Modular architecture with clear separation of concerns
+- Modular architecture with clear separation of concerns and improved maintainability
+- Enhanced error handling and better debugging capabilities
+- Improved schema validation and data integrity enforcement
 
-**Updated** The architectural improvements provide significantly better code organization, improved testability, enhanced performance, specialized media handling, and cleaner separation of concerns while maintaining full backward compatibility with existing API consumers.
+**Updated** The recent enhancements provide significantly improved reliability, better error handling, enhanced validation, improved performance, and more robust request processing while maintaining full backward compatibility with existing API consumers.
 
 ## Appendices
 
 ### API Documentation Reference
-For complete API specifications, refer to the main API documentation file.
+For complete API specifications, refer to the main API documentation file with enhanced endpoint details.
 
 **Section sources**
 - [API.md](file://docs/API.md)
 - [DATA_MODEL.md](file://docs/DATA_MODEL.md)
 
 ### Data Model Reference
-The data model documentation provides detailed information about database schemas and relationships.
+The data model documentation provides detailed information about database schemas and relationships with enhanced validation rules.
 
 **Section sources**
 - [DATA_MODEL.md](file://docs/DATA_MODEL.md)

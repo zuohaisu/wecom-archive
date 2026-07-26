@@ -3,7 +3,7 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-07-25T13:13:37Z"
+exported_at: "2026-07-26T05:13:30Z"
 modules:
     "":
         dir_name: WeCom Archive Monorepo
@@ -27,8 +27,8 @@ modules:
         depends_on: []
         related_to: []
     backend_app:
-        dir_name: WeCom Archive Backend Application
-        title: WeCom Archive Backend Application
+        dir_name: WeCom Archive Admin Backend
+        title: WeCom Archive Admin Backend
         scope:
             - backend/
         source_files: []
@@ -40,8 +40,8 @@ modules:
         depends_on: []
         related_to: []
     backend_app/app_core:
-        dir_name: WeCom Archive Admin Application
-        title: WeCom Archive Admin Application
+        dir_name: WeCom Archive Admin Backend
+        title: WeCom Archive Admin Backend
         scope:
             - backend/app/
         source_files: []
@@ -134,8 +134,8 @@ modules:
         depends_on: []
         related_to: []
     backend_app/app_core/web_console:
-        dir_name: Web Console & Admin Templates
-        title: Web Console & Admin Templates
+        dir_name: Admin Web Console & Static Asset Renderer
+        title: Admin Web Console & Static Asset Renderer
         scope:
             - backend/app/web/
         source_files: []
@@ -174,8 +174,8 @@ modules:
         related_to:
             - path: backend_app/app_core/wecom_integration
     backend_app/tests:
-        dir_name: Pytest Test Suite for WeCom Archive Backend
-        title: Pytest Test Suite for WeCom Archive Backend
+        dir_name: WeCom Archive Backend Test Suite
+        title: WeCom Archive Backend Test Suite
         scope:
             - backend/tests/
         source_files: []
