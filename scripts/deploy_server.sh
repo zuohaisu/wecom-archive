@@ -163,7 +163,10 @@ INTERNAL_HEALTH="${INTERNAL_HEALTH:-http://127.0.0.1:8035/health/ready}"
 # the calling shell's environment; PUBLIC_HEALTH can also be set directly
 # to override independently of ARCHIVE_DOMAIN.
 ARCHIVE_DOMAIN="${ARCHIVE_DOMAIN:-archive.example.com}"
-PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://${ARCHIVE_DOMAIN}/health}"
+# PUBLIC_HEALTH is intentionally NOT defaulted here — its default depends on
+# ARCHIVE_DOMAIN, which may be set in backend/.env (sourced later). Setting
+# it here would freeze the placeholder domain. The default is computed after
+# .env is sourced below.
 
 # P0-D: retry/timeout knobs, each a single named variable (no
 # per-callsite hardcoding) shared by the internal, public, and
@@ -494,9 +497,9 @@ if [ -f .env ]; then
     # shellcheck disable=SC1091
     source .env
     set +a
-    # RND-233 follow-up: ARCHIVE_DOMAIN and PUBLIC_HEALTH defaults were set
-    # at the top of this script (where .env is not yet available). Re-evaluate
-    # PUBLIC_HEALTH now so a value from .env takes effect.
+    # PUBLIC_HEALTH was not defaulted at the top of this script (see config
+    # section) because it depends on ARCHIVE_DOMAIN which may be set in .env.
+    # Default it now that .env has been sourced.
     PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://${ARCHIVE_DOMAIN}/health}"
 else
     echo "ERROR: backend/.env not found — required to supply DATABASE_URL for Alembic." >&2
