@@ -494,6 +494,10 @@ if [ -f .env ]; then
     # shellcheck disable=SC1091
     source .env
     set +a
+    # RND-233 follow-up: ARCHIVE_DOMAIN and PUBLIC_HEALTH defaults were set
+    # at the top of this script (where .env is not yet available). Re-evaluate
+    # PUBLIC_HEALTH now so a value from .env takes effect.
+    PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://${ARCHIVE_DOMAIN}/health}"
 else
     echo "ERROR: backend/.env not found — required to supply DATABASE_URL for Alembic." >&2
     _restore_worktree_only
