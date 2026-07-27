@@ -106,6 +106,14 @@ def _decrypt_child_target(conn, lib_path: str, encrypt_key: str, encrypt_msg: st
         from app.sdk import wecom_sdk
 
         lib = wecom_sdk.load_sdk(lib_path)
+        # RND-231 fix: NewSlice, FreeSlice, GetSliceLen, and
+        # GetContentFromSlice are configured by configure_sdk_get_chat_data,
+        # NOT by configure_sdk_decrypt_data. Without this call, ctypes
+        # defaults to restype=c_int (32-bit) for these functions, truncating
+        # the 64-bit pointers returned by NewSlice and causing DecryptData
+        # to write decrypted output at a corrupted address -> SIGSEGV
+        # (signal 11), killing every isolated child process.
+        wecom_sdk.configure_sdk_get_chat_data(lib)
         wecom_sdk.configure_sdk_decrypt_data(lib)
 
         slice_ptr = wecom_sdk.new_slice(lib)
