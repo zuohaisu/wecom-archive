@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Optional, Tuple, Callable
 
 from fastapi import HTTPException
@@ -44,13 +45,23 @@ def _collect_archive_participant_ids(db: Session, tenant_id: str) -> set[str]:
 
 
 
-def _collect_staff_ids(db: Session, tenant_id: str) -> set[str]:
+def _collect_staff_ids(
+    db: Session, tenant_id: str, participant_ids: Optional[set[str]] = None
+) -> set[str]:
     """
     Return the set of wecom_userids treated as WeCom archive seats (staff)
     for this tenant. See the module docstring for why two signals are
     combined instead of a single formal source.
+
+    participant_ids (RND-191): when the caller already computed this
+    tenant's full archive-participant set (e.g. list_contacts, which needs
+    it anyway to derive the non-staff remainder), pass it here to skip the
+    redundant _collect_archive_participant_ids() tenant-wide distinct()
+    scan this function would otherwise repeat. Defaults to None, in which
+    case behavior is unchanged from before -- computed fresh.
     """
-    participant_ids = _collect_archive_participant_ids(db, tenant_id)
+    if participant_ids is None:
+        participant_ids = _collect_archive_participant_ids(db, tenant_id)
     prefix_ids = {p for p in participant_ids if _is_staff(p)}
 
     admin_user_rows = (
@@ -957,3 +968,252 @@ def _resolve_conversation_message_ids(
         raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
 
     return _group_room_message_ids(db, conversation_id, tenant_id)
+
+
+
+# ---------------------------------------------------------------------------
+# RND-191: compact (id/sender/roomid/msgtime) membership resolution
+#
+# Same "which messages belong to this conversation_id" question as
+# _fetch_conversation_messages above, same branch ordering, but used ONLY by
+# resolve_timeline_page() (app.services.timeline_service) to decide
+# pagination (sort by (msgtime, id), slice to `limit`) WITHOUT materializing
+# a full ArchiveMessage ORM row (raw_encrypted_payload/decrypted_payload/
+# structured_content JSONB, content_text) for every message in a
+# conversation on every single page request -- for a conversation with
+# thousands of messages that full-row fetch, repeated on every "load older"
+# scroll, was the dominant cost (RND-191 profiling). Only the page actually
+# being rendered (`limit` messages, typically 20) is ever hydrated to a full
+# row -- see _hydrate_timeline_page_messages in timeline_service.py.
+#
+# Unlike the RND-240 id-only siblings above (used by get_conversation_detail,
+# which never receives mode/entity_id), these mirror
+# _fetch_conversation_messages's FULL signature including the entity-scoped
+# collision-disambiguation branches, since resolve_timeline_page does accept
+# mode/staff_id/contact_id. msgtime is carried alongside id/sender/roomid
+# (a 4-column projection, still far lighter than a full row) because the
+# timeline needs it to sort/paginate before knowing which rows will end up
+# on the page.
+# ---------------------------------------------------------------------------
+
+
+def _group_room_compact_messages(db: Session, roomid: str, tenant_id: str) -> list:
+    """Compact counterpart to _fetch_group_room_messages: returns
+    SimpleNamespace(id, sender, roomid, msgtime) instead of full
+    ArchiveMessage rows."""
+    return [
+        SimpleNamespace(id=r[0], sender=r[1], roomid=r[2], msgtime=r[3])
+        for r in db.query(
+            ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid, ArchiveMessage.msgtime
+        )
+        .filter(
+            ArchiveMessage.roomid == roomid,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    ]
+
+
+def _direct_pair_compact_messages(db: Session, uid_a: str, uid_b: str, tenant_id: str) -> list:
+    """Compact counterpart to _fetch_direct_pair_messages."""
+    cols = (ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid, ArchiveMessage.msgtime)
+    rows_a_to_b = (
+        db.query(*cols)
+        .join(
+            ArchiveMessageRecipient,
+            ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+        )
+        .filter(
+            ArchiveMessage.sender == uid_a,
+            ArchiveMessageRecipient.receiver_userid == uid_b,
+            or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    rows_b_to_a = (
+        db.query(*cols)
+        .join(
+            ArchiveMessageRecipient,
+            ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+        )
+        .filter(
+            ArchiveMessage.sender == uid_b,
+            ArchiveMessageRecipient.receiver_userid == uid_a,
+            or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    seen: set[int] = set()
+    messages = []
+    for r in list(rows_a_to_b) + list(rows_b_to_a):
+        if r[0] not in seen:
+            seen.add(r[0])
+            messages.append(SimpleNamespace(id=r[0], sender=r[1], roomid=r[2], msgtime=r[3]))
+    return messages
+
+
+def _null_sender_candidate_compact_messages(
+    db: Session,
+    conversation_id: str,
+    tokens: "str | list[str]",
+    tenant_id: str,
+    *,
+    require_null_sender: bool = False,
+) -> list:
+    """Compact counterpart to _fetch_null_sender_candidate_messages. Still
+    projects sender/roomid (not just id/msgtime), since
+    _derive_conversation_membership needs them to verify each candidate
+    actually canonicalizes to conversation_id -- a 4-column projection, not
+    a full-row fetch."""
+    token_list = [tokens] if isinstance(tokens, str) else list(tokens)
+    token_list = [t for t in token_list if t]
+    if not token_list:
+        return []
+
+    filters = [
+        ArchiveMessage.tenant_id == tenant_id,
+        or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+    ]
+    if require_null_sender:
+        filters.append(or_(ArchiveMessage.sender.is_(None), ArchiveMessage.sender == ""))
+        filters.append(
+            and_(
+                ArchiveMessageRecipient.receiver_userid.in_(token_list),
+                ArchiveMessageRecipient.tenant_id == tenant_id,
+            )
+        )
+    else:
+        filters.append(
+            or_(
+                ArchiveMessage.sender.in_(token_list),
+                and_(
+                    ArchiveMessageRecipient.receiver_userid.in_(token_list),
+                    ArchiveMessageRecipient.tenant_id == tenant_id,
+                ),
+            )
+        )
+
+    candidates = (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid, ArchiveMessage.msgtime)
+        .outerjoin(
+            ArchiveMessageRecipient,
+            ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+        )
+        .filter(*filters)
+        .distinct()
+        .all()
+    )
+    if not candidates:
+        return []
+
+    candidate_ids = [c[0] for c in candidates]
+    recipients_map = _load_recipients_map(db, tenant_id, candidate_ids)
+
+    participant_ids: set[str] = set()
+    for cid, sender, _roomid, _msgtime in candidates:
+        if sender:
+            participant_ids.add(sender)
+        participant_ids.update(recipients_map.get(cid, []))
+    staff_ids = _staff_ids_for_participants(db, tenant_id, participant_ids)
+
+    def _is_staff(uid: str) -> bool:
+        return uid in staff_ids
+
+    matched = []
+    for cid, sender, roomid, msgtime in candidates:
+        recipients = recipients_map.get(cid, [])
+        conv_id, _conv_type, _staff_set, _contact_set = _derive_conversation_membership(
+            sender, roomid, recipients, _is_staff
+        )
+        if conv_id == conversation_id:
+            matched.append(SimpleNamespace(id=cid, sender=sender, roomid=roomid, msgtime=msgtime))
+    return matched
+
+
+def _fetch_conversation_messages_compact(
+    db: Session,
+    conversation_id: str,
+    tenant_id: str,
+    *,
+    mode: Optional[str] = None,
+    entity_id: Optional[str] = None,
+) -> list:
+    """Compact counterpart to _fetch_conversation_messages, same branch
+    ordering/control flow (steps 1-6 in that function's docstring),
+    including the entity-scoped collision-disambiguation branches -- used
+    ONLY by resolve_timeline_page(). Returns SimpleNamespace(id, sender,
+    roomid, msgtime) instead of full ArchiveMessage rows."""
+    entity_scoped = bool(mode and entity_id)
+
+    if conversation_id.startswith("direct__"):
+        rest = conversation_id[len("direct__"):]
+        parts = rest.split("___", 1)
+
+        group_messages = _group_room_compact_messages(db, conversation_id, tenant_id)
+
+        direct_messages: list = []
+        if len(parts) == 2:
+            uid_a, uid_b = parts
+            direct_messages = _direct_pair_compact_messages(db, uid_a, uid_b, tenant_id)
+
+            null_sender_extra = _null_sender_candidate_compact_messages(
+                db, conversation_id, [uid_a, uid_b], tenant_id, require_null_sender=True
+            )
+            if null_sender_extra:
+                seen_direct: set[int] = {m.id for m in direct_messages}
+                for msg in null_sender_extra:
+                    if msg.id not in seen_direct:
+                        seen_direct.add(msg.id)
+                        direct_messages.append(msg)
+
+        if group_messages and direct_messages:
+            if entity_scoped:
+                seed_ids = _entity_seed_ids(db, entity_id, tenant_id)
+                entity_direct = [m for m in direct_messages if m.id in seed_ids]
+                entity_group = [m for m in group_messages if m.id in seed_ids]
+                if entity_direct and entity_group:
+                    seen: set[int] = set()
+                    messages = []
+                    for msg in entity_direct + entity_group:
+                        if msg.id not in seen:
+                            seen.add(msg.id)
+                            messages.append(msg)
+                    return messages
+                if entity_direct:
+                    return entity_direct
+                if entity_group:
+                    return entity_group
+                return []
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Conversation ID is ambiguous: it matches both a direct "
+                    "conversation and a group room. Provide mode and "
+                    "staff_id/contact_id to resolve it unambiguously."
+                ),
+            )
+
+        if group_messages:
+            return group_messages
+
+        if len(parts) == 2:
+            if entity_scoped:
+                seed_ids = _entity_seed_ids(db, entity_id, tenant_id)
+                return [m for m in direct_messages if m.id in seed_ids]
+            return direct_messages
+
+        if rest:
+            orphan_messages = _null_sender_candidate_compact_messages(
+                db, conversation_id, rest, tenant_id
+            )
+            if orphan_messages:
+                return orphan_messages
+
+        raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
+
+    return _group_room_compact_messages(db, conversation_id, tenant_id)

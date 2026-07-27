@@ -23,6 +23,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.orm import Session
+
+from tests.test_staff_seats import db  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -168,57 +171,43 @@ def client():
         yield c
 
 
-def test_group_messages_endpoint_includes_sender_and_recipient_display_fields(client) -> None:
+def test_group_messages_endpoint_includes_sender_and_recipient_display_fields(
+    client, db: Session
+) -> None:
+    # RND-191: real SQLite-backed session, not a hand-rolled MagicMock db --
+    # see test_staff_seats.py's identical fix
+    # (test_conversation_messages_default_returns_latest_20_ascending) for
+    # why a MagicMock keyed to one canned `.all()` result regardless of
+    # columns/predicates can no longer stand in for resolve_timeline_page's
+    # two distinct query shapes (compact membership resolution, then
+    # page-only hydration).
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessage, ArchiveMessageRecipient, Contact
+    from app.db.models import Contact
     from app.db.session import get_db
     from app.main import app
+    from tests.test_staff_seats import _TENANT_A, _insert_message, _insert_recipient
 
-    msg = MagicMock()
-    msg.id = 501
-    msg.msgid = "m-501"
-    msg.sender = "contact_zhangsan"
-    msg.roomid = "wra_room_abc123"
-    msg.msgtime = 1700000000000
-    msg.msgtype = "text"
-    msg.content_text = "hello group"
-    msg.decrypt_status = "success"
-
-    contact_row = MagicMock()
-    contact_row.wecom_userid = "contact_zhangsan"
-    contact_row.name = "张三"
-
-    rcpt_row = MagicMock()
-    rcpt_row.message_id = 501
-    rcpt_row.receiver_userid = "staff_yingzi"
+    msg = _insert_message(
+        db,
+        id=501,
+        msgid="m-501",
+        sender="contact_zhangsan",
+        roomid="wra_room_abc123",
+        msgtime=1700000000000,
+        msgtype="text",
+        content_text="hello group",
+        seq=501,
+        tenant_id=_TENANT_A,
+    )
+    _insert_recipient(db, msg.id, "staff_yingzi", tenant_id=_TENANT_A)
+    db.add(Contact(wecom_userid="contact_zhangsan", name="张三", tenant_id=_TENANT_A))
+    db.flush()
 
     def _override_db():
-        mock = MagicMock()
-
-        msg_q = MagicMock()
-        msg_q.filter.return_value = msg_q
-        msg_q.all.return_value = [msg]
-
-        rcpt_q = MagicMock()
-        rcpt_q.filter.return_value = rcpt_q
-        rcpt_q.all.return_value = [rcpt_row]
-
-        contact_q = MagicMock()
-        contact_q.filter.return_value = contact_q
-        contact_q.all.return_value = [contact_row]
-
-        def _query(model):
-            if model is ArchiveMessageRecipient:
-                return rcpt_q
-            if model is Contact:
-                return contact_q
-            return msg_q
-
-        mock.query.side_effect = _query
-        yield mock
+        yield db
 
     mock_user = MagicMock()
-    app.dependency_overrides[get_current_user] = lambda: (mock_user, "tenant-a")
+    app.dependency_overrides[get_current_user] = lambda: (mock_user, _TENANT_A)
     app.dependency_overrides[get_db] = _override_db
     try:
         resp = client.get("/api/conversations/wra_room_abc123/messages")

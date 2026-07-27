@@ -22,8 +22,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.orm import Session
 
-from tests.test_staff_seats import _msg
+from app.db.models import ArchiveMessage, MediaFile
+from tests.test_staff_seats import _TENANT_A, _insert_message, _msg, db  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +235,65 @@ def _override_db_for_media_route(all_msgs, media_files):
     return _override_db
 
 
+def _override_db_for_timeline_route(db: Session, all_msgs, media_files):
+    """RND-191 variant of _override_db_for_media_route, used ONLY by the two
+    tests below that hit the TIMELINE endpoint (GET .../messages). That
+    endpoint now resolves via resolve_timeline_page's two distinct query
+    shapes (app.services.timeline_service: a compact membership-resolution
+    projection, then a page-only hydration) -- a MagicMock keyed to a
+    single canned `.all()` result regardless of columns/predicates can no
+    longer stand in for it (see test_staff_seats.py's identical fix for
+    the same production change).
+
+    Every OTHER test in this file hits the media *detail* routes
+    (.../media, .../media/access), which still go through the old,
+    unchanged single-query `_fetch_conversation_messages` in
+    app.services.media_access -- those keep using
+    _override_db_for_media_route's MagicMock unchanged, since that path
+    was not touched by RND-191 and is not broken."""
+    existing_ids = {row[0] for row in db.query(ArchiveMessage.id).all()}
+    for m in all_msgs:
+        if m.id not in existing_ids:
+            _insert_message(
+                db,
+                id=m.id,
+                msgid=m.msgid,
+                sender=m.sender,
+                roomid=m.roomid,
+                msgtime=m.msgtime,
+                msgtype=m.msgtype,
+                content_text=m.content_text,
+                sdkfileid=getattr(m, "sdkfileid", None),
+                decrypt_status=getattr(m, "decrypt_status", "success"),
+                structured_content=getattr(m, "structured_content", None),
+                seq=m.id,
+                tenant_id=_TENANT_A,
+            )
+
+    existing_media_ids = {row[0] for row in db.query(MediaFile.archive_message_id).all()}
+    for mf in media_files:
+        if mf.archive_message_id not in existing_media_ids:
+            db.add(
+                MediaFile(
+                    archive_message_id=mf.archive_message_id,
+                    sdkfileid=f"sdk-media-{mf.archive_message_id}",
+                    download_status=mf.download_status,
+                    storage_backend=getattr(mf, "storage_backend", None),
+                    storage_ref=getattr(mf, "storage_ref", None),
+                    local_path=getattr(mf, "local_path", None),
+                    file_type=getattr(mf, "file_type", None),
+                    file_size=getattr(mf, "file_size", None),
+                    tenant_id=_TENANT_A,
+                )
+            )
+    db.flush()
+
+    def _override_db():
+        yield db
+
+    return _override_db
+
+
 def _install_overrides(app, override_db):
     from app.auth import get_current_user
     from app.db.session import get_db
@@ -344,7 +405,9 @@ def test_media_route_serves_downloaded_emotion_directly_even_though_timeline_hid
     assert resp.content == b"fake gif bytes"
 
 
-def test_timeline_exposes_media_url_for_downloaded_voice_message(client, monkeypatch, tmp_path) -> None:
+def test_timeline_exposes_media_url_for_downloaded_voice_message(
+    client, db: Session, monkeypatch, tmp_path
+) -> None:
     from app.main import app
 
     media_root = tmp_path / "media"
@@ -366,7 +429,7 @@ def test_timeline_exposes_media_url_for_downloaded_voice_message(client, monkeyp
         )
     ]
 
-    _install_overrides(app, _override_db_for_media_route(all_msgs, media_files))
+    _install_overrides(app, _override_db_for_timeline_route(db, all_msgs, media_files))
     try:
         resp = client.get("/api/conversations/room1/messages")
     finally:
@@ -381,7 +444,9 @@ def test_timeline_exposes_media_url_for_downloaded_voice_message(client, monkeyp
     assert "sdk-1" not in resp.text
 
 
-def test_timeline_exposes_media_url_for_servable_emotion_message(client, monkeypatch, tmp_path) -> None:
+def test_timeline_exposes_media_url_for_servable_emotion_message(
+    client, db: Session, monkeypatch, tmp_path
+) -> None:
     """RND-206: the timeline now wires media_url/media_access_url for a
     servable emotion message (the bytes were already reachable through
     SERVABLE_MEDIA_MSGTYPES — only the timeline pointer was withheld,
@@ -411,7 +476,7 @@ def test_timeline_exposes_media_url_for_servable_emotion_message(client, monkeyp
         )
     ]
 
-    _install_overrides(app, _override_db_for_media_route(all_msgs, media_files))
+    _install_overrides(app, _override_db_for_timeline_route(db, all_msgs, media_files))
     try:
         resp = client.get("/api/conversations/room1/messages")
     finally:

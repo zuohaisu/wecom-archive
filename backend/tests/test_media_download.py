@@ -22,8 +22,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.orm import Session
 
-from tests.test_staff_seats import _msg
+from app.db.models import ArchiveMessage, MediaFile
+from tests.test_staff_seats import _TENANT_A, _insert_message, _msg, db  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -297,56 +299,69 @@ def client():
         yield c
 
 
-def _run_messages_query(client, app, all_msgs, media_files=None):
-    from app.auth import get_current_user
-    from app.db.models import (
-        ArchiveMessageRecipient,
-        Contact,
-        MediaFile,
-        MessageRevocation,
+def _insert_media_file(db: Session, **kwargs) -> MediaFile:
+    defaults = dict(
+        sdkfileid=f"sdk-media-{kwargs.get('archive_message_id')}",
+        tenant_id=_TENANT_A,
     )
+    defaults.update(kwargs)
+    mf = MediaFile(**defaults)
+    db.add(mf)
+    db.flush()
+    return mf
+
+
+def _run_messages_query(client, app, db: Session, all_msgs, media_files=None):
+    # RND-191: real SQLite-backed session, not a hand-rolled MagicMock db --
+    # see the docstring note on
+    # test_conversation_messages_default_returns_latest_20_ascending in
+    # test_staff_seats.py for why a MagicMock keyed to one canned `.all()`
+    # result can no longer stand in for resolve_timeline_page's two
+    # distinct query shapes (compact membership resolution, then
+    # page-only hydration). Idempotent seeding: skips ids already present
+    # so repeated calls against the same db/all_msgs are safe.
+    from app.auth import get_current_user
     from app.db.session import get_db
 
     media_files = media_files or []
 
+    existing_ids = {row[0] for row in db.query(ArchiveMessage.id).all()}
+    for m in all_msgs:
+        if m.id not in existing_ids:
+            _insert_message(
+                db,
+                id=m.id,
+                msgid=m.msgid,
+                sender=m.sender,
+                roomid=m.roomid,
+                msgtime=m.msgtime,
+                msgtype=m.msgtype,
+                content_text=m.content_text,
+                sdkfileid=getattr(m, "sdkfileid", None),
+                decrypt_status=getattr(m, "decrypt_status", "success"),
+                structured_content=getattr(m, "structured_content", None),
+                seq=m.id,
+                tenant_id=_TENANT_A,
+            )
+
+    existing_media_ids = {row[0] for row in db.query(MediaFile.archive_message_id).all()}
+    for mf in media_files:
+        if mf.archive_message_id not in existing_media_ids:
+            _insert_media_file(
+                db,
+                archive_message_id=mf.archive_message_id,
+                download_status=mf.download_status,
+                storage_backend=getattr(mf, "storage_backend", None),
+                storage_ref=getattr(mf, "storage_ref", None),
+                local_path=getattr(mf, "local_path", None),
+                file_type=getattr(mf, "file_type", None),
+                file_size=getattr(mf, "file_size", None),
+            )
+
     def _override_db():
-        mock = MagicMock()
+        yield db
 
-        msg_q = MagicMock()
-        msg_q.filter.return_value = msg_q
-        msg_q.all.return_value = list(all_msgs)
-
-        rcpt_q = MagicMock()
-        rcpt_q.filter.return_value = rcpt_q
-        rcpt_q.all.return_value = []
-
-        contact_q = MagicMock()
-        contact_q.filter.return_value = contact_q
-        contact_q.all.return_value = []
-
-        media_q = MagicMock()
-        media_q.filter.return_value = media_q
-        media_q.all.return_value = list(media_files)
-
-        revocation_q = MagicMock()
-        revocation_q.filter.return_value = revocation_q
-        revocation_q.all.return_value = []
-
-        def _query(model):
-            if model is ArchiveMessageRecipient:
-                return rcpt_q
-            if model is Contact:
-                return contact_q
-            if model is MediaFile:
-                return media_q
-            if model is MessageRevocation:
-                return revocation_q
-            return msg_q
-
-        mock.query.side_effect = _query
-        yield mock
-
-    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
+    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), _TENANT_A)
     app.dependency_overrides[get_db] = _override_db
     try:
         return client.get("/api/conversations/room1/messages")
@@ -354,55 +369,55 @@ def _run_messages_query(client, app, all_msgs, media_files=None):
         app.dependency_overrides.clear()
 
 
-def test_timeline_image_no_media_file_row_not_downloaded(client) -> None:
+def test_timeline_image_no_media_file_row_not_downloaded(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-1")]
-    resp = _run_messages_query(client, app, all_msgs, media_files=[])
+    resp = _run_messages_query(client, app, db, all_msgs, media_files=[])
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_status"] == "not_downloaded"
     assert msg["media_url"] is None
 
 
-def test_timeline_image_pending_media_file_no_url(client) -> None:
+def test_timeline_image_pending_media_file_no_url(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-1")]
     media_files = [_media_file(1, "pending")]
-    resp = _run_messages_query(client, app, all_msgs, media_files=media_files)
+    resp = _run_messages_query(client, app, db, all_msgs, media_files=media_files)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_url"] is None
     assert msg["media_status"] == "not_downloaded"
 
 
-def test_timeline_image_failed_media_file(client) -> None:
+def test_timeline_image_failed_media_file(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-1")]
     media_files = [_media_file(1, "failed")]
-    resp = _run_messages_query(client, app, all_msgs, media_files=media_files)
+    resp = _run_messages_query(client, app, db, all_msgs, media_files=media_files)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_status"] == "failed"
     assert msg["media_url"] is None
 
 
-def test_timeline_image_downloaded_but_file_missing_on_disk(client, monkeypatch) -> None:
+def test_timeline_image_downloaded_but_file_missing_on_disk(client, db: Session, monkeypatch) -> None:
     from app.main import app
 
     monkeypatch.delenv("STORAGE_LOCAL_PATH", raising=False)
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-1")]
     media_files = [_media_file(1, "downloaded", local_path="/nonexistent/x.jpg")]
-    resp = _run_messages_query(client, app, all_msgs, media_files=media_files)
+    resp = _run_messages_query(client, app, db, all_msgs, media_files=media_files)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_status"] == "failed"
     assert msg["media_url"] is None
 
 
-def test_timeline_image_downloaded_and_available(client, monkeypatch, tmp_path) -> None:
+def test_timeline_image_downloaded_and_available(client, db: Session, monkeypatch, tmp_path) -> None:
     from app.main import app
 
     media_root = tmp_path / "media"
@@ -414,14 +429,14 @@ def test_timeline_image_downloaded_and_available(client, monkeypatch, tmp_path) 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-1")]
     all_msgs[0].msgid = "m-1"
     media_files = [_media_file(1, "downloaded", local_path=str(img_path))]
-    resp = _run_messages_query(client, app, all_msgs, media_files=media_files)
+    resp = _run_messages_query(client, app, db, all_msgs, media_files=media_files)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_status"] == "available"
     assert msg["media_url"] == "/api/conversations/room1/messages/m-1/media"
 
 
-def test_timeline_image_downloaded_disallowed_extension_not_available(client, monkeypatch, tmp_path) -> None:
+def test_timeline_image_downloaded_disallowed_extension_not_available(client, db: Session, monkeypatch, tmp_path) -> None:
     """RND-144 QA blocker regression: a downloaded row pointing at a real,
     safely-resolvable file with a disallowed extension (.bmp) must NOT be
     reported as media_status=="available" and must NOT get a media_url —
@@ -436,7 +451,7 @@ def test_timeline_image_downloaded_disallowed_extension_not_available(client, mo
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-1")]
     media_files = [_media_file(1, "downloaded", local_path=str(img_path))]
-    resp = _run_messages_query(client, app, all_msgs, media_files=media_files)
+    resp = _run_messages_query(client, app, db, all_msgs, media_files=media_files)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_status"] != "available"
@@ -445,7 +460,7 @@ def test_timeline_image_downloaded_disallowed_extension_not_available(client, mo
     assert str(img_path) not in resp.text
 
 
-def test_timeline_never_exposes_media_file_internal_fields(client, monkeypatch, tmp_path) -> None:
+def test_timeline_never_exposes_media_file_internal_fields(client, db: Session, monkeypatch, tmp_path) -> None:
     from app.main import app
 
     media_root = tmp_path / "media"
@@ -458,7 +473,7 @@ def test_timeline_never_exposes_media_file_internal_fields(client, monkeypatch, 
         _msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-should-never-appear")
     ]
     media_files = [_media_file(1, "downloaded", local_path=str(img_path))]
-    resp = _run_messages_query(client, app, all_msgs, media_files=media_files)
+    resp = _run_messages_query(client, app, db, all_msgs, media_files=media_files)
     assert resp.status_code == 200
     body_text = resp.text
     assert "sdk-should-never-appear" not in body_text
@@ -468,22 +483,22 @@ def test_timeline_never_exposes_media_file_internal_fields(client, monkeypatch, 
         assert forbidden_field not in msg
 
 
-def test_timeline_text_message_unchanged(client) -> None:
+def test_timeline_text_message_unchanged(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, content_text="hi", msgtype="text")]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "text"
     assert msg["media_url"] is None
 
 
-def test_timeline_unsupported_msgtype_unchanged(client) -> None:
+def test_timeline_unsupported_msgtype_unchanged(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="emotion")]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "unsupported"
@@ -662,7 +677,7 @@ def test_media_route_rejects_disallowed_extension(client, monkeypatch, media_rou
 
 
 def test_timeline_and_media_route_agree_on_disallowed_extension(
-    client, monkeypatch, tmp_path
+    client, db: Session, monkeypatch, tmp_path
 ) -> None:
     """End-to-end consistency check for the RND-144 QA blocker: for the same
     downloaded-but-disallowed-extension media_files row, the timeline API
@@ -680,7 +695,7 @@ def test_timeline_and_media_route_agree_on_disallowed_extension(
     msg = _msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-1")
     media_files = [_media_file(1, "downloaded", local_path=str(bmp_path))]
 
-    timeline_resp = _run_messages_query(client, app, [msg], media_files=media_files)
+    timeline_resp = _run_messages_query(client, app, db, [msg], media_files=media_files)
     assert timeline_resp.status_code == 200
     timeline_msg = timeline_resp.json()["messages"][0]
     assert timeline_msg["media_url"] is None

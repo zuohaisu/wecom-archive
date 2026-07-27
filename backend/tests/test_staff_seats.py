@@ -351,9 +351,6 @@ def test_monitored_accounts_ranks_active_seat_first_and_keeps_history(
 
     own_participation_times = {"real_wecom_user_001": 5000, "staff_old_account": 1000}
 
-    def fake_latest_own_participation(db, entity_id, tenant_id):
-        return own_participation_times.get(entity_id)
-
     def fake_fetch_messages(db, entity_id, tenant_id):
         if entity_id == "real_wecom_user_001":
             return [_msg(1, "real_wecom_user_001", msgtime=5000)]
@@ -366,11 +363,23 @@ def test_monitored_accounts_ranks_active_seat_first_and_keeps_history(
     # must be patched there. _fetch_messages_for_entity/_load_recipients_map
     # are not called by this endpoint (never were) — left patched on `conv`
     # as an inert no-op guard against a real DB call sneaking through.
+    # RND-191: latest_message_time is now resolved via the batched
+    # _batch_latest_own_participation_time (one call for every seat) rather
+    # than the singular per-seat _latest_own_participation_time.
     monkeypatch.setattr(listing_service, "_collect_staff_ids", fake_collect_staff_ids)
-    monkeypatch.setattr(listing_service, "_latest_own_participation_time", fake_latest_own_participation)
+    monkeypatch.setattr(
+        listing_service,
+        "_batch_latest_own_participation_time",
+        lambda db, tenant_id, entity_ids: {
+            eid: own_participation_times[eid] for eid in entity_ids if eid in own_participation_times
+        },
+    )
+    monkeypatch.setattr(
+        listing_service, "_batch_count_entity_conversations", lambda db, tenant_id, entity_ids, staff_ids=None: {eid: 1 for eid in entity_ids}
+    )
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_fetch_messages)
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(listing_service, "_load_display_names", lambda db, tenant_id: {})
+    monkeypatch.setattr(listing_service, "_load_display_names_for_ids", lambda db, tenant_id, ids: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty
@@ -431,7 +440,14 @@ def test_monitored_accounts_display_name_falls_back_when_contact_name_missing(
         listing_service, "_collect_staff_ids", lambda db, tenant_id: {"real_wecom_user_001"}
     )
     monkeypatch.setattr(
-        listing_service, "_latest_own_participation_time", lambda db, entity_id, tenant_id: 100
+        listing_service,
+        "_batch_latest_own_participation_time",
+        lambda db, tenant_id, entity_ids: {eid: 100 for eid in entity_ids},
+    )
+    monkeypatch.setattr(
+        listing_service,
+        "_batch_count_entity_conversations",
+        lambda db, tenant_id, entity_ids, staff_ids=None: {eid: 1 for eid in entity_ids},
     )
     monkeypatch.setattr(
         conv,
@@ -439,7 +455,7 @@ def test_monitored_accounts_display_name_falls_back_when_contact_name_missing(
         lambda db, entity_id, tenant_id: [_msg(1, entity_id, msgtime=100)],
     )
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(listing_service, "_load_display_names", lambda db, tenant_id: {})
+    monkeypatch.setattr(listing_service, "_load_display_names_for_ids", lambda db, tenant_id, ids: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty
@@ -555,55 +571,37 @@ def test_staff_sessions_sorted_by_latest_message_time_desc(client, monkeypatch) 
 # ---------------------------------------------------------------------------
 
 
-def test_conversation_messages_default_returns_latest_20_ascending(client) -> None:
+def test_conversation_messages_default_returns_latest_20_ascending(client, db: Session) -> None:
+    # RND-191: real SQLite-backed session, not a hand-rolled MagicMock db.
+    # resolve_timeline_page now resolves membership via a compact
+    # (id/sender/roomid/msgtime) projection and only hydrates the winning
+    # page to full ArchiveMessage rows (two distinct `db.query(...)` shapes
+    # instead of one) -- a mock keyed to a single canned `.all()` result
+    # regardless of which columns/ids were actually queried can no longer
+    # tell the two queries apart. A real DB does the filtering for real, so
+    # this is both simpler and a more faithful regression check.
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile, MessageRevocation
     from app.db.session import get_db
     from app.main import app
 
-    all_msgs = [
-        _msg(i, "staff_a" if i % 2 == 0 else "contact_b", roomid="room1", msgtime=1000 + i)
-        for i in range(25)
-    ]
+    for i in range(25):
+        _insert_message(
+            db,
+            id=i,
+            msgid=f"m-{i}",
+            sender="staff_a" if i % 2 == 0 else "contact_b",
+            roomid="room1",
+            msgtime=1000 + i,
+            msgtype="text",
+            content_text="",
+            seq=i,
+            tenant_id=_TENANT_A,
+        )
 
     def _override_db():
-        mock = MagicMock()
+        yield db
 
-        msg_q = MagicMock()
-        msg_q.filter.return_value = msg_q
-        msg_q.all.return_value = list(all_msgs)
-
-        rcpt_q = MagicMock()
-        rcpt_q.filter.return_value = rcpt_q
-        rcpt_q.all.return_value = []
-
-        contact_q = MagicMock()
-        contact_q.filter.return_value = contact_q
-        contact_q.all.return_value = []
-
-        media_q = MagicMock()
-        media_q.filter.return_value = media_q
-        media_q.all.return_value = []
-
-        revocation_q = MagicMock()
-        revocation_q.filter.return_value = revocation_q
-        revocation_q.all.return_value = []
-
-        def _query(model):
-            if model is ArchiveMessageRecipient:
-                return rcpt_q
-            if model is Contact:
-                return contact_q
-            if model is MediaFile:
-                return media_q
-            if model is MessageRevocation:
-                return revocation_q
-            return msg_q
-
-        mock.query.side_effect = _query
-        yield mock
-
-    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
+    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), _TENANT_A)
     app.dependency_overrides[get_db] = _override_db
     try:
         resp = client.get("/api/conversations/room1/messages")
@@ -650,49 +648,38 @@ def test_conversation_messages_requires_auth_still_blocked(client) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_messages_query(client, app, all_msgs, before=None, limit=20):
+def _run_messages_query(client, app, db, all_msgs, before=None, limit=20):
+    # RND-191: real SQLite-backed session -- see the docstring note on
+    # test_conversation_messages_default_returns_latest_20_ascending for
+    # why a MagicMock keyed to one canned `.all()` result can no longer
+    # stand in for resolve_timeline_page's two distinct query shapes
+    # (compact resolution, then page-only hydration). Idempotent seeding:
+    # this helper is called twice per test against the same `all_msgs`/`db`
+    # (once per pagination page), so already-inserted ids are skipped
+    # rather than re-inserted.
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile, MessageRevocation
     from app.db.session import get_db
 
+    existing_ids = {row[0] for row in db.query(ArchiveMessage.id).all()}
+    for m in all_msgs:
+        if m.id not in existing_ids:
+            _insert_message(
+                db,
+                id=m.id,
+                msgid=m.msgid,
+                sender=m.sender,
+                roomid=m.roomid,
+                msgtime=m.msgtime,
+                msgtype=m.msgtype,
+                content_text=m.content_text,
+                seq=m.id,
+                tenant_id=_TENANT_A,
+            )
+
     def _override_db():
-        mock = MagicMock()
+        yield db
 
-        msg_q = MagicMock()
-        msg_q.filter.return_value = msg_q
-        msg_q.all.return_value = list(all_msgs)
-
-        rcpt_q = MagicMock()
-        rcpt_q.filter.return_value = rcpt_q
-        rcpt_q.all.return_value = []
-
-        contact_q = MagicMock()
-        contact_q.filter.return_value = contact_q
-        contact_q.all.return_value = []
-
-        media_q = MagicMock()
-        media_q.filter.return_value = media_q
-        media_q.all.return_value = []
-
-        revocation_q = MagicMock()
-        revocation_q.filter.return_value = revocation_q
-        revocation_q.all.return_value = []
-
-        def _query(model):
-            if model is ArchiveMessageRecipient:
-                return rcpt_q
-            if model is Contact:
-                return contact_q
-            if model is MediaFile:
-                return media_q
-            if model is MessageRevocation:
-                return revocation_q
-            return msg_q
-
-        mock.query.side_effect = _query
-        yield mock
-
-    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
+    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), _TENANT_A)
     app.dependency_overrides[get_db] = _override_db
     try:
         url = f"/api/conversations/room1/messages?limit={limit}"
@@ -703,13 +690,13 @@ def _run_messages_query(client, app, all_msgs, before=None, limit=20):
         app.dependency_overrides.clear()
 
 
-def test_conversation_messages_pagination_survives_duplicate_msgtime(client) -> None:
+def test_conversation_messages_pagination_survives_duplicate_msgtime(client, db: Session) -> None:
     from app.main import app
 
     T = 5000
     all_msgs = [_msg(i, "staff_a", roomid="room1", msgtime=T) for i in range(21)]
 
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     data = resp.json()
     page1_ids = [m["msgid"] for m in data["messages"]]
@@ -718,7 +705,7 @@ def test_conversation_messages_pagination_survives_duplicate_msgtime(client) -> 
     cursor = data["pagination"]["next_before"]
     assert cursor is not None
 
-    resp2 = _run_messages_query(client, app, all_msgs, before=cursor)
+    resp2 = _run_messages_query(client, app, db, all_msgs, before=cursor)
     assert resp2.status_code == 200
     data2 = resp2.json()
     page2_ids = [m["msgid"] for m in data2["messages"]]
@@ -730,20 +717,20 @@ def test_conversation_messages_pagination_survives_duplicate_msgtime(client) -> 
     assert set(combined) == {m.msgid for m in all_msgs}
 
 
-def test_conversation_messages_pagination_mixed_timestamps_still_works(client) -> None:
+def test_conversation_messages_pagination_mixed_timestamps_still_works(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(i, "staff_a", roomid="room1", msgtime=1000) for i in range(10)]
     all_msgs += [_msg(i, "staff_a", roomid="room1", msgtime=1000 + i) for i in range(10, 25)]
 
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     data = resp.json()
     page1_ids = [m["msgid"] for m in data["messages"]]
     assert len(page1_ids) == 20
     assert data["pagination"]["has_older"] is True
     cursor = data["pagination"]["next_before"]
-    resp2 = _run_messages_query(client, app, all_msgs, before=cursor)
+    resp2 = _run_messages_query(client, app, db, all_msgs, before=cursor)
     assert resp2.status_code == 200
     data2 = resp2.json()
     page2_ids = [m["msgid"] for m in data2["messages"]]
@@ -763,10 +750,15 @@ def test_monitored_accounts_avoids_full_orm_materialization_for_conversation_cou
 ) -> None:
     """
     RND-158: /api/monitored-accounts must NOT call _fetch_messages_for_entity
-    for conversation-count computation. Instead it should call
-    _count_entity_conversations, which fetches a compact projection and
-    derives canonical conversation keys using the exact same
-    _derive_conversation_membership logic as the authoritative builder.
+    for conversation-count computation.
+
+    RND-191: conversation-count computation was further batched across all
+    seats in a single call (_batch_count_entity_conversations) instead of
+    one _count_entity_conversations call per seat, to eliminate the ~7*S
+    per-tenant query multiplier for S seats (RND-158 profiling identified
+    _latest_own_participation_time + _count_entity_conversations together
+    as ~7 queries per seat). This test now asserts the batched call happens
+    exactly once, covering every seat, rather than once per seat.
     """
     import app.routers.conversations as conv
     import app.services.listing_service as listing_service
@@ -781,20 +773,22 @@ def test_monitored_accounts_avoids_full_orm_materialization_for_conversation_cou
         old_fetch_called.append(entity_id)
         return []
 
-    def fake_count(db, entity_id, tenant_id, staff_ids=None):
-        count_called_with.append((entity_id, tenant_id))
-        return 5
+    def fake_batch_count(db, tenant_id, entity_ids, staff_ids=None):
+        count_called_with.append((frozenset(entity_ids), tenant_id))
+        return {eid: 5 for eid in entity_ids}
 
     monkeypatch.setattr(
         listing_service, "_collect_staff_ids", lambda db, tenant_id: {"staff_a", "staff_b"}
     )
     monkeypatch.setattr(
-        listing_service, "_latest_own_participation_time", lambda db, entity_id, tenant_id: 100
+        listing_service,
+        "_batch_latest_own_participation_time",
+        lambda db, tenant_id, entity_ids: {eid: 100 for eid in entity_ids},
     )
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_old_fetch)
-    monkeypatch.setattr(listing_service, "_count_entity_conversations", fake_count)
+    monkeypatch.setattr(listing_service, "_batch_count_entity_conversations", fake_batch_count)
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(listing_service, "_load_display_names", lambda db, tenant_id: {})
+    monkeypatch.setattr(listing_service, "_load_display_names_for_ids", lambda db, tenant_id, ids: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty
@@ -802,8 +796,9 @@ def test_monitored_accounts_avoids_full_orm_materialization_for_conversation_cou
         resp = client.get("/api/monitored-accounts")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(count_called_with) == 2
-        used_ids = {c[0] for c in count_called_with}
+        # Batched into a single call covering every seat, not one call per seat.
+        assert len(count_called_with) == 1
+        used_ids = count_called_with[0][0]
         assert used_ids == {"staff_a", "staff_b"}
         assert len(old_fetch_called) == 0
         by_id = {d["staff_id"]: d for d in data}
@@ -837,11 +832,22 @@ def _optimized_count(db: Session, entity_id: str, tenant_id: str, staff_ids=None
     return _count_entity_conversations(db, entity_id, tenant_id, staff_ids)
 
 
+def _batch_optimized_count(db: Session, entity_id: str, tenant_id: str, staff_ids=None) -> int:
+    """RND-191 batch path: same canonical count via
+    _batch_count_entity_conversations, called with a single-entity set so
+    every existing equivalence fixture below also exercises the batched
+    code path, not just the original per-entity one."""
+    from app.services.listing_service import _batch_count_entity_conversations
+    return _batch_count_entity_conversations(db, tenant_id, {entity_id}, staff_ids).get(entity_id, 0)
+
+
 def _assert_equivalence(db: Session, entity_id: str, tenant_id: str, msg: str, staff_ids=None) -> None:
     auth = _authoritative_count(db, entity_id, tenant_id)
     opt = _optimized_count(db, entity_id, tenant_id, staff_ids)
-    assert auth == opt, (
-        f"Equivalence failure for '{msg}': authoritative={auth}, optimized={opt} (staff_ids={staff_ids})"
+    batch = _batch_optimized_count(db, entity_id, tenant_id, staff_ids)
+    assert auth == opt == batch, (
+        f"Equivalence failure for '{msg}': authoritative={auth}, optimized={opt}, "
+        f"batch={batch} (staff_ids={staff_ids})"
     )
 
 
@@ -1046,6 +1052,95 @@ def test_equivalence_null_sender_with_recipients(db: Session) -> None:
 
 
 # ---------------------------------------------------------------------------
+# RND-191: _batch_count_entity_conversations / _batch_latest_own_
+# participation_time — multi-entity behavior the single-entity equivalence
+# fixtures above (each calling _batch_optimized_count with a set of exactly
+# one id) don't exercise: a group room's expansion is computed ONCE and
+# shared across every entity that touches it (see that function's
+# docstring) rather than once per entity, so these confirm sharing the
+# expansion doesn't leak one entity's membership into another's count.
+# ---------------------------------------------------------------------------
+
+
+def test_batch_count_entity_conversations_two_seats_share_group_room(db: Session) -> None:
+    """Two seats in the SAME group room -- expanded once by the batch call,
+    not once per seat -- must each still get their own correct count.
+    Only staff_a additionally has a private direct conversation."""
+    from app.services.listing_service import _batch_count_entity_conversations
+
+    msg1 = _insert_message(db, sender="staff_a", roomid="room_g1", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg1.id, "staff_b", tenant_id=_TENANT_A)
+    msg2 = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg2.id, "contact_zhangsan", tenant_id=_TENANT_A)
+
+    result = _batch_count_entity_conversations(
+        db, _TENANT_A, {"staff_a", "staff_b"}, {"staff_a", "staff_b"}
+    )
+    assert result["staff_a"] == 2  # room_g1 + direct with contact_zhangsan
+    assert result["staff_b"] == 1  # room_g1 only
+
+    # Cross-check against the original per-entity path for the same data.
+    from app.routers.conversations import _count_entity_conversations
+    assert result["staff_a"] == _count_entity_conversations(
+        db, "staff_a", _TENANT_A, {"staff_a", "staff_b"}
+    )
+    assert result["staff_b"] == _count_entity_conversations(
+        db, "staff_b", _TENANT_A, {"staff_a", "staff_b"}
+    )
+
+
+def test_batch_count_entity_conversations_handles_entity_with_no_participation(db: Session) -> None:
+    """An id in the batch request with zero archived participation must
+    resolve to 0, not be dropped or raise, even though other ids in the
+    same batch call do have data."""
+    from app.services.listing_service import _batch_count_entity_conversations
+
+    msg = _insert_message(db, sender="staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg.id, "contact_zhangsan", tenant_id=_TENANT_A)
+
+    result = _batch_count_entity_conversations(
+        db, _TENANT_A, {"staff_a", "staff_ghost"}, {"staff_a"}
+    )
+    assert result["staff_a"] == 1
+    assert result["staff_ghost"] == 0
+
+
+def test_batch_count_entity_conversations_empty_entity_ids() -> None:
+    from app.services.listing_service import _batch_count_entity_conversations
+
+    assert _batch_count_entity_conversations(MagicMock(), _TENANT_A, set()) == {}
+
+
+def test_batch_latest_own_participation_time_matches_singular(db: Session) -> None:
+    """The batched max(sender, recipient) time for several entities in one
+    call must match calling the original singular function once per
+    entity, and an entity with no rows at all is simply absent."""
+    from app.services.listing_service import (
+        _batch_latest_own_participation_time,
+        _latest_own_participation_time,
+    )
+
+    msg1 = _insert_message(db, sender="staff_a", msgtime=100, tenant_id=_TENANT_A)
+    msg2 = _insert_message(db, sender="staff_b", msgtime=50, tenant_id=_TENANT_A)
+    _insert_recipient(db, msg2.id, "staff_a", tenant_id=_TENANT_A)
+    _insert_recipient(db, msg1.id, "staff_c", tenant_id=_TENANT_A)
+
+    batch = _batch_latest_own_participation_time(
+        db, _TENANT_A, {"staff_a", "staff_b", "staff_c", "staff_ghost"}
+    )
+    assert batch.get("staff_a") == _latest_own_participation_time(db, "staff_a", _TENANT_A) == 100
+    assert batch.get("staff_b") == _latest_own_participation_time(db, "staff_b", _TENANT_A) == 50
+    assert batch.get("staff_c") == _latest_own_participation_time(db, "staff_c", _TENANT_A) == 100
+    assert "staff_ghost" not in batch
+
+
+def test_batch_latest_own_participation_time_empty_entity_ids() -> None:
+    from app.services.listing_service import _batch_latest_own_participation_time
+
+    assert _batch_latest_own_participation_time(MagicMock(), _TENANT_A, set()) == {}
+
+
+# ---------------------------------------------------------------------------
 # _latest_own_participation_time — unit tests (mock-based)
 # ---------------------------------------------------------------------------
 
@@ -1141,9 +1236,6 @@ def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
 
     own_participation_times = {"staff_a": T1, "staff_b": T_ACTIVE}
 
-    def fake_latest_own_participation(db, entity_id, tenant_id):
-        return own_participation_times.get(entity_id)
-
     def fake_fetch_messages(db, entity_id, tenant_id):
         if entity_id == "staff_a":
             return [
@@ -1157,11 +1249,21 @@ def test_monitored_accounts_active_history_not_polluted_by_group_expansion(
     monkeypatch.setattr(
         listing_service, "_collect_staff_ids", lambda db, tenant_id: {"staff_a", "staff_b"}
     )
-    monkeypatch.setattr(listing_service, "_latest_own_participation_time", fake_latest_own_participation)
-    monkeypatch.setattr(listing_service, "_count_entity_conversations", lambda db, eid, tid, staff_ids=None: 1)
+    monkeypatch.setattr(
+        listing_service,
+        "_batch_latest_own_participation_time",
+        lambda db, tenant_id, entity_ids: {
+            eid: own_participation_times[eid] for eid in entity_ids if eid in own_participation_times
+        },
+    )
+    monkeypatch.setattr(
+        listing_service,
+        "_batch_count_entity_conversations",
+        lambda db, tenant_id, entity_ids, staff_ids=None: {eid: 1 for eid in entity_ids},
+    )
     monkeypatch.setattr(conv, "_fetch_messages_for_entity", fake_fetch_messages)
     monkeypatch.setattr(conv, "_load_recipients_map", lambda db, tenant_id, ids: {})
-    monkeypatch.setattr(listing_service, "_load_display_names", lambda db, tenant_id: {})
+    monkeypatch.setattr(listing_service, "_load_display_names_for_ids", lambda db, tenant_id, ids: {})
 
     app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
     app.dependency_overrides[get_db] = _override_db_empty

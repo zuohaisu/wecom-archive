@@ -136,6 +136,21 @@ class AdminUser(Base):
         UniqueConstraint(
             "tenant_id", "wecom_user_id", name="uq_admin_users_tenant_wecom"
         ),
+        # RND-191: pg_trgm GIN indexes so search_contacts' ILIKE '%term%'
+        # predicates (app/routers/search.py) are index-backed instead of a
+        # sequential scan. See migration 0013.
+        Index(
+            "ix_admin_users_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_admin_users_wecom_user_id_trgm",
+            "wecom_user_id",
+            postgresql_using="gin",
+            postgresql_ops={"wecom_user_id": "gin_trgm_ops"},
+        ),
     )
 
     id = Column(String(36), primary_key=True)
@@ -276,6 +291,31 @@ class ArchiveMessage(Base):
             "structured_content",
             postgresql_using="gin",
         ),
+        # RND-191: pg_trgm GIN index so search_messages' ILIKE '%term%'
+        # predicate (app/routers/search.py) is index-backed -- the FTS GIN
+        # index above only supports to_tsvector(...) @@ to_tsquery(...)
+        # matching, never a plain ILIKE substring predicate, so ILIKE was
+        # falling back to a sequential scan. Same substring/case-
+        # insensitive matching semantics as before; only the query plan
+        # changes. See migration 0013.
+        Index(
+            "ix_archive_messages_content_text_trgm",
+            "content_text",
+            postgresql_using="gin",
+            postgresql_ops={"content_text": "gin_trgm_ops"},
+        ),
+        # RND-191: tenant_id-leading composite indexes for the hot,
+        # always-tenant-scoped query shapes -- see migration 0013's
+        # docstring for why a composite beats intersecting single-column
+        # indexes here.
+        Index("ix_archive_messages_tenant_msgtime_id", "tenant_id", "msgtime", "id"),
+        Index("ix_archive_messages_tenant_roomid", "tenant_id", "roomid"),
+        Index(
+            "ix_archive_messages_tenant_decrypt_revoked",
+            "tenant_id",
+            "decrypt_status",
+            "is_revoked",
+        ),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -336,6 +376,16 @@ class ArchiveMessageRecipient(Base):
     """
 
     __tablename__ = "archive_message_recipients"
+    __table_args__ = (
+        # RND-191: composite index for the recipient-side membership/
+        # participation lookups (tenant_id + receiver_userid always filter
+        # together) -- see migration 0013.
+        Index(
+            "ix_archive_message_recipients_tenant_receiver",
+            "tenant_id",
+            "receiver_userid",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     message_id = Column(
@@ -613,6 +663,21 @@ class Contact(Base):
     __table_args__ = (
         UniqueConstraint(
             "tenant_id", "wecom_userid", name="uq_contacts_tenant_wecom_userid"
+        ),
+        # RND-191: pg_trgm GIN indexes so search_contacts' ILIKE '%term%'
+        # predicates (app/routers/search.py) are index-backed instead of a
+        # sequential scan. See migration 0013.
+        Index(
+            "ix_contacts_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_contacts_wecom_userid_trgm",
+            "wecom_userid",
+            postgresql_using="gin",
+            postgresql_ops={"wecom_userid": "gin_trgm_ops"},
         ),
     )
 

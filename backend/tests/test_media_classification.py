@@ -25,8 +25,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.orm import Session
 
-from tests.test_staff_seats import _msg
+from app.db.models import ArchiveMessage
+from tests.test_staff_seats import _TENANT_A, _insert_message, _insert_recipient, _msg, db  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -147,49 +149,41 @@ def client():
         yield c
 
 
-def _run_messages_query(client, app, all_msgs, conversation_id="room1"):
+def _run_messages_query(client, app, db: Session, all_msgs, conversation_id="room1"):
+    # RND-191: real SQLite-backed session, not a hand-rolled MagicMock db --
+    # see the docstring note on
+    # test_conversation_messages_default_returns_latest_20_ascending in
+    # test_staff_seats.py for why a MagicMock keyed to one canned `.all()`
+    # result can no longer stand in for resolve_timeline_page's two
+    # distinct query shapes (compact membership resolution, then
+    # page-only hydration). Idempotent seeding: skips ids already present
+    # so repeated calls against the same db/all_msgs are safe.
     from app.auth import get_current_user
-    from app.db.models import ArchiveMessageRecipient, Contact, MediaFile, MessageRevocation
     from app.db.session import get_db
 
+    existing_ids = {row[0] for row in db.query(ArchiveMessage.id).all()}
+    for m in all_msgs:
+        if m.id not in existing_ids:
+            _insert_message(
+                db,
+                id=m.id,
+                msgid=m.msgid,
+                sender=m.sender,
+                roomid=m.roomid,
+                msgtime=m.msgtime,
+                msgtype=m.msgtype,
+                content_text=m.content_text,
+                sdkfileid=getattr(m, "sdkfileid", None),
+                decrypt_status=getattr(m, "decrypt_status", "success"),
+                structured_content=getattr(m, "structured_content", None),
+                seq=m.id,
+                tenant_id=_TENANT_A,
+            )
+
     def _override_db():
-        mock = MagicMock()
+        yield db
 
-        msg_q = MagicMock()
-        msg_q.filter.return_value = msg_q
-        msg_q.all.return_value = list(all_msgs)
-
-        rcpt_q = MagicMock()
-        rcpt_q.filter.return_value = rcpt_q
-        rcpt_q.all.return_value = []
-
-        contact_q = MagicMock()
-        contact_q.filter.return_value = contact_q
-        contact_q.all.return_value = []
-
-        media_q = MagicMock()
-        media_q.filter.return_value = media_q
-        media_q.all.return_value = []
-
-        revocation_q = MagicMock()
-        revocation_q.filter.return_value = revocation_q
-        revocation_q.all.return_value = []
-
-        def _query(model):
-            if model is ArchiveMessageRecipient:
-                return rcpt_q
-            if model is Contact:
-                return contact_q
-            if model is MediaFile:
-                return media_q
-            if model is MessageRevocation:
-                return revocation_q
-            return msg_q
-
-        mock.query.side_effect = _query
-        yield mock
-
-    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), "tenant-a")
+    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), _TENANT_A)
     app.dependency_overrides[get_db] = _override_db
     try:
         return client.get(f"/api/conversations/{conversation_id}/messages")
@@ -197,11 +191,11 @@ def _run_messages_query(client, app, all_msgs, conversation_id="room1"):
         app.dependency_overrides.clear()
 
 
-def test_timeline_text_message_media_fields(client) -> None:
+def test_timeline_text_message_media_fields(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, content_text="hello", msgtype="text")]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["content_text"] == "hello"
@@ -210,35 +204,35 @@ def test_timeline_text_message_media_fields(client) -> None:
     assert msg["unsupported_reason"] is None
 
 
-def test_timeline_image_with_sdkfileid_not_downloaded(client) -> None:
+def test_timeline_image_with_sdkfileid_not_downloaded(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [
         _msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid="sdk-abc123")
     ]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "image"
     assert msg["media_status"] == "not_downloaded"
 
 
-def test_timeline_image_without_sdkfileid_unknown_status(client) -> None:
+def test_timeline_image_without_sdkfileid_unknown_status(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="image", sdkfileid=None)]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "image"
     assert msg["media_status"] == "unknown"
 
 
-def test_timeline_video_placeholder_status(client) -> None:
+def test_timeline_video_placeholder_status(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="video", sdkfileid="sdk-v1")]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "video"
@@ -246,11 +240,11 @@ def test_timeline_video_placeholder_status(client) -> None:
     assert msg["unsupported_reason"]
 
 
-def test_timeline_voice_placeholder_status(client) -> None:
+def test_timeline_voice_placeholder_status(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="voice", sdkfileid="sdk-a1")]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "voice"
@@ -258,28 +252,32 @@ def test_timeline_voice_placeholder_status(client) -> None:
     assert msg["unsupported_reason"]
 
 
-def test_timeline_direct_voice_empty_text_still_serialized(client, monkeypatch) -> None:
-    import app.services.timeline_service as timeline_service
-
+def test_timeline_direct_voice_empty_text_still_serialized(client, db: Session) -> None:
+    # RND-191: resolve_timeline_page resolves conversation membership via
+    # _fetch_conversation_messages_compact now, not the legacy
+    # _fetch_conversation_messages this test used to monkeypatch -- that
+    # patch target is dead code on the new path (only
+    # _resolve_timeline_page_legacy still calls it), so a real direct
+    # message + recipient row is inserted instead to make
+    # "direct__contact_a___staff_a" resolve for real.
     from app.main import app
 
-    msg = _msg(
-        1,
-        "staff_a",
+    msg = _insert_message(
+        db,
+        id=1,
+        msgid="m-1",
+        sender="staff_a",
         roomid=None,
         msgtime=1000,
-        content_text=None,
         msgtype="voice",
+        content_text=None,
         sdkfileid="redacted-media-id",
+        seq=1,
+        tenant_id=_TENANT_A,
     )
-    # RND-220: resolve_timeline_page's implementation (and its own call to
-    # _fetch_conversation_messages) now lives in app.services.timeline_service,
-    # not app.routers.conversations (which only re-exports the function
-    # object) -- patch the name where it is actually looked up at call time.
-    monkeypatch.setattr(
-        timeline_service, "_fetch_conversation_messages", lambda db, cid, tenant_id, **kwargs: [msg]
-    )
-    resp = _run_messages_query(client, app, [], conversation_id="direct__contact_a___staff_a")
+    _insert_recipient(db, msg.id, "contact_a", tenant_id=_TENANT_A)
+
+    resp = _run_messages_query(client, app, db, [], conversation_id="direct__contact_a___staff_a")
     assert resp.status_code == 200
     data = resp.json()["messages"]
     assert len(data) == 1
@@ -293,7 +291,7 @@ def test_timeline_direct_voice_empty_text_still_serialized(client, monkeypatch) 
     assert data[0]["roomid"] is None
 
 
-def test_timeline_group_voice_empty_text_still_serialized(client) -> None:
+def test_timeline_group_voice_empty_text_still_serialized(client, db: Session) -> None:
     from app.main import app
 
     msg = _msg(
@@ -305,7 +303,7 @@ def test_timeline_group_voice_empty_text_still_serialized(client) -> None:
         msgtype="voice",
         sdkfileid="redacted-media-id",
     )
-    resp = _run_messages_query(client, app, [msg])
+    resp = _run_messages_query(client, app, db, [msg])
     assert resp.status_code == 200
     data = resp.json()["messages"]
     assert len(data) == 1
@@ -319,11 +317,11 @@ def test_timeline_group_voice_empty_text_still_serialized(client) -> None:
     assert data[0]["roomid"] == "room1"
 
 
-def test_timeline_file_placeholder_status(client) -> None:
+def test_timeline_file_placeholder_status(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="file", sdkfileid="sdk-f1")]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "file"
@@ -331,29 +329,29 @@ def test_timeline_file_placeholder_status(client) -> None:
     assert msg["unsupported_reason"]
 
 
-def test_timeline_unsupported_msgtype(client) -> None:
+def test_timeline_unsupported_msgtype(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="emotion")]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "unsupported"
     assert msg["unsupported_reason"] == "unsupported_msgtype"
 
 
-def test_timeline_missing_msgtype(client) -> None:
+def test_timeline_missing_msgtype(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [_msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype=None)]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     msg = resp.json()["messages"][0]
     assert msg["media_type"] == "unknown"
     assert msg["unsupported_reason"] == "missing_msgtype"
 
 
-def test_timeline_never_exposes_raw_media_identifiers(client) -> None:
+def test_timeline_never_exposes_raw_media_identifiers(client, db: Session) -> None:
     """
     The timeline response must never leak sdkfileid, local_path, oss_key, or
     any encrypted/decrypted payload field — only the safe classification
@@ -371,7 +369,7 @@ def test_timeline_never_exposes_raw_media_identifiers(client) -> None:
             sdkfileid="sdk-should-never-appear",
         )
     ]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     body_text = resp.text
     assert "sdk-should-never-appear" not in body_text
@@ -386,7 +384,7 @@ def test_timeline_never_exposes_raw_media_identifiers(client) -> None:
         assert forbidden_field not in msg
 
 
-def test_timeline_exposes_registry_metadata_and_structured_content_fields(client) -> None:
+def test_timeline_exposes_registry_metadata_and_structured_content_fields(client, db: Session) -> None:
     """RND-197: TimelineMessageOut must carry the Message Type Registry
     metadata plus the parsed structured_content.fields — not the raw
     sub-payload (security requirement, see the "raw" exclusion test
@@ -399,7 +397,7 @@ def test_timeline_exposes_registry_metadata_and_structured_content_fields(client
         "raw": {"title": "Example", "link_url": "https://example.com"},
         "parse_warnings": [],
     }
-    resp = _run_messages_query(client, app, [msg])
+    resp = _run_messages_query(client, app, db, [msg])
     assert resp.status_code == 200
     out = resp.json()["messages"][0]
     assert out["normalized_type"] == "link"
@@ -412,20 +410,20 @@ def test_timeline_exposes_registry_metadata_and_structured_content_fields(client
     assert "raw" not in out["structured_content"]
 
 
-def test_timeline_structured_content_null_for_historical_rows_without_it(client) -> None:
+def test_timeline_structured_content_null_for_historical_rows_without_it(client, db: Session) -> None:
     from app.main import app
 
     msg = _msg(1, "staff_a", roomid="room1", msgtime=1000, msgtype="link")
     # No structured_content attribute set at all — mirrors a historical
     # row from before this migration existed.
-    resp = _run_messages_query(client, app, [msg])
+    resp = _run_messages_query(client, app, db, [msg])
     assert resp.status_code == 200
     out = resp.json()["messages"][0]
     assert out["structured_content"] is None
     assert out["normalized_type"] == "link"
 
 
-def test_timeline_never_exposes_structured_content_raw_sub_payload(client) -> None:
+def test_timeline_never_exposes_structured_content_raw_sub_payload(client, db: Session) -> None:
     """Security requirement: the type-specific raw sub-payload preserved
     server-side must never reach the API response."""
     from app.main import app
@@ -436,7 +434,7 @@ def test_timeline_never_exposes_structured_content_raw_sub_payload(client) -> No
         "raw": {"latitude": 1.0, "longitude": 2.0, "title": "Office", "some_internal_field": "secret-raw-value"},
         "parse_warnings": [],
     }
-    resp = _run_messages_query(client, app, [msg])
+    resp = _run_messages_query(client, app, db, [msg])
     assert resp.status_code == 200
     assert "secret-raw-value" not in resp.text
     assert "raw" not in resp.json()["messages"][0]["structured_content"]
@@ -451,7 +449,7 @@ def test_timeline_docmsg_and_audio_doc_report_partial_structured_card() -> None:
         assert meta["renderer_strategy"] == "structured_card"
 
 
-def test_timeline_voice_never_exposes_raw_media_identifiers(client) -> None:
+def test_timeline_voice_never_exposes_raw_media_identifiers(client, db: Session) -> None:
     from app.main import app
 
     all_msgs = [
@@ -464,7 +462,7 @@ def test_timeline_voice_never_exposes_raw_media_identifiers(client) -> None:
             sdkfileid="redacted-media-id",
         )
     ]
-    resp = _run_messages_query(client, app, all_msgs)
+    resp = _run_messages_query(client, app, db, all_msgs)
     assert resp.status_code == 200
     body_text = resp.text
     assert "redacted-media-id" not in body_text

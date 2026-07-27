@@ -18,15 +18,17 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.conversation_membership import (
     _fetch_conversation_messages,
+    _fetch_conversation_messages_compact,
     _is_valid_roomid,
     _load_display_names,
+    _load_display_names_for_ids,
     _load_recipients_map,
 )
-from app.db.models import MediaFile, MessageRevocation
+from app.db.models import ArchiveMessage, MediaFile, MessageRevocation
 from app.display_names import resolve_person_display_name
 from app.media_classification import classify_media, resolve_downloadable_media_status
 from app.media_download import NESTED_MEDIA_MSGTYPES, iter_nested_media_refs
@@ -518,6 +520,48 @@ def _thumbnail_timeline_fields(
     )
 
 
+def _hydrate_timeline_page_messages(
+    db: Session, tenant_id: str, page_ids: list[int]
+) -> list[ArchiveMessage]:
+    """RND-191: fetch full ArchiveMessage rows for exactly the ids on this
+    timeline page (typically `limit`, e.g. 20), projected via load_only to
+    the columns resolve_timeline_page actually reads. Deliberately excludes
+    raw_encrypted_payload/encrypt_random_key/encrypt_chat_msg/
+    decrypted_payload -- the encrypted-envelope and raw-decrypt columns
+    nothing in the timeline rendering path below reads (content_text/
+    structured_content are the already-extracted fields it uses instead).
+    Ordered to match page_compact's (msgtime, id) ascending order, since
+    callers rely on page[0] for the pagination cursor and on `page`'s
+    overall order being oldest-first."""
+    if not page_ids:
+        return []
+    return (
+        db.query(ArchiveMessage)
+        .options(
+            load_only(
+                ArchiveMessage.id,
+                ArchiveMessage.msgid,
+                ArchiveMessage.sender,
+                ArchiveMessage.roomid,
+                ArchiveMessage.msgtime,
+                ArchiveMessage.msgtype,
+                ArchiveMessage.content_text,
+                ArchiveMessage.decrypt_status,
+                ArchiveMessage.sdkfileid,
+                ArchiveMessage.structured_content,
+                ArchiveMessage.is_revoked,
+                ArchiveMessage.revoked_at,
+            )
+        )
+        .filter(
+            ArchiveMessage.id.in_(page_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .order_by(ArchiveMessage.msgtime.asc(), ArchiveMessage.id.asc())
+        .all()
+    )
+
+
 def resolve_timeline_page(
     db: Session,
     tenant_id: str,
@@ -579,25 +623,33 @@ def resolve_timeline_page(
             status_code=400, detail="conversation_type must be 'direct' or 'group'"
         )
 
-    messages = _fetch_conversation_messages(
+    # RND-191: resolve membership as a compact (id, sender, roomid, msgtime)
+    # projection, not full ArchiveMessage rows -- see
+    # _fetch_conversation_messages_compact's module note. A conversation
+    # with thousands of messages no longer means materializing thousands of
+    # rows' raw_encrypted_payload/decrypted_payload/structured_content on
+    # every single page request; only the `limit`-sized page actually
+    # rendered below is ever hydrated to a full row (_hydrate_timeline_page_
+    # messages, after pagination has already picked which ids those are).
+    compact_messages = _fetch_conversation_messages_compact(
         db, conversation_id, tenant_id, mode=mode, entity_id=entity_id
     )
 
-    if not messages:
+    if not compact_messages:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     # RND-158 Phase 2 QA round 7 (blocker 5, conversation_type policy):
     # cross-check the caller-supplied hint against the type
-    # _fetch_conversation_messages actually resolved for this id/entity
-    # context -- group if any resolved message carries a real roomid
-    # (_is_valid_roomid, the same truthiness rule
+    # _fetch_conversation_messages_compact actually resolved for this
+    # id/entity context -- group if any resolved message carries a real
+    # roomid (_is_valid_roomid, the same truthiness rule
     # _derive_conversation_membership uses), direct otherwise. A mismatch
     # means the caller's cached/stale conversation_type no longer matches
     # this bucket (e.g. an entity-scoped collision resolved to the other
     # side) -- surfaced as 400 rather than silently served under the
     # wrong assumption.
     resolved_conversation_type = (
-        "group" if any(_is_valid_roomid(m.roomid) for m in messages) else "direct"
+        "group" if any(_is_valid_roomid(m.roomid) for m in compact_messages) else "direct"
     )
     if conversation_type is not None and conversation_type != resolved_conversation_type:
         raise HTTPException(
@@ -608,41 +660,60 @@ def resolve_timeline_page(
             ),
         )
 
-    recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
-    display_names = _load_display_names(db, tenant_id)
-
     # RND-158 Phase 2 QA round 7 (blocker 3, media context propagation):
-    # precompute the entity-context query-string suffix (mode/staff_id/
-    # contact_id) carried by every media URL this response generates.
-    # conversation_type is DELIBERATELY NOT included here (RND-226 fix):
-    # it must be derived PER MESSAGE from each message's own roomid
-    # ("group" if _is_valid_roomid(roomid) else "direct"), because a
-    # collision bucket can contain both a direct message and a group
-    # message and stamping the bucket-level value onto every node would
-    # make the resolver (which checks conversation_type against that
-    # specific message's roomid) reject the mismatched side. The per-message
-    # conversation_type is re-attached at each media-URL construction site
-    # below via _entity_context_query_string(mode, staff_id, contact_id,
-    # per_message_type). Empty ("") when no entity context was supplied on
-    # this request -- generated media URLs are then byte-identical to
-    # previous rounds' behavior. The per-message conversation_type is
-    # re-attached at each media-URL construction site below via
-    # _entity_context_query_string(mode, staff_id, contact_id,
-    # per_message_type).
+    # the entity-context query-string suffix (mode/staff_id/contact_id)
+    # carried by every media URL this response generates is derived PER
+    # MESSAGE below, not once here. conversation_type is DELIBERATELY NOT
+    # included in that per-message derivation (RND-226 fix): it must come
+    # from each message's own roomid ("group" if _is_valid_roomid(roomid)
+    # else "direct"), because a collision bucket can contain both a direct
+    # message and a group message and stamping the bucket-level value onto
+    # every node would make the resolver (which checks conversation_type
+    # against that specific message's roomid) reject the mismatched side.
+    # The per-message conversation_type is attached at each media-URL
+    # construction site below via _entity_context_query_string(mode,
+    # staff_id, contact_id, per_message_type). Empty ("") when no entity
+    # context was supplied on this request -- generated media URLs are then
+    # byte-identical to previous rounds' behavior.
 
-    all_sorted_asc = sorted(messages, key=lambda m: (m.msgtime or 0, m.id))
+    all_sorted_asc = sorted(compact_messages, key=lambda m: (m.msgtime or 0, m.id))
     if before is not None:
         cursor = _decode_message_cursor(before)
         eligible = [m for m in all_sorted_asc if (m.msgtime or 0, m.id) < cursor]
     else:
         eligible = all_sorted_asc
 
-    page = eligible[-limit:] if len(eligible) > limit else eligible
+    page_compact = eligible[-limit:] if len(eligible) > limit else eligible
 
     has_older = len(eligible) > limit
     next_before = (
-        _encode_message_cursor(page[0].msgtime, page[0].id) if page and has_older else None
+        _encode_message_cursor(page_compact[0].msgtime, page_compact[0].id)
+        if page_compact and has_older
+        else None
     )
+
+    page = _hydrate_timeline_page_messages(db, tenant_id, [m.id for m in page_compact])
+
+    # RND-191: recipients_map/display_names are scoped to this page's
+    # participants only (senders, recipients, and any 名片/business-card
+    # referenced contact -- see the card check below), not every
+    # participant in the whole conversation -- the whole-conversation
+    # unscoped versions this replaced cost more the larger the conversation
+    # or the tenant's contact list, for output that only ever needs
+    # `limit`-many messages' worth of names.
+    recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in page])
+    participant_ids: set[str] = set()
+    for msg in page:
+        if msg.sender:
+            participant_ids.add(msg.sender)
+        participant_ids.update(recipients_map.get(msg.id, []))
+        if msg.msgtype == "card":
+            raw_structured = getattr(msg, "structured_content", None)
+            if isinstance(raw_structured, dict):
+                card_fields = raw_structured.get("fields")
+                if isinstance(card_fields, dict) and card_fields.get("userid"):
+                    participant_ids.add(card_fields["userid"])
+    display_names = _load_display_names_for_ids(db, tenant_id, participant_ids)
 
     media_files_map = _load_media_files_map(db, tenant_id, [m.id for m in page])
     revocations = _load_revocations_map(db, tenant_id, [m.id for m in page])

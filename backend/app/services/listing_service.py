@@ -28,7 +28,6 @@ from app.conversation_membership import (
     _entity_seed_ids,
     _is_staff,
     _is_valid_roomid,
-    _load_display_names,
     _load_display_names_for_ids,
     _staff_ids_for_participants,
 )
@@ -236,6 +235,174 @@ def _latest_own_participation_time(
     )
     candidates = [v for v in (sender_max, recipient_max) if v is not None]
     return max(candidates) if candidates else None
+
+
+def _batch_latest_own_participation_time(
+    db: Session, tenant_id: str, entity_ids: set[str]
+) -> dict[str, int]:
+    """Batch counterpart to _latest_own_participation_time: the identical
+    max(sender-side msgtime, recipient-side msgtime) result for every id in
+    entity_ids, computed with two GROUP BY queries total instead of two
+    queries PER id. Used ONLY by list_monitored_accounts (RND-191), which
+    previously called _latest_own_participation_time once per seat -- 2*S
+    queries for S seats. Absent ids (no participation at all) are simply
+    missing from the returned dict, matching the singular function's None
+    return for that case."""
+    if not entity_ids:
+        return {}
+    entity_list = list(entity_ids)
+    result: dict[str, int] = {}
+    for uid, max_time in (
+        db.query(ArchiveMessage.sender, func.max(ArchiveMessage.msgtime))
+        .filter(
+            ArchiveMessage.sender.in_(entity_list),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .group_by(ArchiveMessage.sender)
+        .all()
+    ):
+        if max_time is not None:
+            result[uid] = max_time
+    for uid, max_time in (
+        db.query(ArchiveMessageRecipient.receiver_userid, func.max(ArchiveMessage.msgtime))
+        .join(ArchiveMessage, ArchiveMessage.id == ArchiveMessageRecipient.message_id)
+        .filter(
+            ArchiveMessageRecipient.receiver_userid.in_(entity_list),
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .group_by(ArchiveMessageRecipient.receiver_userid)
+        .all()
+    ):
+        if max_time is not None and (uid not in result or max_time > result[uid]):
+            result[uid] = max_time
+    return result
+
+
+def _batch_count_entity_conversations(
+    db: Session,
+    tenant_id: str,
+    entity_ids: set[str],
+    staff_ids: Optional[set[str]] = None,
+) -> dict[str, int]:
+    """Batch counterpart to _count_entity_conversations: the identical
+    canonical-conversation count for every id in entity_ids, computed with
+    a small constant number of queries instead of the ~5-6 queries PER id
+    _count_entity_conversations/_compact_entity_messages issue. Used ONLY
+    by list_monitored_accounts (RND-191), which previously called
+    _count_entity_conversations once per seat -- roughly 5-6*S queries for
+    S seats.
+
+    Mirrors _compact_entity_messages's seed-then-expand-then-derive logic
+    (same canonical _derive_conversation_membership call, same group-room
+    expansion rule) exactly, but computed for every entity in one pass: a
+    group room shared by several seats is expanded once here, not once per
+    seat that happens to touch it.
+    """
+    if not entity_ids:
+        return {}
+    entity_list = list(entity_ids)
+
+    seed_ids_by_entity: dict[str, set[int]] = {eid: set() for eid in entity_list}
+    for mid, sender in (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender)
+        .filter(
+            ArchiveMessage.sender.in_(entity_list),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    ):
+        seed_ids_by_entity[sender].add(mid)
+    for mid, uid in (
+        db.query(ArchiveMessageRecipient.message_id, ArchiveMessageRecipient.receiver_userid)
+        .filter(
+            ArchiveMessageRecipient.receiver_userid.in_(entity_list),
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+        )
+        .all()
+    ):
+        seed_ids_by_entity[uid].add(mid)
+
+    all_seed_ids: set[int] = set()
+    for ids in seed_ids_by_entity.values():
+        all_seed_ids.update(ids)
+    if not all_seed_ids:
+        return {eid: 0 for eid in entity_list}
+
+    # (sender, roomid) for every seed message, one query -- extended below
+    # with every group-room message's (sender, roomid) too, so this one map
+    # covers every message id either loop below needs to classify.
+    row_by_id: dict[int, tuple[Optional[str], Optional[str]]] = {
+        r[0]: (r[1], r[2])
+        for r in db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+        .filter(
+            ArchiveMessage.id.in_(all_seed_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    }
+
+    group_rooms_by_entity: dict[str, set[str]] = {}
+    all_group_rooms: set[str] = set()
+    for eid, ids in seed_ids_by_entity.items():
+        rooms = {
+            row_by_id[mid][1]
+            for mid in ids
+            if mid in row_by_id and _is_valid_roomid(row_by_id[mid][1])
+        }
+        group_rooms_by_entity[eid] = rooms
+        all_group_rooms.update(rooms)
+
+    room_ids_by_room: dict[str, set[int]] = {room: set() for room in all_group_rooms}
+    if all_group_rooms:
+        for mid, sender, roomid in (
+            db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+            .filter(
+                ArchiveMessage.roomid.in_(all_group_rooms),
+                ArchiveMessage.tenant_id == tenant_id,
+            )
+            .all()
+        ):
+            room_ids_by_room[roomid].add(mid)
+            row_by_id[mid] = (sender, roomid)
+
+    final_ids_by_entity: dict[str, set[int]] = {}
+    all_final_ids: set[int] = set()
+    for eid in entity_list:
+        direct_ids = {
+            mid
+            for mid in seed_ids_by_entity.get(eid, set())
+            if mid in row_by_id and not _is_valid_roomid(row_by_id[mid][1])
+        }
+        expanded_ids: set[int] = set()
+        for room in group_rooms_by_entity.get(eid, set()):
+            expanded_ids.update(room_ids_by_room.get(room, set()))
+        final_ids = direct_ids | expanded_ids
+        final_ids_by_entity[eid] = final_ids
+        all_final_ids.update(final_ids)
+
+    if not all_final_ids:
+        return {eid: 0 for eid in entity_list}
+
+    recipients_map = _load_recipients_map_compact(db, tenant_id, list(all_final_ids))
+
+    def is_staff(uid: str) -> bool:
+        if staff_ids is not None:
+            return uid in staff_ids
+        return uid.startswith("staff_")
+
+    result: dict[str, int] = {}
+    for eid in entity_list:
+        canonical_keys: set[str] = set()
+        for mid in final_ids_by_entity[eid]:
+            sender, roomid = row_by_id.get(mid, (None, None))
+            recipients = recipients_map.get(mid, [])
+            conv_id, _conv_type, _staff_set, _contact_set = _derive_conversation_membership(
+                sender, roomid, recipients, is_staff
+            )
+            canonical_keys.add(conv_id)
+        result[eid] = len(canonical_keys)
+    return result
 
 
 def _fetch_compact_messages_for_entity(
@@ -544,47 +711,44 @@ def list_monitored_accounts(db: Session, tenant_id: str) -> list[MonitoredAccoun
     seat-roster source.
 
     latest_message_time (and therefore active/history ranking) is computed
-    from _latest_own_participation_time() — each seat's own sender/recipient
-    rows only, never the group-room-expanded set _fetch_messages_for_entity()
-    returns. conversation_count still uses the expanded set: that is a
-    session-viewing concern (how many threads to show under this seat), not
-    a classification concern (RND-132 QA fix — see _latest_own_participation_time
-    docstring for why these two must stay separate).
+    from _batch_latest_own_participation_time() — each seat's own
+    sender/recipient rows only, never the group-room-expanded set
+    _fetch_messages_for_entity() returns. conversation_count still uses the
+    expanded set: that is a session-viewing concern (how many threads to
+    show under this seat), not a classification concern (RND-132 QA fix —
+    see _latest_own_participation_time docstring for why these two must
+    stay separate).
+
+    RND-191: latest_message_time and conversation_count are computed for
+    ALL seats in two batched calls (_batch_latest_own_participation_time,
+    _batch_count_entity_conversations) instead of looping the singular
+    per-seat _latest_own_participation_time/_count_entity_conversations —
+    those two calls alone cost roughly 7 queries per seat (RND-158
+    profiling), so a tenant with S seats issued ~7*S queries here. display_
+    names is likewise scoped to just this tenant's staff_ids rather than
+    loading every Contact row in the tenant.
     """
     staff_ids = _collect_staff_ids(db, tenant_id)
     if not staff_ids:
         return []
 
-    display_names = _load_display_names(db, tenant_id)
+    display_names = _load_display_names_for_ids(db, tenant_id, staff_ids)
+    latest_times = _batch_latest_own_participation_time(db, tenant_id, staff_ids)
+    conversation_counts = _batch_count_entity_conversations(db, tenant_id, staff_ids, staff_ids)
 
     seats: list[dict] = []
     for sid in staff_ids:
-        latest_message_time = _latest_own_participation_time(db, sid, tenant_id)
+        latest_message_time = latest_times.get(sid)
         if latest_message_time is None:
             # No direct participation at all for this identity — not a seat
             # worth surfacing (definition requires archived records where
             # the seat is literally the sender or a listed recipient).
             continue
-        # RND-158: avoid full ArchiveMessage ORM object materialization for
-        # conversation_count. The old code fetched every message as a full
-        # ORM object (all columns including content_text, msgtype, sdkfileid,
-        # decrypted_payload, etc.) then aggregated them through
-        # _build_conversation_list — just to compute the display-badge
-        # conversation_count. The revised path fetches a compact projection
-        # (message.id, message.sender, message.roomid + recipient userids)
-        # and derives canonical conversation keys using the exact same
-        # _derive_conversation_membership function the authoritative builder
-        # uses, avoiding full ORM object construction while preserving exact
-        # count semantics. Per-seat query scaling remains unchanged.
-        # The authoritative conversation list endpoint (/api/conversations)
-        # still uses the full _fetch_messages_for_entity +
-        # _build_conversation_list path for correctness.
-        conversation_count = _count_entity_conversations(db, sid, tenant_id, staff_ids)
         seats.append(
             {
                 "staff_id": sid,
                 "latest_message_time": latest_message_time,
-                "conversation_count": conversation_count,
+                "conversation_count": conversation_counts.get(sid, 0),
             }
         )
 
@@ -613,11 +777,19 @@ def list_monitored_accounts(db: Session, tenant_id: str) -> list[MonitoredAccoun
 
 
 def list_contacts(db: Session, tenant_id: str) -> list[ContactOut]:
-    """Return all contacts (non-staff participants) observed in the tenant archive."""
+    """Return all contacts (non-staff participants) observed in the tenant archive.
+
+    RND-191: participant_ids is computed once and passed into
+    _collect_staff_ids so it doesn't redundantly repeat its own tenant-wide
+    _collect_archive_participant_ids() scan; display_names is scoped to
+    just the contacts being returned rather than every Contact row in the
+    tenant (which can include staff and off-archive-graph contacts this
+    response never surfaces).
+    """
     participant_ids = _collect_archive_participant_ids(db, tenant_id)
-    staff_ids = _collect_staff_ids(db, tenant_id)
+    staff_ids = _collect_staff_ids(db, tenant_id, participant_ids)
     contact_ids = participant_ids - staff_ids
-    display_names = _load_display_names(db, tenant_id)
+    display_names = _load_display_names_for_ids(db, tenant_id, contact_ids)
     return [
         ContactOut(
             contact_id=cid,
