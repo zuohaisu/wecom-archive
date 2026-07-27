@@ -1,0 +1,16 @@
+[Unit]
+Description=WeCom Archive Disk/Log/Backup Capacity Check Timer — runs every 15 minutes
+
+[Timer]
+# RND-193: offset (minute mod 15 == 9) chosen so this NEVER coincides with
+# wecom-archive-worker.timer (OnCalendar=*:0/5, i.e. minute mod 5 == 0) or
+# wecom-archive-media-download.timer (OnCalendar=*:2/5, i.e. minute mod 5
+# == 2) at any point in the hour — see RND-192's timer de-overlap fix,
+# which this deliberately does not disturb.
+OnCalendar=*:9/15
+AccuracySec=30s
+Persistent=true
+Unit=wecom-disk-usage-check.service
+
+[Install]
+WantedBy=timers.target

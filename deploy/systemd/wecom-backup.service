@@ -1,0 +1,44 @@
+[Unit]
+Description=WeCom Archive Encrypted DB + Media Backup (RND-193, one shot)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wecomarchive
+WorkingDirectory=/srv/apps/wecom-archive-365/current
+# backend/.env supplies DATABASE_URL and STORAGE_LOCAL_PATH (the same
+# values the app itself uses). shared/backup.env supplies
+# BACKUP_GPG_PASSPHRASE ONLY — kept out of backend/.env deliberately so
+# the main app process (which reads backend/.env too) never has this
+# secret in its own environment; see docs/operations/2c2g-runbook.md for
+# how to create shared/backup.env (600 perms, wecomarchive:wecomarchive).
+EnvironmentFile=/srv/apps/wecom-archive-365/current/backend/.env
+EnvironmentFile=/srv/apps/wecom-archive-365/shared/backup.env
+# ProtectHome=yes below hides the real $HOME, so gpg's default
+# ~/.gnupg would fail to be created — point it at a writable directory
+# under this app's own tree instead (create once: mkdir -p
+# /srv/apps/wecom-archive-365/shared/gnupg && chmod 700 ... && chown
+# wecomarchive:wecomarchive ...; see docs/operations/2c2g-runbook.md).
+Environment=GNUPGHOME=/srv/apps/wecom-archive-365/shared/gnupg
+ExecStart=/usr/bin/bash /srv/apps/wecom-archive-365/current/scripts/backup_once.sh
+
+# Security hardening (safe subset — must not break access to the
+# PostgreSQL socket/TCP port, backend/.env, shared/backup.env,
+# shared/media, and shared/backups).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/apps/wecom-archive-365
+ReadOnlyPaths=/usr /etc
+# Safe to keep even though backup_once.sh no longer stages anything under
+# /tmp (it stages under shared/backups/.tmp instead, on-disk, specifically
+# because /tmp on this host is tmpfs — i.e. RAM-backed, capped at ~945M on
+# this 1.8GB box — and a plaintext DB dump + media tar landing there would
+# compete with the app/worker for memory during the backup window). Kept
+# for defense-in-depth namespace isolation, not because anything relies on
+# it.
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

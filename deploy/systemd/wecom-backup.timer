@@ -1,0 +1,15 @@
+[Unit]
+Description=WeCom Archive Encrypted Backup Timer — runs daily off-hours
+
+[Timer]
+# RND-193: 03:17 local — outside the app's observed usage hours, and not
+# aligned with any other timer's schedule (worker/media run every 5
+# minutes all day regardless; this just avoids adding a large one-shot
+# pg_dump+tar+gpg job on a round-number boundary).
+OnCalendar=*-*-* 03:17:00
+AccuracySec=1min
+Persistent=true
+Unit=wecom-backup.service
+
+[Install]
+WantedBy=timers.target

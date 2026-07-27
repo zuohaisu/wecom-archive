@@ -1,0 +1,23 @@
+[Unit]
+Description=WeCom Archive Disk/Log/Backup Capacity Check (RND-193, one shot)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wecomarchive
+WorkingDirectory=/srv/apps/wecom-archive-365/current
+EnvironmentFile=/srv/apps/wecom-archive-365/current/backend/.env
+ExecStart=/usr/bin/bash /srv/apps/wecom-archive-365/current/scripts/disk_usage_check.sh
+
+# Security hardening (safe subset — must not break /proc reads for memory
+# stats, df's read of the root filesystem, or psql's connection to the
+# local PostgreSQL socket/TCP port).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/apps/wecom-archive-365
+ReadOnlyPaths=/usr /etc
+
+[Install]
+WantedBy=multi-user.target
