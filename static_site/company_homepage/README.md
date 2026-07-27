@@ -13,18 +13,24 @@ or any archive UI.
 static_site/company_homepage/
 ├── index.html
 ├── style.css
+├── brand/              # logo SVG、favicon、mask-icon
+├── assets/             # console_review.png —— Hero 产品截图
+├── site.webmanifest
 └── README.md   (this file)
 ```
 
 ## Target deployment directory (proposed)
 
-On the production host, deploy the contents of `static_site/company_homepage/`
-(just `index.html` and `style.css`) to a dedicated static directory, e.g.:
+On the production host, deploy the **entire** contents of
+`static_site/company_homepage/` (including `brand/` and `assets/`, not just
+`index.html` and `style.css`) to a dedicated static directory, e.g.:
 
 ```
 /var/www/crowntime-site/
 ├── index.html
-└── style.css
+├── style.css
+├── brand/
+└── assets/
 ```
 
 This directory must be separate from wherever the WeCom archive backend
