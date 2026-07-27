@@ -222,7 +222,7 @@ function doLogin(e){{
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Login — 365 WeCom Archive</title>
+<title>Login — Crowntime WeCom Archive</title>
 <style>
 {_PAGE_STYLE}
 </style>
@@ -231,7 +231,7 @@ function doLogin(e){{
 {I18N_SCRIPT_TAG}
 {_LANG_SWITCH_HTML}
 <div class="card">
-  <h1>365 WeCom Archive</h1>
+  <h1>Crowntime WeCom Archive</h1>
   <p class="sub" data-i18n="app.subtitle">对话审阅控制台</p>
   {login_body}
 </div>

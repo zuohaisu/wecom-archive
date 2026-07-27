@@ -1,4 +1,4 @@
-# Business Terms — 365 WeCom Archive
+# Business Terms — Crowntime WeCom Archive
 
 ## Domain Terminology
 

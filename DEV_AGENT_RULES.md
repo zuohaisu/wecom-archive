@@ -1,4 +1,4 @@
-# DEV_AGENT_RULES v3 - 365 WeCom Archive
+# DEV_AGENT_RULES v3 - Crowntime WeCom Archive
 
 Binding working rules for every AI agent and human contributor on this project.
 Deviation requires explicit approval from Haisu.

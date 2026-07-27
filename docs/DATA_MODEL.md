@@ -1,4 +1,4 @@
-# Data Model — 365 WeCom Archive
+# Data Model — Crowntime WeCom Archive
 
 PostgreSQL schema for storing WeCom conversation archive messages and tenant
 management infrastructure for future SaaS use.

@@ -1,6 +1,10 @@
-# 365 WeCom Archive
+# Crowntime WeCom Archive
 
-Internal WeCom (企业微信) conversation archive, media storage, and admin review system. Pulls messages from the WeCom Conversation Archive API, decrypts and stores them, and provides a conversation review console for authorized administrators.
+「康冠时代」企业微信会话存档
+
+Crowntime WeCom Archive is an internal WeCom (企业微信) conversation archive, media storage, and admin review system. It pulls messages from the WeCom Conversation Archive API, decrypts and stores them, and provides a conversation review console for authorized administrators.
+
+> 本项目为第三方独立开源项目，与腾讯公司无关联，非腾讯官方产品。"企业微信/WeCom"为腾讯公司商标，本项目名称仅用于描述产品用途。
 
 ---
 
@@ -25,7 +29,7 @@ working WeCom SDK or live WeCom credentials, but it **does** require:
 ```bash
 # 1. Clone the repo
 git clone <repo-url>
-cd wecom-archive-365
+cd crowntime-wecom-archive
 
 # 2. Enter backend directory
 cd backend
@@ -183,7 +187,7 @@ For a detailed architecture reference, see [docs/ARCHITECTURE.md](docs/ARCHITECT
 ## Project Structure
 
 ```
-wecom-archive-365/
+crowntime-wecom-archive/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                   # FastAPI app entry point + HTML routes

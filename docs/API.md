@@ -1,4 +1,4 @@
-# API Reference — 365 WeCom Archive
+# API Reference — Crowntime WeCom Archive
 
 Route catalog for the current FastAPI application.
 

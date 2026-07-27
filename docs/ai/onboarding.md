@@ -1,4 +1,4 @@
-# Onboarding Guide — 365 WeCom Archive
+# Onboarding Guide — Crowntime WeCom Archive
 
 ## Recommended Reading Order
 

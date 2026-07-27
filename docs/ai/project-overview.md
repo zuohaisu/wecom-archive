@@ -1,4 +1,4 @@
-# Project Overview — 365 WeCom Archive
+# Project Overview — Crowntime WeCom Archive
 
 **One-line description:** Internal admin system that archives, decrypts, stores, and provides review capabilities for WeCom (企业微信) enterprise conversation data.
 

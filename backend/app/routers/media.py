@@ -1,5 +1,5 @@
 """
-Media access APIs for the 365 WeCom Archive review console (RND-221 — moved
+Media access APIs for the Crowntime WeCom Archive review console (RND-221 — moved
 out of app.routers.conversations; no behavior, path, or schema changes).
 
 All routes are protected by get_current_user (RND-110).

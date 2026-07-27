@@ -1,4 +1,4 @@
-# Deployment Guide — 365 WeCom Archive
+# Deployment Guide — Crowntime WeCom Archive
 
 This document separates:
 

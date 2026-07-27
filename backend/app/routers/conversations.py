@@ -1,5 +1,5 @@
 """
-Conversation aggregation APIs for the 365 WeCom Archive review console.
+Conversation aggregation APIs for the Crowntime WeCom Archive review console.
 
 All routes are protected by get_current_user (RND-110).
 All archive queries are scoped by session tenant_id.
@@ -566,4 +566,3 @@ def get_conversation_detail(
         decrypted_percent=decrypted_percent,
         participants=participants,
     )
-

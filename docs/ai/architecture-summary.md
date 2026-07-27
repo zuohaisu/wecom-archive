@@ -1,4 +1,4 @@
-# Architecture Summary — 365 WeCom Archive
+# Architecture Summary — Crowntime WeCom Archive
 
 **One sentence:** A Python FastAPI backend that pulls encrypted messages from WeCom on a schedule, decrypts them, stores everything in PostgreSQL, serves a conversation review console to authenticated admins, and downloads media through a pluggable storage provider.
 

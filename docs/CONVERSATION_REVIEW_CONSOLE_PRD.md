@@ -6,7 +6,7 @@ Related issue: RND-99
 
 ## 1. Problem Statement
 
-365 WeCom Archive currently stores archived messages and exposes basic message search, but the review experience is still too message-centric.
+Crowntime WeCom Archive currently stores archived messages and exposes basic message search, but the review experience is still too message-centric.
 
 Reviewers do not primarily want to inspect isolated messages. They want to inspect conversations:
 

@@ -1,4 +1,4 @@
-# Known Pitfalls — 365 WeCom Archive
+# Known Pitfalls — Crowntime WeCom Archive
 
 Common traps, gotchas, and "don't touch this" areas that have caused problems in the past.
 

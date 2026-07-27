@@ -1,4 +1,4 @@
-# AGENTS — 365 WeCom Archive
+# AGENTS — Crowntime WeCom Archive
 
 Agent roster, responsibilities, and handoff protocol.
 Full working rules are in [DEV_AGENT_RULES.md](../DEV_AGENT_RULES.md).

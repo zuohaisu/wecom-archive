@@ -1,4 +1,4 @@
-# Current Status — 365 WeCom Archive
+# Current Status — Crowntime WeCom Archive
 
 **Last updated:** 2026-07-13
 

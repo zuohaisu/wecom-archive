@@ -84,7 +84,7 @@ def create_app() -> FastAPI:
     instance. Kept as a factory (RND-223) rather than a module-level side
     effect so tests/tooling can construct an independent app instance; the
     module-level `app` below is what `uvicorn app.main:app` actually serves."""
-    app = FastAPI(title="365 WeCom Archive")
+    app = FastAPI(title="Crowntime WeCom Archive")
     # RND-187: guarantees Cache-Control: no-store on every response (success or
     # error, any status code) for the media access descriptor endpoint — see
     # MediaAccessNoStoreMiddleware's docstring for why this must be a

@@ -1,4 +1,4 @@
-# Architecture — 365 WeCom Archive
+# Architecture — Crowntime WeCom Archive
 
 Reference document covering product boundary, components, data flow, auth, storage, deployment, and explicit non-goals.
 
@@ -6,7 +6,7 @@ Reference document covering product boundary, components, data flow, auth, stora
 
 ## 1. Product Boundary
 
-365 WeCom Archive is an **internal, admin-only** system that:
+Crowntime WeCom Archive is an **internal, admin-only** system that:
 
 - Pulls conversation messages and media from the WeCom Conversation Archive API on a scheduled basis.
 - Decrypts messages using RSA + AES (WeCom SDK encryption scheme).
