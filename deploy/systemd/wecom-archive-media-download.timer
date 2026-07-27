@@ -2,8 +2,14 @@
 Description=WeCom Archive Recent Media Download Timer — runs every 5 minutes
 
 [Timer]
-OnBootSec=5min
-OnUnitActiveSec=5min
+# RND-192: fixed 2-minute offset from wecom-archive-worker.timer's
+# OnCalendar=*:0/5 — was OnBootSec=5min + OnUnitActiveSec=5min, a
+# boot/last-run-relative schedule that drifts over time and had converged
+# to fire in the same second as the worker timer (confirmed live on
+# 2026-07-27: both firing at :30:12, :35:12, :40:xx). An absolute
+# OnCalendar offset, like the worker timer already uses, guarantees the
+# two never coincide regardless of run-duration drift.
+OnCalendar=*:2/5
 AccuracySec=30s
 Persistent=true
 Unit=wecom-archive-media-download.service
