@@ -1,0 +1,1 @@
+Python 3.11+ with FastAPI, SQLAlchemy/Alembic, ruff for linting, pytest for tests, Node.js for embedded JS syntax validation, Bash/systemd for deployment orchestration, acme.sh + Qiniu SDK for SSL/CDN automation, and PostgreSQL 14+ as the shared datastore across backend and workers.

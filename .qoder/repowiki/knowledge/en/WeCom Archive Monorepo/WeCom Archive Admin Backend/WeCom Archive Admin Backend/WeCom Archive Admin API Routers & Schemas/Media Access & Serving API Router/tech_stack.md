@@ -1,0 +1,1 @@
+FastAPI `APIRouter` with Starlette `BaseHTTPMiddleware`; SQLAlchemy ORM sessions via `get_db`; Pydantic response models `MediaAccessOut` / `NestedMediaAccessOut` from `app.schemas.media`; Qiniu cloud storage provider for signed-URL generation (referenced through `app.services.media_access`).

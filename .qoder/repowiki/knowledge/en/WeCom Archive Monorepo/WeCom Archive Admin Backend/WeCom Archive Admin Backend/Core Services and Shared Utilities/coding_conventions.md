@@ -1,0 +1,6 @@
+- Every structured-message parser follows the `(fields_dict, warnings_list)` return signature and never raises — malformed or missing fields produce None values plus descriptive warning strings instead of exceptions.
+- Message types are declared once in `message_type_registry.py` as frozen `MessageTypeDefinition` dataclass entries with `raw_type`, `normalized_type`, category/support status, parser/renderer strategies, media capability, and optional aliases; consumers call `resolve()` rather than maintaining parallel mappings.
+- Display-name resolvers always guarantee a non-empty string, falling back to a stable label derived from the raw ID rather than returning blank or fabricated names.
+- Database writes use conditional `UPDATE ... WHERE` statements evaluated at write time (never Python read-compare-write) and `execution_options(synchronize_session=False)` to make concurrent operations race-free and avoid stale ORM state.
+- Compact-projection queries construct `SimpleNamespace` objects with only the columns actually read by downstream code, avoiding full ORM object materialization for performance-sensitive endpoints.
+- All user-facing strings go through the centralized i18n keys defined in `assets/i18n.js`; Python never hardcodes UI copy, and `i18n_assets.py` is the single loader that embeds the JS source into HTML.

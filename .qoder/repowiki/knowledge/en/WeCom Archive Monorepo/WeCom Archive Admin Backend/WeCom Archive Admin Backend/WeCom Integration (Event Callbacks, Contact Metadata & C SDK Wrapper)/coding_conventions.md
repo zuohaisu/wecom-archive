@@ -1,0 +1,5 @@
+- Each C SDK feature group is initialized through a dedicated `configure_sdk_*` function that sets `argtypes`/`restype` on the `ctypes.CDLL`, keeping symbol configuration separate from callers.
+- All WeCom API responses are treated as optional — functions return `None` or empty strings on network errors, malformed JSON, or missing fields instead of raising exceptions.
+- Secrets and identifiers are sourced exclusively from environment variables via helper getters (`_get_token`, `_get_aes_key`, `_get_corp_id`) and are never embedded in log messages or exception payloads.
+- Binary data extracted from the C SDK uses `ctypes.string_at(ptr, length)` with explicit lengths rather than relying on NUL-terminated `c_char_p` semantics, preserving embedded zero bytes in binary media chunks.
+- Exception classes carry strict message contracts — e.g. `SdkMediaError` messages must never include sdkfileid or indexbuf values, only short internal diagnostics like return codes.

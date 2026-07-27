@@ -1,0 +1,1 @@
+FastAPI routers and Pydantic schemas that expose the WeCom Archive admin console's authentication, conversation listing, message browsing, search, media access, reachability diagnostics, HTML pages, and WeCom webhook endpoints.

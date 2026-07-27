@@ -1,0 +1,214 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+nodes_managed: true
+exported_at: "2026-07-26T05:13:30Z"
+modules:
+    "":
+        dir_name: WeCom Archive Monorepo
+        title: WeCom Archive Monorepo
+        scope:
+            - README.md
+            - Makefile
+            - pyproject.toml
+            - .gitignore
+            - DESIGN-linear.app.md
+            - DEV_AGENT_RULES.md
+            - PROJECT_DOCUMENTATION_REPORT.md
+            - TASK_TRACKING.md
+            - .env.example
+        source_files: []
+        children:
+            - backend_app
+            - deployment_infra
+            - docs_and_design
+            - ssl_renew_tool
+        depends_on: []
+        related_to: []
+    backend_app:
+        dir_name: WeCom Archive Admin Backend
+        title: WeCom Archive Admin Backend
+        scope:
+            - backend/
+        source_files: []
+        children:
+            - backend_app/app_core
+            - backend_app/migrations
+            - backend_app/scripts
+            - backend_app/tests
+        depends_on: []
+        related_to: []
+    backend_app/app_core:
+        dir_name: WeCom Archive Admin Backend
+        title: WeCom Archive Admin Backend
+        scope:
+            - backend/app/
+        source_files: []
+        children:
+            - backend_app/app_core/api_routers
+            - backend_app/app_core/core_services_and_utils
+            - backend_app/app_core/database_layer
+            - backend_app/app_core/media_pipeline
+            - backend_app/app_core/web_console
+            - backend_app/app_core/wecom_integration
+        depends_on: []
+        related_to: []
+    backend_app/app_core/api_routers:
+        dir_name: WeCom Archive Admin API Routers & Schemas
+        title: WeCom Archive Admin API Routers & Schemas
+        scope:
+            - backend/app/routers/
+            - backend/app/schemas/
+        source_files: []
+        children:
+            - backend_app/app_core/api_routers/media_router
+            - backend_app/app_core/api_routers/media_schemas
+        depends_on: []
+        related_to: []
+    backend_app/app_core/api_routers/media_router:
+        dir_name: Media Access & Serving API Router
+        title: Media Access & Serving API Router
+        scope:
+            - backend/app/routers/media.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/app_core/api_routers/media_schemas:
+        dir_name: Media Access Response Schemas
+        title: Media Access Response Schemas
+        scope:
+            - backend/app/schemas/media.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/app_core/core_services_and_utils:
+        dir_name: Core Services and Shared Utilities
+        title: Core Services and Shared Utilities
+        scope:
+            - backend/app/services/
+            - backend/app/structured_message_parser.py
+            - backend/app/message_type_registry.py
+            - backend/app/display_names.py
+            - backend/app/html_helpers.py
+            - backend/app/i18n_assets.py
+            - backend/app/assets/i18n.js
+            - backend/app/revoke_reconciliation.py
+        source_files: []
+        children:
+            - backend_app/app_core/core_services_and_utils/media_access_service
+        depends_on: []
+        related_to: []
+    backend_app/app_core/core_services_and_utils/media_access_service:
+        dir_name: Unified Media Access Service
+        title: Unified Media Access Service
+        scope:
+            - backend/app/services/media_access.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/app_core/database_layer:
+        dir_name: SQLAlchemy ORM Models & Database Session Layer
+        title: SQLAlchemy ORM Models & Database Session Layer
+        scope:
+            - backend/app/db/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/app_core/media_pipeline:
+        dir_name: Media Pipeline Download, Storage, Classification & Thumbnails
+        title: 'Media Pipeline: Download, Storage, Classification & Thumbnails'
+        scope:
+            - backend/app/media_classification.py
+            - backend/app/media_download.py
+            - backend/app/media_storage.py
+            - backend/app/media_thumbnails.py
+            - backend/app/thumbnail_pipeline.py
+            - backend/app/qiniu_storage.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/app_core/web_console:
+        dir_name: Admin Web Console & Static Asset Renderer
+        title: Admin Web Console & Static Asset Renderer
+        scope:
+            - backend/app/web/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/app_core/wecom_integration:
+        dir_name: WeCom Integration (Event Callbacks, Contact Metadata & C SDK Wrapper)
+        title: WeCom Integration (Event Callbacks, Contact Metadata & C SDK Wrapper)
+        scope:
+            - backend/app/sdk/wecom_sdk.py
+            - backend/app/wecom_contacts.py
+            - backend/app/routers/wecom_events.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/scripts
+    backend_app/migrations:
+        dir_name: Database Schema Migrations (Alembic)
+        title: Database Schema Migrations (Alembic)
+        scope:
+            - backend/alembic/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    backend_app/scripts:
+        dir_name: One-Shot Database Bootstrap & WeCom Archive Backfill Scripts
+        title: One-Shot Database Bootstrap & WeCom Archive Backfill Scripts
+        scope:
+            - backend/scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_app/app_core/wecom_integration
+    backend_app/tests:
+        dir_name: WeCom Archive Backend Test Suite
+        title: WeCom Archive Backend Test Suite
+        scope:
+            - backend/tests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    deployment_infra:
+        dir_name: Production Deployment & Systemd Service Units
+        title: Production Deployment & Systemd Service Units
+        scope:
+            - deploy/
+            - scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    docs_and_design:
+        dir_name: Project Documentation, Design Specs & Static Site
+        title: Project Documentation, Design Specs & Static Site
+        scope:
+            - docs/
+            - design/
+            - static_site/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    ssl_renew_tool:
+        dir_name: SSL Certificate Auto-Renewal & Qiniu CDN Deployment
+        title: SSL Certificate Auto-Renewal & Qiniu CDN Deployment
+        scope:
+            - ssl-renew/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

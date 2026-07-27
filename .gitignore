@@ -246,23 +246,9 @@ ssl-renew/.env*
 !ssl-renew/lib/*.sh
 .DS_Store
 
-# WorkBuddy agent workspace — internal only, not for open source
-.workbuddy/
-
-# IDE / agent wiki artifacts — not for open source
-.qoder/
-.trae/
-
-# Generated presentation (PPTX) + IDE caches — not project source
-ppt-365-intro/
-
-# Old company_homepage embeds real legal identity (RND-234/RND-239) — keep
-# out of open source. The NEW marketing site lives in static_site/ (tracked, built by RND-239).
-static_site/company_homepage/
-
-# Internal working docs (task checklists, QA snapshots) — not for open source
-TASK_TRACKING.md
-PROJECT_DOCUMENTATION_REPORT.md
+# Presentation IDE caches — not project source
+ppt-365-intro/.slidep/
+ppt-365-intro/.cache/
 
 # Internal IP-protection plan — untracked, keep out of open source
 docs/ip-protection-plan-365huifang.md

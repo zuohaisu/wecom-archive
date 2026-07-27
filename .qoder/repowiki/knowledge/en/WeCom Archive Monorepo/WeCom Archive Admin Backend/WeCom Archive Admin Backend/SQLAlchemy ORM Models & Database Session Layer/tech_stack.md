@@ -1,0 +1,1 @@
+SQLAlchemy ORM with `DeclarativeBase`, PostgreSQL-specific features (`JSONB`, `postgresql_where`, GIN indexes via `postgresql_using='gin'`, `to_tsvector` FTS), Alembic for schema migrations, and engine pooling configured via `pool_size=2, max_overflow=2`.

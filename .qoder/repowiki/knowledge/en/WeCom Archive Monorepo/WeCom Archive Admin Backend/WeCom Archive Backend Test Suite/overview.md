@@ -1,0 +1,1 @@
+Pytest-based test suite for the WeCom Archive backend covering authentication, tenant isolation, Qiniu/local media storage, message type registry, admin console JS rendering, Alembic migrations, and reachability diagnostics.

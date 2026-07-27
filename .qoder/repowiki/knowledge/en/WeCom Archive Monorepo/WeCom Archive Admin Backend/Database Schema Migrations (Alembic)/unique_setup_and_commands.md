@@ -1,0 +1,1 @@
+Database connection is driven entirely by environment variables: `DATABASE_URL` takes precedence, otherwise falls back to `DB_HOST` (default `localhost`), `DB_PORT` (`5432`), `DB_NAME` (`wecom_archive`), `DB_USER` (`postgres`), `DB_PASSWORD` (empty). Alembic must be invoked from the `backend/` directory so the `sys.path.insert(0, ...)` trick makes `app.db` importable.

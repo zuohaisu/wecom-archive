@@ -1,0 +1,1 @@
+SQLAlchemy ORM for `ArchiveMessage`/`MediaFile` queries; Pillow (`PIL.Image`, `ImageOps.exif_transpose`) for thumbnail generation; Qiniu Kodo SDK (`qiniu.Auth`, `BucketManager`) for cloud object storage; httpx for internal Qiniu downloads; WeCom SDK (`app.sdk.wecom_sdk.iter_media_chunks`) for chunked media retrieval.

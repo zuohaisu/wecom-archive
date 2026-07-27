@@ -1,0 +1,5 @@
+- Template values are injected as uppercase `__TOKEN__` placeholders (e.g. `__STATIC_VERSION__`, `__I18N_SCRIPT__`, `__ROW_HTML__`) and must be supplied by the caller or `render_template` raises a `KeyError`.
+- Client-side UI text is localized via `data-i18n="key"` attributes on elements, translated at runtime through a global `I18N.t()` function injected into the page.
+- Static assets are loaded with a `?v=__STATIC_VERSION__` query string so browsers bust their cache automatically after deployment without a separate build pipeline.
+- Each JS module declares its dependencies implicitly through script tag load order in the template and exposes functions via the global scope rather than using a module system.
+- API calls go through `fetch()` against `/api/*` endpoints and consistently handle unauthenticated responses by redirecting to `/admin/login`.

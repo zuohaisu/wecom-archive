@@ -1,0 +1,1 @@
+Python ctypes binding to a native WeCom Conversation Archive C shared library; FastAPI for HTTP routing; cryptography (AES-CBC, PKCS#7) for echostr decryption; httpx for WeCom OpenAPI calls.

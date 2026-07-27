@@ -1,0 +1,6 @@
+- Each test module begins with a docstring summarizing the RND ticket scope and what it validates, followed by a `Run (from backend/): pytest ...` command.
+- Tests that need a real database use `@pytest.mark.skipif(not _DB_AVAILABLE, reason="DATABASE_URL not set")` where `_DB_AVAILABLE = bool(os.environ.get("DATABASE_URL", "").strip())`.
+- FastAPI dependencies (`get_db`, `get_current_user`) are overridden per-test via `app.dependency_overrides[...]` with `MagicMock` generators, avoiding real DB/network calls for unit-style assertions.
+- External SDK boundaries (Qiniu SDK, httpx) are monkeypatched at the attribute level rather than using global mocks, so assertions can verify exact parameter values passed through.
+- Embedded JavaScript is exercised by extracting function bodies via regex from the bundled source and executing them through `subprocess.run([NODE, '-e', harness])`, with English locale forced before evaluation.
+- Helper factories follow a `_make_*` / `_db_returning` / `_current_user_for` naming pattern, returning closures or generators that yield mocked objects configured for a single test scenario.

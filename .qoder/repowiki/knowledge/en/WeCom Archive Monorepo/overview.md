@@ -1,0 +1,1 @@
+Monorepo unifying the FastAPI WeCom archive backend, systemd-based deployment automation, Let's Encrypt/Qiniu SSL renewal tooling, and project documentation under a single Python/Shell development and production workflow.

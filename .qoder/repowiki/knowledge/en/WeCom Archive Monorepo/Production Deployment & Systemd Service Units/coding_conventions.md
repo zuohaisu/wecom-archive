@@ -1,0 +1,6 @@
+- Every external command is routed through an overridable `*_BIN` variable (e.g. `GIT_BIN`, `SYSTEMCTL_BIN`, `CURL_BIN`, `PYTHON_BIN`, `FLOCK_BIN`, `MV_BIN`) so tests can swap in mock implementations without patching the script.
+- All sensitive output (especially DATABASE_URL connection strings) is piped through `_redact`, which strips userinfo via sed before any echo or log line reaches stdout/stderr.
+- Failure paths restore the working tree to `PREV_SHA` via `_restore_worktree_only` and never invoke `alembic downgrade`; rollbacks target the persisted `last_known_good_sha` file rather than raw HEAD.
+- Health checks use a uniform `_wait_for_health` helper parameterized by label, URL, retry count, interval, and curl timeout — all tunable via `HEALTH_RETRIES`, `HEALTH_RETRY_INTERVAL_SECONDS`, and `HEALTH_CURL_TIMEOUT_SECONDS` environment variables.
+- Concurrency is protected by a non-blocking `flock` on `$DEPLOY_STATE_DIR/deploy.lock`, with a `DEPLOY_LOCK_ALREADY_HELD=1` flag allowing a caller (CI workflow wrapper) to acquire the lock once and pass it down to avoid self-deadlock.
+- Test fixtures mirror production layout exactly (fake git repo, fake venv, fake `.env`, fake systemd state) and configure behavior entirely through exported `MOCK_*` variables, keeping assertions against captured command logs rather than side effects.

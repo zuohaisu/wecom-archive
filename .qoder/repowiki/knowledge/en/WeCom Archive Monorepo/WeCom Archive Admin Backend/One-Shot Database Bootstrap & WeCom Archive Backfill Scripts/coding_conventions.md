@@ -1,0 +1,6 @@
+- Every script begins with a `#!/usr/bin/env python3` shebang and a module docstring describing usage, required env vars, safety guarantees, and exit codes.
+- Environment variables are validated through a local `_require_env(name)` helper that prints a `[FAIL]` message and calls `sys.exit(1)` on missing values.
+- Database access always goes through `sqlalchemy.create_engine(database_url)` followed by a `with Session(engine) as session:` block; raw SQL uses `text(...)` with named parameters.
+- All output uses structured `[INFO]`, `[FAIL]`, `[PASS]`, or `[DETAIL]` prefixed lines flushed immediately, never printing secrets, connection strings, or decrypted payloads.
+- Scripts are explicitly idempotent: inserts use `ON CONFLICT DO NOTHING` or pre-checks by unique keys (e.g. `msgid` + `tenant_id`), and re-runs skip already-present rows.
+- Exit codes are semantic: 0 for success, 1 for configuration/fatal errors, and higher codes (2, 3) reserved for specific failure categories such as blocking violations or unexpected execution errors.

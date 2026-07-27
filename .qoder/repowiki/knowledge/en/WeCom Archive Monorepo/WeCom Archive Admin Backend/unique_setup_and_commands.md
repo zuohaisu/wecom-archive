@@ -1,0 +1,1 @@
+Run the service via the FastAPI app entry point; apply schema changes with `alembic upgrade head`; execute maintenance scripts under `scripts/` (e.g. `bootstrap_default_tenant.py`, `sync_wecom_archive_once.py`, `migrate_local_media_to_qiniu.py`) which connect to the same DB configured through `.env`.

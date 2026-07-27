@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: backend_app/app_core/api_routers/media_router
+title: Media Access & Serving API Router
+scope:
+    - backend/app/routers/media.py
+source_files: []
+depends_on: []
+related_to: []

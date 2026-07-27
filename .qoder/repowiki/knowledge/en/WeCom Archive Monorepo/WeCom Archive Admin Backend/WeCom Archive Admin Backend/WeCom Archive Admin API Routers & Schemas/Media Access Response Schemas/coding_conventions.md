@@ -1,0 +1,3 @@
+- Public response models are defined as Pydantic `BaseModel` subclasses with only `Optional` fields defaulting to `None`, never requiring mandatory fields in the response shape.
+- Separate models are created for distinct API contracts even when fields overlap (e.g. `NestedMediaAccessOut` mirrors `MediaAccessOut` but omits `media_id`) rather than reusing or subclassing, to keep each public surface independently versioned.
+- Docstrings encode the rationale and cross-references to ticket numbers (RND-187, RND-200, RND-221) and related functions (`_build_nested_media_descriptor`, `get_message_media_access`) instead of relying on external documentation.

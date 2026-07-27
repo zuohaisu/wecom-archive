@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: backend_app/scripts
+title: One-Shot Database Bootstrap & WeCom Archive Backfill Scripts
+scope:
+    - backend/scripts/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_app/app_core/wecom_integration

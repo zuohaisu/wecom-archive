@@ -1,0 +1,6 @@
+This module is a pure documentation and static-content package with no executable code. It is organized into three top-level directories:
+- `docs/` — layered by purpose: `adr/` (Architecture Decision Records), `ai/` (AI-assisted onboarding and project context), `ops/` (operations runbooks), `research/` (RND investigation notes), `ssl-renewal/` (SSL lifecycle docs), plus root-level cross-cutting references (`ARCHITECTURE.md`, `DATA_MODEL.md`, `API.md`, `DEPLOYMENT.md`, AGENTS workflow).
+- `design/` — UI/design specs for features not yet implemented (e.g. RND-229/230 search enhancement spec and its HTML mockup).
+- `static_site/company_homepage/` — a self-contained, zero-dependency static website (`index.html` + `style.css`) deployed separately from the WeCom archive backend for ICP beian compliance.
+
+There are no internal dependencies between subdirectories; each document is independently authored and versioned. The only structural coupling is that design specs in `design/` reference existing FastAPI routes defined in the backend (e.g. `_REVIEW_CONSOLE_HTML`, `/api/search/messages`) to ensure consistency.

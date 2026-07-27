@@ -1,0 +1,1 @@
+Integrates the WeCom Conversation Archive system via a FastAPI event callback router, an httpx-based contact metadata client, and a ctypes wrapper around the WeCom C SDK for chat data retrieval and media download.
