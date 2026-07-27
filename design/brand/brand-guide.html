@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>康冠时代 CROWN TIME · 品牌指南 v1.0</title>
+<link rel="icon" href="favicon/favicon.svg" type="image/svg+xml">
+<style>
+:root{
+  --blue-500:#1F5CC4; --blue-600:#1A4FA9; --blue-700:#15418C; --blue-800:#10336E; --blue-900:#0B2453;
+  --blue-400:#4B7FD6; --blue-300:#7AA3E3; --blue-200:#ADC8F0; --blue-100:#DCE8FA; --blue-50:#F0F5FD;
+  --gold-500:#C29A3B; --gold-100:#F5EBD4;
+  --ink:#1D2733; --slate:#5A6B85; --line:#E3E8F0; --mist:#F5F7FB; --white:#FFF;
+  --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Manrope","Source Han Sans SC","PingFang SC",system-ui,sans-serif;color:var(--ink);background:var(--mist);line-height:1.6}
+.wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+header.guide-top{background:var(--white);border-bottom:1px solid var(--line);padding:18px 0;position:sticky;top:0;z-index:10}
+header.guide-top .wrap{display:flex;align-items:center;gap:16px}
+header.guide-top img{height:30px}
+header.guide-top .v{font-size:12px;color:var(--slate);margin-left:auto}
+nav.anchors{background:var(--white);border-bottom:1px solid var(--line);padding:10px 0;font-size:13px}
+nav.anchors .wrap{display:flex;gap:18px;flex-wrap:wrap}
+nav.anchors a{color:var(--slate);text-decoration:none}
+nav.anchors a:hover{color:var(--blue-500)}
+section{padding:44px 0 8px}
+h2{font-size:20px;margin-bottom:6px;display:flex;align-items:baseline;gap:10px}
+h2 .no{font-size:12px;color:var(--blue-500);font-weight:700;letter-spacing:.08em}
+p.lead{color:var(--slate);font-size:14px;max-width:720px;margin-bottom:22px}
+.card{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+.grid{display:grid;gap:16px}
+.grid.c2{grid-template-columns:1fr 1fr}
+.grid.c3{grid-template-columns:1fr 1fr 1fr}
+.grid.c4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:820px){.grid.c3,.grid.c4{grid-template-columns:1fr 1fr}}
+.logo-stage{display:flex;align-items:center;justify-content:center;min-height:120px;border-radius:8px;padding:24px}
+.logo-stage.mist{background:var(--blue-50)}
+.logo-stage.dark{background:var(--blue-900)}
+.logo-stage.white{background:var(--white);border:1px solid var(--line)}
+.cap{font-size:12px;color:var(--slate);margin-top:10px;text-align:center}
+.swatch{border-radius:8px;overflow:hidden;border:1px solid var(--line);background:var(--white)}
+.swatch .chip{height:56px}
+.swatch .meta{padding:8px 10px;font-size:11px;line-height:1.5}
+.swatch .meta b{font-size:12px;display:block}
+.swatch .meta code{color:var(--slate)}
+.type-sample{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:20px}
+.type-sample .name{font-size:12px;color:var(--blue-500);font-weight:700;letter-spacing:.06em;margin-bottom:8px}
+.dont{position:relative}
+.dont .logo-stage{background:var(--white);border:1px solid var(--line);min-height:96px}
+.dont .x{position:absolute;top:8px;right:10px;color:#C0392B;font-weight:800;font-size:18px}
+.dont p{font-size:12px;color:var(--slate);margin-top:8px;text-align:center}
+.mock{border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+.mock .bar{display:flex;align-items:center;gap:14px;padding:0 16px;height:44px}
+.mock .bar.dark{background:#001529;color:#fff}
+.mock .bar.light{background:var(--white);border-bottom:1px solid var(--line)}
+.mock .bar img{flex:none}
+.mock .bar .prod{font-size:13px;color:#8CA0B3}
+.mock .bar .links{margin-left:auto;display:flex;gap:16px;font-size:12px;color:#8CA0B3}
+.mock .bar.light .links{color:var(--slate)}
+.mock .body{background:var(--mist);padding:22px 16px;font-size:13px;color:var(--slate)}
+.mock .foot{background:var(--blue-900);color:#9FB6D8;padding:22px 20px;font-size:12px;line-height:2}
+.mock .foot img{height:24px;display:block;margin-bottom:10px}
+.mock-label{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--blue-500);margin:18px 0 8px}
+pre.code{background:var(--ink);color:#D7E3F4;border-radius:8px;padding:16px;font-size:12px;overflow:auto;line-height:1.7;font-family:"JetBrains Mono",ui-monospace,monospace}
+.alert-gold{background:var(--gold-100);border:1px solid var(--gold-500);border-radius:var(--radius);padding:16px 20px;font-size:14px;display:flex;gap:12px;align-items:flex-start}
+.alert-gold b{color:#8A6B1F}
+.clearspace-diagram{background:var(--white);border:1px solid var(--line);border-radius:8px;padding:28px;display:flex;justify-content:center}
+footer.guide-foot{padding:36px 0 60px;font-size:12px;color:var(--slate)}
+table.rules{width:100%;border-collapse:collapse;font-size:13px;background:var(--white);border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+table.rules th,table.rules td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line)}
+table.rules th{background:var(--blue-50);font-size:12px;color:var(--blue-700)}
+table.rules tr:last-child td{border-bottom:none}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.92em}
+</style>
+</head>
+<body>
+
+<header class="guide-top">
+  <div class="wrap">
+    <img src="logo/svg/logo-horizontal.svg" alt="康冠时代 CROWN TIME">
+    <span class="v">品牌指南 Brand Guidelines · v1.0 · 2026-07</span>
+  </div>
+</header>
+<nav class="anchors">
+  <div class="wrap">
+    <a href="#logo">标志</a><a href="#split">组合与拆分</a><a href="#color">色彩</a><a href="#type">字体</a><a href="#space">净空与尺寸</a><a href="#donts">禁止事项</a><a href="#product">产品页方案</a><a href="#site">官网方案</a><a href="#favicon-code">Favicon 接入</a><a href="#legal">法律备注</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<section id="legal-banner" style="padding-top:28px">
+  <div class="alert-gold">
+    <span style="font-size:18px;line-height:1.2">⚠</span>
+    <span><b>商标续展提醒（最紧急）</b>：注册证（第 17528858 号）有效期至 <b>2026-11-13</b>，现在已处于续展窗口期（期满前 12 个月可办理）。请尽快提交续展申请；逾期后仅有 6 个月宽展期，再逾期商标将被注销。</span>
+  </div>
+</section>
+
+<section id="logo">
+  <h2><span class="no">01</span>标志</h2>
+  <p class="lead">精修版完全保留注册证的「图形标 + 康冠时代 + CROWN TIME」组合关系：边缘全矢量对齐、斜率统一 1:3；文字改用思源黑体 Bold（SIL OFL，免费可商用）并已转为轮廓路径——任何设备打开都一致，无字体侵权面。</p>
+  <div class="card" style="margin-bottom:16px">
+    <div class="logo-stage mist" style="min-height:180px">
+      <img src="logo/svg/logo-horizontal.svg" alt="彩色横版" style="width:420px;max-width:88%">
+    </div>
+    <p class="cap">主标识 · 彩色横版 logo-horizontal.svg（白/浅底首选）</p>
+  </div>
+  <div class="grid c3">
+    <div>
+      <div class="logo-stage white"><img src="logo/svg/logo-horizontal-mono.svg" alt="单色黑横版" style="width:200px"></div>
+      <p class="cap">单色黑横版 · 对应注册证形态，法律/正式场景</p>
+    </div>
+    <div>
+      <div class="logo-stage dark"><img src="logo/svg/logo-horizontal-reverse.svg" alt="反白横版" style="width:200px"></div>
+      <p class="cap">反白横版 · 深色底专用（产品深色顶栏/页脚）</p>
+    </div>
+    <div>
+      <div class="logo-stage mist"><img src="logo/svg/logo-stacked.svg" alt="彩色竖版" style="width:150px"></div>
+      <p class="cap">彩色竖版 · 登录页/启动页/名片</p>
+    </div>
+  </div>
+  <div class="grid c4" style="margin-top:16px">
+    <div>
+      <div class="logo-stage mist" style="min-height:96px"><img src="logo/svg/logo-icon.svg" alt="图形标" style="width:56px"></div>
+      <p class="cap">图形标 · 彩色</p>
+    </div>
+    <div>
+      <div class="logo-stage dark" style="min-height:96px"><img src="logo/svg/logo-icon-reverse.svg" alt="图形标反白" style="width:56px"></div>
+      <p class="cap">图形标 · 反白</p>
+    </div>
+    <div>
+      <div class="logo-stage white" style="min-height:96px"><img src="favicon/icon-tile.svg" alt="图标底板" style="width:64px"></div>
+      <p class="cap">图标底板 · apple-touch-icon / PWA</p>
+    </div>
+    <div>
+      <div class="logo-stage white" style="min-height:96px;display:flex;gap:14px;align-items:flex-end">
+        <img src="favicon/favicon-16.png" alt="16px" style="width:16px;image-rendering:pixelated">
+        <img src="favicon/favicon-32.png" alt="32px" style="width:32px;image-rendering:pixelated">
+        <img src="favicon/favicon-48.png" alt="48px" style="width:48px">
+      </div>
+      <p class="cap">favicon 16/32/48 · 小尺寸间隙加宽优化版</p>
+    </div>
+  </div>
+</section>
+
+<section id="split">
+  <h2><span class="no">02</span>组合与拆分</h2>
+  <p class="lead">图形与文字允许分开单独使用，但必须是「整体组合」或「纯图形标」两种合法形态之一；文字不单独重排成新组合。</p>
+  <table class="rules">
+    <tr><th>场景</th><th>用法</th><th>资产</th></tr>
+    <tr><td>产品深色顶栏、官网导航</td><td>横版组合，高 24–28px</td><td class="mono">logo-horizontal(-reverse).svg</td></tr>
+    <tr><td>浏览器标签 / App 图标 / 头像</td><td>图形标单独</td><td class="mono">favicon/、icon-tile.svg</td></tr>
+    <tr><td>登录页 / 启动页 / PPT 封面</td><td>竖版组合居中</td><td class="mono">logo-stacked.svg</td></tr>
+    <tr><td>加载动画 / 水印 / 页眉小标</td><td>图形标，透明度 8–16%</td><td class="mono">logo-icon.svg</td></tr>
+    <tr><td>页脚版权行</td><td>公司名是纯文本，直接排版</td><td>—</td></tr>
+    <tr><td>「365」副标题</td><td>不进入 lockup；以文本置于标志旁，字号 ≤ 50%，Slate 色</td><td>—</td></tr>
+  </table>
+</section>
+
+<section id="color">
+  <h2><span class="no">03</span>色彩</h2>
+  <p class="lead">康冠蓝由原 #2660B5 同色相提亮为 #1F5CC4（白底对比度 6.2:1，过 WCAG AA）。注册证为黑白稿、未声明颜色，任意配色均在注册保护范围内。冠金只用于品牌信任语境，面积 ≤5%。</p>
+  <div class="grid c4" id="swatches"></div>
+</section>
+
+<section id="type">
+  <h2><span class="no">04</span>字体（全部 SIL OFL 开源授权，可商用）</h2>
+  <div class="grid c3">
+    <div class="type-sample"><div class="name">思源黑体 · 中文</div><div style="font-size:22px;font-weight:700">康冠时代 企业微信会话存档</div><div style="color:var(--slate);font-size:14px;margin-top:6px">稳定、合规、可持续的对话数据资产。</div></div>
+    <div class="type-sample"><div class="name">Manrope · 西文/数字</div><div style="font-size:22px;font-weight:700">CROWN TIME Archive 365</div><div style="color:var(--slate);font-size:14px;margin-top:6px">Messages, media &amp; compliance. 0123456789</div></div>
+    <div class="type-sample"><div class="name">JetBrains Mono · 等宽</div><div style="font-size:15px;font-family:ui-monospace,monospace">msg_id: 7f3a-921c<br>2026-07-27 22:13:48</div><div style="color:var(--slate);font-size:13px;margin-top:6px">消息 ID / 时间戳 / 日志</div></div>
+  </div>
+</section>
+
+<section id="space">
+  <h2><span class="no">05</span>净空区与最小尺寸</h2>
+  <div class="grid c2">
+    <div class="clearspace-diagram">
+      <div style="border:1.5px dashed var(--blue-300);padding:22px;position:relative">
+        <span style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:#fff;padding:0 8px;font-size:11px;color:var(--blue-500)">净空 ≥ x（x = 方块边长）</span>
+        <img src="logo/svg/logo-horizontal.svg" alt="" style="width:240px;display:block">
+      </div>
+    </div>
+    <div class="card">
+      <table class="rules" style="border:none">
+        <tr><th>版本</th><th>屏幕最小</th><th>印刷最小</th></tr>
+        <tr><td>横版组合</td><td>宽 120px</td><td>宽 30mm</td></tr>
+        <tr><td>竖版组合</td><td>宽 96px</td><td>宽 24mm</td></tr>
+        <tr><td>图形标</td><td>16px</td><td>5mm</td></tr>
+      </table>
+      <p style="font-size:12px;color:var(--slate);margin-top:12px">低于最小尺寸只用图形标，且使用 favicon 优化版（间隙已加宽）。</p>
+    </div>
+  </div>
+</section>
+
+<section id="donts">
+  <h2><span class="no">06</span>禁止事项</h2>
+  <div class="grid c3">
+    <div class="dont"><div class="logo-stage"><img src="logo/svg/logo-horizontal.svg" alt="" style="width:220px;transform:scaleX(1.35)"></div><span class="x">✗</span><p>不拉伸/压扁</p></div>
+    <div class="dont"><div class="logo-stage"><img src="logo/svg/logo-horizontal.svg" alt="" style="width:220px;transform:rotate(-8deg)"></div><span class="x">✗</span><p>不旋转/倾斜</p></div>
+    <div class="dont"><div class="logo-stage"><img src="logo/svg/logo-horizontal.svg" alt="" style="width:220px;filter:hue-rotate(120deg)"></div><span class="x">✗</span><p>不随意改色相/加滤镜</p></div>
+    <div class="dont"><div class="logo-stage" style="background:var(--blue-500)"><img src="logo/svg/logo-horizontal.svg" alt="" style="width:220px"></div><span class="x">✗</span><p>彩色版不放同明度蓝底（用反白版）</p></div>
+    <div class="dont"><div class="logo-stage"><img src="logo/svg/logo-horizontal.svg" alt="" style="width:220px;filter:drop-shadow(4px 4px 3px rgba(0,0,0,.4))"></div><span class="x">✗</span><p>不加阴影/描边/发光/渐变</p></div>
+    <div class="dont"><div class="logo-stage"><span style="font-size:13px;color:var(--slate);text-align:center">「康冠时代」四字<br>换字体重排或移到图形左侧</span></div><span class="x">✗</span><p>不重排注册证之外的组合</p></div>
+  </div>
+</section>
+
+<section id="product">
+  <h2><span class="no">07</span>产品页应用方案（会话存档 admin）</h2>
+  <p class="lead">改动最小：深色顶栏左侧加反白 logo（高 24px）+ 产品名文本；页面接入 favicon。中期可把顶栏 #001529 与主色 #1890ff 对齐到品牌 Blue 900/500。</p>
+  <div class="mock-label">现状 BEFORE</div>
+  <div class="mock">
+    <div class="bar dark"><span style="font-size:14px;font-weight:600">对话审阅控制台</span><span class="links">会话审阅 · 搜索 · 诊断 · 退出</span></div>
+  </div>
+  <div class="mock-label">方案 AFTER</div>
+  <div class="mock">
+    <div class="bar dark">
+      <img src="logo/svg/logo-horizontal-reverse.svg" alt="康冠时代" style="height:24px">
+      <span class="prod">企业微信会话存档</span>
+      <span class="links">会话审阅 · 搜索 · 诊断 · 退出</span>
+    </div>
+    <div class="body">浏览器标签同步显示 favicon 图形标 → 多个后台标签页一眼可辨。</div>
+  </div>
+  <div class="mock-label">登录页（竖版居中）</div>
+  <div class="mock">
+    <div class="body" style="display:flex;flex-direction:column;align-items:center;padding:34px 16px">
+      <img src="logo/svg/logo-stacked.svg" alt="" style="width:150px">
+      <div style="margin-top:14px;font-size:13px;color:var(--slate)">企业微信会话存档 · 管理控制台</div>
+    </div>
+  </div>
+</section>
+
+<section id="site">
+  <h2><span class="no">08</span>官网应用方案（company_homepage）</h2>
+  <p class="lead">占位图标替换为真实标志；主色从 #4c56d6（与品牌冲突的薰衣草紫）迁移到康冠蓝 #1F5CC4；四个彩色 icon-tile 统一为蓝色系。页脚深色区块放反白 logo + 注册商标声明。</p>
+  <div class="mock-label">导航</div>
+  <div class="mock">
+    <div class="bar light" style="height:56px">
+      <img src="logo/svg/logo-horizontal.svg" alt="康冠时代" style="height:28px">
+      <span class="links"><span style="color:var(--blue-500)">首页</span> 关于我们 服务内容 服务流程 联系我们</span>
+    </div>
+    <div class="body">主色迁移一行改动：<span class="mono">--color-primary: #4c56d6 → #1F5CC4</span>（hover 用 Blue 600 #1A4FA9）</div>
+  </div>
+  <div class="mock-label">页脚</div>
+  <div class="mock">
+    <div class="foot">
+      <img src="logo/svg/logo-horizontal-reverse.svg" alt="">
+      © 2026 深圳前海康冠时代科技有限公司 版权所有 · 粤ICP备2026090201号 · 粤公网安备44030002014504号<br>
+      「康冠时代 CROWN TIME」是深圳前海康冠时代科技有限公司的注册商标（第 17528858 号）。本产品与企业微信官方无关，「企业微信」为腾讯公司注册商标。
+    </div>
+  </div>
+</section>
+
+<section id="favicon-code">
+  <h2><span class="no">09</span>Favicon 接入代码</h2>
+  <pre class="code">&lt;link rel="icon" href="/favicon/favicon.svg" type="image/svg+xml"&gt;
+&lt;link rel="icon" href="/favicon/favicon.ico" sizes="any"&gt;
+&lt;link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png"&gt;
+&lt;link rel="mask-icon" href="/logo/svg/logo-icon-mono.svg" color="#1F5CC4"&gt;
+&lt;link rel="manifest" href="/site.webmanifest"&gt;  &lt;!-- 见 BRAND.md 第 5 节 --&gt;</pre>
+</section>
+
+<section id="legal">
+  <h2><span class="no">10</span>商标法律备注</h2>
+  <table class="rules">
+    <tr><th style="width:180px">事项</th><th>要点</th></tr>
+    <tr><td>续展（紧急）</td><td>有效期至 2026-11-13，续展窗口已开启，尽快办理；宽展期 6 个月，逾期注销</td></tr>
+    <tr><td>颜色自由</td><td>注册为黑白稿，可任意颜色使用；单色黑横版 = 注册证标准形态，正式法律文件用它</td></tr>
+    <tr><td>精修版差异</td><td>商业使用无妨；若精修版成为长期主形态，建议就精修版补充一件注册申请，并保留原注册的使用证据</td></tr>
+    <tr><td>® 标注</td><td>首次出现处标「康冠时代®」即可；勿标在「365」「企业微信会话存档」等未注册名称上</td></tr>
+    <tr><td>字体合规</td><td>全套字体 SIL OFL 1.1，可商用/嵌入/转轮廓；标志 SVG 已是纯路径，零字体依赖</td></tr>
+    <tr><td>腾讯商标</td><td>「企业微信」仅作描述性使用，官网/README 附免责声明，标志本体不含该字样</td></tr>
+  </table>
+</section>
+
+<footer class="guide-foot">
+  康冠时代 CROWN TIME 品牌指南 v1.0 · 与 BRAND.md 配套使用 · 设计资产目录 design/brand/
+</footer>
+
+</div>
+
+<script>
+const swatches = [
+  ['Blue 50','#F0F5FD'],['Blue 100','#DCE8FA'],['Blue 200','#ADC8F0'],['Blue 300','#7AA3E3'],
+  ['Blue 400','#4B7FD6'],['Blue 500 主色','#1F5CC4'],['Blue 600 hover','#1A4FA9'],['Blue 700','#15418C'],
+  ['Blue 800','#10336E'],['Blue 900 深色区块','#0B2453'],['Gold 500 ≤5%','#C29A3B'],['Gold 100','#F5EBD4'],
+  ['Ink 900 正文','#1D2733'],['Slate 500 次要','#5A6B85'],['Line 200 边线','#E3E8F0'],['Mist 50 页面底','#F5F7FB'],
+];
+document.getElementById('swatches').innerHTML = swatches.map(([n,c]) => `
+  <div class="swatch">
+    <div class="chip" style="background:${c}"></div>
+    <div class="meta"><b>${n}</b><code>${c}</code></div>
+  </div>`).join('');
+</script>
+</body>
+</html>
