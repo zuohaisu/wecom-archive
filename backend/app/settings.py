@@ -104,3 +104,11 @@ class ThumbnailSettings(BaseSettings):
 
 def get_thumbnail_settings() -> ThumbnailSettings:
     return ThumbnailSettings()
+
+
+class VoiceTranscodeSettings(BaseSettings):
+    voice_transcode_enabled: str = ""
+
+
+def get_voice_transcode_settings() -> VoiceTranscodeSettings:
+    return VoiceTranscodeSettings()

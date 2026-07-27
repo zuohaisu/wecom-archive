@@ -39,8 +39,8 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install Bats (deploy_server.sh integration tests)
-        run: sudo apt-get update -qq && sudo apt-get install -yqq bats shellcheck
+      - name: Install system test dependencies and ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -yqq bats shellcheck ffmpeg
 
       - name: Install Python dependencies
         run: |

@@ -235,6 +235,12 @@ def _with_variant_thumb(url: str) -> str:
     return f"{url}{separator}variant=thumb"
 
 
+def _with_variant_play(url: str) -> str:
+    """Append variant=play while preserving entity-context query parameters."""
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}variant=play"
+
+
 def _build_nested_media_descriptor(
     media_type: str,
     media_file: Optional[MediaFile],

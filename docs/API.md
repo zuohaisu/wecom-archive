@@ -154,17 +154,19 @@ constructs a Qiniu/CDN URL itself.
     `.../media` route, unchanged; `expires_at` is `null` (the URL carries
     no time-boxed credential of its own — the session cookie authorizes
     each request to it, exactly as before RND-187).
-- **`variant` query param (RND-207)**: `?variant=thumb` returns a descriptor
-  for the generated **list thumbnail** (a separate stored object) when one
-  exists, else falls back to the original; any other value (or omitted)
-  returns the original. `size_bytes` is `null` for a thumbnail descriptor.
-  The viewer requests the original; the list requests `thumb`. The same
-  object-key tenant-prefix check is applied to the thumbnail object. The
-  timeline (`GET .../messages`) additionally carries `thumbnail_access_url`
-  (the `?variant=thumb` URL, `null` when no thumbnail exists) and
-  `image_width`/`image_height` (the original's intrinsic pixels, for
-  layout-box reservation). Nested mixed/chatrecord media descriptors carry the
-  same three fields.
+- **`variant` query param (RND-207/RND-258)**: `?variant=thumb` returns a
+  descriptor for the generated **list thumbnail** when one exists, else falls
+  back to the original. `?variant=play` returns a generated MP3/WAV playback
+  derivative for a `voice`/`audio_archive` row when one exists; ordinary
+  voice descriptor requests select that same derivative automatically. A
+  failed or unsupported conversion falls back to the original AMR/SILK so it
+  remains downloadable. `size_bytes` is `null` for either derived object.
+  The same object-key tenant-prefix check applies to every derivative. The
+  timeline (`GET .../messages`) additionally carries
+  `thumbnail_access_url` (the `?variant=thumb` URL, `null` when no thumbnail
+  exists) and `image_width`/`image_height` (the original's intrinsic pixels,
+  for layout-box reservation). Nested mixed/chatrecord media descriptors carry
+  the same thumbnail fields.
 - **Cache-Control**: `no-store` on **every** response this endpoint can
   produce — success or error, any status code (`200`/`401`/`404`/`500`/`502`/`503`).
   This response is per-user and short-lived and must never be cached by a

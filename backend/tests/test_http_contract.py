@@ -61,6 +61,7 @@ CREATE TABLE media_files (
     bucket TEXT, mime_type TEXT, checksum_sha256 TEXT, thumbnail_ref TEXT,
     image_width INTEGER, image_height INTEGER, thumbnail_status TEXT,
     thumbnail_attempted_at TEXT, thumbnail_error TEXT,
+    playback_ref TEXT, playback_status TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

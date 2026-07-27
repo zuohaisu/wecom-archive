@@ -501,6 +501,16 @@ class MediaFile(Base):
     thumbnail_status = Column(String(16), nullable=True, index=True)
     thumbnail_attempted_at = Column(DateTime(timezone=True), nullable=True)
     thumbnail_error = Column(Text, nullable=True)
+    # RND-258: browser-playable derivative for voice / audio_archive media.
+    # The original archival object remains untouched and downloadable.
+    playback_ref = Column(Text, nullable=True)
+    playback_status = Column(
+        String(32),
+        nullable=True,
+        default="not_applicable",
+        server_default=text("'not_applicable'"),
+        index=True,
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

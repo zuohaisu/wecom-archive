@@ -373,10 +373,10 @@ Important caveat:
 
 ### 9.1 Configuration Architecture (RND-223)
 
-Web-app runtime reads are consolidated behind `backend/app/settings.py`: six
+Web-app runtime reads are consolidated behind `backend/app/settings.py`: seven
 domain-grouped Typed Settings classes (`DatabaseSettings`, `AuthSettings`,
 `WecomOAuthSettings`, `WecomCallbackSettings`, `MediaStorageSettings`,
-`ThumbnailSettings`), each a `pydantic-settings` `BaseSettings` instantiated
+`ThumbnailSettings`, `VoiceTranscodeSettings`), each a `pydantic-settings` `BaseSettings` instantiated
 fresh on every call via a `get_xxx_settings()` factory — never cached — so an
 env var change takes effect on the next read, matching the pre-RND-223
 `os.getenv`/`os.environ.get` semantics the test suite relies on

@@ -671,6 +671,7 @@ function swapRichMediaPlaceholder(el,kind,desc){
     audio.className='media-audio';
     audio.controls=true;
     audio.preload='metadata';
+    audio.type=desc.content_type||'audio/mpeg';
     audio.src=desc.url;
     audio.onerror=function(){handleRichMediaPlaybackFailure('voice',accessUrl,audio,audio);};
     replacement=audio;

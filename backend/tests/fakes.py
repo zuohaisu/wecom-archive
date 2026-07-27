@@ -330,6 +330,8 @@ CREATE TABLE media_files (
     thumbnail_status TEXT,
     thumbnail_attempted_at TEXT,
     thumbnail_error TEXT,
+    playback_ref TEXT,
+    playback_status TEXT,
     tenant_id TEXT,
     created_at TEXT,
     updated_at TEXT,

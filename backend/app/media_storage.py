@@ -317,6 +317,27 @@ def build_thumbnail_storage_ref(original_ref: str, tenant_id: str, output_ext: s
     return build_tenant_media_key(tenant_id, THUMBNAIL_KEY_CATEGORY, stem, suffix=suffix)
 
 
+def build_voice_playback_storage_ref(
+    original_ref: str, tenant_id: str, output_ext: str
+) -> str:
+    """Derive a browser-playable voice object beside its original (RND-258).
+
+    ``tenants/{tenant}/voice/42.amr`` becomes
+    ``tenants/{tenant}/voice/42_play.mp3``. Local legacy refs can be
+    absolute paths, so this derives from the supplied ref rather than
+    reconstructing a tenant key from scratch.
+    """
+    if output_ext not in {".mp3", ".wav"}:
+        raise ValueError("voice playback extension must be .mp3 or .wav")
+    if not original_ref or not tenant_id:
+        raise ValueError("original_ref and tenant_id are required")
+    basename = original_ref.rsplit("/", 1)[-1]
+    stem = basename.rsplit(".", 1)[0] if "." in basename else basename
+    parent = original_ref.rsplit("/", 1)[0] if "/" in original_ref else ""
+    derived = f"{stem}_play{output_ext}"
+    return f"{parent}/{derived}" if parent else derived
+
+
 def object_key_tenant_prefix_matches(storage_ref: Optional[str], tenant_id: str) -> bool:
     """True iff storage_ref's leading "tenants/{tenant}/" segment (see
     build_tenant_media_key) matches tenant_id's own sanitized form.

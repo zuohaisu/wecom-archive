@@ -555,6 +555,8 @@ def get_or_reset_media_file(
     row.storage_backend = None
     row.storage_ref = None
     row.file_size = None
+    row.playback_ref = None
+    row.playback_status = "not_applicable"
     session.commit()
     session.refresh(row)
     return row

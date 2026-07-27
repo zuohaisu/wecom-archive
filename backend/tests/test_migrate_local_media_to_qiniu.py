@@ -554,6 +554,8 @@ def _make_sqlite_engine(tmp_path, name="migration_test.db"):
                     thumbnail_status TEXT,
                     thumbnail_attempted_at TEXT,
                     thumbnail_error TEXT,
+                    playback_ref TEXT,
+                    playback_status TEXT,
                     tenant_id TEXT,
                     created_at TEXT,
                     updated_at TEXT,

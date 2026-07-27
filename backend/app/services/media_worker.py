@@ -53,6 +53,9 @@ from app.media_download import (
 )
 from app.media_storage import MediaStorageProvider
 from app.thumbnail_pipeline import maybe_generate_after_download
+from app.voice_playback_pipeline import (
+    maybe_generate_after_download as maybe_generate_voice_playback_after_download,
+)
 
 
 @dataclass
@@ -105,6 +108,11 @@ def _persist_download_outcome(
             # image, co-located in the same backend. Fully isolated — a
             # thumbnail failure never affects the already-committed original.
             maybe_generate_after_download(session, storage_provider, media_file)
+            # RND-258: conversion happens only after the original is safely
+            # committed, and no ffmpeg outcome can change download success.
+            maybe_generate_voice_playback_after_download(
+                session, storage_provider, media_file
+            )
             return downloaded + 1, failed
         media_file.download_status = "failed"
         media_file.local_path = None

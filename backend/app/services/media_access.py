@@ -307,22 +307,28 @@ _MEDIA_PROXY_CACHE_MAX_AGE = 3600
 
 def _resolve_variant_serve_ref(
     media_file: MediaFile, variant: Optional[str], original_ref: str
-) -> Tuple[str, bool]:
-    """RND-207: choose the object key/path to actually serve for a requested
-    variant. variant="thumb" serves the generated thumbnail (co-located in
-    the SAME storage backend as the original, under the same
-    tenants/{tenant}/ prefix) when one exists; any other value, or a row
-    without a usable thumbnail, serves the original. Returns
-    (serve_ref, is_thumbnail). The thumbnail is never an independent
-    authorization boundary — it is only reached after the original row has
-    been fully authorized by resolve_authorized_media."""
+) -> Tuple[str, bool, bool]:
+    """Choose a requested thumbnail or browser-playable voice derivative.
+
+    Returns ``(serve_ref, is_thumbnail, is_playback)``. A generated voice
+    derivative is selected automatically for an ordinary descriptor request,
+    or explicitly through ``variant=play``. It is only reached after the
+    original media row has passed the normal tenant authorization flow.
+    """
     if (
         variant == "thumb"
         and getattr(media_file, "thumbnail_status", None) == "generated"
         and getattr(media_file, "thumbnail_ref", None)
     ):
-        return media_file.thumbnail_ref, True
-    return original_ref, False
+        return media_file.thumbnail_ref, True, False
+    if (
+        (variant == "play" or variant is None)
+        and getattr(media_file, "file_type", None) in {"voice", "audio_archive"}
+        and getattr(media_file, "playback_status", None) == "generated"
+        and getattr(media_file, "playback_ref", None)
+    ):
+        return media_file.playback_ref, False, True
+    return original_ref, False, False
 
 
 def _resolve_servable_backend_and_ref(media_file: MediaFile, route_label: str) -> Tuple[str, str]:
@@ -449,6 +455,7 @@ def build_access_descriptor(
     tenant_id: str,
     media_file: MediaFile,
     is_thumbnail: bool,
+    is_playback: bool = False,
     size_bytes: Optional[int],
     proxy_url: str,
     route_label: str,
@@ -550,11 +557,12 @@ def build_access_descriptor(
         expires_at = datetime.fromtimestamp(deadline, timezone.utc).isoformat()
         logger.info(
             "%s: signed url issued (media_id=%s, tenant_id=%s, "
-            "backend=qiniu_kodo, is_thumbnail=%s)",
+            "backend=qiniu_kodo, is_thumbnail=%s, is_playback=%s)",
             route_label,
             media_file.id,
             tenant_id,
             is_thumbnail,
+            is_playback,
         )
         return {
             "storage_backend": "qiniu_kodo",

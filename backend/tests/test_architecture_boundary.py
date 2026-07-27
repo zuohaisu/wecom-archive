@@ -83,6 +83,8 @@ _FLAT_SERVICE_MODULES = {
     "app.revoke_reconciliation",
     "app.structured_message_parser",
     "app.thumbnail_pipeline",
+    "app.voice_playback_pipeline",
+    "app.voice_transcode",
     "app.wecom_contacts",
     "app.sdk",
     "app.sdk.wecom_sdk",

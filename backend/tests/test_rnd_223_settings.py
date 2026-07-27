@@ -19,12 +19,14 @@ from app.settings import (
     DatabaseSettings,
     MediaStorageSettings,
     ThumbnailSettings,
+    VoiceTranscodeSettings,
     WecomCallbackSettings,
     WecomOAuthSettings,
     get_auth_settings,
     get_database_settings,
     get_media_storage_settings,
     get_thumbnail_settings,
+    get_voice_transcode_settings,
     get_wecom_callback_settings,
     get_wecom_oauth_settings,
 )
@@ -120,6 +122,11 @@ def test_thumbnail_settings_defaults(monkeypatch) -> None:
     assert settings.media_thumbnail_jpeg_quality == ""
 
 
+def test_voice_transcode_settings_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("VOICE_TRANSCODE_ENABLED", raising=False)
+    assert get_voice_transcode_settings().voice_transcode_enabled == ""
+
+
 # ---------------------------------------------------------------------------
 # Raw pass-through: no implicit strip/lower at the Settings layer -- matches
 # os.getenv/os.environ.get returning the literal string, with any
@@ -199,6 +206,13 @@ def test_thumbnail_settings_has_no_process_level_cache(monkeypatch) -> None:
     assert get_thumbnail_settings().media_thumbnail_max_edge == "500"
 
 
+def test_voice_transcode_settings_has_no_process_level_cache(monkeypatch) -> None:
+    monkeypatch.setenv("VOICE_TRANSCODE_ENABLED", "false")
+    assert get_voice_transcode_settings().voice_transcode_enabled == "false"
+    monkeypatch.setenv("VOICE_TRANSCODE_ENABLED", "true")
+    assert get_voice_transcode_settings().voice_transcode_enabled == "true"
+
+
 def test_factories_are_not_memoized_functions() -> None:
     """Guard against a future edit accidentally adding @lru_cache (or an
     equivalent memoizing decorator) to any factory -- each must be a plain
@@ -210,6 +224,7 @@ def test_factories_are_not_memoized_functions() -> None:
         (get_wecom_callback_settings, WecomCallbackSettings),
         (get_media_storage_settings, MediaStorageSettings),
         (get_thumbnail_settings, ThumbnailSettings),
+        (get_voice_transcode_settings, VoiceTranscodeSettings),
     ):
         assert not hasattr(factory, "cache_clear"), (
             f"{factory.__name__} appears to be memoized (has cache_clear) -- "

@@ -20,14 +20,17 @@
 # ── Server (sudo) Prerequisites ────────────────────────────────────────────
 #   The runtime user (e.g. wecomarchive) must be able to run
 #       sudo systemctl restart wecom-archive-365.service
+#       sudo apt-get update -qq
+#       sudo apt-get install -y ffmpeg
 #   without a password prompt.  Add a sudoers drop-in file:
 #
 #       /etc/sudoers.d/wecomarchive
 #       ─────────────────────────────
-#       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service
+#       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service, /usr/bin/apt-get
 #
 # ── First-Time Server Setup ────────────────────────────────────────────────
-#   1. Install git, python3, python3-venv, pip, and curl.
+#   1. Install git, python3, python3-venv, pip, curl, and ffmpeg
+#      (`sudo apt-get install -y ffmpeg`).
 #   2. Create the runtime user (if not exists):
 #          sudo adduser wecomarchive --disabled-password --gecos ""
 #   3. Clone the repository:
@@ -149,6 +152,8 @@ CURL_BIN="${CURL_BIN:-curl}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 FLOCK_BIN="${FLOCK_BIN:-flock}"
 MV_BIN="${MV_BIN:-mv}"
+APT_GET_BIN="${APT_GET_BIN:-apt-get}"
+FFMPEG_BIN="${FFMPEG_BIN:-ffmpeg}"
 
 # Health gate endpoints. Internal uses /health/ready — the authoritative,
 # localhost, real readiness check (DB + schema revision — see
@@ -251,6 +256,19 @@ _systemctl_is_active() {
 
 _install_deps() {
     "$PYTHON_BIN" -m pip install -r requirements.txt --quiet
+}
+
+_ensure_ffmpeg() {
+    if command -v "$FFMPEG_BIN" >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "  → ffmpeg is missing; installing it …"
+    if [ -n "$SUDO_BIN" ]; then
+        "$SUDO_BIN" "$APT_GET_BIN" update -qq && "$SUDO_BIN" "$APT_GET_BIN" install -y ffmpeg
+    else
+        "$APT_GET_BIN" update -qq && "$APT_GET_BIN" install -y ffmpeg
+    fi
+    command -v "$FFMPEG_BIN" >/dev/null 2>&1
 }
 
 # _record_known_good <sha> — called only after this script has itself
@@ -384,7 +402,7 @@ _rollback_and_restart_old() {
 }
 
 # ── 1. Pull latest code (clean-tree guarded) ───────────────────────────────
-echo "[1/8] Pulling latest code from $GIT_REMOTE/$GIT_BRANCH …"
+echo "[1/9] Pulling latest code from $GIT_REMOTE/$GIT_BRANCH …"
 
 if [ ! -d "$DEPLOY_DIR" ]; then
     echo "ERROR: Deploy directory $DEPLOY_DIR does not exist." >&2
@@ -479,8 +497,16 @@ echo ""
 
 cd backend
 
-# ── 2. Install / update Python dependencies ────────────────────────────────
-echo "[2/8] Installing Python dependencies …"
+# ── 2. Ensure media-transcoding runtime ────────────────────────────────────
+echo "[2/9] Ensuring ffmpeg is available …"
+if ! _ensure_ffmpeg; then
+    echo "ERROR: ffmpeg installation failed." >&2
+    _restore_worktree_only
+    exit 1
+fi
+
+# ── 3. Install / update Python dependencies ────────────────────────────────
+echo "[3/9] Installing Python dependencies …"
 if [ ! -d .venv ]; then
     echo "ERROR: Virtual environment not found at $PWD/.venv. Run first-time setup." >&2
     _restore_worktree_only
@@ -513,16 +539,16 @@ if ! _install_deps; then
     exit 1
 fi
 
-# ── 3. Compile-check Python code ───────────────────────────────────────────
-echo "[3/8] Checking Python code compilation …"
+# ── 4. Compile-check Python code ───────────────────────────────────────────
+echo "[4/9] Checking Python code compilation …"
 if ! "$PYTHON_BIN" -m compileall app scripts; then
     echo "ERROR: Compile check failed." >&2
     _restore_worktree_only
     exit 1
 fi
 
-# ── 4. Alembic migration (P0-A) ─────────────────────────────────────────────
-echo "[4/8] Running Alembic migrations (alembic upgrade head) …"
+# ── 5. Alembic migration (P0-A) ─────────────────────────────────────────────
+echo "[5/9] Running Alembic migrations (alembic upgrade head) …"
 if ! "$PYTHON_BIN" -m alembic upgrade head 2>&1 | _redact; then
     echo "ERROR: Alembic migration failed. Service was NOT restarted; the old process is still running the old code." >&2
     _restore_worktree_only
@@ -530,7 +556,7 @@ if ! "$PYTHON_BIN" -m alembic upgrade head 2>&1 | _redact; then
 fi
 
 # ── 5. Verify DB revision == repository head (P0-B) ─────────────────────────
-echo "[5/8] Verifying database revision matches repository head …"
+echo "[6/9] Verifying database revision matches repository head …"
 if ! "$PYTHON_BIN" scripts/verify_alembic_head.py 2>&1 | _redact; then
     echo "ERROR: Database revision does not match repository head. Service was NOT restarted." >&2
     _restore_worktree_only
@@ -538,7 +564,7 @@ if ! "$PYTHON_BIN" scripts/verify_alembic_head.py 2>&1 | _redact; then
 fi
 
 # ── 6. Restart systemd service ──────────────────────────────────────────────
-echo "[6/8] Restarting systemd service ($SERVICE) …"
+echo "[7/9] Restarting systemd service ($SERVICE) …"
 if ! _systemctl_restart "$SERVICE"; then
     echo "ERROR: systemctl restart failed." >&2
     _rollback_and_restart_old "systemctl restart failed"
@@ -551,7 +577,7 @@ if ! _systemctl_is_active "$SERVICE" >/dev/null 2>&1; then
 fi
 
 # ── 7. Readiness health gate (P0-C / P0-D) ──────────────────────────────────
-echo "[7/8] Readiness health gate …"
+echo "[8/9] Readiness health gate …"
 if ! _wait_for_health "Internal" "$INTERNAL_HEALTH" "$HEALTH_RETRIES" "$HEALTH_RETRY_INTERVAL_SECONDS"; then
     echo "ERROR: Internal readiness check failed after $HEALTH_RETRIES attempts." >&2
     _rollback_and_restart_old "internal readiness gate failed"
@@ -582,7 +608,7 @@ fi
 # ── 8. Deploy static site + success ──────────────────────────────────────────
 # Runs only after the backend is confirmed healthy above, so a
 # successful static copy can never mask a backend deploy failure.
-echo "[8/8] Deploying company homepage static files …"
+echo "[9/9] Deploying company homepage static files …"
 STATIC_SRC="$DEPLOY_DIR/static_site/company_homepage"
 # STATIC_SITE_DIR_NAME — the directory name (under shared/www and nginx's
 # webroot) this deployment's static homepage is copied to. Set the real

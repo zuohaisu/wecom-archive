@@ -95,6 +95,7 @@ EOF
 	export CURL_BIN="curl"
 	export PYTHON_BIN="python"
 	export FLOCK_BIN="flock"          # resolved via mocked PATH
+	export FFMPEG_BIN="true"           # avoid host package management in deploy tests
 	export INTERNAL_HEALTH="http://mock-host/internal-health"
 	export PUBLIC_HEALTH="http://mock-host/public-health"
 	export HEALTH_RETRIES=3

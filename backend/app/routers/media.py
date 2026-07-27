@@ -39,6 +39,7 @@ from app.services.media_access import (
 from app.services.timeline_service import (
     _entity_context_query_string,
     _resolve_entity_context,
+    _with_variant_play,
     _with_variant_thumb,
 )
 
@@ -114,9 +115,10 @@ def get_message_media(
     variant: Optional[str] = Query(
         None,
         description=(
-            "RND-207: 'thumb' serves the generated list thumbnail instead of "
-            "the original, when one exists for this row; any other value (or "
-            "omitted) serves the original."
+            "RND-207/RND-258: 'thumb' serves a generated list thumbnail; "
+            "'play' serves a generated browser-playable voice derivative. "
+            "Omitted voice requests use a generated playback variant when "
+            "available; otherwise the original is served."
         ),
     ),
     db: Session = Depends(get_db),
@@ -190,7 +192,7 @@ def get_message_media(
     # RND-207: serve the generated thumbnail when variant=thumb is requested
     # and one exists; the thumbnail is co-located in the same backend and
     # under the same tenant prefix as the original (already authorized above).
-    serve_ref, _is_thumbnail = _resolve_variant_serve_ref(
+    serve_ref, _is_thumbnail, _is_playback = _resolve_variant_serve_ref(
         auth_result.media_file, variant, effective_ref
     )
     return serve_media_bytes(effective_backend, serve_ref, route_label="media route")
@@ -227,10 +229,10 @@ def get_message_media_access(
     variant: Optional[str] = Query(
         None,
         description=(
-            "RND-207: 'thumb' returns a descriptor for the generated list "
-            "thumbnail (when one exists); any other value (or omitted) "
-            "returns the original. The viewer requests the original; the "
-            "list requests 'thumb'."
+            "RND-207/RND-258: 'thumb' returns a list-thumbnail descriptor; "
+            "'play' returns a generated browser-playable voice descriptor. "
+            "Omitted voice requests use playback when available; otherwise "
+            "the original is returned."
         ),
     ),
     db: Session = Depends(get_db),
@@ -309,15 +311,19 @@ def get_message_media_access(
     )
     # RND-207: variant=thumb resolves to the generated thumbnail (co-located
     # in the same backend / tenant prefix); anything else keeps the original.
-    serve_ref, is_thumbnail = _resolve_variant_serve_ref(media_file, variant, effective_ref)
+    serve_ref, is_thumbnail, is_playback = _resolve_variant_serve_ref(
+        media_file, variant, effective_ref
+    )
     # size_bytes tracks only the original object; a thumbnail's byte size is
     # not persisted, so report None rather than the misleading original size.
-    size_bytes = None if is_thumbnail else media_file.file_size
+    size_bytes = None if (is_thumbnail or is_playback) else media_file.file_size
     proxy_context_qs = _entity_context_query_string(mode, staff_id, contact_id, conversation_type)
 
     proxy_url = f"/api/conversations/{conversation_id}/messages/{msgid}/media{proxy_context_qs}"
     if is_thumbnail:
         proxy_url = _with_variant_thumb(proxy_url)
+    elif is_playback:
+        proxy_url = _with_variant_play(proxy_url)
 
     descriptor = build_access_descriptor(
         effective_backend=effective_backend,
@@ -325,6 +331,7 @@ def get_message_media_access(
         tenant_id=tenant_id,
         media_file=media_file,
         is_thumbnail=is_thumbnail,
+        is_playback=is_playback,
         size_bytes=size_bytes,
         proxy_url=proxy_url,
         route_label="media access route",
@@ -361,9 +368,9 @@ def get_nested_message_media(
     variant: Optional[str] = Query(
         None,
         description=(
-            "RND-207: 'thumb' serves the generated thumbnail for this nested "
-            "image when one exists; any other value (or omitted) serves the "
-            "original."
+            "RND-207/RND-258: 'thumb' serves a generated thumbnail; 'play' "
+            "serves a generated browser-playable voice derivative. Omitted "
+            "voice requests use playback when available."
         ),
     ),
     db: Session = Depends(get_db),
@@ -410,7 +417,7 @@ def get_nested_message_media(
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         auth_result.media_file, "nested media route"
     )
-    serve_ref, _is_thumbnail = _resolve_variant_serve_ref(
+    serve_ref, _is_thumbnail, _is_playback = _resolve_variant_serve_ref(
         auth_result.media_file, variant, effective_ref
     )
     return serve_media_bytes(effective_backend, serve_ref, route_label="nested media route")
@@ -449,9 +456,9 @@ def get_nested_message_media_access(
     variant: Optional[str] = Query(
         None,
         description=(
-            "RND-207: 'thumb' returns a descriptor for this nested image's "
-            "generated thumbnail (when one exists); any other value (or "
-            "omitted) returns the original."
+            "RND-207/RND-258: 'thumb' returns a generated-thumbnail "
+            "descriptor; 'play' returns a browser-playable voice descriptor. "
+            "Omitted voice requests use playback when available."
         ),
     ),
     db: Session = Depends(get_db),
@@ -509,8 +516,10 @@ def get_nested_message_media_access(
     effective_backend, effective_ref = _resolve_servable_backend_and_ref(
         media_file, "nested media access route"
     )
-    serve_ref, is_thumbnail = _resolve_variant_serve_ref(media_file, variant, effective_ref)
-    size_bytes = None if is_thumbnail else media_file.file_size
+    serve_ref, is_thumbnail, is_playback = _resolve_variant_serve_ref(
+        media_file, variant, effective_ref
+    )
+    size_bytes = None if (is_thumbnail or is_playback) else media_file.file_size
     proxy_context_qs = _entity_context_query_string(mode, staff_id, contact_id, conversation_type)
 
     proxy_url = (
@@ -520,6 +529,8 @@ def get_nested_message_media_access(
     )
     if is_thumbnail:
         proxy_url = _with_variant_thumb(proxy_url)
+    elif is_playback:
+        proxy_url = _with_variant_play(proxy_url)
 
     descriptor = build_access_descriptor(
         effective_backend=effective_backend,
@@ -527,6 +538,7 @@ def get_nested_message_media_access(
         tenant_id=tenant_id,
         media_file=media_file,
         is_thumbnail=is_thumbnail,
+        is_playback=is_playback,
         size_bytes=size_bytes,
         proxy_url=proxy_url,
         route_label="nested media access route",
