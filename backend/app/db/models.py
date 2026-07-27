@@ -4,6 +4,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Enum,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -234,6 +235,17 @@ class SyncState(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     corp_id = Column(String(64), nullable=False)
     last_seq = Column(BigInteger, nullable=False, default=0)
+    # RND-211: the cursor remains the source of truth for incremental SDK
+    # reads, while this separate version lets the console cheaply decide
+    # whether a completed sync requires it to reload its view.
+    status = Column(
+        Enum("idle", "syncing", "error", name="sync_state_status"),
+        nullable=False,
+        default="idle",
+    )
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+    seq_version = Column(Integer, nullable=False, default=0)
     tenant_id = Column(
         String(36), ForeignKey("tenants.id"), nullable=True, index=True
     )

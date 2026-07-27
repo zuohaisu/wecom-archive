@@ -10,6 +10,13 @@ function doLogout(){
     window.location.href='/admin/login';
   }).catch(function(){window.location.href='/admin/login';});
 }
+function fetchSyncStatus(){
+  return fetch('/api/admin/sync-status').then(function(r){
+    if(handleUnauth(r))return null;
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  });
+}
 // QA fix (search-then-select race): returns the fetch promise so callers
 // that need to act AFTER the entity list has actually rendered (e.g.
 // setMode()/onSearchContactItemClick()) can chain off it instead of

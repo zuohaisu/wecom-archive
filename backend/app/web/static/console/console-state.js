@@ -36,6 +36,11 @@ var refreshTickTimer=null;
 var refreshInFlight=false;
 var refreshErrorText=null;
 var lastRefreshAt=null;
+// RND-211: only a successful archive-sync version change merits reloading
+// list/timeline data. Status polling itself is deliberately lightweight.
+var syncStatus=null,syncInProgress=false,lastSeenSyncVersion=null;
+var syncStatusNotice=null,syncStatusPollTimer=null,syncStatusRequestInFlight=false;
+var syncStatusCountdownSec=0;
 function esc(s){
   return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

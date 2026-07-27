@@ -47,6 +47,10 @@ function applyLocale(){
     document.getElementById('timeline-body').innerHTML='<div class="empty-state">'+I18N.t('console.selectConversation')+'</div>';
   }
   updateRefreshStatus();
+  // Console scripts load refresh.js before this entry file in production.
+  // Keep the guard for isolated test harnesses that intentionally load only
+  // console-entry.js to exercise locale rendering.
+  if(typeof updateSyncStatus==='function')updateSyncStatus();
   // QA fix: everything below is dynamic content built via I18N.t(...) at
   // RENDER time (not a static data-i18n element applyStaticI18n() already
   // refreshed above) -- each one previously stayed in whatever language it

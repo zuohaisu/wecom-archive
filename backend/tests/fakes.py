@@ -259,6 +259,10 @@ CREATE TABLE sync_states (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     corp_id TEXT NOT NULL,
     last_seq INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'idle',
+    started_at DATETIME,
+    error_message TEXT,
+    seq_version INTEGER NOT NULL DEFAULT 0,
     tenant_id TEXT,
     updated_at TEXT,
     UNIQUE(tenant_id, corp_id)

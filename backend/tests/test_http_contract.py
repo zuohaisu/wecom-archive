@@ -317,7 +317,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 34  # RND-159: +2 for /api/search/contacts, /api/search/messages; RND-229: +1 for /admin/search; Archive Console v2 design import: +1 for /api/conversations/{conversation_id}/detail
+    assert route_count == 36  # RND-211: +2 for sync status and manual sync trigger.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -335,6 +335,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/messages/{msgid}",
             "/admin/search",
             "/api/admin/reachability-audit",
+            "/api/admin/sync-now",
+            "/api/admin/sync-status",
             "/api/auth/logout",
             "/api/auth/me",
             "/api/auth/password/login",
@@ -400,6 +402,8 @@ def test_route_snapshot_with_real_model_names() -> None:
             "ReachabilityAuditOut",
             "None",
         ),
+        ("/api/admin/sync-now", frozenset({"POST"}), "SyncNowResponse", "None"),
+        ("/api/admin/sync-status", frozenset({"GET"}), "SyncStatusResponse", "None"),
         ("/api/auth/logout", frozenset({"POST"}), "None", "None"),
         ("/api/auth/me", frozenset({"GET"}), "None", "None"),
         ("/api/auth/password/login", frozenset({"POST"}), "None", "None"),
@@ -548,6 +552,7 @@ class TestAuthGates:
             "/api/messages/any",
             "/api/messages/any-id",
             "/api/admin/reachability-audit",
+            "/api/admin/sync-status",
         ],
     )
     def test_api_401(self, client: TestClient, path: str) -> None:

@@ -17,31 +17,27 @@ reason it is in app.services.decrypt_worker: no fallback, no None
 default, so a caller can never accidentally run this against every
 tenant's rows.
 
-Transaction boundary (unchanged from the original script — see RND-222
-ticket §0.3): per-run commit, not per-record — inserted records are
-committed once, then the seq cursor is advanced and committed once more.
-Both commits happen on the one Session the caller passes in (a
-simplification from the original two-session structure — the original
-opened a second Session purely to bump the cursor, against the same
-engine/DB; using the caller's existing session for the second commit is
-observably identical). Deliberately has NO try/except around either
-commit call, matching the original script exactly: an unexpected commit
-failure is allowed to propagate as an uncaught exception (Python's
-default non-zero exit with a traceback), not translated into a `[FAIL]`
-message — this worker has never had that translation and RND-222 does not
-add it (only decrypt_wecom_messages_once.py's documented tenant-scope fix
-changes behavior; see app/services/decrypt_worker.py).
+Transaction boundary: archive records are committed once, then the seq
+cursor is advanced and committed once more. RND-211 adds separate state
+commits immediately before and after that work so the admin console can
+observe a long-running sync. Unexpected worker failures still propagate to
+the CLI's non-zero path; the only added handling is a generic persisted
+status code, never an exception message exposed to users.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.db.models import ArchiveMessage, SyncState
 from app.sdk import wecom_sdk as _default_sdk
+
+
+_SYNC_FAILED_MESSAGE = "sync_failed"
 
 
 @dataclass
@@ -85,6 +81,61 @@ def _upsert_seq(session: Session, corp_id: str, new_seq: int, tenant_id: str) ->
         row.last_seq = new_seq
 
 
+def _begin_sync(session: Session, corp_id: str, tenant_id: str) -> None:
+    """Persist an in-progress state before contacting the WeCom SDK.
+
+    This is deliberately committed separately so an admin console in another
+    process can report progress while the SDK call is running.
+    """
+    row = (
+        session.query(SyncState)
+        .filter(SyncState.corp_id == corp_id, SyncState.tenant_id == tenant_id)
+        .first()
+    )
+    if row is None:
+        row = SyncState(corp_id=corp_id, last_seq=0, tenant_id=tenant_id)
+        session.add(row)
+
+    row.status = "syncing"
+    row.started_at = datetime.now(timezone.utc)
+    row.error_message = None
+    session.commit()
+
+
+def _finish_sync(
+    session: Session,
+    corp_id: str,
+    tenant_id: str,
+    *,
+    succeeded: bool,
+) -> None:
+    """Persist the terminal sync state without exposing operational details.
+
+    ``seq_version`` advances on every successful run, including an empty
+    successful response. It intentionally does not advance for failures: it
+    represents data freshness, not an attempt counter.
+    """
+    row = (
+        session.query(SyncState)
+        .filter(SyncState.corp_id == corp_id, SyncState.tenant_id == tenant_id)
+        .first()
+    )
+    if row is None:
+        row = SyncState(corp_id=corp_id, last_seq=0, tenant_id=tenant_id)
+        session.add(row)
+
+    if succeeded:
+        row.status = "idle"
+        row.error_message = None
+        row.seq_version = (row.seq_version or 0) + 1
+    else:
+        row.status = "error"
+        # Never persist SDK, database, or subprocess exception text here:
+        # this value is returned to authenticated browser clients.
+        row.error_message = _SYNC_FAILED_MESSAGE
+    session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Core loop
 # ---------------------------------------------------------------------------
@@ -112,80 +163,94 @@ def run_sync_once(
     summary either way before checking return_code).
     """
     summary = SyncRunSummary()
+    _begin_sync(session, corp_id, tenant_id)
 
-    prev_seq = _read_seq(session, corp_id, tenant_id)
-    summary.previous_seq = prev_seq
+    try:
+        prev_seq = _read_seq(session, corp_id, tenant_id)
+        summary.previous_seq = prev_seq
 
-    chat_ret = sdk.get_chat_data(lib, handle, slice_ptr, prev_seq, limit)
-    summary.return_code = chat_ret
+        chat_ret = sdk.get_chat_data(lib, handle, slice_ptr, prev_seq, limit)
+        summary.return_code = chat_ret
 
-    records: list = []
-    if chat_ret == 0:
-        slice_len = sdk.get_slice_len(lib, slice_ptr)
-        if slice_len > 0:
-            raw = sdk.get_content_from_slice(lib, slice_ptr)
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                    records = parsed.get("chatdata", [])
-                except (json.JSONDecodeError, ValueError):
-                    pass  # records stays empty
+        records: list = []
+        if chat_ret == 0:
+            slice_len = sdk.get_slice_len(lib, slice_ptr)
+            if slice_len > 0:
+                raw = sdk.get_content_from_slice(lib, slice_ptr)
+                if raw:
+                    try:
+                        parsed = json.loads(raw)
+                        records = parsed.get("chatdata", [])
+                    except (json.JSONDecodeError, ValueError):
+                        pass  # records stays empty
 
-    summary.record_count = len(records)
+        summary.record_count = len(records)
 
-    inserted = 0
-    skipped = 0
-    max_seq = prev_seq
+        inserted = 0
+        skipped = 0
+        max_seq = prev_seq
 
-    for rec in records:
-        msgid = rec.get("msgid", "")
-        if not msgid:
-            continue
+        for rec in records:
+            msgid = rec.get("msgid", "")
+            if not msgid:
+                continue
 
-        seq_val = rec.get("seq", 0)
-        if seq_val > max_seq:
-            max_seq = seq_val
+            seq_val = rec.get("seq", 0)
+            if seq_val > max_seq:
+                max_seq = seq_val
 
-        # Idempotency check scoped to (tenant_id, msgid) per the unique constraint
-        existing = (
-            session.query(ArchiveMessage)
-            .filter(
-                ArchiveMessage.msgid == msgid,
-                ArchiveMessage.tenant_id == tenant_id,
+            # Idempotency check scoped to (tenant_id, msgid) per the unique constraint
+            existing = (
+                session.query(ArchiveMessage)
+                .filter(
+                    ArchiveMessage.msgid == msgid,
+                    ArchiveMessage.tenant_id == tenant_id,
+                )
+                .first()
             )
-            .first()
+            if existing:
+                skipped += 1
+                continue
+
+            msg = ArchiveMessage(
+                msgid=msgid,
+                seq=seq_val,
+                # Encrypted envelope — store the raw record exactly as returned
+                publickey_ver=rec.get("publickey_ver", 0),
+                raw_encrypted_payload=rec,
+                encrypt_random_key=rec.get("encrypt_random_key", ""),
+                encrypt_chat_msg=rec.get("encrypt_chat_msg", ""),
+                # Decryption state — not yet attempted
+                decrypt_status="pending",
+                tenant_id=tenant_id,
+            )
+            session.add(msg)
+            inserted += 1
+
+        summary.inserted = inserted
+        summary.skipped_duplicate = skipped
+
+        # Only commit records and advance the SDK cursor when records arrived.
+        if records:
+            session.commit()
+
+            new_seq = max_seq
+            _upsert_seq(session, corp_id, new_seq, tenant_id)
+            session.commit()
+        else:
+            new_seq = prev_seq
+
+        summary.new_seq = new_seq
+        _finish_sync(
+            session,
+            corp_id,
+            tenant_id,
+            succeeded=summary.return_code == 0,
         )
-        if existing:
-            skipped += 1
-            continue
-
-        msg = ArchiveMessage(
-            msgid=msgid,
-            seq=seq_val,
-            # Encrypted envelope — store the raw record exactly as returned
-            publickey_ver=rec.get("publickey_ver", 0),
-            raw_encrypted_payload=rec,
-            encrypt_random_key=rec.get("encrypt_random_key", ""),
-            encrypt_chat_msg=rec.get("encrypt_chat_msg", ""),
-            # Decryption state — not yet attempted
-            decrypt_status="pending",
-            tenant_id=tenant_id,
-        )
-        session.add(msg)
-        inserted += 1
-
-    summary.inserted = inserted
-    summary.skipped_duplicate = skipped
-
-    # Only commit if we actually got records back
-    if records:
-        session.commit()
-
-        new_seq = max_seq
-        _upsert_seq(session, corp_id, new_seq, tenant_id)
-        session.commit()
-    else:
-        new_seq = prev_seq
-
-    summary.new_seq = new_seq
-    return summary
+        return summary
+    except Exception:
+        # The original exception still propagates to the CLI's documented
+        # non-zero path. Roll back first so the terminal state can commit.
+        session.rollback()
+        _finish_sync(session, corp_id, tenant_id, succeeded=False)
+        raise

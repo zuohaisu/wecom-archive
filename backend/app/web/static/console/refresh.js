@@ -88,6 +88,76 @@ function setRefreshError(msg){
   refreshErrorText=msg;
   updateRefreshStatus();
 }
+function updateSyncStatus(){
+  var el=document.getElementById('sync-status');
+  var button=document.getElementById('btn-sync-now');
+  if(button)button.disabled=syncInProgress;
+  if(!el)return;
+  var text='',isError=false;
+  if(syncStatusNotice==='failed'){
+    text=I18N.t('sync.failed');
+    isError=true;
+  }else if(syncStatusNotice==='already_running'){
+    text=I18N.t('sync.queued');
+  }else if(syncStatusNotice==='rate_limited'){
+    text=I18N.t('sync.rateLimited');
+  }else if(syncStatus&&syncStatus.status==='syncing'){
+    text=I18N.t('sync.inProgress');
+  }else if(syncStatus&&syncStatus.status==='error'){
+    text=I18N.t('sync.failed');
+    isError=true;
+  }else if(syncStatus&&syncStatus.startTime){
+    text=I18N.t('sync.lastSync').replace('{time}',fmtTime(Date.parse(syncStatus.startTime)));
+  }else{
+    text=I18N.t('sync.noData');
+  }
+  el.textContent=text;
+  el.className='sync-status'+(isError?' sync-status-error':'');
+}
+function _recordSyncStatus(data){
+  if(!data)return false;
+  var version=Number(data.seqVersion||0);
+  var versionChanged=lastSeenSyncVersion!==null&&version!==lastSeenSyncVersion;
+  lastSeenSyncVersion=version;
+  syncStatus=data;
+  syncInProgress=data.status==='syncing';
+  if(syncStatusNotice==='already_running'&&data.status!=='syncing')syncStatusNotice=null;
+  if(syncStatusNotice==='rate_limited'&&data.status!=='idle')syncStatusNotice=null;
+  updateSyncStatus();
+  if(syncInProgress){
+    startSyncStatusPolling();
+  }else{
+    stopSyncStatusPolling();
+  }
+  return versionChanged;
+}
+function pollSyncStatus(){
+  if(syncStatusRequestInFlight)return Promise.resolve(false);
+  syncStatusRequestInFlight=true;
+  return fetchSyncStatus().then(function(data){
+    syncStatusRequestInFlight=false;
+    return _recordSyncStatus(data);
+  }).catch(function(e){
+    syncStatusRequestInFlight=false;
+    setRefreshError(_refreshErrMsg(e));
+    return false;
+  });
+}
+function startSyncStatusPolling(){
+  if(syncStatusPollTimer)return;
+  syncStatusPollTimer=setInterval(function(){
+    if(!document.hidden){
+      pollSyncStatus().then(function(versionChanged){
+        if(versionChanged)refreshForSyncVersion();
+      });
+    }
+  },2000);
+}
+function stopSyncStatusPolling(){
+  if(!syncStatusPollTimer)return;
+  clearInterval(syncStatusPollTimer);
+  syncStatusPollTimer=null;
+}
 function updateRefreshStatus(){
   var el=document.getElementById('refresh-status');
   if(!el)return;
@@ -107,17 +177,57 @@ function scheduleNextRefresh(){
   refreshCountdownSec=REFRESH_INTERVAL_SEC;
   updateRefreshStatus();
 }
+function refreshData(){
+  var tasks=[refreshEntityList().catch(function(e){setRefreshError(_refreshErrMsg(e));})];
+  if(selEntityId)tasks.push(refreshConversationList().catch(function(e){setRefreshError(_refreshErrMsg(e));}));
+  if(timelineConvId)tasks.push(refreshTimelineIfSelected().catch(function(e){setRefreshError(_refreshErrMsg(e));}));
+  return Promise.all(tasks);
+}
+function finishRefresh(){
+  refreshInFlight=false;
+  lastRefreshAt=Date.now();
+  scheduleNextRefresh();
+}
+function refreshForSyncVersion(){
+  if(refreshInFlight)return;
+  refreshInFlight=true;
+  setRefreshError(null);
+  refreshData().then(finishRefresh,finishRefresh);
+}
 function refreshNow(reason){
   if(refreshInFlight)return;
   refreshInFlight=true;
   setRefreshError(null);
-  var tasks=[refreshEntityList().catch(function(e){setRefreshError(_refreshErrMsg(e));})];
-  if(selEntityId)tasks.push(refreshConversationList().catch(function(e){setRefreshError(_refreshErrMsg(e));}));
-  if(timelineConvId)tasks.push(refreshTimelineIfSelected().catch(function(e){setRefreshError(_refreshErrMsg(e));}));
-  Promise.all(tasks).then(function(){
-    refreshInFlight=false;
-    lastRefreshAt=Date.now();
-    scheduleNextRefresh();
+  // Manual refresh preserves the existing full-refresh behaviour. Interval
+  // and visibility refreshes fetch only sync status until its version moves.
+  pollSyncStatus().then(function(versionChanged){
+    if(reason==='manual'||versionChanged)return refreshData();
+    return null;
+  }).then(finishRefresh,finishRefresh);
+}
+function syncNow(){
+  if(syncInProgress)return;
+  syncInProgress=true;
+  syncStatusNotice=null;
+  updateSyncStatus();
+  return fetch('/api/admin/sync-now',{method:'POST'}).then(function(r){
+    if(handleUnauth(r))return null;
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(function(data){
+    if(!data)return;
+    syncStatusNotice=data.accepted?null:data.message;
+    if(data.message==='already_running')syncInProgress=true;
+    if(data.message==='rate_limited')syncInProgress=false;
+    updateSyncStatus();
+    if(syncInProgress)startSyncStatusPolling();
+    return pollSyncStatus().then(function(versionChanged){
+      if(versionChanged)refreshForSyncVersion();
+    });
+  }).catch(function(){
+    syncInProgress=false;
+    syncStatusNotice='failed';
+    updateSyncStatus();
   });
 }
 function tickRefreshCountdown(){
@@ -125,12 +235,23 @@ function tickRefreshCountdown(){
   refreshCountdownSec--;
   if(refreshCountdownSec<=0){
     refreshNow('interval');
-  }else{
-    updateRefreshStatus();
+    return;
   }
+  syncStatusCountdownSec--;
+  if(syncStatusCountdownSec<=0){
+    syncStatusCountdownSec=5;
+    pollSyncStatus().then(function(versionChanged){
+      if(versionChanged)refreshForSyncVersion();
+    });
+  }
+  updateRefreshStatus();
 }
 function startAutoRefresh(){
   if(refreshTickTimer)clearInterval(refreshTickTimer);
+  syncStatusCountdownSec=0;
+  pollSyncStatus().then(function(versionChanged){
+    if(versionChanged)refreshForSyncVersion();
+  });
   refreshTickTimer=setInterval(tickRefreshCountdown,1000);
   document.addEventListener('visibilitychange',function(){
     if(document.hidden){

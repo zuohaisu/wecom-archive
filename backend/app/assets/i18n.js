@@ -62,6 +62,14 @@
         "refresh.failedPrefix": "刷新失败：",
         "refresh.newMessages": "有新消息",
 
+        "sync.now": "立即同步",
+        "sync.inProgress": "同步中...",
+        "sync.lastSync": "上次同步：{time}",
+        "sync.noData": "暂无同步记录",
+        "sync.queued": "已有同步正在运行",
+        "sync.rateLimited": "请在 30 秒后再试",
+        "sync.failed": "同步失败，请稍后重试",
+
         "timeline.groupChat": "群聊",
         "timeline.participant": "人",
         "timeline.participants": "人",
@@ -400,6 +408,14 @@
         "refresh.failedPrefix": "重新整理失敗：",
         "refresh.newMessages": "有新訊息",
 
+        "sync.now": "立即同步",
+        "sync.inProgress": "同步中...",
+        "sync.lastSync": "上次同步：{time}",
+        "sync.noData": "暫無同步記錄",
+        "sync.queued": "已有同步正在運行",
+        "sync.rateLimited": "請在 30 秒後再試",
+        "sync.failed": "同步失敗，請稍後重試",
+
         "timeline.groupChat": "群組聊天",
         "timeline.participant": "人",
         "timeline.participants": "人",
@@ -737,6 +753,14 @@
         "refresh.paused": "Paused (tab hidden)",
         "refresh.failedPrefix": "Refresh failed: ",
         "refresh.newMessages": "New messages",
+
+        "sync.now": "Sync Now",
+        "sync.inProgress": "Syncing...",
+        "sync.lastSync": "Last synced: {time}",
+        "sync.noData": "No sync records",
+        "sync.queued": "A sync is already running",
+        "sync.rateLimited": "Try again in 30 seconds",
+        "sync.failed": "Sync failed. Please try again",
 
         "timeline.groupChat": "Group chat",
         "timeline.participant": "participant",

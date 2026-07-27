@@ -43,8 +43,13 @@ a{color:var(--link-color)}
 .refresh-bar{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#8a8f99;flex-shrink:0}
 .refresh-status{white-space:nowrap}
 .refresh-status .refresh-status-error{color:#d4436b}
+.sync-status{white-space:nowrap}
+.sync-status.sync-status-error{color:#d4436b}
 .btn-refresh{height:28px;padding:0 11px;border:1px solid #e3e7ee;border-radius:7px;background:#fff;color:#3d4552;cursor:pointer;font-size:12px;white-space:nowrap}
 .btn-refresh:hover{background:#f6f8fb}
+.btn-sync-now{height:28px;padding:0 11px;border:1px solid #1677ff;border-radius:7px;background:#1677ff;color:#fff;cursor:pointer;font-size:12px;white-space:nowrap}
+.btn-sync-now:hover{background:#0958d9;border-color:#0958d9}
+.btn-sync-now:disabled{opacity:.58;cursor:not-allowed}
 
 .search-bar{position:relative;flex:0 1 380px;min-width:0}
 .search-bar input{width:100%;height:32px;padding:0 76px 0 12px;border:1px solid #e3e7ee;border-radius:8px;background:#f6f8fb;font-size:13px;outline:none;color:#1f2329;box-sizing:border-box}
@@ -360,7 +365,7 @@ __I18N_SCRIPT__
     <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.externalContacts">外部联系人</span><em data-i18n="nav.comingSoon">即将推出</em></span>
     <div class="side-nav-group" data-i18n="nav.group.system">系统</div>
     <a class="side-nav-item" href="/admin/diagnostics/reachability" data-i18n="nav.diagnostics">消息可达性诊断</a>
-    <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.syncTasks">同步与任务</span><em data-i18n="nav.comingSoon">即将推出</em></span>
+    <a class="side-nav-item" href="#sync-status"><span data-i18n="nav.syncTasks">同步与任务</span></a>
     <span class="side-nav-item side-nav-disabled" aria-disabled="true"><span data-i18n="nav.settings">设置</span><em data-i18n="nav.comingSoon">即将推出</em></span>
   </div>
   <div class="side-nav-user">
@@ -381,6 +386,8 @@ __I18N_SCRIPT__
     <div class="refresh-bar">
       <span id="refresh-status" class="refresh-status"></span>
       <button class="btn-refresh" id="btn-refresh" onclick="refreshNow('manual')" data-i18n="refresh.manual">刷新</button>
+      <button class="btn-sync-now" id="btn-sync-now" onclick="syncNow()" data-i18n="sync.now">立即同步</button>
+      <span id="sync-status" class="sync-status" aria-live="polite"></span>
     </div>
     <div class="search-bar" id="search-bar">
       <input type="text" id="search-input" placeholder="搜索联系人或聊天内容…" autocomplete="off">

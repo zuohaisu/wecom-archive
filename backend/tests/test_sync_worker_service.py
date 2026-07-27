@@ -62,6 +62,10 @@ def test_run_sync_once_persists_records_and_advances_seq_cursor(worker_db) -> No
 
     state = worker_db.query(SyncState).filter_by(tenant_id=_TENANT_A, corp_id=_CORP_ID).one()
     assert state.last_seq == 20
+    assert state.status == "idle"
+    assert state.seq_version == 1
+    assert state.started_at is not None
+    assert state.error_message is None
 
 
 def test_run_sync_once_is_idempotent_on_tenant_and_msgid(worker_db) -> None:
@@ -118,7 +122,28 @@ def test_run_sync_once_reports_nonzero_return_code_without_touching_seq_or_recor
     assert summary.inserted == 0
     assert summary.new_seq == 0
     assert worker_db.query(ArchiveMessage).count() == 0
-    assert worker_db.query(SyncState).count() == 0
+    state = worker_db.query(SyncState).filter_by(tenant_id=_TENANT_A, corp_id=_CORP_ID).one()
+    assert state.last_seq == 0
+    assert state.status == "error"
+    assert state.error_message == "sync_failed"
+    assert state.seq_version == 0
+
+
+def test_run_sync_once_advances_refresh_version_for_empty_success(worker_db) -> None:
+    sdk = FakeWecomSdk()
+    sdk.set_chat_data([], ret=0)
+
+    summary = run_sync_once(
+        worker_db, _TENANT_A, _CORP_ID, "fake-lib", "fake-handle", "fake-slice", 500, sdk=sdk
+    )
+
+    assert summary.return_code == 0
+    assert summary.record_count == 0
+    assert summary.new_seq == 0
+    state = worker_db.query(SyncState).filter_by(tenant_id=_TENANT_A, corp_id=_CORP_ID).one()
+    assert state.last_seq == 0
+    assert state.status == "idle"
+    assert state.seq_version == 1
 
 
 def test_service_module_has_no_print_sys_exit_or_shell_imports() -> None:
