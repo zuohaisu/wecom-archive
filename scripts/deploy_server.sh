@@ -618,6 +618,9 @@ SHARED_DST="/srv/apps/wecom-archive-365/shared/www/$STATIC_SITE_DIR_NAME"
 NGINX_DST="/var/www/$STATIC_SITE_DIR_NAME"
 
 if [ -d "$STATIC_SRC" ]; then
+    # Ensure target directories exist
+    mkdir -p "$SHARED_DST"
+
     # Copy to shared (wecomarchive-owned) first
     cp "$STATIC_SRC/index.html" "$SHARED_DST/index.html"
     cp "$STATIC_SRC/style.css" "$SHARED_DST/style.css"
@@ -625,9 +628,11 @@ if [ -d "$STATIC_SRC" ]; then
 
     # Then copy to nginx root (needs sudo)
     if [ -n "$SUDO_BIN" ]; then
+        "$SUDO_BIN" mkdir -p "$NGINX_DST"
         "$SUDO_BIN" cp "$SHARED_DST/index.html" "$NGINX_DST/index.html"
         "$SUDO_BIN" cp "$SHARED_DST/style.css" "$NGINX_DST/style.css"
     else
+        mkdir -p "$NGINX_DST"
         cp "$SHARED_DST/index.html" "$NGINX_DST/index.html"
         cp "$SHARED_DST/style.css" "$NGINX_DST/style.css"
     fi
