@@ -167,6 +167,56 @@ _NESTED_KNOWN_TYPES = (
     _NESTED_TEXT_TYPES | _NESTED_MEDIA_TYPES | _NESTED_STRUCTURED_JSON_TYPES | _NESTED_COMPOSITE_TYPES
 )
 
+# WeCom chatrecord (forwarded chat history) child items carry a `ChatRecord`-
+# prefixed `type` vocabulary (ChatRecordImage / ChatRecordVoice /
+# ChatRecordVideo / ChatRecordText / ChatRecordLink / ChatRecordLocation / ...)
+# that is otherwise identical to the canonical nested-child vocabulary this
+# module branches on. Map each onto its canonical equivalent so the existing
+# media / structured / text / composite branches handle them (RND-243).
+_CHATRECORD_TYPE_PREFIX = "ChatRecord"
+
+
+def _normalize_nested_child_type(raw_type: Optional[str]) -> Optional[str]:
+    """Normalize a WeCom chatrecord child `type` onto the canonical
+    nested-child vocabulary.
+
+    A chatrecord item's `type` is `ChatRecord` + the capitalized canonical
+    name (e.g. `ChatRecordImage`, `ChatRecordVoice`, `ChatRecordText`,
+    `ChatRecordLink`). Strip the prefix, lowercase the remainder, and accept
+    it only when it names a type this parser already supports
+    (`_NESTED_KNOWN_TYPES`); otherwise return the original value unchanged so
+    it still reaches the unknown-type fallback (visible, never dropped). This
+    generic mapping covers every official chatrecord sub-type without a
+    hand-maintained list, and is safe: an unmapped `ChatRecordXxx` is simply
+    left as-is rather than misclassified.
+    """
+    if not raw_type or not raw_type.startswith(_CHATRECORD_TYPE_PREFIX):
+        return raw_type
+    candidate = raw_type[len(_CHATRECORD_TYPE_PREFIX):].lower()
+    if candidate in _NESTED_KNOWN_TYPES:
+        return candidate
+    return raw_type
+
+
+def _normalize_nested_timestamp(ts: Optional[int]) -> Optional[int]:
+    """Convert a WeCom chatrecord child `msgtime` from seconds to
+    milliseconds when needed (RND-243).
+
+    The official chatrecord API documents `msgtime` in **seconds**, whereas
+    the rest of the archive (and the frontend `fmtTime`) expect
+    **milliseconds** -- feeding a raw seconds value renders as 1970-01-xx.
+    Any epoch-millisecond timestamp for a date after 2001 is >= 1e12, while a
+    seconds value will not reach 1e12 until the year ~33658, so a threshold of
+    1e12 cleanly separates the two units with no realistic overlap. `mixed`
+    children are covered identically (defense in depth) without affecting a
+    payload that already emits milliseconds.
+    """
+    if ts is None:
+        return None
+    if ts < 1_000_000_000_000:
+        return ts * 1000
+    return ts
+
 
 def safe_url(url: Any) -> Optional[str]:
     """Return url unchanged if it is a plain http(s) URL, else None.
@@ -987,6 +1037,15 @@ def _parse_nested_item(
         return node
 
     item_type = _clean_str(raw_item.get("type"))
+    # RND-243: WeCom chatrecord (forwarded chat history) child items use a
+    # `ChatRecord`-prefixed type vocabulary (ChatRecordImage, ChatRecordVoice,
+    # ChatRecordVideo, ChatRecordText, ChatRecordLink, ...) that is otherwise
+    # identical to the canonical nested-child types this parser branches on.
+    # Without normalization these fell through to the unknown-type branch and
+    # were echoed back to the UI as raw JSON instead of rendered as media /
+    # structured content. Normalize to the canonical vocabulary so every
+    # existing branch (media / structured / text / composite) handles them.
+    item_type = _normalize_nested_child_type(item_type)
     node["type"] = item_type
     node["supported"] = item_type in _NESTED_KNOWN_TYPES
 
@@ -1006,7 +1065,10 @@ def _parse_nested_item(
     for key in ("msgtime", "time", "timestamp"):
         timestamp = _safe_int(raw_item.get(key))
         if timestamp is not None:
-            node["timestamp"] = timestamp
+            # RND-243: chatrecord child `msgtime` is in SECONDS (official
+            # doc) while the archive/frontend expect MILLISECONDS; convert so
+            # the rendered timestamp is not 1970.
+            node["timestamp"] = _normalize_nested_timestamp(timestamp)
             break
 
     if item_type in _NESTED_TEXT_TYPES:

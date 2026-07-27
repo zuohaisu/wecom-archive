@@ -713,6 +713,100 @@ def test_parse_chatrecord_message_direct_media_children(media_type) -> None:
     assert media_refs == [{"path": "0", "type": media_type, "sdkfileid": f"sdk-{media_type}"}]
 
 
+# --- RND-243: chatrecord ChatRecord-prefixed child types ---------------------
+# WeCom emits forwarded-chat-history children with `ChatRecord`-prefixed types
+# (ChatRecordImage / ChatRecordVideo / ChatRecordVoice / ChatRecordText /
+# ChatRecordLink / ...). These must be normalized to the canonical nested-child
+# vocabulary and rendered as media / structured content, NOT echoed as raw JSON.
+
+
+@pytest.mark.parametrize(
+    "chatrecord_type,canonical_type",
+    [
+        ("ChatRecordImage", "image"),
+        ("ChatRecordVideo", "video"),
+        ("ChatRecordVoice", "voice"),
+        ("ChatRecordFile", "file"),
+        ("ChatRecordEmotion", "emotion"),
+        ("ChatRecordText", "text"),
+        ("ChatRecordLink", "link"),
+        ("ChatRecordLocation", "location"),
+    ],
+)
+def test_parse_chatrecord_message_chatrecord_prefixed_child_normalized(
+    chatrecord_type, canonical_type
+) -> None:
+    """Each `ChatRecord`-prefixed child must resolve to its canonical type,
+    be marked supported, and (for media types) register a media reference."""
+    if canonical_type in ("image", "video", "voice", "file", "emotion"):
+        item = {
+            "type": chatrecord_type,
+            "content": json.dumps({"sdkfileid": f"sdk-{canonical_type}"}),
+        }
+        fields, _warnings, media_refs = parse_chatrecord_message({"title": "t", "item": [item]})
+        node = fields["items"][0]
+        assert node["type"] == canonical_type
+        assert node["supported"] is True
+        assert node["media"] == {"has_reference": True}
+        assert media_refs == [
+            {"path": "0", "type": canonical_type, "sdkfileid": f"sdk-{canonical_type}"}
+        ]
+    elif canonical_type == "text":
+        item = {"type": chatrecord_type, "content": json.dumps({"content": "hello"})}
+        fields, _warnings, _refs = parse_chatrecord_message({"title": "t", "item": [item]})
+        node = fields["items"][0]
+        assert node["type"] == "text"
+        assert node["supported"] is True
+        assert node["text"] == "hello"
+    else:  # link / location -> structured
+        item = {
+            "type": chatrecord_type,
+            "content": json.dumps({"url": "https://example.com", "title": "x"}),
+        }
+        fields, _warnings, _refs = parse_chatrecord_message({"title": "t", "item": [item]})
+        node = fields["items"][0]
+        assert node["type"] == canonical_type
+        assert node["supported"] is True
+
+
+def test_parse_chatrecord_message_chatrecord_image_no_longer_echoes_raw_json() -> None:
+    """Regression for the reported production bug: a chatrecord image child
+    whose content is the raw media JSON must NOT be surfaced as literal text
+    -- it must register a media reference and leave `text` empty."""
+    payload = {
+        "title": "转发聊天记录",
+        "item": [
+            {
+                "type": "ChatRecordImage",
+                "content": json.dumps(
+                    {"md5sum": "d82ea6db...", "filesize": 902691, "sdkfileid": "CtYB..."}
+                ),
+            }
+        ],
+    }
+    fields, warnings, media_refs = parse_chatrecord_message(payload)
+    node = fields["items"][0]
+    assert node["type"] == "image"
+    assert node["media"] == {"has_reference": True}
+    assert node.get("text") in (None, "")
+    assert media_refs == [{"path": "0", "type": "image", "sdkfileid": "CtYB..."}]
+    assert warnings == []
+
+
+def test_parse_chatrecord_message_chatrecord_child_msgtime_seconds_to_ms() -> None:
+    """Regression for the reported 1970 timestamp: chatrecord child
+    `msgtime` is in seconds and must be normalized to milliseconds."""
+    items = [
+        {
+            "type": "ChatRecordText",
+            "msgtime": 1_700_000_000,
+            "content": json.dumps({"content": "s"}),
+        }
+    ]
+    fields, _warnings, _refs = parse_chatrecord_message({"title": "t", "item": items})
+    assert fields["items"][0]["timestamp"] == 1_700_000_000_000
+
+
 def test_parse_chatrecord_message_media_references_span_multiple_items() -> None:
     fields, warnings, media_refs = parse_chatrecord_message(
         {
