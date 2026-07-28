@@ -229,6 +229,38 @@ class AdminSession(Base):
     is_revoked = Column(Boolean, nullable=False, default=False)
 
 
+class AuditLog(Base):
+    """Immutable, append-only audit trail (RND-293 / A7-1).
+
+    Records admin actions for compliance evidence. There is NO update/delete
+    path at the application layer — rows are written once (A7-2) and read
+    (A7-3) but never mutated. `detail` holds structured context only; it
+    MUST NOT contain message bodies or decrypted payloads (SF-1).
+    """
+
+    __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_tenant_id", "tenant_id"),
+        Index("ix_audit_logs_admin_user_id", "admin_user_id"),
+        Index("ix_audit_logs_created_at", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=False, index=False
+    )
+    admin_user_id = Column(
+        String(36), ForeignKey("admin_users.id"), nullable=True, index=False
+    )
+    action = Column(Text, nullable=False)
+    object_type = Column(Text, nullable=False)
+    object_id = Column(Text, nullable=True)
+    detail = Column(JSONB, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 # —— RND-278 (F0-3) 密码重置令牌 ——
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
