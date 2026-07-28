@@ -132,6 +132,7 @@
         "composite.unknownChild": "不支持的子消息类型",
         "composite.depthLimitReached": "内容层级过深，已省略",
 
+        "placeholder.image": "图片",
         "placeholder.video": "不支持视频消息",
         "placeholder.voice": "不支持语音消息",
         "placeholder.file": "不支持文件消息",
@@ -494,6 +495,7 @@
         "composite.unknownChild": "不支援的子訊息類型",
         "composite.depthLimitReached": "內容層級過深，已省略",
 
+        "placeholder.image": "圖片",
         "placeholder.video": "不支援影片訊息",
         "placeholder.voice": "不支援語音訊息",
         "placeholder.file": "不支援檔案訊息",
@@ -856,6 +858,7 @@
         "composite.unknownChild": "Unsupported nested message",
         "composite.depthLimitReached": "Content too deeply nested — truncated",
 
+        "placeholder.image": "Image",
         "placeholder.video": "Unsupported video message",
         "placeholder.voice": "Unsupported voice message",
         "placeholder.file": "Unsupported file message",

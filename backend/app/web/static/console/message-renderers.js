@@ -937,43 +937,48 @@ function renderMixedMessage(m){
   html+='</div>';
   return html;
 }
-// Archive Console v2 (Message Types spec, chatrecord section): the
-// PREVIOUS implementation was a compact summary card, click-to-open-
-// overlay only -- a black box during review. The TOP-LEVEL chatrecord
-// message now renders an in-place transcript card instead: the first
-// CHATRECORD_PREVIEW_COUNT items expanded by default (reusing the exact
-// same per-node renderer nested/composite content already uses --
-// renderCompositeNode -- one rendering path, not a second one), a
-// expand-all/collapse toggle for the rest, and a secondary link into the
-// existing overlay Viewer for deep nested drill-down (arbitrary-depth
-// nested chatrecord/media hydration already works correctly there -- no
-// need to reimplement it inline). A nested chatrecord/mixed node found
-// INSIDE another composite message keeps the original compact
-// overlay-only renderChatrecordCard() -- only the top-level timeline
-// message gets the inline preview.
-var CHATRECORD_PREVIEW_COUNT=2;
+// Archive Console v2 (Message Types spec, chatrecord section): top-level
+// chatrecord messages have an in-place transcript card. Its initial,
+// collapsed form deliberately contains summary rows only: no rich-media
+// placeholder is emitted until the user expands it. Nested chatrecord/mixed
+// nodes retain the overlay-only renderChatrecordCard() path above.
+function chatrecordChildKindLabel(item){
+  var t=item&&item.type;
+  if(t==='text')return null;
+  var entry=MessageTypeRegistry.resolve(t);
+  if(entry&&entry.placeholderKey)return I18N.t(entry.placeholderKey);
+  if(t&&entry)return I18N.t('messageType.'+t);
+  return I18N.t('placeholder.unsupported');
+}
+function renderChatrecordRowPlaceholder(item){
+  item=item||{};
+  var sender=item.sender_name||item.sender||'';
+  var time=fmtTime(item.timestamp);
+  var kind=chatrecordChildKindLabel(item);
+  var text=item.type==='text'&&item.text?String(item.text).slice(0,60):'';
+  return '<div class="chatrecord-row"><div class="chatrecord-row-body">'
+    +'<div class="chatrecord-row-meta">'
+    +'<span class="chatrecord-row-sender">'+esc(sender)+'</span>'
+    +(kind?'<span class="chatrecord-row-kind">['+esc(kind)+']</span>':'')
+    +'<span class="chatrecord-row-time">'+esc(time)+'</span>'
+    +'</div>'
+    +(text?'<div class="chatrecord-row-text">'+esc(text)+'</div>':'')
+    +'</div></div>';
+}
 function renderChatrecordMessage(m){
   var fields=m.structured_content&&m.structured_content.fields;
   var items=(fields&&fields.items)||[];
   var title=(fields&&fields.title)||I18N.t('chatrecord.title');
   var node={fields:fields,children:items};
-  var previewCount=Math.min(CHATRECORD_PREVIEW_COUNT,items.length);
-  var previewHtml='',restHtml='';
-  for(var i=0;i<items.length;i++){
-    var rowHtml='<div class="v-chatrecord-node">'+renderCompositeNode(items[i],1)+'</div>';
-    if(i<previewCount)previewHtml+=rowHtml;else restHtml+=rowHtml;
-  }
-  var hasMore=items.length>previewCount;
-  var toggleBtn=hasMore
-    ?'<button type="button" class="chatrecord-card-toggle" onclick="toggleChatrecordRows(&quot;'+esc(m.msgid)+'&quot;,this)">'+esc(I18N.t('chatrecord.expandAll'))+'</button>'
-    :'';
+  var rowsHtml=items.map(renderChatrecordRowPlaceholder).join('');
+  var itemsData=esc(JSON.stringify(node));
+  var toggleBtn='<button type="button" class="chatrecord-card-toggle" onclick="toggleChatrecordRows(&quot;'+esc(m.msgid)+'&quot;,this)">'+esc(I18N.t('chatrecord.expandAll'))+'</button>';
   return '<div class="chatrecord-card">'
     +'<div class="chatrecord-card-hd"><div class="chatrecord-card-icon"></div>'
     +'<span class="chatrecord-card-title">'+esc(title)+'</span>'
     +'<span class="chatrecord-card-count">'+esc(items.length+' '+I18N.t('chatrecord.itemsSuffix'))+'</span>'
     +toggleBtn+'</div>'
-    +'<div class="chatrecord-card-rows">'+previewHtml
-    +'<div id="cr-rows-'+esc(m.msgid)+'" style="display:none">'+restHtml+'</div></div>'
+    +'<div class="chatrecord-card-rows" id="cr-rows-'+esc(m.msgid)+'" data-items="'+itemsData+'">'+rowsHtml+'</div>'
     +'<button type="button" class="chatrecord-viewer-link" data-node="'+esc(JSON.stringify(node))+'" '
     +'onclick="openChatrecordViewer(JSON.parse(this.getAttribute(&quot;data-node&quot;)),0)">'+esc(I18N.t('chatrecord.viewInViewer'))+'</button>'
     +'</div>';
@@ -981,9 +986,22 @@ function renderChatrecordMessage(m){
 function toggleChatrecordRows(msgid,btn){
   var el=document.getElementById('cr-rows-'+msgid);
   if(!el)return;
-  var isHidden=el.style.display==='none';
-  el.style.display=isHidden?'block':'none';
-  if(btn)btn.textContent=isHidden?I18N.t('chatrecord.collapse'):I18N.t('chatrecord.expandAll');
+  var node;
+  try{node=JSON.parse(el.getAttribute('data-items'));}catch(e){return;}
+  var items=Array.isArray(node&&node.children)?node.children:[];
+  var expanded=el.getAttribute('data-expanded')==='true';
+  if(expanded){
+    el.innerHTML=items.map(renderChatrecordRowPlaceholder).join('');
+    el.removeAttribute('data-expanded');
+    if(btn)btn.textContent=I18N.t('chatrecord.expandAll');
+    return;
+  }
+  el.innerHTML=items.map(function(item){
+    return '<div class="v-chatrecord-node">'+renderCompositeNode(item,1)+'</div>';
+  }).join('');
+  el.setAttribute('data-expanded','true');
+  hydrateRichMedia(el);
+  if(btn)btn.textContent=I18N.t('chatrecord.collapse');
 }
 function renderCompositeMessage(m){
   if(m.normalized_type==='chatrecord')return renderChatrecordMessage(m);
