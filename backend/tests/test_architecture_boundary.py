@@ -90,6 +90,7 @@ _FLAT_SERVICE_MODULES = {
     "app.wecom_contacts",
     "app.sdk",
     "app.sdk.wecom_sdk",
+    "app.session_lifecycle",
     "app.web",  # templating/static-asset helpers (render_template, STATIC_VERSION)
 }
 

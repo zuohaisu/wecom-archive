@@ -47,6 +47,7 @@ class AuthSettings(BaseSettings):
     app_env: str = "development"
     admin_username: str = ""
     admin_password_hash: str = ""
+    session_ttl_hours: str = ""
 
 
 def get_auth_settings() -> AuthSettings:

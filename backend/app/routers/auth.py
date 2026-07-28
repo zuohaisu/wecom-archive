@@ -39,11 +39,11 @@ from sqlalchemy.orm import Session
 from app.auth import (
     PASSWORD_MODE_WECOM_PREFIX,
     SESSION_COOKIE,
-    SESSION_TTL_HOURS,
     _is_production,
     consume_state,
     generate_state,
     get_auth_mode,
+    get_session_ttl_hours,
     get_wecom_token,
     safe_log_value,
     strict_int_equals,
@@ -52,6 +52,7 @@ from app.auth import (
 from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
+from app.session_lifecycle import cleanup_expired_sessions
 from app.settings import (
     get_auth_settings,
     get_email_settings,
@@ -482,7 +483,8 @@ def password_login(
 
     # Create session row.
     session_id = str(uuid.uuid4())
-    expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
+    session_ttl_hours = get_session_ttl_hours()
+    expires_at = now + timedelta(hours=session_ttl_hours)
     session = AdminSession(
         id=session_id,
         admin_user_id=resolved_user.id,
@@ -493,6 +495,7 @@ def password_login(
     )
     db.add(session)
     db.commit()
+    cleanup_expired_sessions(db)
 
     logger.info("password_login: success, session created (id not logged)")
 
@@ -504,7 +507,7 @@ def password_login(
         secure=_is_production(),
         samesite="lax",
         path="/",
-        max_age=SESSION_TTL_HOURS * 3600,
+        max_age=session_ttl_hours * 3600,
     )
     return response
 
@@ -720,7 +723,8 @@ def wecom_callback(
 
         # 8. Create session row
         session_id = str(uuid.uuid4())
-        expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
+        session_ttl_hours = get_session_ttl_hours()
+        expires_at = now + timedelta(hours=session_ttl_hours)
         session = AdminSession(
             id=session_id,
             admin_user_id=user.id,
@@ -748,10 +752,11 @@ def wecom_callback(
             secure=_is_production(),
             samesite="lax",
             path="/",
-            max_age=SESSION_TTL_HOURS * 3600,
+            max_age=session_ttl_hours * 3600,
         )
         logger.info("wecom_callback: login success, session created (id not logged)")
         db.commit()
+        cleanup_expired_sessions(db)
     except Exception as exc:
         # Log only the exception type — DBAPI errors often embed bound
         # parameters (e.g. the new session id) in their string repr.

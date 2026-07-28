@@ -38,12 +38,15 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AdminSession, AdminUser, PasswordResetToken
 from app.db.session import get_db
+from app.session_lifecycle import touch_last_active
 from app.settings import get_auth_settings
 
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE = "session_id"
-SESSION_TTL_HOURS = 8
+DEFAULT_SESSION_TTL_HOURS = 8
+# Compatibility default for existing imports; new sessions use the configured value.
+SESSION_TTL_HOURS = DEFAULT_SESSION_TTL_HOURS
 _STATE_TTL_SECONDS = 300  # 5 minutes
 _TOKEN_CACHE_TTL = 7000   # seconds (WeCom tokens expire in 7200 s)
 
@@ -85,6 +88,23 @@ def safe_log_value(value: object) -> str:
 _PBKDF2_HASH = "sha256"
 _PBKDF2_ITERATIONS = 260_000
 _PBKDF2_SALT_BYTES = 16
+
+
+def get_session_ttl_hours() -> int:
+    """Read ``SESSION_TTL_HOURS``; default to 8 and clamp to [1, 8760]."""
+    raw = get_auth_settings().session_ttl_hours.strip()
+    if not raw:
+        return DEFAULT_SESSION_TTL_HOURS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "SESSION_TTL_HOURS=%r not an int; using default %d",
+            raw,
+            DEFAULT_SESSION_TTL_HOURS,
+        )
+        return DEFAULT_SESSION_TTL_HOURS
+    return max(1, min(8760, value))
 
 
 def get_auth_mode() -> str:
@@ -342,6 +362,8 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
 
+    if isinstance(user, AdminUser):
+        touch_last_active(user, db)
     return user, session.tenant_id
 
 
@@ -375,7 +397,13 @@ def require_html_session(
         # parameters (here, the session token) in their string repr.
         logger.error("require_html_session: session lookup failed: %s", type(exc).__name__)
         return None
-    return session.tenant_id if session is not None else None
+    if session is None:
+        return None
+
+    user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
+    if isinstance(user, AdminUser):
+        touch_last_active(user, db)
+    return session.tenant_id
 
 
 def _is_production() -> bool:
