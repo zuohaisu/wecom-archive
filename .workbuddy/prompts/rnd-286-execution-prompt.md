@@ -65,7 +65,7 @@ alembic check                                                  # 必须绿（Sta
 
 ### 4.5 HTTP 契约测试（必同步更新，否则 `make verify` 红）
 `backend/tests/test_http_contract.py` 三处必须同步更新（新增 2 条路由）：
-1. **`L325`** `assert route_count == 42` → `== 44`（注释补 `RND-286: +2 admin user routes`）。
+1. **`L325`** `assert route_count ==`：当前基线已漂移（RND-285 后已 >42），**先读当前值 N，再改为 N+2**（注释补 `RND-286: +2 admin user routes`）；切勿写死 42/44。
 2. **`L334-377`** `test_routers_are_registered` 的 `expected` 集合：追加 `"/api/admin/users/{id}"` 与 `"/api/admin/users/{id}/reset-password"`。
 3. **`L403-492`** `test_route_snapshot_with_real_model_names` 的 `expected` 列表：追加两条（顺序无关，断言为 `sorted(actual) == sorted(expected)`，`L493`）：
    ```python
@@ -215,14 +215,14 @@ RED 基线（改前）：
 cd backend
 ls app/routers/users.py              # 不存在
 grep -n "api/admin/users" app/main.py   # 无
-python -c "from app.main import app; print(sum(1 for r in app.routes if hasattr(r,'methods')))"  # 42
+python -c "from app.main import app; print(sum(1 for r in app.routes if hasattr(r,'methods')))"  # 先读当前实际值再比较（基线已漂移，勿写死 42）
 ```
 
 GREEN（改后）：
 ```bash
 cd backend
 python -c "from app.routers.users import router; print('users router ok')"
-python -c "from app.main import app; print(sum(1 for r in app.routes if hasattr(r,'methods')))"  # 44
+python -c "from app.main import app; print(sum(1 for r in app.routes if hasattr(r,'methods')))"  # 当前+2（基线已漂移，勿写死 44）
 alembic check                        # 必须绿（无 schema 变更）
 make verify                          # lint-diff typecheck build test 全绿（含 test_rnd286_user_admin.py）
 ```

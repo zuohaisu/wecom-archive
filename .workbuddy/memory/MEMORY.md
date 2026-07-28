@@ -30,6 +30,12 @@
 - 12 子票 RND-245~256；混合存储 DB>env>默认、Fernet 加密、热加载、复用登录态
 - **D1 冻结：复用 SSR+vanilla JS（review_console 模板+base.css），不引 React**；G1 仅导 .env / G2 无 tenant_id / G3 首启触发 / G4 已认证=admin / G5 缺 key fail-closed
 
+## 提示词落点审计纪律（2026-07-29 确立，防 RND-323 类返工）
+- **写执行/QA 提示词钉函数落点前，先 grep 真实位置**：`grep -rn "function <name>" backend/app/web/static/console/*.js` + `grep -n "def <name>" backend/app/<module>.py`。console/*.js 经多票迭代函数会跨文件迁移（RND-323 的 `loadCurrentUser` 已从 `console-state.js` 迁到 `api-client.js`）。
+- **绝不硬编码会随提交漂移的值**：尤其 `test_http_contract.py` 的 `route_count`（每次加路由都变）。正确写法=「读当前值 N，改 N+delta（本票新增路由数）」，禁止写死具体数字（如 `== 40`/`== 44`）。
+- 后端函数落点可用「import 断言 / grep 功能」式前置校验替代死磕行号；行号仅作辅助，函数名才是锚。
+- QA 提示词的 diff 集合要与实际改动文件一致（RND-323 曾把未改的 `console-state.js` 列进 diff，已纠）。
+
 ## 进行中的链与状态（截至 2026-07-27）
 - 重构 epic RND-212 收口：12 子任务全 Done；main.py=composition root，import-boundary 测试锁定
 - RND-217 已实现未提交（等 QA+用户许可）；RND-218~221 在 main 工作树未提交（221 QA PASS 16/16）；222/223/224 pending

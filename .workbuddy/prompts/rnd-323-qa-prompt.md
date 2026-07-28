@@ -30,7 +30,7 @@
 
 ## 三、架构 / 范围守门
 
-- diff 应含：`backend/app/routers/auth.py`（一行，补 `id`）+ `backend/app/web/static/console/{conversation-list.js, console-state.js, api-client.js}` + 本票测试文件。
+- diff 应含：`backend/app/routers/auth.py`（一行，补 `id`）+ `backend/app/web/static/console/{conversation-list.js, api-client.js}`（注意：`console-state.js` **不变更**，`loadCurrentUser` 实际位于 `api-client.js`）+ 本票测试文件。
 - **无** Alembic 迁移、**无**新 router 文件、**无** `main.py` 改动、**无**新依赖、**未**引 React（D1 冻结）。
 - `git diff --stat` 期望仅上述文件。`/api/auth/me` 之外无其他端点 diff。
 - 若发现 diff 触碰 `password_login`/`wecom_login`/`logout`/`selectEntityIfPresent`/`applyLocale` 语义、或任何迁移/依赖 → **判失败**，要求开发 agent 撤销越界改动（违反硬约束）。
@@ -40,7 +40,7 @@
 1. **搜索后选中（`onSearchContactItemClick`，`console-entry.js:289`）**：恰有 1 个监控账号时，搜索某联系人并点击 → 最终应落在该搜索实体（contact 模式选中），**不被**单账号 auto-select 抢占显示错账号。验证：构造 1 项 staff + 触发 search-then-select 流程，断言最终 `selEntityId` 为搜索目标而非自动选中的 staff id；若发现 race，要求开发 agent 以 `!searchActive`（或等价搜索态标志，见 `setSearchActive`）守卫 `maybeAutoSelectEntity`。
 2. **会话列表刷新（`refresh.js` 自动刷新）**：刷新会再次 `loadEntityList` → `renderEntityList`；因 `!selEntityId` 守卫，已选中时**不重复**触发 auto-select、不闪空态、不重置已加载会话。验证：选中 A 后模拟一次 refresh 路径，断言 `selEntityId` 仍为 A 且 `loadConversations` 未被 auto-select 二次调用。
 3. **RND-320 chatrecord 折叠态（`message-renderers.js`）**：auto-select 不触碰消息渲染，理论上无耦合；回归确认：选中含 chatrecord 消息的会话后，折叠态仍不渲染媒体（无 `<img>/<video>/<audio>`），与 RND-320 验收一致。
-4. **后端 `/api/auth/me` 兼容（RND-110/RND-112）**：用真实浏览器或 node 跑 `console-state.js` 的 `loadCurrentUser`，断言导航栏 `#current-user` 显示名仍正确（用 `display_name`）；跑项目登录相关回归测试（RND-110/RND-112）全绿。
+4. **后端 `/api/auth/me` 兼容（RND-110/RND-112）**：用真实浏览器或 node 跑 `api-client.js` 的 `loadCurrentUser`，断言导航栏 `#current-user` 显示名仍正确（用 `display_name`）；跑项目登录相关回归测试（RND-110/RND-112）全绿。
 
 ## 五、测试落地（node harness —— 与现有 console JS 测试同范式）
 

@@ -106,7 +106,7 @@ def dashboard_usage(range: int = Query(30, alias="range", description="14|30|90"
   - `app/web/templates/dashboard.html`（新增模板）
   - `app/routers/web.py:admin_dashboard`（新增页面路由）
   - `app/assets/i18n.js`（新增 `dashboard.*` 三语 key）
-  - `backend/tests/test_http_contract.py:325`（路由基线 `==38` → +2 = `==40`；注释 RND-262）
+  - `backend/tests/test_http_contract.py:325`（路由基线已漂移，本票改 `assert route_count ==` 为 **当前 N + 2**；注释 RND-262）
 - **租户作用域**：所有聚合 SQL 强制 `tenant_id` 过滤；`tenant_id` 仅来自 `get_current_user` / `require_html_session`。
 - **被监控员工数口径**：默认 = `archive_messages.sender` 去重（`sender IS NOT NULL`）。若产品意图是「已同步通讯录员工」，改用 `contacts` 表（`models.py:729 Contact`，需确认其 `tenant_id` 与员工标识字段）→ 在实现说明里记录选用口径及理由。
 - **存储估算**：媒体文件 `SUM(file_size)` 为真实值；DB 体量为估算（标注 `estimated=true`），不写精确行字节。
@@ -121,7 +121,7 @@ def dashboard_usage(range: int = Query(30, alias="range", description="14|30|90"
 2. 建 `app/routers/dashboard.py` + `main.py` 注册（`prefix="/api/admin"`）。
 3. `web.py` 加 `GET /admin/dashboard` 页面路由；建 `dashboard.html` 模板（SSR + 原生 JS 分段切换）。
 4. `i18n.js` 三语块加 `dashboard.*`（概览标题、存储占用、监控员工数、同步健康度、近N天归档量、最近活动、暂无审计数据、常用入口等）。
-5. `test_http_contract.py:325` 改 `== 40`，注释 RND-262（+2 路由：页面 + API）。
+5. `test_http_contract.py:325` 的 `assert route_count ==`：**先读当前值 N（基线已因工多票叠加漂移，切勿写死 40），再改为 N+2**（+2 路由：dashboard 页面 + dashboard API）；注释 RND-262。
 6. 新测试 `backend/tests/test_rnd262_dashboard.py`（见 §6）。
 7. 跑 `make verify`（lint-diff / typecheck / build / test）全绿。
 
@@ -151,7 +151,7 @@ def dashboard_usage(range: int = Query(30, alias="range", description="14|30|90"
 
 1. **绝不 commit/push**：agent 不执行 git 提交；交付=本执行提示词 + QA 提示词，用户本人决定提交。
 2. **架构边界**：`UsageService` 放 `app/services/usage.py`（service 层，无需改 allowlist）；dashboard 路由走 `app/routers/dashboard.py` 并在 `main.py` 注册；**禁止在 `main.py` 直接 `@app.get` 业务路由**。
-3. **route-count 基线**：`test_http_contract.py:325` 改 `== 40` 并注释 RND-262。
+3. **route-count 基线**：`test_http_contract.py:325` 的 `assert route_count ==` 改为 **当前 N + 2** 并注释 RND-262（基线已漂移，勿写死 40）。
 4. **D1 冻结**：前端 SSR + 原生 JS，**禁止 React/SPA / 图表库**；复用 design-system class 与 `base.css`。
 5. **租户作用域**：所有聚合强制 `tenant_id` 过滤，来源仅 `get_current_user`/`require_html_session`。
 6. **只读聚合**：本票只做 SELECT 聚合，**不写入、不建表、不改模型**（AuditLog 属 A7，禁止自建）。

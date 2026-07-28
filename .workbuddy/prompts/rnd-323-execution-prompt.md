@@ -19,7 +19,7 @@ cd /Users/zuohaisu/Documents/code/wecom-archive-365
 grep -n "function renderEntityList"   backend/app/web/static/console/conversation-list.js   # 期望 L13
 grep -n "function onEntityClick"     backend/app/web/static/console/conversation-list.js   # 期望 L43
 grep -n "function loadEntityList"    backend/app/web/static/console/api-client.js          # 期望 L26
-grep -n "function loadCurrentUser"   backend/app/web/static/console/console-state.js        # 期望 L1
+grep -n "function loadCurrentUser"   backend/app/web/static/console/api-client.js          # 期望 L1（实际位于 api-client.js，非 console-state.js）
 grep -n "function selectEntityIfPresent" backend/app/web/static/console/console-entry.js    # 期望 L269
 grep -n '"tenant_id": session.tenant_id' backend/app/routers/auth.py                        # 应已命中（L865）
 grep -n "loadCurrentUser();" backend/app/web/static/console/console-entry.js                # 启动入口，期望 L559
@@ -45,7 +45,7 @@ grep -n "loadCurrentUser();" backend/app/web/static/console/console-entry.js    
 ## 四、项目现状（精确落点）
 
 - `backend/app/routers/auth.py:860-867` `auth_me` 返回体：当前 `{authenticated, wecom_user_id, display_name, tenant_id, role}` —— **缺 `id`**。
-- `backend/app/web/static/console/console-state.js:1-7` `loadCurrentUser()`：fetch `/api/auth/me`，仅设 `#current-user` 文本；**未捕获 `tenant_id`/`id`，未返回 promise**。启动时被 `console-entry.js:559 loadCurrentUser();` 调用。
+- `backend/app/web/static/console/api-client.js:1-7` `loadCurrentUser()`：fetch `/api/auth/me`，仅设 `#current-user` 文本；**未捕获 `tenant_id`/`id`，未返回 promise**。启动时被 `console-entry.js:559 loadCurrentUser();` 调用。
 - `backend/app/web/static/console/api-client.js:26-31` `loadEntityList()`：`url=mode==='staff'?'/api/monitored-accounts':'/api/contacts'`；`.then(items=>renderEntityList(items))`；返回 promise（search 等会 `await`）。
 - `backend/app/web/static/console/conversation-list.js:13-42` `renderEntityList(items)`：L17 零项早返空态；L18-36 渲染 `.entity-item`（data-id=`item.staff_id`）；L37-41 若 `selEntityId` 已设则高亮。**在 L41 后插入 auto-select 调用（守卫 `mode==='staff' && !selEntityId`）**。
 - `backend/app/web/static/console/conversation-list.js:43-55` `onEntityClick(el)`：L44 设 `selEntityId=el.dataset.id`。**L44 后（仅 staff）调用 `persistLastEntity`**。
@@ -69,7 +69,7 @@ grep -n "loadCurrentUser();" backend/app/web/static/console/console-entry.js    
         }
 ```
 
-### 5.2 前端：`console-state.js` 捕获 `tenant_id` + `id` 并返回 promise（L1-7 改写）
+### 5.2 前端：`api-client.js` 捕获 `tenant_id` + `id` 并返回 promise（L1-7 改写，`loadCurrentUser` 实际位于此文件）
 
 ```js
 var currentTenantId=null, currentUserId=null, authMePromise=null;   // RND-323: 供自动选中 key 隔离
@@ -84,7 +84,7 @@ function loadCurrentUser(){
   return authMePromise;                          // RND-323: 供 loadEntityList 等待
 }
 ```
-> 其余 `console-state.js` 全局（mode/selEntityId 等）不动。`console-entry.js:559` 的 `loadCurrentUser();` 调用无需改（返回值忽略即可）。
+> 仅改 `api-client.js` 中的 `loadCurrentUser`（L1-7）；`console-state.js` 内的全局变量（`mode`/`selEntityId` 等）**不在本票范围、不动**。`console-entry.js:559` 的 `loadCurrentUser();` 调用无需改（返回值忽略即可）。
 
 ### 5.3 前端：`api-client.js` loadEntityList 等待 auth/me 解析（L26-31 改写开头）
 
