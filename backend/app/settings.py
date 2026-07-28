@@ -61,6 +61,7 @@ class EmailSettings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     reset_base_url: str = Field(default="", validation_alias="PASSWORD_RESET_BASE_URL")
+    invite_base_url: str = Field(default="", validation_alias="INVITE_BASE_URL")
     reset_token_ttl_hours: str = Field(
         default="1", validation_alias="PASSWORD_RESET_TOKEN_TTL_HOURS"
     )

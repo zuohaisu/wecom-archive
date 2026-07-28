@@ -23,9 +23,10 @@ Security notes:
 from __future__ import annotations
 
 import logging
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 import hmac as _hmac
 
@@ -44,6 +45,7 @@ from app.auth import (
     consume_state,
     generate_state,
     get_auth_mode,
+    get_current_user,
     get_session_ttl_hours,
     get_wecom_token,
     safe_log_value,
@@ -234,6 +236,19 @@ class _ResetBody(BaseModel):
     password: str
 
 
+class _InviteBody(BaseModel):
+    wecom_user_id: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    role: str
+
+
+class _AcceptBody(BaseModel):
+    token: str
+    password: str
+    name: Optional[str] = None
+
+
 def _password_reset_ttl_hours() -> int:
     """Read a valid reset TTL, falling back to the safe one-hour default."""
     try:
@@ -289,6 +304,89 @@ def password_reset(body: _ResetBody, db: Session = Depends(get_db)):
     user, token_row = result
     user.password_hash = hash_password(body.password)
     token_row.used = True
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/admin/users/invite")
+def invite_user(
+    body: _InviteBody,
+    current: Tuple[AdminUser, str] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a disabled pending account and deliver its invitation link."""
+    if body.role not in {"owner", "admin", "compliance", "legal", "readonlyaudit"}:
+        raise HTTPException(status_code=400, detail="invalid_role")
+
+    admin_user, tenant_id = current
+    wecom_user_id = (body.wecom_user_id or "").strip()
+    if not wecom_user_id:
+        if not body.email:
+            raise HTTPException(status_code=400, detail="wecom_user_id_or_email_required")
+        wecom_user_id = f"invited:{body.email.lower()}"
+
+    existing = (
+        db.query(AdminUser)
+        .filter(
+            AdminUser.tenant_id == tenant_id,
+            AdminUser.wecom_user_id == wecom_user_id,
+            AdminUser.invite_status == "pending",
+        )
+        .first()
+    )
+    if existing is not None:
+        raw_token = existing.invite_token
+    else:
+        raw_token = secrets.token_urlsafe(32)
+        db.add(
+            AdminUser(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                wecom_user_id=wecom_user_id,
+                email=(body.email or "").strip() or None,
+                name=body.name,
+                role=body.role,
+                status="disabled",
+                invite_status="pending",
+                invite_token=raw_token,
+                invited_by=admin_user.id,
+            )
+        )
+    db.commit()
+
+    from app.email import send_invite_email
+
+    settings = get_email_settings()
+    base = settings.invite_base_url or get_wecom_oauth_settings().admin_domain
+    accept_link = f"{base.rstrip('/')}/admin/accept-invite?token={raw_token}"
+    if body.email:
+        send_invite_email(body.email, accept_link)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/admin/users/accept")
+def accept_invite(body: _AcceptBody, db: Session = Depends(get_db)):
+    """Activate a pending invited account after setting its password."""
+    if not body.password or len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="weak_password")
+    user = (
+        db.query(AdminUser)
+        .filter(
+            AdminUser.invite_token == body.token,
+            AdminUser.invite_status == "pending",
+        )
+        .first()
+    )
+    if user is None:
+        raise HTTPException(status_code=400, detail="invalid_or_expired_token")
+
+    from app.auth import hash_password
+
+    user.password_hash = hash_password(body.password)
+    user.status = "active"
+    user.invite_status = "accepted"
+    if body.name:
+        user.name = body.name
     db.commit()
     return JSONResponse({"ok": True})
 
@@ -882,6 +980,7 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
             "wecom_user_id": exposed_wecom_id,
             "display_name": user.name or user.wecom_user_id,
             "tenant_id": session.tenant_id,
+            "id": user.id,
             "role": user.role,
         }
     )

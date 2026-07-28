@@ -322,7 +322,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 44  # RND-295: +1 audit-log list route.
+    assert route_count == 46  # RND-285: +2 invitation routes.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -346,6 +346,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/sync-now",
             "/api/admin/sync-status",
             "/api/admin/users",
+            "/api/admin/users/accept",
+            "/api/admin/users/invite",
             "/api/auth/logout",
             "/api/auth/me",
             "/api/auth/password/forgot",
@@ -421,6 +423,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/sync-now", frozenset({"POST"}), "SyncNowResponse", "None"),
         ("/api/admin/sync-status", frozenset({"GET"}), "SyncStatusResponse", "None"),
         ("/api/admin/users", frozenset({"GET"}), "AdminUserListOut", "None"),
+        ("/api/admin/users/accept", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/users/invite", frozenset({"POST"}), "None", "None"),
         ("/api/auth/logout", frozenset({"POST"}), "None", "None"),
         ("/api/auth/me", frozenset({"GET"}), "None", "None"),
         ("/api/auth/password/forgot", frozenset({"POST"}), "None", "None"),
