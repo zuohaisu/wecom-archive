@@ -74,7 +74,11 @@ def test_auth_me_returns_contract_db_default_role_and_unauthenticated_shape() ->
         db.close()
 
 
-def test_require_role_is_not_attached_to_existing_routes() -> None:
+def test_require_role_is_attached_only_to_audit_log_route() -> None:
     routers_dir = Path(__file__).parents[1] / "app" / "routers"
     for router_file in routers_dir.rglob("*.py"):
-        assert "Depends(require_role" not in router_file.read_text()
+        source = router_file.read_text()
+        if router_file.name == "audit.py":
+            assert "Depends(require_role())" in source
+        else:
+            assert "Depends(require_role" not in source

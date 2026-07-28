@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db.schema_check import full_readiness_check
 from app.db.session import get_engine
+from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
 from app.routers.media import MediaAccessNoStoreMiddleware
@@ -97,6 +98,7 @@ def create_app() -> FastAPI:
     app.include_router(reachability_audit_router)
     app.include_router(search_router)
     app.include_router(sync_router, prefix="/api/admin")
+    app.include_router(audit_router, prefix="/api/admin")
     app.include_router(wecom_events_router)
     app.include_router(web_router)
     app.include_router(messages_router)
