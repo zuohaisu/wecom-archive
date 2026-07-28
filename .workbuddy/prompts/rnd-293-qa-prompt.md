@@ -5,7 +5,7 @@
 
 ## 一、验收目标
 
-确认 `AuditLog` **immutable / 只读追加** 模型与配套 Alembic migration（`0018` / `down_revision="0017"`）已落地，**`alembic check` 绿**，**`make verify` 全绿**，**不可变语义成立**（无 update/delete 代码路径、无 `updated_at`），且**范围严格守门**（无端点、无写入钩子、未提交）。零回归。
+确认 `AuditLog` **immutable / 只读追加** 模型与配套 Alembic migration（`0019` / `down_revision="0018"`）已落地，**`alembic check` 绿**，**`make verify` 全绿**，**不可变语义成立**（无 update/delete 代码路径、无 `updated_at`），且**范围严格守门**（无端点、无写入钩子、未提交）。零回归。
 
 ## 二、逐条验收清单（PASS/FAIL，附证据）
 
@@ -25,8 +25,9 @@
 - [ ] I3 工作树**无**任何对 `audit_logs` 的 UPDATE/DELETE 代码路径：grep 工作树（含 `routers/`、`services/`、`app/`、迁移外）确认无 `audit_logs` 相关 endpoint、无 `session.execute(text(... update/delete ... audit_logs ...))`、模型无 `update`/`delete` 方法 —— 证据：grep 结果（应为空）
 - [ ] I4 `detail` 列语义合规：模型 docstring / 代码无承载消息正文或 `decrypted_payload` 的迹象（SF-1 数据最小化）—— 证据：读模型类注释与列定义
 
-### 迁移（文件 `backend/alembic/versions/0018_audit_log.py`）
-- [ ] M1 `revision=="0018"` 且 `down_revision=="0017"`（非 0017 以外的值）
+### 迁移（文件 `backend/alembic/versions/0019_audit_log.py`）
+- [ ] M0 迁移文件名为 `0019_audit_log.py`（**不得** named `0018_audit_log.py`，`0018` 已被 RND-278 的 `0018_password_reset_tokens.py` 占用 → 撞 revision 会让 `alembic upgrade head`/`alembic check` 失败）
+- [ ] M1 `revision=="0019"` 且 `down_revision=="0018"`（非 0018 以外的值）
 - [ ] M2 `upgrade()` 用 `op.create_table("audit_logs", ...)` 建表，列/类型/可空/nullable 与模型**完全一致**（含 `created_at` 的 `server_default=sa.func.now()`、`detail` 用 `postgresql.JSONB()`）
 - [ ] M3 `upgrade()` 建三个索引名与模型 `__table_args__` 一致；`downgrade()` 顺序正确（`drop_index` ×3 → `drop_table`），无 `Enum.drop`（因本票无原生枚举）
 - [ ] M4 表含两个 FK：`fk_audit_logs_tenant_id` → `tenants.id`、`fk_audit_logs_admin_user_id` → `admin_users.id`
@@ -38,7 +39,7 @@
 - [ ] K3 若环境有 `DATABASE_URL`：DB 支撑测试通过（建 tenant+user → 插 AuditLog → 读回断言；并确认 `information_schema.columns` 中 `audit_logs` 无 `updated_at`）—— 证据：测试通过
 
 ### 范围守门（本票只动：模型 + 迁移 + 测试）
-- [ ] G1 `git diff --name-only` 仅含：`backend/app/db/models.py` + `backend/alembic/versions/0018_audit_log.py` + `backend/tests/test_rnd293_audit_log.py`（或等价测试文件）
+- [ ] G1 `git diff --name-only` 仅含：`backend/app/db/models.py` + `backend/alembic/versions/0019_audit_log.py` + `backend/tests/test_rnd293_audit_log.py`（或等价测试文件）
 - [ ] G2 `git diff` 不含任何 `routers/*.py` 改动（无列表 API —— 属 A7-3）
 - [ ] G3 `git diff` 不含 `services/` 或 `routers/` 中任何 `audit`/`AuditLog` 写入函数/钩子（写入钩子属 A7-2）
 - [ ] G4 未改动 `auth.py` / `routers/auth.py` / `models.py` 中 `AdminUser` / `Tenant` 等既有定义（仅新增 `AuditLog` 类）
@@ -57,7 +58,7 @@
 ## 四、智能路由判定（每轮必给）
 
 - 模型缺列 / 类型错（如 `action` 误用 `Enum`、`detail` 误用 `Text` 而非 `JSONB`）/ 漏索引 → 反馈开发 agent 修复，附 `models.py` 具体位置 + 期望；不自行改实现。
-- 迁移 `revision`/`down_revision` 错（如写成 0017 或 0016）或列定义与模型不一致（尤其 `created_at` 的 `server_default`、FK 命名）→ 反馈修复，附 `0018_audit_log.py` 行号。
+- 迁移 `revision`/`down_revision` 错（如写成 0018 或 0016/0017）或列定义与模型不一致（尤其 `created_at` 的 `server_default`、FK 命名）→ 反馈修复，附 `0019_audit_log.py` 行号。
 - `alembic check` 不绿 → 优先排查模型与迁移不一致（列类型、`created_at` 的 `server_default` 渲染、索引名、FK 名）；反馈具体 diff。
 - 发现任何 `audit_logs` 的 UPDATE/DELETE 代码路径或 `updated_at` 列（I1/I2/I3 命中）→ 判 FAIL 并附证据，要求移除（本票不可变语义硬约束）。
 - 发现越界实现（新增 router 端点 / service 写钩子 / 改动既有表）→ 判 FAIL，引用 G2/G3/G4，要求裁剪到本票范围。

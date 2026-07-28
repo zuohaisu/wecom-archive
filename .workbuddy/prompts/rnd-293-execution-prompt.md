@@ -5,7 +5,7 @@
 
 ## 一、任务（一句话）
 
-在 `backend/app/db/models.py` 新增 **immutable / 只读追加** 的 `AuditLog` 模型，并配套 Alembic migration（`0018` / `down_revision="0017"`），**不实现任何写入钩子或读取端点**（分别属 A7-2 / A7-3）。最终 `alembic upgrade head` + `alembic check` 必须全绿，且 `make verify` 全绿。
+在 `backend/app/db/models.py` 新增 **immutable / 只读追加** 的 `AuditLog` 模型，并配套 Alembic migration（`0019` / `down_revision="0018"`），**不实现任何写入钩子或读取端点**（分别属 A7-2 / A7-3）。最终 `alembic upgrade head` + `alembic check` 必须全绿，且 `make verify` 全绿。
 
 ## 二、决策背景（已全部拍板，不要再问）
 
@@ -22,8 +22,8 @@
 ## 三、项目现状（基线，2026-07-28 扫描）
 
 ### 3.1 迁移链（务必基于真实 head，不要猜）
-- 当前 head = `0017`（`backend/alembic/versions/0017_admin_users_account_fields.py`，`down_revision="0016"`，即 RND-277 F0-1）。
-- **新迁移必须是 `revision="0018"`、`down_revision="0017"`**。
+- 当前 head = `0018`（`backend/alembic/versions/0018_password_reset_tokens.py`，`down_revision="0017"`，即 RND-278 F0-3）。
+- **新迁移必须是 `revision="0019"`、`down_revision="0018"`**。
 - 原生枚举范式参考 `0017_admin_users_account_fields.py`（本票 `action`/`object_type` 是 Text，**不需要**建原生枚举类型，比 0017 更简单）。
 - `alembic check`（Alembic 1.14）可用，作为「模型 ⇄ 迁移一致」的硬门槛。
 
@@ -110,13 +110,13 @@ class AuditLog(Base):
 
 > 注意：`tenant_id` / `admin_user_id` 列上 `index=False`，索引改由 `__table_args__` 的 `Index(...)` 统一管理，避免重复建索引。
 
-### 5.2 迁移：新建 `backend/alembic/versions/0018_audit_log.py`
+### 5.2 迁移：新建 `backend/alembic/versions/0019_audit_log.py`
 
 ```python
 """Create immutable AuditLog table (RND-293 A7-1).
 
-Revision ID: 0018
-Revises: 0017
+Revision ID: 0019
+Revises: 0018
 Create Date: 2026-07-28
 """
 
@@ -126,8 +126,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0018"
-down_revision: Union[str, None] = "0017"
+revision: str = "0019"
+down_revision: Union[str, None] = "0018"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -191,7 +191,7 @@ def downgrade() -> None:
 
 ## 七、范围守门（本票只动：模型 + 迁移 + 测试）
 
-- [ ] `git diff --name-only` 仅含：`backend/app/db/models.py` + `backend/alembic/versions/0018_audit_log.py` + `backend/tests/test_rnd293_audit_log.py`。
+- [ ] `git diff --name-only` 仅含：`backend/app/db/models.py` + `backend/alembic/versions/0019_audit_log.py` + `backend/tests/test_rnd293_audit_log.py`。
 - [ ] **不**新增/修改任何 router 端点（列表 API 属 A7-3）。
 - [ ] **不**新增任何 service / router 写入函数或钩子（写入钩子属 A7-2）。
 - [ ] **不**改动 `auth.py` / `routers/auth.py` 等现有文件。
