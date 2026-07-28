@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.db.models import AdminUser, SyncState, TenantWecomConfig
+from app.media_event_dispatch import trigger_recent_image_download
 from app.db.session import get_db, get_engine
 from app.schemas.sync import SyncNowResponse, SyncStatusResponse
 
@@ -85,6 +86,11 @@ def _mark_worker_failed(tenant_id: str, corp_id: str) -> None:
         # A status-write failure must not make the request/background runner
         # emit database details to the browser or application logs.
         logger.error("archive worker failed and sync status could not be updated")
+
+
+def _trigger_via_dispatcher(tenant_id: str) -> None:
+    """Best-effort event signal after the archive worker has been queued."""
+    trigger_recent_image_download(tenant_id, triggered_by="sync")
 
 
 def _run_archive_worker(tenant_id: str, corp_id: str) -> None:
@@ -180,4 +186,5 @@ def sync_now(
         return SyncNowResponse(accepted=False, message="already_running")
 
     background_tasks.add_task(_run_archive_worker, tenant_id, config.corp_id)
+    background_tasks.add_task(_trigger_via_dispatcher, tenant_id)
     return SyncNowResponse(accepted=True, message="started")

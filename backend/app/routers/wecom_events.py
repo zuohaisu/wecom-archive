@@ -18,6 +18,11 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
+from sqlalchemy.orm import Session
+
+from app.db.models import TenantWecomConfig
+from app.db.session import get_engine
+from app.media_event_dispatch import trigger_recent_image_download
 from app.settings import get_wecom_callback_settings
 
 logger = logging.getLogger(__name__)
@@ -115,6 +120,22 @@ def _get_corp_id() -> str:
     return get_wecom_callback_settings().wecom_corp_id.strip()
 
 
+def _active_tenant_for_corp(corp_id: str) -> str | None:
+    """Resolve callback configuration to an active tenant without exposing DB errors."""
+    if not corp_id:
+        return None
+    try:
+        with Session(get_engine()) as db:
+            row = (
+                db.query(TenantWecomConfig)
+                .filter(TenantWecomConfig.corp_id == corp_id, TenantWecomConfig.is_active.is_(True))
+                .first()
+            )
+            return row.tenant_id if row is not None else None
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # GET — URL verification (WeCom 接收事件服务器)
 # ---------------------------------------------------------------------------
@@ -190,6 +211,14 @@ async def wecom_callback_post(
         logger.warning("wecom_callback_post rejected: invalid signature")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    # TODO: RND-107 will trigger archive worker after valid POST event.
+    # This is intentionally independent of RND-107's archive-worker trigger:
+    # a dispatcher failure must never change WeCom's callback acknowledgement.
+    tenant_id = _active_tenant_for_corp(_get_corp_id())
+    if tenant_id is not None:
+        try:
+            trigger_recent_image_download(tenant_id, triggered_by="callback")
+        except Exception:
+            pass
+
     logger.info("wecom_callback_post accepted")
     return PlainTextResponse(content="ok", media_type="text/plain")

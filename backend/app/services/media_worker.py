@@ -150,6 +150,7 @@ def download_media_candidates(
     timeout: int,
     candidates: list,
     nested_item_candidates: list,
+    before_attempt=None,
 ) -> MediaDownloadSummary:
     """Download every candidate and nested item, persisting each outcome.
 
@@ -170,6 +171,9 @@ def download_media_candidates(
             )
             continue
 
+        if before_attempt is not None:
+            before_attempt(media_file)
+
         outcome, detail, file_size = download_one(
             lib, handle, storage_provider, tenant_id, msg.id, msg.msgtype, msg.sdkfileid, timeout
         )
@@ -186,6 +190,9 @@ def download_media_candidates(
                 summary.nested_reason_counts.get("media_identity_conflict", 0) + 1
             )
             continue
+
+        if before_attempt is not None:
+            before_attempt(media_file)
 
         outcome, detail, file_size = download_one(
             lib, handle, storage_provider, tenant_id, msg.id, ref["type"], ref["sdkfileid"],

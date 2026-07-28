@@ -112,3 +112,18 @@ class VoiceTranscodeSettings(BaseSettings):
 
 def get_voice_transcode_settings() -> VoiceTranscodeSettings:
     return VoiceTranscodeSettings()
+
+
+class EventMediaDownloadSettings(BaseSettings):
+    """Fail-closed controls for the lightweight event image sweep."""
+
+    event_media_download_enabled: str = ""
+    event_media_download_batch_limit: str = "20"
+    event_media_download_recent_window_hours: str = "24"
+    event_media_download_retry_count: str = "3"
+    event_media_download_backoff_seconds: str = "30"
+    event_media_download_sweep_interval_seconds: str = "15"
+
+
+def get_event_media_download_settings() -> EventMediaDownloadSettings:
+    return EventMediaDownloadSettings()

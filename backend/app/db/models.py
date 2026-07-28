@@ -492,6 +492,9 @@ class MediaFile(Base):
     storage_ref = Column(Text, nullable=True)
     file_size = Column(BigInteger, nullable=True)
     download_status = Column(String(16), nullable=False, default="pending")
+    # RND-172: durable event-sweep retry budget. Incremented before every
+    # SDK attempt so restarts cannot reset a failing item's retry count.
+    download_attempts = Column(Integer, nullable=False, default=0, server_default=text("0"))
     migration_status = Column(String(16), nullable=True, index=True)
     migration_attempted_at = Column(DateTime(timezone=True), nullable=True)
     migration_error = Column(Text, nullable=True)

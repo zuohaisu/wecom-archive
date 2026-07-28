@@ -566,6 +566,7 @@ def _make_sqlite_engine(tmp_path, name):
                     local_path TEXT, oss_key TEXT, storage_backend TEXT,
                     storage_ref TEXT, file_size INTEGER,
                     download_status TEXT NOT NULL DEFAULT 'pending',
+                    download_attempts INTEGER NOT NULL DEFAULT 0,
                     migration_status TEXT, migration_attempted_at TEXT,
                     migration_error TEXT, bucket TEXT, mime_type TEXT,
                     checksum_sha256 TEXT, thumbnail_ref TEXT,

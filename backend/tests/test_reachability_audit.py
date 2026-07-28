@@ -119,6 +119,7 @@ CREATE TABLE media_files (
     storage_ref TEXT,
     file_size INTEGER,
     download_status TEXT NOT NULL DEFAULT 'pending',
+    download_attempts INTEGER NOT NULL DEFAULT 0,
     migration_status TEXT,
     migration_attempted_at TEXT,
     migration_error TEXT,

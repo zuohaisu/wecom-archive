@@ -75,6 +75,7 @@ _FLAT_SERVICE_MODULES = {
     "app.i18n_assets",
     "app.media_classification",
     "app.media_download",
+    "app.media_event_dispatch",
     "app.media_storage",
     "app.media_thumbnails",
     "app.message_type_registry",

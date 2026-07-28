@@ -57,6 +57,7 @@ CREATE TABLE media_files (
     archive_message_id INTEGER, tenant_id TEXT, file_type TEXT,
     local_path TEXT, oss_key TEXT, storage_backend TEXT, storage_ref TEXT,
     file_size INTEGER, download_status TEXT NOT NULL DEFAULT 'pending',
+    download_attempts INTEGER NOT NULL DEFAULT 0,
     migration_status TEXT, migration_attempted_at TEXT, migration_error TEXT,
     bucket TEXT, mime_type TEXT, checksum_sha256 TEXT, thumbnail_ref TEXT,
     image_width INTEGER, image_height INTEGER, thumbnail_status TEXT,
