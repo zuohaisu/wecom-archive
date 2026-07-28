@@ -16,6 +16,7 @@
 
 ```bash
 cd backend
+set -a; source .env 2>/dev/null; set +a   # 加载 DATABASE_URL（真实 PG 连接串，含密码）；本仓 alembic/pydantic-settings 只认 OS 环境变量，不自动读 .env
 PY=../.venv/bin/python
 test -x "$PY" || { echo "venv 缺失 — 先在仓库根运行: python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt alembic" >&2; exit 1; }
 "$PY" -c "from app.db import models; c=[x.name for x in models.AuditLog.__table__.columns]; assert {'id','tenant_id','admin_user_id','action','object_type','object_id','detail','created_at'} <= set(c), c; assert 'updated_at' not in c; print('A7-1 OK', c)"
@@ -242,6 +243,7 @@ cd backend && grep -n "route_count ==" tests/test_http_contract.py              
 GREEN（改后）：
 ```bash
 cd backend
+set -a; source .env 2>/dev/null; set +a   # 加载 DATABASE_URL（见第二节约定）
 ../.venv/bin/python -c "from app.routers.audit import list_audit_logs; print('audit router ok')"
 alembic check                                                          # 需可用 DB；无 DB 时跳过（同第二节约定，本票无 schema 变更）
 make verify                                                            # lint-diff typecheck build test 全绿

@@ -11,7 +11,7 @@
 - **不可篡改（只读）**：端点仅 `GET`，无增/删/改路径；返回的是 A7-1 既存不可变行的只读投影。
 - **租户隔离**：仅返回当前会话租户的审计行；跨租户物理不可见。
 - **角色门禁**：所有管理员角色（含 `readonlyaudit`）可读；未认证 401。
-- **契约不变**：无 schema 变更（`alembic check` 绿）、`test_http_contract.py` 仅增量更新、架构边界 PASS、无新依赖。
+- **契约不变**：无 schema 变更（`alembic check` 在有可用 DB 时绿；无 DB 环境跳过并记录）、`test_http_contract.py` 仅增量更新、架构边界 PASS、无新依赖。
 
 前置：A7-1（RND-293）已落地（否则开发 agent 应已停下报告，本票无可验收内容）。
 
@@ -35,7 +35,7 @@
 - [ ] S4 不返回 `record_hash` / 不暴露任何哈希链字段（设计稿 seal 属 UI，非本票；A7-1 schema 无该列）。 —— 证据：读源码 + 响应字段断言。
 
 ### 全局契约
-- [ ] C1 **无 schema 变更**：`alembic check` 绿；`git diff` 不含 `app/db/models.py`/`alembic/versions/` 改动。 —— 证据：命令 + `git diff`。
+- [ ] C1 **无 schema 变更**：`alembic check` 绿（需可用 DB；无 DB 时跳过并记录「需有 DB 复测」，不判 FAIL）；`git diff` 不含 `app/db/models.py`/`alembic/versions/` 改动。 —— 证据：命令 + `git diff`。
 - [ ] C2 **架构边界**：`backend/tests/test_architecture_boundary.py` PASS；`app/routers/audit.py` 未 `import app.routers.*`/`app.main`；`app/main.py` 仅新增 `include_router`，无内联路由。 —— 证据：`make verify` + grep。
 - [ ] C3 **HTTP 契约同步**：`test_http_contract.py` 三处已更新且 `make verify` 绿 —— `route_count` 改为实际值（L325）、path 集合含 `/api/admin/audit-logs`（L334-377）、snapshot 列表含 `("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None")`（L403-492）。 —— 证据：`make verify` + 读测试。
 - [ ] C4 **既有路由不变**：`reachability_audit`/`password_login`/`wecom_*`/`auth_me`/`sync` 等 URL 与行为不变；`app/audit.py`(A7-2) 未被本票改动（本票不依赖 A7-2）。 —— 证据：`git diff` 仅含新增 + 契约测试更新；既有测试全绿。
@@ -43,6 +43,8 @@
 - [ ] C6 **无新第三方依赖 / 不碰 B 层**：`requirements.txt`、`.env.example`、systemd、`deploy.yml`、`backend/scripts` 未改动。 —— 证据：`git diff`。
 
 ## 三、回归套件（必须全绿）
+
+> 🔑 运行 `make verify` / `alembic check` 前必须先 `cd backend && set -a && source .env && set +a` 加载 `DATABASE_URL`（本仓 alembic / pydantic-settings 只认 OS 环境变量，不自动读 `.env`；若未加载，alembic 会走空密码 fallback 导致连接失败、DB 门控测试 skip）。`.env` 已指向真实本地 PG（postgres/qwe123 @ localhost:5432/wecom_archive）。
 
 `make verify` 全绿，重点确认：
 - `backend/tests/test_architecture_boundary.py`
@@ -65,7 +67,7 @@ DB 支撑测试用 `DATABASE_URL` 门控；无 DB 时相关用例自动 skip，�
 ## 五、RED→GREEN 记录要求
 
 - RED（改前基线）：`app/routers/audit.py` 不存在；`/api/admin/audit-logs` 404；`route_count` = 42；`AuditLog` 是否可 import 视 A7-1 是否先合。
-- GREEN（改后）：B1-B9、S1-S4、C1-C6 全 PASS；`alembic check` 绿；`make verify` 绿。
+- GREEN（改后）：B1-B9、S1-S4、C1-C6 全 PASS；`alembic check` 在有可用 DB 时绿（无 DB 跳过）；`make verify` 绿。
 - 量化：B1 断言 `total` 与插入数相等；B7 断言 `has_more` 逻辑；其余为布尔 PASS。
 
 ## 六、交付报告格式

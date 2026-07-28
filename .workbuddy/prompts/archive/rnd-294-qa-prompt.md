@@ -52,6 +52,8 @@
 
 ## 三、回归套件
 
+> 🔑 运行 `make verify` / `alembic check` 前必须先 `cd backend && set -a && source .env && set +a` 加载 `DATABASE_URL`（本仓 alembic / pydantic-settings 只认 OS 环境变量，不自动读 `.env`；若未加载，alembic 走空密码 fallback 失败）。`.env` 已指向真实本地 PG（postgres/qwe123 @ localhost:5432/wecom_archive）。
+
 1. `cd backend && make verify`（全量；应含 `test_rnd294_audit_hook.py` + `test_architecture_boundary.py` + `test_http_contract.py`）。
 2. 若环境有 `DATABASE_URL`：额外确认 `alembic check` 绿，以及 DB 支撑测试（写入/回环、logout→audit 集成）通过。
 3. 若 `DATABASE_URL` 缺失：DB 支撑类测试按 `_DB_AVAILABLE` 门控自动 skip；此类项标记「需有 DB 环境复测」，不得判 FAIL。

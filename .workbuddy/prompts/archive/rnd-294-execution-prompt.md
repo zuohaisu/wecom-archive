@@ -41,6 +41,7 @@
 
 ```bash
 cd backend
+set -a; source .env 2>/dev/null; set +a   # 加载 DATABASE_URL（真实 PG 连接串，含密码）；本仓 alembic/pydantic-settings 只认 OS 环境变量，不自动读 .env
 PY=../.venv/bin/python
 test -x "$PY" || { echo "venv 缺失 — 先在仓库根目录运行: python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt alembic" >&2; exit 1; }
 "$PY" -c "from app.db.models import AuditLog; print([c.name for c in AuditLog.__table__.columns])"  # 应列出 id/tenant_id/admin_user_id/action/object_type/object_id/detail/created_at
