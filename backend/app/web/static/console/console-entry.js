@@ -275,6 +275,7 @@ function selectEntityIfPresent(wecomUserId){
   });
   return found;
 }
+var searchSelectionInProgress=false;
 // QA fix: a contact-search result's wecom_userid could resolve to either
 // a monitored account (staff) or an external contact -- /api/search/contacts
 // doesn't classify which, so this must actually check both lists. The
@@ -292,10 +293,14 @@ function onSearchContactItemClick(){
   document.getElementById('search-input').value='';
   setSearchActive(false);
   searchLastQ='';
+  // RND-323: suppress staff auto-selection while this explicit search
+  // navigation resolves its target; it must not briefly load another scope.
+  searchSelectionInProgress=true;
   setMode('staff').then(function(){
-    if(selectEntityIfPresent(wecomUserId))return;
+    if(selectEntityIfPresent(wecomUserId)){searchSelectionInProgress=false;return;}
     return setMode('contact').then(function(){
       selectEntityIfPresent(wecomUserId);
+      searchSelectionInProgress=false;
     });
   });
 }

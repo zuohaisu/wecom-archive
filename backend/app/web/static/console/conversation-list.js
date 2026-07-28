@@ -10,6 +10,21 @@ function convListSignature(convs){
       (c.monitored_account_display_names||c.monitored_account_ids||[]).join(',')];
   }));
 }
+// RND-323: staff selection preference is isolated by both tenant and user.
+function _lastEntityStorageKey(){
+  if(!(currentTenantId&&currentUserId))return null;
+  return 'rnd.lastEntity.'+currentTenantId+'.'+currentUserId;
+}
+function persistLastEntity(id){
+  var key=_lastEntityStorageKey();
+  if(!id||!key)return;
+  try{localStorage.setItem(key,id);}catch(e){}
+}
+function readLastEntity(){
+  var key=_lastEntityStorageKey();
+  if(!key)return null;
+  try{return localStorage.getItem(key);}catch(e){return null;}
+}
 function renderEntityList(items){
   lastEntityItems=items;
   lastEntitySig=entityListSignature(items);
@@ -39,9 +54,22 @@ function renderEntityList(items){
       el.classList.toggle('active',el.dataset.id===selEntityId);
     });
   }
+  if(mode==='staff'&&!selEntityId)maybeAutoSelectEntity(items);
+}
+// RND-323: reuse the regular selection path so auto-selection has identical
+// conversation and timeline loading side effects to a manual click.
+function maybeAutoSelectEntity(items){
+  if(mode!=='staff'||selEntityId||(typeof searchSelectionInProgress!=='undefined'&&searchSelectionInProgress)||!items||!items.length)return;
+  if(items.length===1){
+    selectEntityIfPresent(items[0].staff_id);
+    return;
+  }
+  var last=readLastEntity();
+  if(last&&items.some(function(it){return it.staff_id===last;}))selectEntityIfPresent(last);
 }
 function onEntityClick(el){
   selEntityId=el.dataset.id; selEntityName=el.dataset.name; selConvId=null; selConvName=null;
+  if(mode==='staff'&&typeof persistLastEntity==='function')persistLastEntity(selEntityId);
   timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.querySelectorAll('.entity-item').forEach(function(e){e.classList.remove('active');});
   el.classList.add('active');

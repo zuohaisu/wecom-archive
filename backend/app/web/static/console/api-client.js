@@ -1,9 +1,13 @@
+var currentTenantId=null,currentUserId=null,authMePromise=null;
 function loadCurrentUser(){
-  fetch('/api/auth/me').then(function(r){return r.json();}).then(function(d){
+  authMePromise=fetch('/api/auth/me').then(function(r){return r.json();}).then(function(d){
     if(!d.authenticated){window.location.href='/admin/login';return;}
+    currentTenantId=d.tenant_id||null;
+    currentUserId=d.id||null;
     var el=document.getElementById('current-user');
     if(el)el.textContent=d.display_name||d.wecom_user_id||'';
   }).catch(function(){});
+  return authMePromise;
 }
 function doLogout(){
   fetch('/api/auth/logout',{method:'POST'}).then(function(){
@@ -26,7 +30,10 @@ function fetchSyncStatus(){
 function loadEntityList(){
   var url=mode==='staff'?'/api/monitored-accounts':'/api/contacts';
   document.getElementById('entity-body').innerHTML='<div class="loading">'+I18N.t('console.loading')+'</div>';
-  return fetch(url).then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(items){if(items)renderEntityList(items);})
+  // RND-323: wait for /api/auth/me so the storage key is fully isolated.
+  var pre=(typeof authMePromise!=='undefined'&&authMePromise)?authMePromise:null;
+  var chain=pre?pre.then(function(){return fetch(url);}):fetch(url);
+  return chain.then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(items){if(items)renderEntityList(items);})
     .catch(function(){document.getElementById('entity-body').innerHTML='<div class="error-msg">'+I18N.t('console.failedToLoadEntities')+'</div>';});
 }
 function loadConversations(entityId){
