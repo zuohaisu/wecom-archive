@@ -70,3 +70,4 @@ Schema 落地：S1–S7 各项 PASS/FAIL + 证据
 契约：未 commit __
 遗留：__
 ```
+done
