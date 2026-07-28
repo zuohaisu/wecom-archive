@@ -14,11 +14,15 @@
 
 ```bash
 cd backend
-python -c "from app.db import models; c=[x.name for x in models.AdminUser.__table__.columns]; assert {'password_hash','email','role','status'} <= set(c), c; print('F0-1 OK', c)"
-python -c "from app.auth import require_role, create_password_reset_token; print('F0-5/F0-3 helpers OK')"
-python -c "from app.email import send_password_reset_email; print('email OK')"
+PY=../.venv/bin/python
+test -x "$PY" || { echo "venv 缺失 — 先在仓库根运行: python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt alembic" >&2; exit 1; }
+set -a; source .env; set +a   # alembic/settings 只认 OS 环境变量，必须 source .env
+"$PY" -c "from app.db import models; c=[x.name for x in models.AdminUser.__table__.columns]; assert {'password_hash','email','role','status'} <= set(c), c; print('F0-1 OK', c)"
+"$PY" -c "from app.auth import require_role, create_password_reset_token; print('F0-5/F0-3 helpers OK')"
+"$PY" -c "from app.email import send_password_reset_email; print('email OK')"
 grep -n 'AdminUser.status == "active"' app/routers/auth.py   # 应命中 password_login 内（约 L459），确认禁用用户已被登录拦截
-alembic check                                                  # 必须绿（Status: Success）
+# alembic check 需可达 DB（DATABASE_URL，来自 .env）；无 DB 时跳过并记录，不作为硬停
+if [ -n "$DATABASE_URL" ]; then "../.venv/bin/python" -m alembic check || { echo "alembic check 未绿 — 停下报告（不要擅自 alembic upgrade）"; exit 1; }; else echo "无 DATABASE_URL：跳过 alembic check（A7-1 是否已合并以 git log + 模型/迁移文件为准）"; fi
 ```
 
 断言失败或出现 `ImportError` → **停下报告**（依赖未落地；严禁自行改 `models.py`/加迁移/改鉴权/改 `auth.py` 既有 helper，那属于 F0 各子票）。
@@ -51,13 +55,10 @@ alembic check                                                  # 必须绿（Sta
 - `backend/app/email.py`：`send_password_reset_email(to_email, reset_link, locale="zh-CN")` → `bool`（`L20`）。
 - `backend/app/settings.py`：`get_email_settings()`（含 `reset_token_ttl_hours` `L?` 与 `reset_base_url`）、`get_wecom_oauth_settings()`（`admin_domain`）。
 
-### 4.3 路由注册（新增模块）
-- `backend/app/main.py`：现有 `app.include_router(sync_router, prefix="/api/admin")`（`L99`）范式。本票新增 `users_router` 并以**相同 `prefix="/api/admin"`** 注册，使路由得到字面 URL `/api/admin/users/{id}` 与 `/api/admin/users/{id}/reset-password`：
-  ```python
-  from app.routers.users import router as users_router
-  # ...在 L99 之后、L100 之前（或同类 include_router 区）插入：
-  app.include_router(users_router, prefix="/api/admin")
-  ```
+### 4.3 路由注册（复用 RND-284 既有注册，本票不改 main.py）
+- `backend/app/routers/users.py` **已存在**（RND-284 创建）：持有 `users_router = APIRouter()` 与 GET `/users` 列表端点。
+- `backend/app/main.py` 已在 `L18` `from app.routers.users import users_router` 且 `L103` `app.include_router(users_router, prefix="/api/admin")` 完成注册。
+- **本票不新增/不改 `main.py` 注册**：直接在现有 `users.py` 的 `users_router` 上追加两个端点，URL 自动成为 `/api/admin/users/{user_id}` 与 `/api/admin/users/{user_id}/reset-password`。
 
 ### 4.4 架构边界（`backend/tests/test_architecture_boundary.py`，CI 强制）
 - `routers/users.py` 是**路由模块**（非 flat service），**无需**加入 `_FLAT_SERVICE_MODULES`。
@@ -76,31 +77,27 @@ alembic check                                                  # 必须绿（Sta
 
 ## 五、实现步骤（GREEN，最小变更）
 
-### 步骤 1 — 新建 `backend/app/routers/users.py`
+### 步骤 1 — 在现有 `backend/app/routers/users.py` 追加两个端点（不新建文件、不改 main.py）
+
+> ⚠️ **布局已变（RND-284 已落地）**：`users.py` 已存在，持有 `users_router = APIRouter()` 与 GET `/users` 列表端点（文件顶部 docstring 为 RND-284 内容，**不要替换**）。本票**不是新建文件**，而是向该文件的 `users_router` 追加两个端点；`main.py` 注册已由 RND-284 完成，**不改动**。
+
+**1a. 合并导入**（编辑文件顶部既有 import 块，按如下补齐，勿重复/缺失）：
+
 ```python
-"""Admin user lifecycle management (RND-286 / A3-3): enable/disable + admin-triggered password reset.
-
-Tenant-scoped and role-gated (require_role("admin","owner")). Reuses F0-3
-password-reset token + email infrastructure; no new models/migrations.
-"""
-from __future__ import annotations
-
-from datetime import datetime, timezone
-from typing import Any
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query   # 加 HTTPException
+from typing import Any, Optional                              # 加 Any
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-
-from app.auth import create_password_reset_token, require_role
-from app.db.models import AdminSession, AdminUser
-from app.db.session import get_db
+from app.auth import create_password_reset_token, get_current_user, require_role   # 加 create_password_reset_token, require_role
+from app.db.models import AdminSession, AdminUser, ArchiveMessage   # 加 AdminSession
 from app.email import send_password_reset_email
 from app.settings import get_email_settings, get_wecom_oauth_settings
+```
 
-router = APIRouter()
+（既有 `from sqlalchemy import ...`、`from app.db.session import get_db`、`from app.schemas.admin_users import ...` 保持不变；`datetime`/`timezone` 已由 RND-284 在文件顶部 `from datetime import datetime, timedelta, timezone` 导入，无需重复。）
 
+**1b. 在文件末尾追加以下端点与 helper**（挂在既有 `users_router` 上；因 `main.py` 已以 `prefix="/api/admin"` 注册，URL 自动变为 `/api/admin/users/{user_id}` 与 `/api/admin/users/{user_id}/reset-password`）：
 
+```python
 class _StatusUpdate(BaseModel):
     status: str  # "active" | "disabled"
 
@@ -127,7 +124,7 @@ def _user_dto(user: AdminUser) -> dict[str, Any]:
     }
 
 
-@router.patch("/users/{user_id}")
+@users_router.patch("/users/{user_id}")
 def update_user_status(
     user_id: str,
     body: _StatusUpdate,
@@ -155,7 +152,7 @@ def update_user_status(
     return _user_dto(target)
 
 
-@router.post("/users/{user_id}/reset-password")
+@users_router.post("/users/{user_id}/reset-password")
 def admin_reset_password(
     user_id: str,
     auth: tuple[AdminUser, str] = Depends(require_role("admin", "owner")),
@@ -184,14 +181,14 @@ def admin_reset_password(
     return {"ok": True}
 ```
 
-> 注意：`AdminSession` 已在 `app/db/models.py` 定义，直接导入即可；`datetime`/`timezone` 为 Python 标准库。
+> 注意：`AdminSession` 已在 `app/db/models.py` 定义，直接导入即可；`datetime`/`timezone` 已由 RND-284 在文件顶部导入，无需重复。
 > 「Recommended hardening」处的 session revoke 是**可选加固**（纵深防御）。实现它时务必 `db.commit()` 包含在 PATCH 的事务内；若选择不实现，删除该 `if` 块即可，不影响 AC。
 
-### 步骤 2 — 注册路由（`backend/app/main.py`）
-见 4.3：加 `from app.routers.users import router as users_router` + `app.include_router(users_router, prefix="/api/admin")`（紧邻 `sync_router` 那行）。
+### 步骤 2 — 路由注册：本票无需改动 `main.py`
+`users_router` 已由 RND-284 在 `main.py:18/103` 以 `prefix="/api/admin"` 注册；步骤 1 的端点挂在既有 `users_router` 上即自动生效。不要新增 `include_router` 调用（避免重复注册）。
 
 ### 步骤 3 — 同步 HTTP 契约测试（`backend/tests/test_http_contract.py`）
-见 4.5 三处：route_count 42→44、path 集合追加 2 条、snapshot 列表追加 2 条（顺序无关）。
+见 4.5 三处：当前基线 `route_count == 46`（RND-285 后），改为 `48`（本票 +2）；path 集合追加 2 条、snapshot 列表追加 2 条（顺序无关）。
 
 ### 步骤 4 — 新增测试 `backend/tests/test_rnd286_user_admin.py`
 覆盖（沿用 `test_password_auth.py` 的 `dependency_overrides[get_db]` 工厂模式，或复用 `backend/tests/conftest.py` 的 DB fixture；无 `DATABASE_URL` 时优雅 skip）：
@@ -210,20 +207,24 @@ def admin_reset_password(
 
 ## 六、阶段三验证（RED/GREEN 记录）
 
-RED 基线（改前）：
+RED 基线（改前，反映 RND-284 已落地）：
 ```bash
 cd backend
-ls app/routers/users.py              # 不存在
-grep -n "api/admin/users" app/main.py   # 无
-python -c "from app.main import app; print(sum(1 for r in app.routes if hasattr(r,'methods')))"  # 先读当前实际值再比较（基线已漂移，勿写死 42）
+PY=../.venv/bin/python
+ls app/routers/users.py              # 已存在（RND-284 创建，含 users_router + GET /users；本票不重建）
+grep -n "api/admin/users" app/main.py   # 已含 users_router 注册（RND-284，prefix=/api/admin）
+"$PY" -c "from app.routers/users import users_router; print('users router 已存在')"
+"$PY" -c "from app.main import app; print(sum(1 for r in app.routes if hasattr(r,'methods')))"  # 先读当前实际值再比较（基线已漂移，勿写死）
 ```
 
 GREEN（改后）：
 ```bash
 cd backend
-python -c "from app.routers.users import router; print('users router ok')"
-python -c "from app.main import app; print(sum(1 for r in app.routes if hasattr(r,'methods')))"  # 当前+2（基线已漂移，勿写死 44）
-alembic check                        # 必须绿（无 schema 变更）
+PY=../.venv/bin/python
+set -a; source .env; set +a
+"$PY" -c "from app.routers.users import users_router; print('users router ok')"
+"$PY" -c "from app.main import app; print(sum(1 for r in app.routes if hasattr(r,'methods')))"  # 当前+2（基线已漂移，勿写死）
+"$PY" -m alembic check   # DB 可达时须绿（无 schema 变更）；无 DATABASE_URL 则跳过
 make verify                          # lint-diff typecheck build test 全绿（含 test_rnd286_user_admin.py）
 ```
 
@@ -238,10 +239,10 @@ make verify                          # lint-diff typecheck build test 全绿（�
 - **Non-goals**：不实现「改自身密码 / 用户自助改密」端点（A8-1）；不新建 SSR 页面（列表/邀请 UI 归 A3-1/A3-2）。
 - 不引 React；本票纯后端 + 测试。
 - 不碰 B 层生产路径（`/srv/apps/wecom-archive-365`、systemd、`.env.example`、`deploy.yml`、`backend/scripts`）；不新增第三方依赖。
-- `backend/tests/test_architecture_boundary.py` 必须仍 PASS（新 router 未违反边界）；`app/main.py` 仅新增 `include_router` 调用，不新增内联路由。
-- `test_http_contract.py` 三处必须同步更新（route_count 44、path 集合、snapshot 列表），否则 `make verify` 红。
+- `backend/tests/test_architecture_boundary.py` 必须仍 PASS（新端点未违反边界）；`app/main.py` 无改动（RND-284 已注册 `users_router`），不新增内联路由。
+- `test_http_contract.py` 三处必须同步更新（route_count 当前 46 → 48（+2）、path 集合、snapshot 列表），否则 `make verify` 红。
 - 原始重置令牌只经 `create_password_reset_token` 返回、拼入邮件链接；不得写入任何响应体或日志。
 
 ## 八、收尾（交付物）
 
-向用户交付：RED/GREEN 记录、`git diff --stat`（应含 `app/routers/users.py`(新) + `app/main.py`(注册) + `tests/test_http_contract.py`(3 处) + `tests/test_rnd286_user_admin.py`(新)）、`alembic check` 绿日志、`make verify` 全绿日志、未提交声明。
+向用户交付：RED/GREEN 记录、`git diff --stat`（应含 `app/routers/users.py`(追加端点) + `tests/test_http_contract.py`(3 处) + `tests/test_rnd286_user_admin.py`(新)；`app/main.py` 无改动，RND-284 已注册 `users_router`）、`alembic check` 绿日志（或记录「无 DB 跳过」）、`make verify` 全绿日志、未提交声明。

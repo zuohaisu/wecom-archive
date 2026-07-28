@@ -39,8 +39,8 @@
 
 ### 全局契约
 - [ ] C1 **无 schema 变更**：`alembic check` 绿（Status: Success）；`git diff` 不含 `app/db/models.py`/`alembic/versions/` 改动。 —— 证据：命令输出 + `git diff`。
-- [ ] C2 **架构边界**：`backend/tests/test_architecture_boundary.py` PASS；`app/routers/users.py` 未 `import app.routers.*`/`app.main`（仅 `app.auth`/`app.email`/`app.db.models`/`app.db.session`/`app.settings`）；`app/main.py` 仅新增 `include_router`，无内联路由。 —— 证据：`make verify` + grep。
-- [ ] C3 **HTTP 契约同步**：`test_http_contract.py` 三处已更新且 `make verify` 绿 —— `route_count == 44`（L325）、path 集合含两条新路由（L334-377）、snapshot 列表含两条（`response_model="None"`、`response_class="None"`，L403-492）。 —— 证据：`make verify` + 读测试。
+- [ ] C2 **架构边界**：`backend/tests/test_architecture_boundary.py` PASS；`app/routers/users.py` 未 `import app.routers.*`/`app.main`（仅 `app.auth`/`app.email`/`app.db.models`/`app.db.session`/`app.settings`）；`app/main.py` **无改动**（RND-284 已注册 `users_router`），无内联路由。 —— 证据：`make verify` + grep + `git diff`。
+- [ ] C3 **HTTP 契约同步**：`test_http_contract.py` 三处已更新且 `make verify` 绿 —— `route_count == 48`（L325；RND-285 后基线 46，本票 +2）、path 集合含两条新路由（L334-377）、snapshot 列表含两条（`response_model="None"`、`response_class="None"`，L403-492）。 —— 证据：`make verify` + 读测试。
 - [ ] C4 **既有路由不变**：`password_login`/`wecom_login`/`wecom_callback`/`auth_me`/`logout` URL 与行为不变；`/api/auth/me` 不变；`/api/auth/password/login` 404/500 守卫不变。 —— 证据：`git diff` 仅含新增 + 契约测试更新，无既有路由体改动；既有 auth 测试全绿。
 - [ ] C5 **登录契约**：`test_password_auth.py`（RND-276 契约）全绿，env 回退路径不受影响。 —— 证据：`make verify`。
 - [ ] C6 **无新第三方依赖 / 不碰 B 层**：`requirements.txt`、`.env.example`、systemd、`deploy.yml`、`backend/scripts` 未改动。 —— 证据：`git diff`。
@@ -68,7 +68,7 @@ DB 支撑测试用 `DATABASE_URL` 门控；无 DB 时相关用例自动 skip，�
 
 ## 五、RED→GREEN 记录要求
 
-- RED（改前基线）：`app/routers/users.py` 不存在；`app/main.py` 无 `api/admin/users`；`route_count` = 42；reset-password 端点 404。
+- RED（改前基线，反映 RND-284 已落地）：`app/routers/users.py` **已存在**（RND-284 创建，含 `users_router` + GET `/users`）；`app/main.py` 已注册 `users_router`（prefix `/api/admin`）；`route_count` = 46；`/api/admin/users/{id}` 与 `/api/admin/users/{id}/reset-password` 端点 404。
 - GREEN（改后）：B1-B12、S1-S5、C1-C7 全 PASS；`alembic check` 绿；`make verify` 绿。
 - 量化：B2 需断言停用后 `password_login` 返回 401（AC 硬证据）；其余为布尔 PASS。
 
