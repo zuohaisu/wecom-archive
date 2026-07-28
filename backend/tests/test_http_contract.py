@@ -322,7 +322,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 36  # RND-211: +2 for sync status and manual sync trigger.
+    assert route_count == 40  # RND-278: +4 password reset API and SSR routes.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -335,16 +335,20 @@ def test_routers_are_registered(client: TestClient) -> None:
         [
             "/admin/conversations",
             "/admin/diagnostics/reachability",
+            "/admin/forgot-password",
             "/admin/login",
             "/admin/messages",
             "/admin/messages/{msgid}",
+            "/admin/reset-password",
             "/admin/search",
             "/api/admin/reachability-audit",
             "/api/admin/sync-now",
             "/api/admin/sync-status",
             "/api/auth/logout",
             "/api/auth/me",
+            "/api/auth/password/forgot",
             "/api/auth/password/login",
+            "/api/auth/password/reset",
             "/api/auth/wecom/callback",
             "/api/auth/wecom/login",
             "/api/contacts",
@@ -397,9 +401,11 @@ def test_route_snapshot_with_real_model_names() -> None:
     expected = [
         ("/admin/conversations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/forgot-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/login", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages/{msgid}", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/reset-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/search", frozenset({"GET"}), "None", "HTMLResponse"),
         (
             "/api/admin/reachability-audit",
@@ -411,7 +417,9 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/sync-status", frozenset({"GET"}), "SyncStatusResponse", "None"),
         ("/api/auth/logout", frozenset({"POST"}), "None", "None"),
         ("/api/auth/me", frozenset({"GET"}), "None", "None"),
+        ("/api/auth/password/forgot", frozenset({"POST"}), "None", "None"),
         ("/api/auth/password/login", frozenset({"POST"}), "None", "None"),
+        ("/api/auth/password/reset", frozenset({"POST"}), "None", "None"),
         ("/api/auth/wecom/callback", frozenset({"GET"}), "None", "None"),
         ("/api/auth/wecom/login", frozenset({"GET"}), "None", "None"),
         ("/api/contacts", frozenset({"GET"}), "list[ContactOut]", "None"),

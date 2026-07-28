@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -50,6 +51,22 @@ class AuthSettings(BaseSettings):
 
 def get_auth_settings() -> AuthSettings:
     return AuthSettings()
+
+
+class EmailSettings(BaseSettings):
+    smtp_host: str = ""
+    smtp_port: str = ""
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    reset_base_url: str = Field(default="", validation_alias="PASSWORD_RESET_BASE_URL")
+    reset_token_ttl_hours: str = Field(
+        default="1", validation_alias="PASSWORD_RESET_TOKEN_TTL_HOURS"
+    )
+
+
+def get_email_settings() -> EmailSettings:
+    return EmailSettings()
 
 
 class WecomOAuthSettings(BaseSettings):

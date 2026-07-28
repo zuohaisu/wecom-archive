@@ -28,14 +28,15 @@ import logging
 import secrets
 import threading
 import time
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 import httpx
 from fastapi import Cookie, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.db.models import AdminSession, AdminUser
+from app.db.models import AdminSession, AdminUser, PasswordResetToken
 from app.db.session import get_db
 from app.settings import get_auth_settings
 
@@ -141,6 +142,66 @@ def verify_password(plain: str, stored_hash: str) -> bool:
         return hmac.compare_digest(dk, expected)
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Password reset tokens (RND-278 / F0-3)
+# ---------------------------------------------------------------------------
+
+
+def create_password_reset_token(db: Session, user: AdminUser, ttl_hours: int = 1) -> str:
+    """Create a one-time reset token and return its raw value for email delivery.
+
+    Only the SHA-256 digest is persisted; callers must never log or return the
+    raw value outside the reset link sent to the account's email address.
+    """
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.admin_user_id == user.id,
+        PasswordResetToken.used.is_(False),
+    ).update({PasswordResetToken.used: True})
+    db.add(
+        PasswordResetToken(
+            id=str(uuid.uuid4()),
+            admin_user_id=user.id,
+            tenant_id=user.tenant_id,
+            token=token_hash,
+            expires_at=now + timedelta(hours=ttl_hours),
+            used=False,
+        )
+    )
+    db.flush()
+    return raw
+
+
+def consume_password_reset_token(
+    db: Session, raw_token: str
+) -> Optional[tuple[AdminUser, PasswordResetToken]]:
+    """Return an active user and usable token row, or ``None`` if invalid."""
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    row = (
+        db.query(PasswordResetToken)
+        .filter(PasswordResetToken.token == token_hash)
+        .first()
+    )
+    if row is None or row.used:
+        return None
+    expires_at = row.expires_at
+    if expires_at.tzinfo is None:
+        # SQLite-based offline tests return naive timestamps even for a
+        # timezone-aware column; production PostgreSQL returns an aware one.
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        row.used = True
+        db.flush()
+        return None
+    user = db.query(AdminUser).filter(AdminUser.id == row.admin_user_id).first()
+    if user is None or user.status != "active":
+        return None
+    return user, row
+
 
 # ---------------------------------------------------------------------------
 # CSRF OAuth state store

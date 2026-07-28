@@ -229,6 +229,23 @@ class AdminSession(Base):
     is_revoked = Column(Boolean, nullable=False, default=False)
 
 
+# —— RND-278 (F0-3) 密码重置令牌 ——
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(String(36), primary_key=True)
+    admin_user_id = Column(
+        String(36), ForeignKey("admin_users.id"), nullable=False, index=True
+    )
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    # Stores only the SHA-256 hex digest of the raw token. The raw token is
+    # limited to the reset email link and the browser URL.
+    token = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class KeyVersion(Base):
     """Maps WeCom publickey_ver to the private key used for decryption."""
 

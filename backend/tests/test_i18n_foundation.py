@@ -433,22 +433,14 @@ def test_wecom_button_still_links_to_the_real_oauth_endpoint() -> None:
     assert 'data-i18n="login.wecomButton"' in html
 
 
-def test_login_password_mode_has_disabled_forgot_password_entry() -> None:
-    """Intentional interim state: a forgot-password entry point is visible
-    (so the login layout matches the shipped design) but inert — no href, no
-    click handler — until RND F0 (account-system foundation) ships the real
-    email-based recovery flow. See QA summary 2026-07-28 for the tracked
-    follow-up."""
+def test_login_password_mode_links_to_password_recovery() -> None:
     from app.routers.auth import _login_page
 
     html = _login_page(mode="password")
-    assert 'id="forgot-password-disabled"' in html
-    assert 'data-i18n="login.forgotPasswordDisabled"' in html
-    assert 'aria-disabled="true"' in html
-    # Must not be a real, navigable link to any forgot-password route.
-    assert 'href="/admin/forgot-password"' not in html
-    assert 'href="forgot-password.html"' not in html
-    assert 'href="forgot-password"' not in html
+    assert 'href="/admin/forgot-password"' in html
+    assert 'data-i18n="login.forgotPassword"' in html
+    assert 'forgot-password-disabled' not in html
+    assert 'login.forgotPasswordDisabled' not in html
 
 
 def test_password_mode_still_has_no_wecom_link_and_wecom_mode_has_no_password_field() -> (

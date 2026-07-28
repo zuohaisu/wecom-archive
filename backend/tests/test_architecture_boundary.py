@@ -71,6 +71,7 @@ _FLAT_SERVICE_MODULES = {
     "app.auth",  # OAuth/session helpers -- NOT app.routers.auth (router of the same short name)
     "app.conversation_membership",
     "app.display_names",
+    "app.email",
     "app.html_helpers",
     "app.i18n_assets",
     "app.media_classification",

@@ -52,7 +52,11 @@ from app.auth import (
 from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
-from app.settings import get_auth_settings, get_wecom_oauth_settings
+from app.settings import (
+    get_auth_settings,
+    get_email_settings,
+    get_wecom_oauth_settings,
+)
 from app.web import render_template
 
 logger = logging.getLogger(__name__)
@@ -83,9 +87,8 @@ def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
     markup/CSS classes — the login flow itself is unchanged (same element
     ids, same fetch/redirect behavior). The i18n keys are NOT all
     unchanged: `login.subtitle` is new (the page previously reused
-    `app.subtitle`, shared with review_console.html) and
-    `login.forgotPasswordDisabled` is new for the inert forgot-password
-    entry — every other `login.*` key predates this restyle."""
+    `app.subtitle`, shared with review_console.html); every other
+    `login.*` key predates this restyle."""
     error_html = ""
     if error:
         key, fallback_text = _ERROR_MESSAGES.get(
@@ -112,7 +115,7 @@ def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
     <button class="btn btn-primary btn-block btn-lg" type="submit" id="submit-btn" data-i18n="login.submit">登录</button>
   </form>
   <p class="field-help mt-2" style="text-align:right">
-    <span id="forgot-password-disabled" aria-disabled="true" style="color:var(--color-text-5);cursor:not-allowed" data-i18n="login.forgotPasswordDisabled">忘记密码？（即将上线）</span>
+    <a class="btn-link" href="/admin/forgot-password" data-i18n="login.forgotPassword">忘记密码</a>
   </p>
   {error_html}
   <p class="field-help mt-2" style="text-align:center" data-i18n="login.footerPassword">临时管理员登录 — 企业微信登录即将上线</p>
@@ -208,6 +211,148 @@ def admin_login_page(
     mode = get_auth_mode()
     safe_error = error if error in _ERROR_MESSAGES else (error and "auth_failed")
     return HTMLResponse(content=_login_page(mode=mode, error=safe_error))
+
+
+# ---------------------------------------------------------------------------
+# Password reset (RND-278 / F0-3)
+# ---------------------------------------------------------------------------
+
+
+class _ForgotBody(BaseModel):
+    email: str
+
+
+class _ResetBody(BaseModel):
+    token: str
+    password: str
+
+
+def _password_reset_ttl_hours() -> int:
+    """Read a valid reset TTL, falling back to the safe one-hour default."""
+    try:
+        ttl = int(get_email_settings().reset_token_ttl_hours or "1")
+    except ValueError:
+        return 1
+    return ttl if ttl > 0 else 1
+
+
+@router.post("/api/auth/password/forgot")
+def password_forgot(body: _ForgotBody, db: Session = Depends(get_db)):
+    """Request a password reset without revealing whether an account exists."""
+    from app.auth import create_password_reset_token
+    from app.email import send_password_reset_email
+
+    submitted = (body.email or "").strip().lower()
+    user = (
+        db.query(AdminUser)
+        .join(Tenant, Tenant.id == AdminUser.tenant_id)
+        .filter(
+            Tenant.slug == "default",
+            Tenant.is_active.is_(True),
+            func.lower(AdminUser.email) == submitted,
+            AdminUser.status == "active",
+            AdminUser.password_hash.isnot(None),
+        )
+        .first()
+    )
+    if user is not None and user.email:
+        raw_token = create_password_reset_token(db, user, _password_reset_ttl_hours())
+        email_settings = get_email_settings()
+        base_url = (
+            email_settings.reset_base_url or get_wecom_oauth_settings().admin_domain
+        )
+        reset_link = f"{base_url.rstrip('/')}/admin/reset-password?token={raw_token}"
+        db.commit()
+        send_password_reset_email(user.email, reset_link)
+    else:
+        db.rollback()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/auth/password/reset")
+def password_reset(body: _ResetBody, db: Session = Depends(get_db)):
+    """Consume a one-time token and set the account's new PBKDF2 password."""
+    from app.auth import consume_password_reset_token, hash_password
+
+    result = consume_password_reset_token(db, body.token)
+    if result is None:
+        raise HTTPException(status_code=400, detail="invalid_or_expired_token")
+    if not body.password or len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="weak_password")
+    user, token_row = result
+    user.password_hash = hash_password(body.password)
+    token_row.used = True
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.get("/admin/forgot-password", response_class=HTMLResponse)
+def forgot_password_page():
+    return HTMLResponse(
+        content=render_template(
+            "forgot_password", i18n_script=I18N_SCRIPT_TAG, login_body=_forgot_page_body()
+        )
+    )
+
+
+@router.get("/admin/reset-password", response_class=HTMLResponse)
+def reset_password_page():
+    return HTMLResponse(
+        content=render_template(
+            "reset_password", i18n_script=I18N_SCRIPT_TAG, login_body=_reset_page_body()
+        )
+    )
+
+
+def _forgot_page_body() -> str:
+    return """\
+  <form id="forgot-form" onsubmit="doForgot(event)">
+    <div class="field">
+      <label class="field-label" for="email" data-i18n="login.forgotEmail">邮箱</label>
+      <input class="input" type="email" id="email" autocomplete="email" required data-i18n-placeholder="login.forgotEmailPlaceholder" placeholder="请输入您的注册邮箱">
+    </div>
+    <button class="btn btn-primary btn-block btn-lg" type="submit" id="forgot-submit" data-i18n="login.forgotSubmit">发送重置邮件</button>
+  </form>
+  <div class="alert mt-4" id="forgot-success" style="display:none" role="status"><div data-i18n="login.forgotEmailSent">若该邮箱已注册，重置链接已发送，请查收邮件。</div></div>
+  <p class="field-help mt-4" style="text-align:center"><a class="btn-link" href="/admin/login" data-i18n="login.forgotBackToLogin">返回登录</a></p>
+<script>
+function doForgot(e){
+  e.preventDefault();
+  var btn=document.getElementById('forgot-submit');
+  btn.disabled=true;
+  fetch('/api/auth/password/forgot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('email').value})})
+  .then(function(){document.getElementById('forgot-success').style.display='';btn.disabled=false;})
+  .catch(function(){document.getElementById('forgot-success').style.display='';btn.disabled=false;});
+}
+</script>"""
+
+
+def _reset_page_body() -> str:
+    return """\
+  <form id="reset-form" onsubmit="doReset(event)">
+    <input type="hidden" id="reset-token">
+    <div class="field"><label class="field-label" for="new-password" data-i18n="login.resetNewPassword">新密码</label><input class="input" type="password" id="new-password" autocomplete="new-password" required></div>
+    <div class="field"><label class="field-label" for="confirm-password" data-i18n="login.resetConfirmPassword">确认新密码</label><input class="input" type="password" id="confirm-password" autocomplete="new-password" required></div>
+    <button class="btn btn-primary btn-block btn-lg" type="submit" id="reset-submit" data-i18n="login.resetSubmit">重置密码</button>
+  </form>
+  <div class="alert alert-danger mt-4" id="reset-error" style="display:none" role="alert"><div></div></div>
+  <div class="alert mt-4" id="reset-success" style="display:none" role="status"><div data-i18n="login.resetSuccess">密码已重置，请使用新密码登录。</div></div>
+  <p class="field-help mt-4" style="text-align:center"><a class="btn-link" href="/admin/login" data-i18n="login.resetBackToLogin">返回登录</a></p>
+<script>
+document.getElementById('reset-token').value=new URLSearchParams(window.location.search).get('token')||'';
+function resetError(key){var el=document.getElementById('reset-error');el.style.display='';el.querySelector('div').textContent=I18N.t(key);}
+function doReset(e){
+  e.preventDefault();
+  var password=document.getElementById('new-password').value;
+  if(password.length<8){resetError('login.resetWeakPassword');return;}
+  if(password!==document.getElementById('confirm-password').value){resetError('login.resetWeakPassword');return;}
+  var btn=document.getElementById('reset-submit');btn.disabled=true;
+  fetch('/api/auth/password/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:document.getElementById('reset-token').value,password:password})})
+  .then(function(r){if(r.ok){document.getElementById('reset-success').style.display='';return;}return r.json().then(function(d){resetError(d.detail==='invalid_or_expired_token'?'login.resetInvalidToken':'login.resetWeakPassword');});})
+  .catch(function(){resetError('login.resetInvalidToken');})
+  .then(function(){btn.disabled=false;});
+}
+</script>"""
 
 
 # ---------------------------------------------------------------------------
