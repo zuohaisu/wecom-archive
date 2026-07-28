@@ -16,8 +16,8 @@
 ## 二、逐条验收清单（PASS/FAIL，附证据）
 
 ### 前置依赖（A7-1 已合并）
-- [ ] P1 `AuditLog` 模型存在 —— 证据：`python -c "from app.db.models import AuditLog"`
-- [ ] P2 `alembic check` 绿（开发 agent 未动 schema；若红，先判其越界改了模型/迁移）
+- [ ] P1 `AuditLog` 模型存在 —— 证据（仓库根目录运行）：`.venv/bin/python -c "from app.db.models import AuditLog"`。必须用 `.venv` 内 Python 3.9（装了后端依赖），裸 `python`/托管 python 3.13 不可用。
+- [ ] P2 `alembic check` 绿（需 `DATABASE_URL` 连真实 DB；无 DB 环境跳过并记录「需有 DB 复测」。开发 agent 未动 schema；若红且确有 DB，先判其越界改了模型/迁移）
 
 ### 写入钩子模块（文件 `backend/app/audit.py`）
 - [ ] B1 `write_audit(db, *, tenant_id, action, object_type, admin_user_id=None, object_id=None, detail=None)` 存在，签名含 keyword-only 参数 —— 证据：读 `app/audit.py`
@@ -46,7 +46,7 @@
 - [ ] G4 未改动 `get_current_user` / `require_html_session` / WeCom OAuth 流程语义
 
 ### 全局契约
-- [ ] K1 `alembic check` 绿（无 pending change；本票零 schema 变更）
+- [ ] K1 `alembic check` 绿（无 pending change；需 `DATABASE_URL`，无 DB 时跳过/记录；本票零 schema 变更）
 - [ ] K2 `make verify` 全绿（含 `test_architecture_boundary.py`、`test_http_contract.py`、`test_rnd294_audit_hook.py`）
 - [ ] K3 无 git commit 产生（`git log` HEAD 未前进；改动全在工作区）
 

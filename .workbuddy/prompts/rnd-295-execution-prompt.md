@@ -12,13 +12,22 @@
 
 本任务 **BLOCKED on A7-1**（RND-293，建 `audit_logs` 表）：
 
+> ⚠️ 解释器与 DB 约定（同 RND-294）：后端依赖装在仓库根 `.venv`（Python 3.9），裸 `python` / 托管 python 3.13 不可用。`alembic check` 需要**可用**的 Postgres（`DATABASE_URL` 指向可达实例）；无可用 DB 时跳过，属环境限制而非代码问题，不要因此停下。
+
 ```bash
 cd backend
-python -c "from app.db import models; c=[x.name for x in models.AuditLog.__table__.columns]; assert {'id','tenant_id','admin_user_id','action','object_type','object_id','detail','created_at'} <= set(c), c; assert 'updated_at' not in c; print('A7-1 OK', c)"
-alembic check   # 必须绿（Status: Success）
+PY=../.venv/bin/python
+test -x "$PY" || { echo "venv 缺失 — 先在仓库根运行: python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt alembic" >&2; exit 1; }
+"$PY" -c "from app.db import models; c=[x.name for x in models.AuditLog.__table__.columns]; assert {'id','tenant_id','admin_user_id','action','object_type','object_id','detail','created_at'} <= set(c), c; assert 'updated_at' not in c; print('A7-1 OK', c)"
+# alembic check 需可用 DB；仅当 DB 实际可达时才跑，红=越界改了 schema → 停下；不可达则跳过
+if "$PY" -c "import os,psycopg2; psycopg2.connect(os.environ['DATABASE_URL'], connect_timeout=3).close()" >/dev/null 2>&1; then
+  "$PY" -m alembic check   # 必须绿（Status: Success）；红 → 先判是否越界改了 schema
+else
+  echo "DATABASE_URL 未设或 DB 不可达 — 跳过 alembic check（环境限制，非代码问题；A7-1 是否已合并以 git log + 模型/迁移文件为准）"
+fi
 ```
 
-断言失败（如 `AuditLog` 导入报错 / `updated_at` 存在 / `alembic check` 红）→ **停下报告**。禁止自行建表 / 加迁移 / 改 A7-1（那属于 RND-293）。
+导入断言失败（`AuditLog` 导入报错 / `updated_at` 存在）→ **停下报告**，禁止自行建表 / 加迁移 / 改 A7-1（那属于 RND-293）。`alembic check` 仅在有可用 DB 时校验；无 DB 时跳过，不因此停下。
 本票**不依赖 A7-2**（RND-294 写入钩子）——只读取 `audit_logs` 中已存在的行，无论由谁写入。
 
 ## 三、决策背景（已全部拍板，不要再问）
@@ -226,15 +235,15 @@ def list_audit_logs(
 RED 基线（改前）：
 ```bash
 grep -rn "audit-logs" backend/app/routers/                         # 无结果
-python -c "from app.db import models; print('AuditLog' in dir(models))"   # 视 A7-1 是否已合
+.venv/bin/python -c "from app.db import models; print('AuditLog' in dir(models))"   # 视 A7-1 是否已合（用仓库根 .venv 的 python）
 cd backend && grep -n "route_count ==" tests/test_http_contract.py               # == 42
 ```
 
 GREEN（改后）：
 ```bash
 cd backend
-python -c "from app.routers.audit import list_audit_logs; print('audit router ok')"
-alembic check                                                          # 必须仍绿（本票无 schema 变更）
+../.venv/bin/python -c "from app.routers.audit import list_audit_logs; print('audit router ok')"
+alembic check                                                          # 需可用 DB；无 DB 时跳过（同第二节约定，本票无 schema 变更）
 make verify                                                            # lint-diff typecheck build test 全绿
 # 重点：test_http_contract.py 三处已同步；test_rnd295_audit_list.py 全绿
 ```
@@ -249,8 +258,8 @@ make verify                                                            # lint-di
 - 不新增 `record_hash` / 哈希链 / 「重新校验」端点（设计稿 seal 属 UI，非本票）。
 - 不引 React；本票无前端页面改动（审计日志 SSR 控制台页面属前端票，非 A7-3）。
 - 不碰 B 层生产路径（`/srv/apps/wecom-archive-365`、systemd、`deploy.yml`、`backend/scripts`、`.env.example`）。
-- `backend/tests/test_architecture_boundary.py` 必须仍 PASS（`app/main.py` 无内联路由；`routers/audit.py` 未 `import app.routers.*`/`app.main`）；`alembic check` 必须绿。
+- `backend/tests/test_architecture_boundary.py` 必须仍 PASS（`app/main.py` 无内联路由；`routers/audit.py` 未 `import app.routers.*`/`app.main`）；`alembic check` 在有可用 DB 时必须绿（无 DB 环境跳过并记录）。
 
 ## 八、收尾（交付物）
 
-向用户交付：RED/GREEN 记录、`git diff --stat`（应含 `app/routers/audit.py` + `app/main.py`(注册) + `test_http_contract.py`(三处) + 新测试 `test_rnd295_audit_list.py`）、`alembic check` 绿日志、`make verify` 全绿日志、未提交声明。
+向用户交付：RED/GREEN 记录、`git diff --stat`（应含 `app/routers/audit.py` + `app/main.py`(注册) + `test_http_contract.py`(三处) + 新测试 `test_rnd295_audit_list.py`）、`alembic check` 绿日志（若有可用 DB；无 DB 则注明「需 DB 环境复测」）、`make verify` 全绿日志、未提交声明。

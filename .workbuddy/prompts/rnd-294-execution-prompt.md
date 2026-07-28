@@ -20,10 +20,9 @@
 
 ## 三、项目现状（基线，2026-07-28 扫描）
 
-### 3.1 A7-1 尚未合并 → 本票真实 BLOCKED
-- 全仓 grep `AuditLog|audit_log` **无任何命中** → `AuditLog` 模型/迁移不在工作树。
-- 迁移链 head = `0017`（`0017_admin_users_account_fields.py`，RND-277 F0-1）；A7-1 预期 `0018_audit_log.py`（`down_revision="0017"`）。
-- **结论**：开工前必须先校验 A7-1 已落地（见第四节步骤 0）。若未落地，停下报告，**不要**自行补 `AuditLog` 模型或迁移。
+### 3.1 A7-1 前置依赖（运行时校验）
+- 当前 HEAD 已含 RND-293（提交 `1cd781a`）：`AuditLog` 模型在 `backend/app/db/models.py`、`0019_audit_log.py` 迁移已落地，`down_revision="0018"`（即 RND-278 的 `0018_password_reset_tokens.py`），链 0017→0018→0019。
+- 开工前仍须用第四节步骤 0 的 `AuditLog` 导入校验确认 A7-1 在工作树可用。若导入失败（A7-1 被回退/未合并），**停下报告**，不要自行补 `AuditLog` 模型或迁移。
 
 ### 3.2 `routers/auth.py` 接入落点（已读，精确行号）
 - `wecom_callback`：`L376–579`。成功建 session：`db.add(session)` 在 `L549`、`db.flush()` 在 `L550`；`db.commit()` 在 `L571`（且 `L552–559` 注释要求 commit 必须是该块最后一条语句）。`user` / `tenant_id` / `corp_id` 在此作用域可用。
@@ -37,13 +36,23 @@
 ## 四、目标实现（精确落点）
 
 ### 步骤 0 — 开工前置校验（A7-1 已落地？）
+
+> ⚠️ 解释器约定：本仓后端依赖装在仓库根目录的 `.venv`（Python 3.9）。**不是** WorkBuddy 托管的 python 3.13（那个没装 sqlalchemy/alembic，导入会 `ModuleNotFoundError`），macOS 也无系统 `python`（裸 `python` 会 `command not found`）。所有 `python` 调用必须用 `../.venv/bin/python`（从 `backend/` 看），与 Makefile 的 `BACKEND_PY ?= $(CURDIR)/.venv/bin/python` 一致。
+
 ```bash
 cd backend
-python -c "from app.db.models import AuditLog; print([c.name for c in AuditLog.__table__.columns])"  # 应列出 id/tenant_id/admin_user_id/action/object_type/object_id/detail/created_at
-alembic check   # 必须绿（A7-1 已迁移且一致）
+PY=../.venv/bin/python
+test -x "$PY" || { echo "venv 缺失 — 先在仓库根目录运行: python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt alembic" >&2; exit 1; }
+"$PY" -c "from app.db.models import AuditLog; print([c.name for c in AuditLog.__table__.columns])"  # 应列出 id/tenant_id/admin_user_id/action/object_type/object_id/detail/created_at
+# alembic check 需要真实 DB 连接（DATABASE_URL）；无 DB 环境下无法运行，属环境限制而非代码问题
+if [ -n "$DATABASE_URL" ]; then
+  "$PY" -m alembic check   # 必须绿（A7-1 已迁移且一致）
+else
+  echo "DATABASE_URL 未设置 — 跳过 alembic check；A7-1 是否已合并以 git log + 模型/迁移文件为准（当前 HEAD 已含 RND-293）"
+fi
 ```
-- 若任一步失败 → **停下报告**，不要补模型/迁移，不要继续。
-- 若通过 → 继续。
+- 若 `AuditLog` 导入失败 → **停下报告**（A7-1 未合并），不要补模型/迁移，不要继续。
+- 若导入通过（且 alembic check 在有 DB 时为绿）→ 继续。
 
 ### 4.1 新模块 `backend/app/audit.py`
 ```python
