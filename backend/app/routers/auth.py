@@ -33,6 +33,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -219,6 +220,38 @@ class _PasswordLoginBody(BaseModel):
     password: str
 
 
+def _upsert_env_admin_user(
+    db: Session,
+    tenant: Tenant,
+    admin_username: str,
+    now: datetime,
+) -> AdminUser:
+    """Create or update the legacy env-configured password account."""
+    tenant_id: str = tenant.id
+    wecom_sentinel = f"{PASSWORD_MODE_WECOM_PREFIX}{admin_username}__"
+    user = (
+        db.query(AdminUser)
+        .filter(
+            AdminUser.tenant_id == tenant_id,
+            AdminUser.wecom_user_id == wecom_sentinel,
+        )
+        .first()
+    )
+    if user is None:
+        user = AdminUser(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            wecom_user_id=wecom_sentinel,
+            name=admin_username,
+            last_login_at=now,
+        )
+        db.add(user)
+    else:
+        user.last_login_at = now
+    db.flush()
+    return user
+
+
 @router.post("/api/auth/password/login")
 def password_login(
     body: _PasswordLoginBody,
@@ -247,15 +280,6 @@ def password_login(
         logger.error("password_login: ADMIN_USERNAME or ADMIN_PASSWORD_HASH not configured")
         raise HTTPException(status_code=500, detail="Server configuration error")
 
-    # Constant-time username comparison + PBKDF2 password verification.
-    # Both checks always run to prevent timing oracle on username enumeration.
-    username_ok = _hmac.compare_digest(body.username, admin_username)
-    password_ok = verify_password(body.password, admin_hash)
-
-    if not (username_ok and password_ok):
-        logger.warning("password_login: failed (credentials not logged)")
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
     # Resolve default tenant — bound to slug='default' created by RND-111 bootstrap.
     # Must NEVER fall back to any other tenant: password-mode sessions are only
     # ever valid for the RND-111 default tenant. If it's missing or inactive,
@@ -269,32 +293,46 @@ def password_login(
         logger.error("password_login: default tenant missing or inactive — run bootstrap_default_tenant.py")
         raise HTTPException(status_code=500, detail="Server configuration error")
 
-    tenant_id: str = tenant.id
     now = datetime.now(timezone.utc)
+    submitted = body.username.strip()
+    normalized_email = submitted.lower()
 
-    # Sentinel wecom_user_id for password-mode users (no real WeCom identity).
-    wecom_sentinel = f"{PASSWORD_MODE_WECOM_PREFIX}{admin_username}__"
-
-    # Upsert AdminUser row for the password-mode account.
-    user = (
+    # F0-2 per-user path: match active users by normalized email in the
+    # default tenant only. Inactive and absent users intentionally follow
+    # the same failure path to avoid an account-enumeration oracle.
+    candidate = (
         db.query(AdminUser)
         .filter(
-            AdminUser.tenant_id == tenant_id,
-            AdminUser.wecom_user_id == wecom_sentinel,
+            AdminUser.tenant_id == tenant.id,
+            func.lower(AdminUser.email) == normalized_email,
+            AdminUser.status == "active",
         )
         .first()
     )
-    if user is None:
-        user = AdminUser(
-            id=str(uuid.uuid4()),
-            tenant_id=tenant_id,
-            wecom_user_id=wecom_sentinel,
-            name=admin_username,
-            last_login_at=now,
-        )
-        db.add(user)
-    else:
-        user.last_login_at = now
+
+    password_ok = False
+    resolved_user = None
+    if candidate is not None and candidate.password_hash:
+        password_ok = verify_password(body.password, candidate.password_hash)
+        if password_ok:
+            resolved_user = candidate
+
+    # Legacy env credentials remain available to bootstrap the first account.
+    # These checks always run after an unsuccessful per-user verification, so
+    # every failed request performs PBKDF2 verification regardless of whether
+    # the submitted email matched an active account.
+    if not password_ok:
+        username_ok = _hmac.compare_digest(submitted, admin_username)
+        env_ok = verify_password(body.password, admin_hash)
+        if username_ok and env_ok:
+            password_ok = True
+            resolved_user = _upsert_env_admin_user(db, tenant, admin_username, now)
+
+    if not password_ok or resolved_user is None:
+        logger.warning("password_login: failed (credentials not logged)")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    resolved_user.last_login_at = now
     db.flush()
 
     # Create session row.
@@ -302,9 +340,9 @@ def password_login(
     expires_at = now + timedelta(hours=SESSION_TTL_HOURS)
     session = AdminSession(
         id=session_id,
-        admin_user_id=user.id,
-        tenant_id=tenant_id,
-        wecom_user_id=wecom_sentinel,
+        admin_user_id=resolved_user.id,
+        tenant_id=resolved_user.tenant_id,
+        wecom_user_id=resolved_user.wecom_user_id,
         expires_at=expires_at,
         is_revoked=False,
     )
@@ -623,7 +661,7 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
             "wecom_user_id": exposed_wecom_id,
             "display_name": user.name or user.wecom_user_id,
             "tenant_id": session.tenant_id,
-            "role": None,
+            "role": user.role,
         }
     )
 

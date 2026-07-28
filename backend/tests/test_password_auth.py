@@ -27,7 +27,6 @@ Tests that only check endpoint behaviour use mocked DB overrides.
 from __future__ import annotations
 
 import os
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Generator
 from unittest.mock import MagicMock, patch
@@ -71,6 +70,10 @@ def _make_admin_user(user_id: str, tenant_id: str, wecom_user_id: str) -> MagicM
     u.wecom_user_id = wecom_user_id
     u.name = "testadmin"
     u.last_login_at = None
+    u.role = "admin"
+    u.email = "admin@example.com"
+    u.password_hash = None
+    u.status = "active"
     return u
 
 
@@ -91,7 +94,6 @@ def _mock_db_for_password_login(tenant_id: str = "00000000-0000-0000-0000-000000
     query and accepts add/flush/commit without error.
     First .first() call returns Tenant; second returns None (no existing user).
     """
-    call_count = [0]
     tenant = _make_tenant(tenant_id)
 
     def _override():
@@ -346,11 +348,15 @@ def test_password_login_invalid_credentials_returns_401(client) -> None:
     real_hash = hash_password("correct-password")
     env = {"AUTH_MODE": "password", "ADMIN_USERNAME": "admin", "ADMIN_PASSWORD_HASH": real_hash}
 
-    with patch.dict(os.environ, env):
-        resp = client.post(
-            "/api/auth/password/login",
-            json={"username": "admin", "password": "wrong-password"},
-        )
+    app.dependency_overrides[get_db] = _mock_db_for_password_login()
+    try:
+        with patch.dict(os.environ, env):
+            resp = client.post(
+                "/api/auth/password/login",
+                json={"username": "admin", "password": "wrong-password"},
+            )
+    finally:
+        app.dependency_overrides[get_db] = _mock_db_no_session
 
     assert resp.status_code == 401
     # Must not include any password hint in the response.
@@ -359,15 +365,21 @@ def test_password_login_invalid_credentials_returns_401(client) -> None:
 
 def test_password_login_wrong_username_returns_401(client) -> None:
     from app.auth import hash_password
+    from app.db.session import get_db
+    from app.main import app
 
     real_hash = hash_password("correct-password")
     env = {"AUTH_MODE": "password", "ADMIN_USERNAME": "admin", "ADMIN_PASSWORD_HASH": real_hash}
 
-    with patch.dict(os.environ, env):
-        resp = client.post(
-            "/api/auth/password/login",
-            json={"username": "notadmin", "password": "correct-password"},
-        )
+    app.dependency_overrides[get_db] = _mock_db_for_password_login()
+    try:
+        with patch.dict(os.environ, env):
+            resp = client.post(
+                "/api/auth/password/login",
+                json={"username": "notadmin", "password": "correct-password"},
+            )
+    finally:
+        app.dependency_overrides[get_db] = _mock_db_no_session
 
     assert resp.status_code == 401
 
@@ -380,6 +392,7 @@ def test_password_login_invalid_credentials_does_not_create_session(client) -> N
     created_sessions = []
 
     def _db_tracking():
+        tenant = _make_tenant()
         mock = MagicMock()
         original_add = mock.add
 
@@ -389,8 +402,16 @@ def test_password_login_invalid_credentials_does_not_create_session(client) -> N
                 created_sessions.append(obj)
             return original_add(obj)
 
+        def _query(model):
+            from app.db.models import Tenant
+
+            query = MagicMock()
+            query.filter.return_value = query
+            query.first.return_value = tenant if model is Tenant else None
+            return query
+
         mock.add.side_effect = _add
-        mock.query.return_value.filter.return_value.first.return_value = None
+        mock.query.side_effect = _query
         yield mock
 
     real_hash = hash_password("correct-password")
@@ -512,7 +533,7 @@ def test_password_session_is_tenant_bound(client) -> None:
         mock = MagicMock()
 
         def _query(model):
-            from app.db.models import AdminSession, AdminUser, Tenant
+            from app.db.models import AdminUser, Tenant
             q = MagicMock()
             q.filter.return_value = q
             if model is Tenant:
@@ -715,7 +736,6 @@ def test_password_login_missing_config_returns_500(client) -> None:
 
     app.dependency_overrides[get_db] = _mock_db_for_password_login()
     try:
-        env = {"AUTH_MODE": "password", "ADMIN_USERNAME": "", "ADMIN_PASSWORD_HASH": ""}
         os.environ.pop("ADMIN_USERNAME", None)
         os.environ.pop("ADMIN_PASSWORD_HASH", None)
         with patch.dict(os.environ, {"AUTH_MODE": "password"}):
@@ -761,7 +781,7 @@ def _mock_db_default_tenant_missing_other_tenant_active(other_tenant_id: str):
         mock = MagicMock()
 
         def _query(model):
-            from app.db.models import AdminSession, AdminUser, Tenant
+            from app.db.models import AdminUser, Tenant
 
             q = MagicMock()
             q.filter.return_value = q
@@ -877,7 +897,7 @@ def test_password_login_fails_when_default_tenant_inactive(client) -> None:
         mock = MagicMock()
 
         def _query(model):
-            from app.db.models import AdminSession, AdminUser, Tenant
+            from app.db.models import Tenant
 
             q = MagicMock()
             q.filter.return_value = q
