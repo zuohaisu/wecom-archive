@@ -36,6 +36,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import (
     PASSWORD_MODE_WECOM_PREFIX,
     SESSION_COOKIE,
@@ -499,6 +500,15 @@ def password_login(
         is_revoked=False,
     )
     db.add(session)
+    write_audit(
+        db,
+        tenant_id=resolved_user.tenant_id,
+        admin_user_id=resolved_user.id,
+        action=AuditAction.LOGIN,
+        object_type=AuditObjectType.USER,
+        object_id=resolved_user.id,
+        detail={"mode": "password"},
+    )
     db.commit()
     cleanup_expired_sessions(db)
 
@@ -761,6 +771,15 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
         )
         db.add(session)
         db.flush()
+        write_audit(
+            db,
+            tenant_id=tenant_id,
+            admin_user_id=user.id,
+            action=AuditAction.LOGIN,
+            object_type=AuditObjectType.USER,
+            object_id=user.id,
+            detail={"corp_id": corp_id, "method": "wecom_oauth"},
+        )
 
         # 9. Build the response (cookie included) BEFORE committing. If
         # anything here somehow fails, the except-block below still rolls
@@ -888,6 +907,14 @@ def auth_logout(
         )
         if session:
             session.is_revoked = True
+            write_audit(
+                db,
+                tenant_id=session.tenant_id,
+                admin_user_id=session.admin_user_id,
+                action=AuditAction.LOGOUT,
+                object_type=AuditObjectType.SESSION,
+                object_id=session_id,
+            )
             db.commit()
             logger.info("wecom_logout: session revoked")
 
