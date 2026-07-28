@@ -152,6 +152,7 @@ class AdminUser(Base):
             postgresql_using="gin",
             postgresql_ops={"wecom_user_id": "gin_trgm_ops"},
         ),
+        Index("ix_admin_users_invite_token", "invite_token"),
     )
 
     id = Column(String(36), primary_key=True)
@@ -171,6 +172,33 @@ class AdminUser(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+    # RND-277 (F0-1) account system fields.
+    password_hash = Column(Text, nullable=True)
+    role = Column(
+        Enum(
+            "owner",
+            "admin",
+            "compliance",
+            "legal",
+            "readonlyaudit",
+            name="admin_user_role",
+        ),
+        nullable=False,
+        server_default=text("'admin'"),
+    )
+    status = Column(
+        Enum("active", "disabled", name="admin_user_status"),
+        nullable=False,
+        server_default=text("'active'"),
+    )
+    email = Column(Text, nullable=True)
+    phone = Column(Text, nullable=True)
+    department = Column(Text, nullable=True)
+    last_active_at = Column(DateTime(timezone=True), nullable=True)
+    invite_token = Column(Text, nullable=True)
+    invited_by = Column(String(36), ForeignKey("admin_users.id"), nullable=True)
+    invite_status = Column(Text, nullable=True)
 
 
 class AdminSession(Base):

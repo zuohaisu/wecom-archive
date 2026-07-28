@@ -79,6 +79,10 @@ CREATE TABLE message_revocations (
 CREATE TABLE admin_users (
     id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, wecom_user_id TEXT NOT NULL,
     name TEXT, avatar_url TEXT, last_login_at TEXT,
+    password_hash TEXT, role TEXT NOT NULL DEFAULT 'admin',
+    status TEXT NOT NULL DEFAULT 'active', email TEXT, phone TEXT,
+    department TEXT, last_active_at TEXT, invite_token TEXT,
+    invited_by TEXT, invite_status TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
