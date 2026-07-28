@@ -367,6 +367,36 @@ def get_current_user(
     return user, session.tenant_id
 
 
+# ---------------------------------------------------------------------------
+# RND-280 (F0-5) — RBAC role vocabulary + require_role scaffold
+# ---------------------------------------------------------------------------
+# `AdminUser.role` is a plain `str` (the ORM `Enum` for `admin_user_role`
+# stores/returns Python strings), so RBAC checks compare against this tuple.
+ADMIN_ROLES: tuple[str, ...] = ("owner", "admin", "compliance", "legal", "readonlyaudit")
+
+
+def require_role(*allowed_roles: str):
+    """FastAPI dependency factory (RND-280 / F0-5 RBAC scaffold).
+
+    Wrap with `Depends(require_role("admin", "owner"))` on a route to gate it
+    by role. Unauthenticated callers get `get_current_user`'s 401 first; an
+    authenticated caller whose `role` is not in `allowed_roles` gets 403.
+    Passing no roles allows any authenticated admin role.
+
+    Returns the same `(AdminUser, tenant_id)` tuple as `get_current_user` so
+    downstream route signatures are unchanged.
+    """
+    allowed = set(allowed_roles) if allowed_roles else set(ADMIN_ROLES)
+
+    def _checker(auth: Tuple[AdminUser, str] = Depends(get_current_user)) -> Tuple[AdminUser, str]:
+        user, _tenant_id = auth
+        if user.role not in allowed:
+            raise HTTPException(status_code=403, detail="Insufficient role for this operation")
+        return auth
+
+    return _checker
+
+
 def require_html_session(
     request: Request, db: Session = Depends(get_db)
 ) -> Optional[str]:
