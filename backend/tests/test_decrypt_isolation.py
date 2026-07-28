@@ -18,12 +18,17 @@ ver=4 payloads — see RND-231's correction) is never rejected by length.
 
 Run (from backend/):
     pytest tests/test_decrypt_isolation.py -v
+
+On macOS, the three tests that intentionally crash a child process are
+skipped by default (CrashReporter dialogs). Re-enable with
+WECOM_RUN_CRASH_SIGNAL_TESTS=1.
 """
 
 from __future__ import annotations
 
 import os
 import signal
+import sys
 import time
 
 import pytest
@@ -37,6 +42,23 @@ from app.services.decrypt_isolation import (
     decrypt_message_isolated,
     run_isolated,
     validate_decrypt_inputs,
+)
+
+# On macOS, a child Python process that exits on a real signal triggers
+# CrashReporter dialogs during `make verify`. These three tests exist
+# precisely to exercise REAL SIGSEGV/SIGABRT semantics, for which there is
+# no lightweight way to keep the signal shape while suppressing the macOS
+# crash UI. Skip them locally by default; run them explicitly to validate
+# the isolation mechanism on macOS:
+#   WECOM_RUN_CRASH_SIGNAL_TESTS=1 pytest tests/test_decrypt_isolation.py -v
+_SKIP_REAL_CRASH_TESTS_ON_MACOS = pytest.mark.skipif(
+    sys.platform == "darwin"
+    and os.environ.get("WECOM_RUN_CRASH_SIGNAL_TESTS") != "1",
+    reason=(
+        "macOS displays CrashReporter dialogs for these intentionally "
+        "crashed Python child processes; set WECOM_RUN_CRASH_SIGNAL_TESTS=1 "
+        "to run them explicitly."
+    ),
 )
 
 # ---------------------------------------------------------------------------
@@ -119,6 +141,7 @@ def test_run_isolated_returns_child_result_on_success():
     assert exitcode == 0
 
 
+@_SKIP_REAL_CRASH_TESTS_ON_MACOS
 def test_run_isolated_classifies_sigsegv():
     """The core RND-231 guarantee: a real SIGSEGV (signal 11 — exactly
     what RND-208 observed as exit code 139 = 128 + 11) in the child is
@@ -128,6 +151,7 @@ def test_run_isolated_classifies_sigsegv():
     assert exitcode == -11
 
 
+@_SKIP_REAL_CRASH_TESTS_ON_MACOS
 def test_run_isolated_classifies_other_signal_distinctly_from_sigsegv():
     message, exitcode = run_isolated(_crash_with_sigabrt, (), timeout=10)
     assert message is None
@@ -172,6 +196,7 @@ def _crash_decrypt_child_target(conn, lib_path, encrypt_key, encrypt_msg):
     os.kill(os.getpid(), signal.SIGSEGV)
 
 
+@_SKIP_REAL_CRASH_TESTS_ON_MACOS
 def test_decrypt_message_isolated_classifies_real_sigsegv_via_child_crash(monkeypatch):
     """End-to-end: force the isolated child to SIGSEGV instead of running
     the real (unavailable-in-CI) SDK, and confirm decrypt_message_isolated
