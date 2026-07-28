@@ -139,6 +139,11 @@ def _bundle() -> str:
         _extract(r"function entityListSignature\(items\)\{.*?\n\}", "entityListSignature()"),
         _extract(r"function convListSignature\(convs\)\{.*?\n\}", "convListSignature()"),
         _extract(r"function renderEntityList\(items\)\{.*?\n\}", "renderEntityList()"),
+        # RND-323: renderEntityList() now calls maybeAutoSelectEntity() on
+        # baseline paint. Auto-selection itself is covered by
+        # test_rnd323_entity_autoselect.py; here we only care about the
+        # signature-comparison re-render behaviour, so stub it out.
+        "function maybeAutoSelectEntity(items){}",
         # Archive Console v2 (design import): renderConvList() now filters
         # through applyConvTypeFilter() (client-side 全部/群聊/单聊 tabs).
         _extract(r"function applyConvTypeFilter\(convs\)\{.*?\n\}", "applyConvTypeFilter()"),
