@@ -1,0 +1,79 @@
+<!-- @dsCard group="Foundations" viewport="1280x900" name="Type, space & elevation" subtitle="13px base, 4px grid, hairline depth" -->
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Type, space & elevation</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+body{padding:32px;background:var(--color-canvas)}
+.spec{display:grid;grid-template-columns:180px 1fr;gap:0;border:1px solid var(--color-border);border-radius:var(--radius-xl);background:var(--color-surface);overflow:hidden}
+.spec>div{padding:12px 16px;border-bottom:1px solid var(--color-border)}
+.spec>div:nth-last-child(-n+2){border-bottom:none}
+.spec .t{font-family:var(--font-mono);font-size:11px;color:var(--color-text-4)}
+h2{margin:28px 0 12px}
+.bar{background:var(--color-primary-soft);border-left:2px solid var(--color-primary);height:20px;display:inline-block}
+.rad{width:74px;height:56px;background:var(--color-primary-soft);border:1px solid var(--color-primary-border);display:flex;align-items:flex-end;justify-content:center;font-size:10.5px;color:var(--color-primary-hover);font-family:var(--font-mono);padding-bottom:4px}
+.elev{width:150px;height:80px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10.5px;color:var(--color-text-4)}
+</style>
+</head>
+<body>
+<h1>字体、间距与层级</h1>
+<p class="muted mb-5" style="max-width:62em">沿用既有 <span class="mono">system-ui</span> 字体栈（含 PingFang SC / Microsoft YaHei 回退），不引入 Web Font——合规工具优先保证首屏与离线可用。正文基准 13px，与既有控制台密度一致。</p>
+
+<h2>字号阶梯</h2>
+<div class="spec">
+  <div class="t">--text-4xl · 32/1.25 · 600</div><div style="font-size:32px;font-weight:600;letter-spacing:-.02em">2,847,193 归档消息</div>
+  <div class="t">--text-3xl · 26/1.1 · 600</div><div style="font-size:26px;font-weight:600;letter-spacing:-.02em">指标卡数值 1.84 TB</div>
+  <div class="t">--text-2xl · 20/1.25 · 600</div><div style="font-size:20px;font-weight:600">页面标题 · 审计日志</div>
+  <div class="t">--text-xl · 17/1.25 · 600</div><div style="font-size:17px;font-weight:600">弹窗标题 · 导出取证材料</div>
+  <div class="t">--text-lg · 15/1.4 · 600</div><div style="font-size:15px;font-weight:600">区块标题 · 同步健康</div>
+  <div class="t">--text-base · 14/1.5</div><div style="font-size:14px">搜索结果正文与消息气泡文本</div>
+  <div class="t">--text-md · 13/1.5 · 基准</div><div style="font-size:13px">表单控件、导航项、正文默认字号</div>
+  <div class="t">--text-sm · 12.5/1.5</div><div style="font-size:12.5px">表格单元格、说明文字</div>
+  <div class="t">--text-xs · 11.5/1.5</div><div style="font-size:11.5px">徽章、元信息、时间戳</div>
+  <div class="t">--text-2xs · 10.5/1.4</div><div style="font-size:10.5px">审计哈希、分组标题（大写 + .06em 字距）</div>
+  <div class="t">--font-mono · 11.5</div><div class="mono" style="font-size:11.5px">msgid 7392014857 · sha256 4c1f…8ba2 · corp_id ww3f8a21c9d0e4b7</div>
+</div>
+<p class="muted mt-3" style="font-size:12.5px">所有 ID、哈希、时间戳、corp_id 一律使用等宽字体——这是「可举证」观感的主要来源。</p>
+
+<h2>间距（4px 网格）</h2>
+<div class="spec">
+  <div class="t">--space-1 · 4px</div><div><span class="bar" style="width:4px"></span> 徽章内边距、图标与文字</div>
+  <div class="t">--space-2 · 8px</div><div><span class="bar" style="width:8px"></span> 控件之间、按钮组</div>
+  <div class="t">--space-3 · 12px</div><div><span class="bar" style="width:12px"></span> 卡片内元素、工具条</div>
+  <div class="t">--space-4 · 16px</div><div><span class="bar" style="width:16px"></span> 表格单元格横向内距、卡片网格间隙</div>
+  <div class="t">--space-5 · 20px</div><div><span class="bar" style="width:20px"></span> 卡片内容内距</div>
+  <div class="t">--space-6 · 24px</div><div><span class="bar" style="width:24px"></span> 页面内距、区块间距</div>
+  <div class="t">--space-8 · 32px</div><div><span class="bar" style="width:32px"></span> 章节之间</div>
+  <div class="t">--space-12 · 48px</div><div><span class="bar" style="width:48px"></span> 页面底部留白、空状态</div>
+</div>
+
+<h2>圆角</h2>
+<div class="row gap-3 wrap">
+  <div class="rad" style="border-radius:var(--radius-xs)">xs 3px 徽章</div>
+  <div class="rad" style="border-radius:var(--radius-sm)">sm 6px 小控件</div>
+  <div class="rad" style="border-radius:var(--radius-md)">md 7px 按钮/输入</div>
+  <div class="rad" style="border-radius:var(--radius-lg)">lg 9px 内嵌块</div>
+  <div class="rad" style="border-radius:var(--radius-xl)">xl 12px 卡片</div>
+  <div class="rad" style="border-radius:var(--radius-pill)">pill 筛选片</div>
+</div>
+
+<h2>层级（以描边为主，阴影极克制）</h2>
+<div class="row gap-4 wrap">
+  <div class="elev">shadow-1 · 卡片默认</div>
+  <div class="elev" style="box-shadow:var(--shadow-2)">shadow-2 · 悬浮/下拉</div>
+  <div class="elev" style="box-shadow:var(--shadow-3)">shadow-3 · 弹窗</div>
+  <div class="elev" style="box-shadow:var(--focus-ring);border-color:var(--color-primary)">focus-ring · 键盘焦点</div>
+</div>
+<p class="muted mt-3" style="font-size:12.5px">密集表格页面不叠加阴影：层级由 1px 描边 + 表面色差表达，避免长列表产生视觉噪声。</p>
+
+<h2>布局栅格</h2>
+<div class="spec">
+  <div class="t">--nav-w</div><div>212px 固定侧栏；≤1300px 收敛至 170px（既有控制台同款断点）</div>
+  <div class="t">--topbar-h</div><div>52px 顶栏；平台超管条额外 44px</div>
+  <div class="t">断点</div><div>主工作区 ≥1280px；1024–1280px 仅做列数收敛，不做移动端适配</div>
+  <div class="t">内容宽度</div><div>表格类页面撑满；表单类页面 <span class="mono">.page-narrow</span> 940px 上限</div>
+</div>
+</body>
+</html>

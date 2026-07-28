@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>王建国 · 外部联系人 · 会话存档控制台</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>
+.detail{display:grid;grid-template-columns:300px 1fr;gap:var(--space-5);align-items:start}
+.profile-hd{display:flex;gap:var(--space-3);align-items:center;padding:var(--space-5);border-bottom:1px solid var(--color-border)}
+.profile-name{font-size:var(--text-xl);font-weight:var(--weight-semibold)}
+.profile-org{font-size:var(--text-sm);color:var(--color-text-4)}
+.tl{background:var(--color-surface-sunken);border-radius:var(--radius-lg);padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-4);max-height:560px;overflow-y:auto}
+.tl-day{align-self:center;font-size:var(--text-xs);color:var(--color-text-5);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-pill);padding:2px 12px}
+.msg{display:flex;flex-direction:column;gap:3px;max-width:560px}
+.msg-self{align-self:flex-end;align-items:flex-end}
+.msg-other{align-self:flex-start;align-items:flex-start}
+.msg-meta{display:flex;align-items:baseline;gap:6px;font-size:var(--text-xs)}
+.msg-sender{font-weight:var(--weight-semibold);color:var(--color-text-3)}
+.msg-sender.staff{color:var(--color-primary-hover)}
+.msg-time{color:var(--color-text-5)}
+.bubble{border-radius:11px;padding:7px 11px;font-size:var(--text-md);line-height:var(--leading-loose);white-space:pre-wrap;word-break:break-word}
+.bubble-self{background:#cfe6fd;color:#000}
+[data-theme="dark"] .bubble-self{background:#1c3452;color:var(--color-text)}
+.bubble-other{background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-border-strong)}
+.file-card{display:flex;align-items:center;gap:10px;background:var(--color-surface);border:1px solid var(--color-border-strong);border-radius:var(--radius-lg);padding:9px 11px;max-width:300px}
+.file-ico{width:30px;height:30px;border-radius:var(--radius-sm);background:var(--color-primary-soft);color:var(--color-primary-hover);display:flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:var(--weight-bold);flex-shrink:0}
+.file-name{font-size:var(--text-sm);font-weight:var(--weight-medium)}
+.file-meta{font-size:var(--text-xs);color:var(--color-text-4)}
+.media-ph{width:180px;height:120px;border-radius:var(--radius-lg);border:1px dashed var(--color-border-strong);background:repeating-linear-gradient(135deg,var(--color-surface),var(--color-surface) 7px,var(--color-surface-sunken) 7px,var(--color-surface-sunken) 14px);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:var(--text-2xs);color:var(--color-text-5)}
+.audit-line{font-size:var(--text-2xs);color:var(--color-text-5);font-family:var(--font-mono)}
+@media (max-width:1180px){.detail{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav data-sidenav="contacts"></nav>
+<div class="main">
+  <header class="topbar">
+    <div class="breadcrumb"><span>通讯录</span><span class="sep">/</span><a href="contacts.html">外部联系人</a><span class="sep">/</span><span class="cur">王建国</span></div>
+    <div class="topbar-actions">
+      <button class="btn btn-sm" type="button">在审阅控制台打开</button>
+      <button class="btn btn-sm btn-primary" type="button" data-modal-open="mExport">导出取证</button>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="detail">
+      <aside class="stack gap-4">
+        <section class="card">
+          <div class="profile-hd">
+            <span class="avatar avatar-lg" style="background:var(--color-viz-1)">王</span>
+            <div class="ellipsis"><div class="profile-name">王建国</div><div class="profile-org">深圳同盛供应链 · 采购总监</div></div>
+          </div>
+          <div class="card-bd">
+            <dl class="kv">
+              <dt>外部联系人 ID</dt><dd class="mono" style="font-size:var(--text-xs)">wmABC123ext</dd>
+              <dt>标签</dt><dd><span class="tag">重点客户</span> <span class="tag tag-neutral">A 类</span></dd>
+              <dt>来源</dt><dd>名片分享（张伟）</dd>
+              <dt>首次互动</dt><dd>2025-08-14 10:02</dd>
+              <dt>最后互动</dt><dd>今天 11:24</dd>
+              <dt>归属员工</dt><dd>张伟、王磊</dd>
+            </dl>
+          </div>
+          <div class="card-ft" style="display:block">
+            <div class="row gap-4" style="justify-content:space-between"><span>会话</span><strong style="color:var(--color-text)">3</strong></div>
+            <div class="row gap-4 mt-2" style="justify-content:space-between"><span>消息</span><strong style="color:var(--color-text)">1,284</strong></div>
+            <div class="row gap-4 mt-2" style="justify-content:space-between"><span>媒体附件</span><strong style="color:var(--color-text)">216</strong></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd"><h3>相关会话</h3></div>
+          <div class="card-bd" style="padding:var(--space-2)">
+            <div class="quick stack gap-1">
+              <a class="sidenav-item active" href="#">张伟 ↔ 王建国 <em>单聊</em></a>
+              <a class="sidenav-item" href="#">同盛项目对接群 <em>群聊</em></a>
+              <a class="sidenav-item" href="#">王磊 ↔ 王建国 <em>单聊</em></a>
+            </div>
+          </div>
+        </section>
+
+        <div class="alert alert-neutral"><span class="alert-ico">🔒</span><div>你正在查看归档内容。本次访问已记录：<span class="mono">陈静 · 14:36 · scope=contact:wmABC123ext</span></div></div>
+      </aside>
+
+      <section class="card">
+        <div class="card-hd">
+          <h2>张伟 ↔ 王建国</h2>
+          <span class="badge badge-info">单聊</span>
+          <div class="right">
+            <div class="search-input" style="flex-basis:200px"><span class="ico">⌕</span><input class="input" type="search" placeholder="在此会话中搜索"></div>
+            <select class="select" style="width:120px"><option>全部类型</option><option>文本</option><option>图片</option><option>文件</option><option>语音</option></select>
+          </div>
+        </div>
+        <div class="card-bd">
+          <div class="tl">
+            <span class="tl-day">2026-07-27 星期一</span>
+
+            <div class="msg msg-other">
+              <div class="msg-meta"><span class="msg-sender">王建国</span><span class="msg-time">16:42</span></div>
+              <div class="bubble bubble-other">张总，8 月那批货的报价单我们内部过了，价格没问题。合同细节能不能这两天定下来？</div>
+            </div>
+
+            <div class="msg msg-self">
+              <div class="msg-meta"><span class="msg-time">16:45</span><span class="msg-sender staff">张伟</span></div>
+              <div class="bubble bubble-self">好的王总，我今晚整理一版合同草稿发您。付款账期还是按上次谈的 60 天。</div>
+            </div>
+
+            <div class="msg msg-self">
+              <div class="msg-meta"><span class="msg-time">21:08</span><span class="msg-sender staff">张伟</span></div>
+              <div class="file-card"><span class="file-ico">PDF</span><div class="ellipsis"><div class="file-name">同盛供应链采购合同_v3.pdf</div><div class="file-meta">1.4 MB · 已归档</div></div></div>
+              <div class="audit-line">msgid 7392014857 · sha256 4c1f…8ba2</div>
+            </div>
+
+            <span class="tl-day">2026-07-28 星期二</span>
+
+            <div class="msg msg-other">
+              <div class="msg-meta"><span class="msg-sender">王建国</span><span class="msg-time">09:31</span></div>
+              <div class="media-ph">image · 1080×1440 · 已归档</div>
+            </div>
+
+            <div class="msg msg-other">
+              <div class="msg-meta"><span class="msg-sender">王建国</span><span class="msg-time">09:32</span></div>
+              <div class="bubble bubble-other">这是我们法务批注的版本，第 7 条要改一下。</div>
+            </div>
+
+            <div class="msg msg-self">
+              <div class="msg-meta"><span class="msg-time">11:24</span><span class="msg-sender staff">张伟</span></div>
+              <div class="bubble bubble-self">收到，我让法务同事看一下，今天下午回复您。</div>
+            </div>
+
+            <div class="msg msg-other">
+              <div class="msg-meta"><span class="msg-sender">王建国</span><span class="msg-time">11:26</span></div>
+              <div class="bubble bubble-other" style="color:var(--color-text-4);font-style:italic">该消息已被撤回（撤回于 11:27，内容已按原样归档）</div>
+            </div>
+          </div>
+        </div>
+        <div class="card-ft"><span>归档只读 · 不可发送消息</span><span style="margin-left:auto">显示第 1,265–1,284 条</span><button class="btn btn-sm" type="button">加载更早</button></div>
+      </section>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="modal-backdrop hidden" id="mExport">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mExportT">
+    <div class="modal-hd"><h2 id="mExportT">导出取证材料</h2><button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button></div>
+    <div class="modal-bd">
+      <div class="field"><span class="field-label">范围</span>
+        <label class="radio"><input type="radio" name="sc" checked> 当前会话（张伟 ↔ 王建国，1,284 条）</label>
+        <label class="radio mt-2"><input type="radio" name="sc"> 该联系人全部会话（3 个会话，1,932 条）</label>
+      </div>
+      <div class="form-grid">
+        <div class="field"><label class="field-label" for="d1">起始日期</label><input class="input" id="d1" type="date" value="2026-06-01"></div>
+        <div class="field"><label class="field-label" for="d2">结束日期</label><input class="input" id="d2" type="date" value="2026-07-28"></div>
+      </div>
+      <div class="field"><span class="field-label">格式</span>
+        <div class="form-row"><label class="radio"><input type="radio" name="fmt" checked> PDF（带页眉签章与逐条时间戳）</label><label class="radio"><input type="radio" name="fmt"> Excel（结构化字段）</label></div>
+      </div>
+      <label class="checkbox mb-4"><input type="checkbox" checked> 附带媒体原件（216 个文件，约 1.2 GB，将打包为 ZIP）</label>
+      <div class="evidence">导出清单将包含：导出人 陈静 · 导出时间 2026-07-28 14:36 (UTC+8) · 范围 contact:wmABC123ext · 记录数 1,284 · 内容哈希 sha256:9f2c…d417</div>
+      <div class="alert alert-warning mt-4"><span class="alert-ico">⚠</span><div>导出属高敏感操作，将完整记入审计日志并通知租户管理员。</div></div>
+    </div>
+    <div class="modal-ft"><button class="btn" type="button" data-modal-close>取消</button><button class="btn btn-primary" type="button" data-modal-close>确认导出</button></div>
+  </div>
+</div>
+<script src="shell.js"></script>
+</body>
+</html>

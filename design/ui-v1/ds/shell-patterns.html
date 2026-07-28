@@ -1,0 +1,89 @@
+<!-- @dsCard group="Patterns" viewport="1280x820" name="Shell & permission planes" subtitle="Sidebar + topbar, tenant vs. platform chrome" -->
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Shell & permission planes</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+body{padding:32px;background:var(--color-canvas)}
+.frame{border:1px solid var(--color-border-strong);border-radius:var(--radius-xl);overflow:hidden;background:var(--color-surface);height:300px;display:flex;box-shadow:var(--shadow-1)}
+.frame .sidenav{width:172px}
+.frame .page{padding:16px}
+.cap{font-size:12px;color:var(--color-text-4);margin:8px 0 20px;max-width:60em;line-height:1.7}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.anno{display:grid;grid-template-columns:150px 1fr;gap:8px 14px;font-size:12.5px;margin-top:10px}
+.anno dt{font-family:var(--font-mono);font-size:11px;color:var(--color-text-4)}
+</style>
+</head>
+<body>
+<h1>外壳与权限分层</h1>
+<p class="muted mb-5" style="max-width:64em">导航选型：<strong>固定左侧栏 + 顶部面包屑</strong>。页面数量已超过 12 个且分属五类（概览 / 审阅 / 数据 / 通讯录 / 系统），顶部导航会被迫折叠成二级菜单，不利于合规人员在页面间反复横跳；左侧栏同时也是既有审阅控制台已上线的结构，沿用可零成本对齐。</p>
+
+<div class="cols">
+  <div>
+    <h2>租户平面（Line A）</h2>
+    <div class="frame">
+      <nav class="sidenav">
+        <div class="sidenav-brand"><span class="sidenav-logo" style="background:var(--color-primary)"></span><span class="sidenav-title">会话存档控制台</span></div>
+        <div class="sidenav-scroll">
+          <div class="sidenav-group">概览</div>
+          <span class="sidenav-item active">总览</span>
+          <span class="sidenav-item">用量分析</span>
+          <div class="sidenav-group">审阅</div>
+          <span class="sidenav-item">对话审阅</span>
+          <span class="sidenav-item">审计日志</span>
+          <div class="sidenav-group">通讯录</div>
+          <span class="sidenav-item">用户管理</span>
+        </div>
+        <div class="sidenav-foot"><div class="sidenav-user"><span class="avatar avatar-sm">陈</span><span class="sidenav-user-name">陈静 · 合规</span></div></div>
+      </nav>
+      <div class="main">
+        <div class="topbar"><div class="breadcrumb"><span>康冠时代</span><span class="sep">/</span><span class="cur">总览</span></div><div class="topbar-actions"><span class="tz-note">UTC+8</span><button class="btn btn-sm btn-primary" type="button">立即同步</button></div></div>
+        <div class="page"><div class="grid grid-2"><div class="stat"><span class="stat-k">消息总量</span><span class="stat-v tnum">2,847,193</span></div><div class="stat"><span class="stat-k">存储占用</span><span class="stat-v tnum">1.84<small>TB</small></span></div></div></div>
+      </div>
+    </div>
+    <p class="cap">浅色侧栏 <span class="mono">--color-surface-nav</span>，白色顶栏。品牌位保留白标插槽（logo 可替换为租户自有标识）。</p>
+  </div>
+
+  <div>
+    <h2>平台平面（Line C · 超管）</h2>
+    <div class="frame">
+      <nav class="sidenav">
+        <div class="sidenav-brand"><span class="sidenav-logo" style="background:var(--color-primary)"></span><span class="sidenav-title">会话存档控制台</span></div>
+        <div class="sidenav-scroll">
+          <div class="sidenav-group">平台</div>
+          <span class="sidenav-item active">租户总览<em>超管</em></span>
+          <span class="sidenav-item">开通配置</span>
+          <div class="sidenav-group">概览</div>
+          <span class="sidenav-item">返回租户视图</span>
+        </div>
+        <div class="sidenav-foot"><div class="sidenav-user"><span class="avatar avatar-sm" style="background:var(--color-warning-fg)">超</span><span class="sidenav-user-name">platform-admin</span></div></div>
+      </nav>
+      <div class="main">
+        <div class="admin-bar"><strong>平台控制台</strong><span class="badge">超级管理员</span><div class="right">仅元数据</div></div>
+        <div class="topbar"><div class="breadcrumb"><span>平台</span><span class="sep">/</span><span class="cur">租户总览</span></div></div>
+        <div class="page"><div class="grid grid-2"><div class="stat"><span class="stat-k">租户总数</span><span class="stat-v tnum">14</span></div><div class="stat"><span class="stat-k">聚合存储</span><span class="stat-v tnum">9.7<small>TB</small></span></div></div></div>
+      </div>
+    </div>
+    <p class="cap">深色管理条 <span class="mono">--color-admin-bar</span> 是唯一的平面区分信号：进入跨租户视图时它常驻页面顶部，让超管随时意识到自己不在租户上下文中。</p>
+  </div>
+</div>
+
+<h2 class="mt-6">信息分层规则</h2>
+<div class="grid grid-3 mt-3">
+  <div class="card"><div class="card-bd"><div class="badge badge-success mb-3">默认可见</div><p style="font-size:12.5px;color:var(--color-text-3);line-height:1.7">租户名、corp_id、状态、创建时间、消息量、存储、活跃坐席、归档天数、同步健康——全部为元数据与聚合指标。</p></div></div>
+  <div class="card"><div class="card-bd"><div class="badge badge-pending mb-3">需显式授权</div><p style="font-size:12.5px;color:var(--color-text-3);line-height:1.7">任何会话正文、联系人姓名、附件内容。须发起申请 → 租户管理员审批 → 限时只读凭证（≤2h）→ 双方审计留痕。</p></div></div>
+  <div class="card"><div class="card-bd"><div class="badge badge-failed mb-3">永不可见</div><p style="font-size:12.5px;color:var(--color-text-3);line-height:1.7">租户加密私钥明文、已到期凭证下的历史内容、租户管理员密码哈希。UI 层不提供任何入口。</p></div></div>
+</div>
+
+<h2 class="mt-6">页面骨架约定</h2>
+<dl class="anno">
+  <dt>.shell</dt><dd>100vh 两栏，页面本身不滚动；滚动发生在 <span class="mono">.page</span> 内部，顶栏与侧栏常驻。</dd>
+  <dt>.topbar</dt><dd>左侧面包屑（租户 / 分组 / 当前页），右侧动作区：时区说明 → 次要动作 → 主动作。</dd>
+  <dt>.page-hd</dt><dd>页面标题 + 一句话说明（说明必须交代数据口径或权限边界），右侧放全页级切换器。</dd>
+  <dt>.toolbar</dt><dd>搜索在最左、筛选居中、统计与导出在最右；已生效筛选在下一行以 chip 复述。</dd>
+  <dt>.card-ft</dt><dd>表格页脚固定承载分页与总数，永远显示「共 N 条」以支撑取证陈述。</dd>
+</dl>
+</body>
+</html>

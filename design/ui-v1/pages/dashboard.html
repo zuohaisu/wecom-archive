@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>总览 · 会话存档控制台</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>
+.health-row{display:flex;align-items:center;gap:var(--space-3);padding:10px var(--space-5);border-bottom:1px solid var(--color-border)}
+.health-row:last-child{border-bottom:none}
+.health-name{font-size:var(--text-sm);font-weight:var(--weight-medium);width:150px;flex-shrink:0}
+.health-bar{flex:1;height:6px;border-radius:var(--radius-pill);background:var(--color-neutral-bg);overflow:hidden;min-width:80px}
+.health-bar i{display:block;height:100%;background:var(--color-viz-1)}
+.health-val{font-size:var(--text-xs);color:var(--color-text-4);width:110px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
+.act{display:flex;gap:var(--space-3);padding:11px var(--space-5);border-bottom:1px solid var(--color-border);align-items:flex-start}
+.act:last-child{border-bottom:none}
+.act-body{flex:1;min-width:0}
+.act-main{font-size:var(--text-sm);color:var(--color-text-2);line-height:var(--leading-loose)}
+.act-meta{font-size:var(--text-xs);color:var(--color-text-5);margin-top:2px;font-family:var(--font-mono)}
+.act-time{font-size:var(--text-xs);color:var(--color-text-5);white-space:nowrap;flex-shrink:0}
+.quick{display:flex;flex-direction:column;gap:2px}
+.quick a{display:flex;align-items:center;gap:var(--space-3);padding:9px var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--color-text-2)}
+.quick a:hover{background:var(--color-surface-hover);text-decoration:none}
+.quick a .arrow{margin-left:auto;color:var(--color-text-5)}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav data-sidenav="dashboard"></nav>
+<div class="main">
+  <header class="topbar">
+    <div class="breadcrumb"><span>康冠时代</span><span class="sep">/</span><span class="cur">总览</span></div>
+    <div class="topbar-actions">
+      <span class="tz-note">时间均为北京时间 (UTC+8) · 数据截至 14:32</span>
+      <button class="btn btn-sm" type="button">刷新</button>
+      <button class="btn btn-sm btn-primary" type="button">立即同步</button>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="alert alert-warning mb-5" role="status">
+      <span class="alert-ico">⚠</span>
+      <div><strong>2 个坐席同步滞后</strong> · 王磊、李文博的会话拉取落后于当前时间 47 分钟，可能因企业微信侧限流。系统将自动重试，无需人工干预。</div>
+      <div class="right"><a class="btn btn-sm" href="../reference/diagnostics.html">查看诊断</a><button class="btn btn-sm btn-ghost" type="button">忽略</button></div>
+    </div>
+
+    <div class="grid grid-5 mb-5">
+      <div class="stat"><span class="stat-k">已归档天数</span><span class="stat-v tnum">386<small>天</small></span><span class="stat-sub">自 2025-07-06 起持续留存</span></div>
+      <div class="stat"><span class="stat-k">消息总量</span><span class="stat-v tnum">2,847,193</span><span class="stat-sub"><span class="delta delta-up">+12,480</span> 较昨日</span></div>
+      <div class="stat"><span class="stat-k">存储占用</span><span class="stat-v tnum">1.84<small>TB</small></span><span class="stat-sub">配额 3 TB · 已用 61%</span></div>
+      <div class="stat"><span class="stat-k">监控员工数</span><span class="stat-v tnum">248</span><span class="stat-sub">其中 12 人近 30 天静默</span></div>
+      <div class="stat"><span class="stat-k">同步健康度</span><span class="stat-v tnum" style="color:var(--color-success-fg)">98.6<small>%</small></span><span class="stat-sub"><span class="badge badge-success badge-dot">正常</span> 最近 24 小时</span></div>
+    </div>
+
+    <div class="grid mb-5" style="grid-template-columns:1.55fr 1fr">
+      <section class="card">
+        <div class="card-hd"><h2>近 14 天归档量</h2><div class="right"><div class="segmented"><button class="active" type="button">14 天</button><button type="button">30 天</button><button type="button">90 天</button></div></div></div>
+        <div class="card-bd">
+          <svg class="chart" viewBox="0 0 720 200" preserveAspectRatio="none" role="img" aria-label="近 14 天每日归档消息量柱状图" style="height:200px">
+            <g id="bars"></g>
+          </svg>
+          <div class="chart-legend"><span><i style="background:var(--color-viz-1)"></i>文本 / 结构化消息</span><span><i style="background:var(--color-viz-3)"></i>媒体（图片、文件、音视频）</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-hd"><h2>同步健康</h2><div class="right"><span class="badge badge-success badge-dot">运行中</span></div></div>
+        <div class="card-bd-flush">
+          <div class="health-row"><span class="health-name">会话拉取任务</span><span class="health-bar"><i style="width:99%"></i></span><span class="health-val">99% · 12s 前</span></div>
+          <div class="health-row"><span class="health-name">媒体下载队列</span><span class="health-bar"><i style="width:87%;background:var(--color-warning-fg)"></i></span><span class="health-val">87% · 积压 1,204</span></div>
+          <div class="health-row"><span class="health-name">解密 worker</span><span class="health-bar"><i style="width:100%"></i></span><span class="health-val">100% · 4 实例</span></div>
+          <div class="health-row"><span class="health-name">通讯录同步</span><span class="health-bar"><i style="width:100%"></i></span><span class="health-val">100% · 02:00</span></div>
+          <div class="health-row"><span class="health-name">冷存储归档</span><span class="health-bar"><i style="width:64%;background:var(--color-viz-5)"></i></span><span class="health-val">进行中 · 64%</span></div>
+        </div>
+        <div class="card-ft"><span>下次全量校验 今日 23:00</span><a class="btn-link" style="margin-left:auto" href="../reference/diagnostics.html">可达性诊断 ›</a></div>
+      </section>
+    </div>
+
+    <div class="grid" style="grid-template-columns:1.55fr 1fr">
+      <section class="card">
+        <div class="card-hd"><h2>最近活动</h2><div class="right"><a class="btn-link" href="audit-log.html">全部审计日志 ›</a></div></div>
+        <div class="card-bd-flush">
+          <div class="act"><span class="badge badge-info">导出</span><div class="act-body"><div class="act-main"><strong>陈静</strong> 导出了「张伟 ↔ 深圳同盛 · 王总」2026-06-01 至 2026-07-27 的会话（PDF，共 412 条）</div><div class="act-meta">audit#a9f31c · scope=conversation · ip 10.4.22.87</div></div><span class="act-time">14:12</span></div>
+          <div class="act"><span class="badge">查看</span><div class="act-body"><div class="act-main"><strong>李文博</strong> 审阅了 3 个群会话，共停留 18 分钟</div><div class="act-meta">audit#a9f2e0 · scope=group ×3</div></div><span class="act-time">13:48</span></div>
+          <div class="act"><span class="badge badge-pending">配置</span><div class="act-body"><div class="act-main"><strong>陈静</strong> 将「市场部」纳入监控范围，新增 14 个坐席</div><div class="act-meta">audit#a9f2b7 · scope=department:market</div></div><span class="act-time">11:05</span></div>
+          <div class="act"><span class="badge badge-failed">失败</span><div class="act-body"><div class="act-main">媒体下载失败 6 条（企业微信侧文件已过期，不可恢复）</div><div class="act-meta">system · reason=media_expired</div></div><span class="act-time">09:30</span></div>
+          <div class="act"><span class="badge badge-success">同步</span><div class="act-body"><div class="act-main">通讯录全量同步完成，员工 248 人、外部联系人 1,932 人</div><div class="act-meta">system · duration=94s</div></div><span class="act-time">02:00</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-hd"><h2>常用入口</h2></div>
+        <div class="card-bd" style="padding:var(--space-3)">
+          <div class="quick">
+            <a href="search-advanced.html"><span class="avatar avatar-sq avatar-sm" style="background:var(--color-primary-soft);color:var(--color-primary-hover)">搜</span>高级搜索与取证导出<span class="arrow">›</span></a>
+            <a href="contacts.html"><span class="avatar avatar-sq avatar-sm" style="background:var(--color-neutral-bg);color:var(--color-neutral-fg)">外</span>外部联系人<span class="arrow">›</span></a>
+            <a href="users.html"><span class="avatar avatar-sq avatar-sm" style="background:var(--color-neutral-bg);color:var(--color-neutral-fg)">员</span>用户与权限<span class="arrow">›</span></a>
+            <a href="media.html"><span class="avatar avatar-sq avatar-sm" style="background:var(--color-neutral-bg);color:var(--color-neutral-fg)">媒</span>媒体库<span class="arrow">›</span></a>
+            <a href="analytics.html"><span class="avatar avatar-sq avatar-sm" style="background:var(--color-neutral-bg);color:var(--color-neutral-fg)">析</span>用量分析<span class="arrow">›</span></a>
+          </div>
+        </div>
+        <div class="card-ft" style="display:block">
+          <div class="mb-2" style="color:var(--color-text-3)">留存策略</div>
+          <div style="font-size:var(--text-sm);color:var(--color-text-2)">全量留存 <strong>1095 天</strong> · 媒体 <strong>365 天</strong> 后转冷存储</div>
+          <div class="hash mt-2">policy v3 · 生效于 2026-03-01 · 由 陈静 设置</div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</div>
+<script src="shell.js"></script>
+<script>
+// Lightweight hand-drawn SVG chart — no chart library, no framework.
+(function(){
+  var data=[[182,54],[201,61],[196,48],[214,72],[233,66],[121,31],[98,24],[229,70],[241,81],[236,64],[218,59],[247,88],[139,36],[112,29]];
+  var W=720,H=200,pad=18,n=data.length,gap=10;
+  var bw=(W-pad*2-gap*(n-1))/n, max=340, g=document.getElementById('bars');
+  var ns='http://www.w3.org/2000/svg', out='';
+  [0,.25,.5,.75,1].forEach(function(t){var y=pad+(H-pad*2)*t;out+='<line class="grid-line" x1="0" x2="'+W+'" y1="'+y+'" y2="'+y+'"/>'});
+  data.forEach(function(d,i){
+    var x=pad+i*(bw+gap), total=d[0]+d[1], h=(total/max)*(H-pad*2), hm=(d[1]/max)*(H-pad*2);
+    out+='<rect x="'+x+'" y="'+(H-pad-h)+'" width="'+bw+'" height="'+(h-hm)+'" fill="var(--color-viz-1)" rx="2"/>';
+    out+='<rect x="'+x+'" y="'+(H-pad-hm)+'" width="'+bw+'" height="'+hm+'" fill="var(--color-viz-3)" rx="2"/>';
+  });
+  g.innerHTML=out;
+})();
+</script>
+</body>
+</html>

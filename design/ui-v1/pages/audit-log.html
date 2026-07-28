@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>审计日志 · 会话存档控制台</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>
+.log-row td{font-size:var(--text-sm)}
+.log-time{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-3);white-space:nowrap}
+.actor{display:flex;align-items:center;gap:8px;min-width:0}
+.scope{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-3);word-break:break-all}
+.seal{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) var(--space-4);border:1px solid var(--color-border-strong);border-left:3px solid var(--color-success-fg);border-radius:var(--radius-lg);background:var(--color-surface);font-size:var(--text-sm)}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav data-sidenav="audit"></nav>
+<div class="main">
+  <header class="topbar">
+    <div class="breadcrumb"><span>康冠时代</span><span class="sep">/</span><span>审阅</span><span class="sep">/</span><span class="cur">审计日志</span></div>
+    <div class="topbar-actions"><span class="tz-note">时间均为北京时间 (UTC+8)</span><button class="btn btn-sm" type="button">导出日志</button></div>
+  </header>
+
+  <div class="page">
+    <div class="page-hd">
+      <div><h1>审计日志</h1><p>记录每一次查看、检索、导出与配置变更。日志为只读追加，任何人（含超管）不可删除或修改。</p></div>
+    </div>
+
+    <div class="seal mb-5">
+      <span class="badge badge-success badge-dot">链路完整</span>
+      <div>逐条哈希链校验通过 · 最近校验 2026-07-28 14:00 · 覆盖 2025-07-06 起共 <strong>184,209</strong> 条记录</div>
+      <div class="hash" style="margin-left:auto">head sha256:7b41c9…e02f</div>
+      <button class="btn btn-sm" type="button">重新校验</button>
+    </div>
+
+    <div class="toolbar">
+      <div class="search-input"><span class="ico">⌕</span><input class="input" type="search" placeholder="搜索操作人、对象或 audit ID…"></div>
+      <input class="input" type="date" style="width:150px" value="2026-07-21">
+      <span class="muted">至</span>
+      <input class="input" type="date" style="width:150px" value="2026-07-28">
+      <select class="select" style="width:130px"><option>全部动作</option><option>查看</option><option>检索</option><option>导出</option><option>配置变更</option><option>登录</option></select>
+      <select class="select" style="width:130px"><option>全部操作人</option><option>陈静</option><option>李文博</option><option>系统</option></select>
+      <div class="right"><span class="muted" style="font-size:var(--text-sm)">1,482 条结果</span></div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table table-fixed">
+        <thead><tr>
+          <th style="width:150px">时间</th><th style="width:170px">操作人</th><th style="width:96px">动作</th>
+          <th>对象与范围</th><th style="width:120px">来源 IP</th><th style="width:88px">结果</th><th style="width:150px">审计 ID</th>
+        </tr></thead>
+        <tbody>
+          <tr class="log-row">
+            <td class="log-time">07-28 14:12:07</td>
+            <td><div class="actor"><span class="avatar avatar-sm" style="background:var(--color-viz-1)">陈</span><div class="ellipsis"><div class="cell-primary">陈静</div><div class="cell-sub">合规管理员</div></div></div></td>
+            <td><span class="badge badge-info">导出</span></td>
+            <td><div>会话导出 PDF · 412 条消息</div><div class="scope">scope=conversation:cv_88213 range=2026-06-01..2026-07-27 media=included</div></td>
+            <td class="mono" style="font-size:var(--text-xs)">10.4.22.87</td>
+            <td><span class="badge badge-success">成功</span></td>
+            <td class="cell-id">a9f31c40e7</td>
+          </tr>
+          <tr class="log-row">
+            <td class="log-time">07-28 13:48:52</td>
+            <td><div class="actor"><span class="avatar avatar-sm" style="background:var(--color-viz-6)">李</span><div class="ellipsis"><div class="cell-primary">李文博</div><div class="cell-sub">合规管理员</div></div></div></td>
+            <td><span class="badge">查看</span></td>
+            <td><div>审阅 3 个群会话 · 停留 18 分钟</div><div class="scope">scope=group:cv_7712,cv_7719,cv_7801 msgs_rendered=642</div></td>
+            <td class="mono" style="font-size:var(--text-xs)">10.4.19.12</td>
+            <td><span class="badge badge-success">成功</span></td>
+            <td class="cell-id">a9f2e0b115</td>
+          </tr>
+          <tr class="log-row">
+            <td class="log-time">07-28 13:22:31</td>
+            <td><div class="actor"><span class="avatar avatar-sm" style="background:var(--color-viz-6)">李</span><div class="ellipsis"><div class="cell-primary">李文博</div><div class="cell-sub">合规管理员</div></div></div></td>
+            <td><span class="badge">检索</span></td>
+            <td><div>关键词检索 · 命中 87 条</div><div class="scope">q="返点" filters=[dept:sales, type:text] range=90d</div></td>
+            <td class="mono" style="font-size:var(--text-xs)">10.4.19.12</td>
+            <td><span class="badge badge-success">成功</span></td>
+            <td class="cell-id">a9f2d78a04</td>
+          </tr>
+          <tr class="log-row">
+            <td class="log-time">07-28 11:05:18</td>
+            <td><div class="actor"><span class="avatar avatar-sm" style="background:var(--color-viz-1)">陈</span><div class="ellipsis"><div class="cell-primary">陈静</div><div class="cell-sub">合规管理员</div></div></div></td>
+            <td><span class="badge badge-pending">配置</span></td>
+            <td><div>监控范围变更 · 新增 14 个坐席</div><div class="scope">scope=department:market before=234 after=248</div></td>
+            <td class="mono" style="font-size:var(--text-xs)">10.4.22.87</td>
+            <td><span class="badge badge-success">成功</span></td>
+            <td class="cell-id">a9f2b73f92</td>
+          </tr>
+          <tr class="log-row">
+            <td class="log-time">07-28 10:41:03</td>
+            <td><div class="actor"><span class="avatar avatar-sm" style="background:var(--color-neutral-fg)">周</span><div class="ellipsis"><div class="cell-primary">周颖</div><div class="cell-sub">HR（已停用）</div></div></div></td>
+            <td><span class="badge">登录</span></td>
+            <td><div>账号密码登录尝试</div><div class="scope">reason=account_disabled attempts=1</div></td>
+            <td class="mono" style="font-size:var(--text-xs)">113.88.7.40</td>
+            <td><span class="badge badge-failed">拒绝</span></td>
+            <td class="cell-id">a9f2a01dd6</td>
+          </tr>
+          <tr class="log-row">
+            <td class="log-time">07-28 09:30:44</td>
+            <td><div class="actor"><span class="avatar avatar-sm" style="background:var(--color-text-disabled)">S</span><div class="ellipsis"><div class="cell-primary">系统</div><div class="cell-sub">media-worker</div></div></div></td>
+            <td><span class="badge">系统</span></td>
+            <td><div>媒体下载失败 6 条</div><div class="scope">reason=media_expired retriable=false</div></td>
+            <td class="muted">—</td>
+            <td><span class="badge badge-failed">失败</span></td>
+            <td class="cell-id">a9f28c4b71</td>
+          </tr>
+          <tr class="log-row">
+            <td class="log-time">07-28 08:15:09</td>
+            <td><div class="actor"><span class="avatar avatar-sm" style="background:var(--color-warning-fg)">超</span><div class="ellipsis"><div class="cell-primary">platform-admin</div><div class="cell-sub">平台超管</div></div></div></td>
+            <td><span class="badge badge-pending">授权</span></td>
+            <td><div>请求查看租户会话内容 · 已被租户管理员批准</div><div class="scope">scope=tenant:crowntime ticket=SR-2291 approved_by=陈静 ttl=2h</div></td>
+            <td class="mono" style="font-size:var(--text-xs)">10.8.1.5</td>
+            <td><span class="badge badge-success">已授权</span></td>
+            <td class="cell-id">a9f27110ae</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="card-ft">
+        <div class="pagination" style="width:100%"><span>共 1,482 条 · 保留 3 年不可删除</span>
+        <div class="pages"><button class="page-btn" type="button" disabled>‹</button><button class="page-btn active" type="button">1</button><button class="page-btn" type="button">2</button><button class="page-btn" type="button">3</button><span class="page-btn" style="border:none;background:none">…</span><button class="page-btn" type="button">75</button><button class="page-btn" type="button">›</button></div></div>
+      </div>
+    </div>
+
+    <div class="alert alert-neutral mt-5"><span class="alert-ico">ℹ</span><div>每条记录写入时以前一条的哈希为输入生成新哈希，形成链式结构；任何篡改都会导致后续校验失败。日志可导出为带哈希清单的 CSV，作为对外举证材料。</div></div>
+  </div>
+</div>
+</div>
+<script src="shell.js"></script>
+</body>
+</html>

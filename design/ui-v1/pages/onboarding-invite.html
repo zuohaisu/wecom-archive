@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>首次配置向导 · 邀请团队 · 会话存档控制台</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body{background:var(--color-canvas)}
+.wiz{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:var(--space-10) var(--space-6) var(--space-12)}
+.wiz-mark{height:26px;margin-bottom:var(--space-8)}
+.wiz-steps{display:flex;align-items:center;gap:0;width:min(680px,100%);margin-bottom:var(--space-8)}
+.wiz-step{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;position:relative}
+.wiz-step .n{width:26px;height:26px;border-radius:50%;border:1px solid var(--color-border-strong);background:var(--color-surface);display:flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-4)}
+.wiz-step .l{font-size:var(--text-xs);color:var(--color-text-4);white-space:nowrap}
+.wiz-step.active .n{background:var(--color-primary);border-color:var(--color-primary);color:var(--color-on-primary)}
+.wiz-step.active .l{color:var(--color-text-2);font-weight:var(--weight-medium)}
+.wiz-step.done .n{background:var(--color-success-bg);border-color:var(--color-success-border);color:var(--color-success-fg)}
+.wiz-step.done .l{color:var(--color-text-3)}
+.wiz-line{position:absolute;top:13px;left:calc(50% + 20px);right:calc(-50% + 20px);height:1px;background:var(--color-border-strong)}
+.wiz-step.done .wiz-line{background:var(--color-success-border)}
+.wiz-card{width:min(640px,100%);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-xl);box-shadow:var(--shadow-2)}
+.wiz-bd{padding:var(--space-8)}
+.wiz-bd h1{font-size:var(--text-2xl);margin-bottom:6px}
+.wiz-bd .lede{font-size:var(--text-sm);color:var(--color-text-4);line-height:var(--leading-loose);margin-bottom:var(--space-6)}
+.wiz-ft{padding:var(--space-4) var(--space-8);border-top:1px solid var(--color-border);display:flex;align-items:center;gap:var(--space-2)}
+.invite-row{display:grid;grid-template-columns:1fr 180px 32px;gap:var(--space-2);margin-bottom:var(--space-2)}
+.check-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--color-border);font-size:var(--text-sm)}
+.check-item:last-child{border-bottom:none}
+.check-ico{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;flex-shrink:0}
+.check-ok{background:var(--color-success-fg)}
+.check-run{background:var(--color-text-disabled)}
+</style>
+</head>
+<body>
+<div class="wiz">
+  <img class="wiz-mark" src="../brand/logo-horizontal.svg" alt="康冠时代">
+
+  <div class="wiz-steps">
+    <div class="wiz-step done"><span class="wiz-line"></span><span class="n">✓</span><span class="l">连接企业微信</span></div>
+    <div class="wiz-step done"><span class="wiz-line"></span><span class="n">✓</span><span class="l">选择监控范围</span></div>
+    <div class="wiz-step done"><span class="wiz-line"></span><span class="n">✓</span><span class="l">留存策略</span></div>
+    <div class="wiz-step active"><span class="n">4</span><span class="l">邀请团队</span></div>
+    <div class="wiz-step" style="flex:0"><span class="n">5</span><span class="l">完成</span></div>
+  </div>
+
+  <div class="wiz-card">
+    <div class="wiz-bd">
+      <h1>邀请合规团队</h1>
+      <p class="lede">邀请需要检索、审阅或导出会话的同事。你可以现在邀请，也可以跳过、之后在「用户管理」中随时添加。</p>
+
+      <div class="invite-row"><input class="input" type="email" placeholder="name@company.com" value="li.wenbo@company.com"><select class="select"><option>合规管理员</option></select><button class="btn btn-ghost" type="button" style="padding:0;color:var(--color-text-4)" aria-label="移除">×</button></div>
+      <div class="invite-row"><input class="input" type="email" placeholder="name@company.com"><select class="select"><option>HR</option><option>合规管理员</option><option>法务</option><option>只读审计</option></select><button class="btn btn-ghost" type="button" style="padding:0;color:var(--color-text-4)" aria-label="移除">×</button></div>
+      <button class="btn-link mt-2" type="button">+ 再添加一行</button>
+
+      <div class="alert alert-neutral mt-5"><span class="alert-ico">ℹ</span><div>邀请邮件有效期 72 小时；角色决定可见范围与导出权限，之后可在「用户管理」调整。</div></div>
+    </div>
+    <div class="wiz-ft">
+      <a class="btn" href="onboarding.html">‹ 上一步</a>
+      <div class="row gap-2" style="margin-left:auto"><button class="btn-link" type="button">跳过</button><a class="btn btn-primary" href="onboarding-done.html">发送邀请并继续 ›</a></div>
+    </div>
+  </div>
+</div>
+<script src="shell.js"></script>
+</body>
+</html>

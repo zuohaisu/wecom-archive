@@ -149,10 +149,17 @@ def test_console_selector_renders_from_available_locales_not_hardcoded() -> None
 
 
 def test_login_selector_renders_from_available_locales_not_hardcoded() -> None:
-    from app.routers.auth import _I18N_BOOTSTRAP_JS
+    # Design import (2026-07-28): the login page's i18n bootstrap JS moved
+    # from the removed _I18N_BOOTSTRAP_JS Python constant into
+    # app/web/templates/login.html (rendered via render_template, same as
+    # review_console/search/diagnostics already were per RND-216) — extract
+    # renderLangMenu() from the actual rendered page instead, so this still
+    # exercises the real served source rather than a stale constant.
+    from app.routers.auth import _login_page
 
+    html = _login_page(mode="wecom")
     src = _extract_from_source(
-        _I18N_BOOTSTRAP_JS, r"function renderLangMenu\(\)\{.*?\n\}", "renderLangMenu()"
+        html, r"function renderLangMenu\(\)\{.*?\n\}", "renderLangMenu()"
     )
     assert "I18N.availableLocales()" in src
     assert "zh-CN" not in src
@@ -366,6 +373,231 @@ def test_login_error_banner_uses_i18n_key_with_zh_cn_fallback_text() -> None:
     html = _login_page(mode="wecom", error="user_inactive")
     assert 'data-i18n="login.error.userInactive"' in html
     assert "您的企业微信账号已停用" in html
+
+
+# ---------------------------------------------------------------------------
+# QA round (2026-07-28) — login.subtitle independence, brand-icon removal,
+# and the inert forgot-password entry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("zh-CN", "对话审阅控制台"),
+        ("zh-TW", "對話審閱控制台"),
+        ("en", "Conversation Review Console"),
+    ],
+)
+def test_login_subtitle_translates_per_locale(code: str, expected: str) -> None:
+    out = _run(
+        f"""
+I18N.setLocale({json.dumps(code)});
+process.stdout.write(JSON.stringify(I18N.t('login.subtitle')));
+"""
+    )
+    assert out == expected
+
+
+@pytest.mark.parametrize("mode", ["password", "wecom"])
+def test_login_subtitle_is_an_independent_key_not_app_subtitle(mode: str) -> None:
+    """The login page's hero subtitle must be its own login.subtitle key, not
+    a reuse of app.subtitle (which review_console.html also renders) — so the
+    two copy points can diverge later without one edit silently changing the
+    other page."""
+    from app.routers.auth import _login_page
+
+    html = _login_page(mode=mode)
+    assert 'data-i18n="login.subtitle"' in html
+    assert 'data-i18n="app.subtitle"' not in html
+
+
+@pytest.mark.parametrize("mode", ["password", "wecom"])
+def test_login_page_has_no_hand_drawn_wecom_icon(mode: str) -> None:
+    """The WeCom button previously carried a hand-drawn SVG approximation of
+    a WeCom-style glyph, which risked reading as an official WeCom/Tencent
+    mark next to the page's own "not an official Tencent product" disclaimer.
+    Removed in favor of a plain text button — no icon is safer than a
+    look-alike one here."""
+    from app.routers.auth import _login_page
+
+    html = _login_page(mode=mode)
+    assert "<svg" not in html
+
+
+def test_wecom_button_still_links_to_the_real_oauth_endpoint() -> None:
+    from app.routers.auth import _login_page
+
+    html = _login_page(mode="wecom")
+    assert 'href="/api/auth/wecom/login"' in html
+    assert 'data-i18n="login.wecomButton"' in html
+
+
+def test_login_password_mode_has_disabled_forgot_password_entry() -> None:
+    """Intentional interim state: a forgot-password entry point is visible
+    (so the login layout matches the shipped design) but inert — no href, no
+    click handler — until RND F0 (account-system foundation) ships the real
+    email-based recovery flow. See QA summary 2026-07-28 for the tracked
+    follow-up."""
+    from app.routers.auth import _login_page
+
+    html = _login_page(mode="password")
+    assert 'id="forgot-password-disabled"' in html
+    assert 'data-i18n="login.forgotPasswordDisabled"' in html
+    assert 'aria-disabled="true"' in html
+    # Must not be a real, navigable link to any forgot-password route.
+    assert 'href="/admin/forgot-password"' not in html
+    assert 'href="forgot-password.html"' not in html
+    assert 'href="forgot-password"' not in html
+
+
+def test_password_mode_still_has_no_wecom_link_and_wecom_mode_has_no_password_field() -> (
+    None
+):
+    """AUTH_MODE-driven single-entry behavior is unchanged by the redesign:
+    the page still renders exactly one of the two login methods, never both
+    side by side — the mockup's combined "WeCom button + divider + password
+    form" layout is explicitly deferred pending an auth product decision."""
+    from app.routers.auth import _login_page
+
+    pw_html = _login_page(mode="password")
+    assert "wecom/login" not in pw_html
+    assert 'data-i18n="login.wecomButton"' not in pw_html
+
+    wc_html = _login_page(mode="wecom")
+    assert 'type="password"' not in wc_html
+    assert 'id="pwd-form"' not in wc_html
+
+
+# ---------------------------------------------------------------------------
+# QA follow-up (2026-07-28) — the login page's marketing/legal copy (brand-
+# slot hint, the 3 compliance selling points, both disclaimers, the hero
+# title, the timezone note, and <title>) previously rendered as hardcoded
+# zh-CN text baked into templates/login.html, so switching locale left the
+# form translated but the rest of the page stuck in Chinese. All of it now
+# goes through data-i18n, same as the rest of the page.
+# ---------------------------------------------------------------------------
+
+_LOGIN_MARKETING_I18N_KEYS = [
+    "login.pageTitle",
+    "login.heroTitle",
+    "login.timezoneNote",
+    "login.brandSlotPlaceholder",
+    "login.point1Title",
+    "login.point1Body",
+    "login.point2Title",
+    "login.point2Body",
+    "login.point3Title",
+    "login.point3Body",
+    "login.legalDisclaimerPrefix",
+    "login.legalDisclaimerEmphasis",
+    "login.legalDisclaimerSuffix",
+    "login.legalDisclaimerShort",
+]
+
+
+@pytest.mark.parametrize("mode", ["password", "wecom"])
+def test_login_marketing_and_legal_copy_all_use_i18n_keys(mode: str) -> None:
+    """Every string flagged in the 2026-07-28 QA blocker (brand-slot hint,
+    the 3 selling points, both disclaimers, hero title, timezone note,
+    <title>) must carry data-i18n — not just login.subtitle."""
+    from app.routers.auth import _login_page
+
+    html = _login_page(mode=mode)
+    for key in _LOGIN_MARKETING_I18N_KEYS:
+        assert f'data-i18n="{key}"' in html, f"missing data-i18n for {key}"
+
+
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        (
+            "zh-CN",
+            {
+                "login.pageTitle": "登录 — Crowntime WeCom Archive",
+                "login.heroTitle": "登录会话存档控制台",
+                "login.timezoneNote": "时间均为北京时间 (UTC+8)",
+                "login.brandSlotPlaceholder": "白标插槽 · 租户可上传自有标识（后续能力，当前为占位）",
+                "login.point1Title": "合规留存",
+                "login.point2Title": "可追溯审阅",
+                "login.point3Title": "最小授权",
+                "login.legalDisclaimerShort": "非腾讯官方产品 · © 2026 康冠时代",
+            },
+        ),
+        (
+            "zh-TW",
+            {
+                "login.pageTitle": "登入 — Crowntime WeCom Archive",
+                "login.heroTitle": "登入會話存檔控制台",
+                "login.timezoneNote": "時間均為北京時間 (UTC+8)",
+                "login.brandSlotPlaceholder": "白標插槽 · 租戶可上傳自有標識（後續能力，當前為佔位）",
+                "login.point1Title": "合規留存",
+                "login.point2Title": "可追溯審閱",
+                "login.point3Title": "最小授權",
+                "login.legalDisclaimerShort": "非騰訊官方產品 · © 2026 康冠時代",
+            },
+        ),
+        (
+            "en",
+            {
+                "login.pageTitle": "Login — Crowntime WeCom Archive",
+                "login.heroTitle": "Log in to the Conversation Archive Console",
+                "login.timezoneNote": "All times shown in Beijing Time (UTC+8)",
+                "login.brandSlotPlaceholder": (
+                    "White-label slot · tenants will be able to upload their "
+                    "own logo (upcoming capability, placeholder for now)"
+                ),
+                "login.point1Title": "Compliance retention",
+                "login.point2Title": "Traceable review",
+                "login.point3Title": "Least privilege",
+                "login.legalDisclaimerShort": "Not an official Tencent product · © 2026 Crown Time",
+            },
+        ),
+    ],
+)
+def test_login_marketing_copy_translates_per_locale(code: str, expected: dict) -> None:
+    lookups = "".join(f"result[{json.dumps(k)}]=I18N.t({json.dumps(k)});" for k in expected)
+    out = _run(
+        f"""
+I18N.setLocale({json.dumps(code)});
+var result = {{}};
+{lookups}
+process.stdout.write(JSON.stringify(result));
+"""
+    )
+    assert out == expected
+
+
+@pytest.mark.parametrize("code", ["zh-CN", "zh-TW", "en"])
+def test_login_legal_disclaimer_segments_concatenate_cleanly(code: str) -> None:
+    """The long disclaimer is split into prefix/emphasis/suffix keys so the
+    <strong> emphasis survives translation (I18N only ever sets
+    textContent, never innerHTML — see applyI18n() in login.html). Every
+    locale's three segments must still read as one coherent sentence when
+    concatenated with no separator, exactly how the DOM assembles them."""
+    out = _run(
+        f"""
+I18N.setLocale({json.dumps(code)});
+var full = I18N.t('login.legalDisclaimerPrefix') + I18N.t('login.legalDisclaimerEmphasis') + I18N.t('login.legalDisclaimerSuffix');
+process.stdout.write(JSON.stringify(full));
+"""
+    )
+    if code == "zh-CN":
+        assert out == (
+            "本产品为康冠时代自主开发的企业微信会话存档合规工具，"
+            "与腾讯公司无隶属、赞助或认可关系，非腾讯官方产品"
+            "。「企业微信」为腾讯公司注册商标，此处仅作功能描述性使用。"
+        )
+    elif code == "zh-TW":
+        assert out == (
+            "本產品為康冠時代自主開發的企業微信會話存檔合規工具，"
+            "與騰訊公司無隸屬、贊助或認可關係，非騰訊官方產品"
+            "。「企業微信」為騰訊公司註冊商標，此處僅作功能描述性使用。"
+        )
+    else:
+        assert "Tencent" in out
+        assert "WeCom" in out
+        assert out.count(".") >= 2
 
 
 def test_rnd152_history_labels_render_through_i18n_in_all_locales() -> None:

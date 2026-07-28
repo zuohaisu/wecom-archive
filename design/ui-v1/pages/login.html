@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>登录 · 康冠时代 企业微信会话存档</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>
+.auth-aside-mark{display:flex;align-items:center;gap:12px}
+.auth-aside-mark img{height:34px;width:auto}
+.brand-slot{margin-top:var(--space-6);border:1px dashed var(--color-border-strong);border-radius:var(--radius-lg);padding:var(--space-3) var(--space-4);font-size:var(--text-xs);color:var(--color-text-5);font-family:var(--font-mono);max-width:320px}
+.auth-points{display:flex;flex-direction:column;gap:var(--space-4);max-width:380px}
+.auth-point{display:flex;gap:var(--space-3);align-items:flex-start}
+.auth-point .n{width:20px;height:20px;border-radius:var(--radius-sm);background:var(--color-primary-soft);color:var(--color-primary-hover);font-size:var(--text-2xs);font-weight:var(--weight-bold);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+.auth-point h3{font-size:var(--text-md);margin-bottom:2px}
+.auth-point p{font-size:var(--text-sm);color:var(--color-text-4);line-height:var(--leading-loose)}
+.btn-wecom{height:40px;font-size:var(--text-base);font-weight:var(--weight-medium)}
+.auth-title{font-size:var(--text-2xl);font-weight:var(--weight-semibold);letter-spacing:-.01em;margin-bottom:6px}
+.auth-sub{font-size:var(--text-sm);color:var(--color-text-4);margin-bottom:var(--space-6)}
+@media (max-width:1080px){.auth{grid-template-columns:1fr}.auth-aside{display:none}}
+</style>
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-aside">
+    <div>
+      <div class="auth-aside-mark"><img src="../brand/logo-horizontal.svg" alt="康冠时代"></div>
+      <div class="brand-slot">白标插槽 · 租户可上传自有标识（后续能力，当前为占位）</div>
+    </div>
+    <div class="auth-points">
+      <div class="auth-point"><span class="n">1</span><div><h3>合规留存</h3><p>企业微信会话按授权范围拉取、解密并长期归档，保留时间与范围可配置。</p></div></div>
+      <div class="auth-point"><span class="n">2</span><div><h3>可追溯审阅</h3><p>每一次查看与导出都会记录操作人、时间、范围，形成不可否认的审计链路。</p></div></div>
+      <div class="auth-point"><span class="n">3</span><div><h3>最小授权</h3><p>平台超管默认只能看到租户元数据与聚合指标，查看会话内容需显式授权。</p></div></div>
+    </div>
+    <p class="auth-legal">本产品为康冠时代自主开发的企业微信会话存档合规工具，<strong>与腾讯公司无隶属、赞助或认可关系，非腾讯官方产品</strong>。「企业微信」为腾讯公司注册商标，此处仅作功能描述性使用。</p>
+  </aside>
+
+  <main class="auth-panel">
+    <div class="auth-card">
+      <div class="auth-title">登录会话存档控制台</div>
+      <p class="auth-sub">请使用企业微信扫码或授权登录；如管理员为你开通了本地账号，也可用账号密码登录。</p>
+
+      <button class="btn btn-primary btn-block btn-wecom" type="button">使用企业微信授权登录</button>
+      <p class="field-help mt-2">将跳转至企业微信授权页，仅获取你的身份与所属企业信息。</p>
+
+      <div class="divider">或使用账号密码</div>
+
+      <form onsubmit="return false">
+        <div class="field">
+          <label class="field-label" for="acct">账号</label>
+          <input class="input" id="acct" type="text" placeholder="邮箱或管理员分配的账号" autocomplete="username">
+        </div>
+        <div class="field">
+          <label class="field-label" for="pw">密码</label>
+          <input class="input" id="pw" type="password" placeholder="请输入密码" autocomplete="current-password">
+        </div>
+        <div class="row wrap gap-3 mb-4" style="justify-content:space-between">
+          <label class="checkbox"><input type="checkbox"> 记住此设备 7 天</label>
+          <a href="forgot-password.html" style="font-size:var(--text-sm)">忘记密码？</a>
+        </div>
+        <button class="btn btn-primary btn-block btn-lg" type="submit">登录</button>
+      <p class="field-help mt-2" style="text-align:center">首次使用本系统？<a href="onboarding.html">查看配置向导</a></p>
+      </form>
+
+      <div class="alert alert-danger mt-4 hidden" id="loginError" role="alert"><span class="alert-ico">⚠</span><div><strong>账号或密码不正确</strong><br>连续 5 次失败后账号将锁定 15 分钟。</div></div>
+
+      <div class="row gap-3 mt-6" style="justify-content:space-between">
+        <span class="tz-note">时间均为北京时间 (UTC+8)</span>
+        <button class="btn-link" type="button" data-lang-toggle>English</button>
+      </div>
+      <p class="auth-legal mt-4">非腾讯官方产品 · © 2026 康冠时代</p>
+    </div>
+  </main>
+</div>
+<script src="shell.js"></script>
+</body>
+</html>

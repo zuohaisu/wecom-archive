@@ -1,0 +1,16 @@
+
+body{font-family:system-ui,sans-serif;margin:2rem;color:#111}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid #ccc;padding:.4rem .6rem;text-align:left;vertical-align:top}
+th{background:#f4f4f4}
+tr:hover td{background:#fafafa}
+a{color:#0070f3}
+form{margin-bottom:1.5rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+input[type=text]{border:1px solid #ccc;padding:.3rem .5rem;border-radius:3px;width:18rem}
+button{padding:.3rem .8rem;border:1px solid #888;border-radius:3px;cursor:pointer}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:.3rem .8rem}
+dt{font-weight:600}
+.badge{font-size:.8em;padding:.1rem .4rem;border-radius:3px;background:#eee}
+.badge-success{background:#d1fae5;color:#065f46}
+.badge-failed{background:#fee2e2;color:#991b1b}
+.badge-pending{background:#fef3c7;color:#92400e}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>首次配置向导 · 完成 · 会话存档控制台</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body{background:var(--color-canvas)}
+.wiz{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:var(--space-10) var(--space-6) var(--space-12)}
+.wiz-mark{height:26px;margin-bottom:var(--space-8)}
+.wiz-steps{display:flex;align-items:center;gap:0;width:min(680px,100%);margin-bottom:var(--space-8)}
+.wiz-step{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;position:relative}
+.wiz-step .n{width:26px;height:26px;border-radius:50%;border:1px solid var(--color-border-strong);background:var(--color-surface);display:flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--color-text-4)}
+.wiz-step .l{font-size:var(--text-xs);color:var(--color-text-4);white-space:nowrap}
+.wiz-step.done .n{background:var(--color-success-bg);border-color:var(--color-success-border);color:var(--color-success-fg)}
+.wiz-step.done .l{color:var(--color-text-3)}
+.wiz-line{position:absolute;top:13px;left:calc(50% + 20px);right:calc(-50% + 20px);height:1px;background:var(--color-border-strong)}
+.wiz-step.done .wiz-line{background:var(--color-success-border)}
+.wiz-card{width:min(560px,100%);background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-xl);box-shadow:var(--shadow-2);text-align:center}
+.wiz-bd{padding:var(--space-10) var(--space-8)}
+.done-ico{width:56px;height:56px;border-radius:50%;background:var(--color-success-bg);color:var(--color-success-fg);display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto var(--space-5)}
+.wiz-bd h1{font-size:var(--text-2xl);margin-bottom:6px}
+.wiz-bd .lede{font-size:var(--text-sm);color:var(--color-text-4);line-height:var(--leading-loose);margin-bottom:var(--space-6)}
+.check-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--color-border);font-size:var(--text-sm);text-align:left}
+.check-item:last-child{border-bottom:none}
+.check-ico{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;flex-shrink:0;background:var(--color-success-fg)}
+</style>
+</head>
+<body>
+<div class="wiz">
+  <img class="wiz-mark" src="../brand/logo-horizontal.svg" alt="康冠时代">
+  <div class="wiz-steps">
+    <div class="wiz-step done"><span class="wiz-line"></span><span class="n">✓</span><span class="l">连接企业微信</span></div>
+    <div class="wiz-step done"><span class="wiz-line"></span><span class="n">✓</span><span class="l">选择监控范围</span></div>
+    <div class="wiz-step done"><span class="wiz-line"></span><span class="n">✓</span><span class="l">留存策略</span></div>
+    <div class="wiz-step done"><span class="wiz-line"></span><span class="n">✓</span><span class="l">邀请团队</span></div>
+    <div class="wiz-step done" style="flex:0"><span class="n">✓</span><span class="l">完成</span></div>
+  </div>
+
+  <div class="wiz-card">
+    <div class="wiz-bd">
+      <div class="done-ico">✓</div>
+      <h1>配置完成，归档已开始</h1>
+      <p class="lede">系统正在拉取历史消息与通讯录，预计 10–30 分钟内可在总览中看到首批数据。</p>
+      <div class="check-item"><span class="check-ico">✓</span>企业微信连通性自检通过（通讯录、会话、解密）</div>
+      <div class="check-item"><span class="check-ico">✓</span>监控范围：全公司 4 个部门、248 名员工</div>
+      <div class="check-item"><span class="check-ico">✓</span>留存策略：3 年 · 媒体 365 天后转冷存储</div>
+      <div class="check-item"><span class="check-ico">✓</span>已邀请 2 位团队成员</div>
+      <a class="btn btn-primary btn-block btn-lg mt-6" href="dashboard.html">进入总览</a>
+    </div>
+  </div>
+</div>
+<script src="shell.js"></script>
+</body>
+</html>
