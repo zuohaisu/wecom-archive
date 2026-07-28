@@ -171,6 +171,11 @@ function doLogin(e){{
   <a class="btn btn-primary btn-block btn-wecom" href="/api/auth/wecom/login">
     <span data-i18n="login.wecomButton">使用企业微信登录</span>
   </a>
+  <section class="mt-4" aria-labelledby="wecom-qr-title">
+    <h2 class="field-label" id="wecom-qr-title" data-i18n="login.qrTitle">扫码登录</h2>
+    <p class="field-help" data-i18n="login.qrScanHint">打开企业微信，扫一扫登录</p>
+    <iframe title="企业微信扫码登录" src="/api/auth/wecom/qr/login" style="width:300px;height:400px;border:0" loading="lazy"></iframe>
+  </section>
   {error_html}
   <p class="field-help mt-2" data-i18n="login.footerWecom">仅限企业内部员工访问</p>"""
 
@@ -554,31 +559,52 @@ def wecom_login():
     return RedirectResponse(oauth_url, status_code=302)
 
 
+@router.get("/api/auth/wecom/qr/login")
+def wecom_qr_login():
+    """Redirect an iframe to WeCom's PC QR-login page (RND-321)."""
+    wecom_oauth_settings = get_wecom_oauth_settings()
+    corp_id = wecom_oauth_settings.wecom_corp_id.strip()
+    agent_id = wecom_oauth_settings.wecom_agent_id.strip()
+    admin_domain = wecom_oauth_settings.admin_domain.strip()
+
+    if not corp_id or not agent_id:
+        logger.error("wecom_qr_login: WECOM_CORP_ID or WECOM_AGENT_ID not configured")
+        return RedirectResponse("/admin/login?error=config_error", status_code=302)
+
+    callback_base = f"https://{admin_domain}" if admin_domain else "http://localhost:8035"
+    import urllib.parse
+
+    redirect_uri = urllib.parse.quote(
+        f"{callback_base}/api/auth/wecom/qr/callback", safe=""
+    )
+    state = generate_state()
+    qr_connect_url = (
+        "https://open.work.weixin.qq.com/wwopen/sso/qrConnect"
+        f"?appid={corp_id}"
+        f"&agentid={agent_id}"
+        f"&redirect_uri={redirect_uri}"
+        f"&state={state}"
+        "&self_redirect=true"
+    )
+    logger.info("wecom_qr_login: auth started")
+    return RedirectResponse(qr_connect_url, status_code=302)
+
+
 # ---------------------------------------------------------------------------
-# WeCom OAuth callback
+# WeCom OAuth and QR callback
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/auth/wecom/callback")
-def wecom_callback(
-    code: str = Query(...),
-    state: str = Query(...),
-    db: Session = Depends(get_db),
-):
-    """
-    Handle the WeCom OAuth callback.
+def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
+    """Exchange a validated callback code and issue the tenant-bound session.
 
-    Validates state, exchanges code for UserId, upserts admin_users,
-    creates admin_sessions, sets HttpOnly cookie, redirects to console.
+    This is deliberately shared by the in-WeCom OAuth and PC QR flows so their
+    employee verification, user upsert, session lifetime, and cookie flags
+    cannot drift apart.
     """
     logger.info("wecom_callback: received (code not logged)")
 
-    # 1. Validate state (single-use, 5-min TTL)
-    if not consume_state(state):
-        logger.warning("wecom_callback: invalid or expired state")
-        return RedirectResponse("/admin/login?error=invalid_state", status_code=302)
-
-    # 2. Load config from env
+    # Load config from env
     wecom_oauth_settings = get_wecom_oauth_settings()
     corp_id = wecom_oauth_settings.wecom_corp_id.strip()
     oauth_secret = wecom_oauth_settings.wecom_oauth_secret.strip()
@@ -765,6 +791,32 @@ def wecom_callback(
         return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
 
     return response
+
+
+@router.get("/api/auth/wecom/callback")
+def wecom_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Handle the in-WeCom OAuth callback after one-time state validation."""
+    if not consume_state(state):
+        logger.warning("wecom_callback: invalid or expired state")
+        return RedirectResponse("/admin/login?error=invalid_state", status_code=302)
+    return _resolve_and_sign_wecom_session(code, db)
+
+
+@router.get("/api/auth/wecom/qr/callback")
+def wecom_qr_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Handle the PC QR callback using the identical OAuth session flow."""
+    if not consume_state(state):
+        logger.warning("wecom_qr_callback: invalid or expired state")
+        return RedirectResponse("/admin/login?error=invalid_state", status_code=302)
+    return _resolve_and_sign_wecom_session(code, db)
 
 
 # ---------------------------------------------------------------------------

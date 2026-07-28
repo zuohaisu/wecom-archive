@@ -322,7 +322,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 40  # RND-278: +4 password reset API and SSR routes.
+    assert route_count == 42  # RND-321: +2 WeCom QR login routes.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -351,6 +351,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/auth/password/reset",
             "/api/auth/wecom/callback",
             "/api/auth/wecom/login",
+            "/api/auth/wecom/qr/callback",
+            "/api/auth/wecom/qr/login",
             "/api/contacts",
             "/api/conversations",
             "/api/conversations/{conversation_id}/detail",
@@ -422,6 +424,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/auth/password/reset", frozenset({"POST"}), "None", "None"),
         ("/api/auth/wecom/callback", frozenset({"GET"}), "None", "None"),
         ("/api/auth/wecom/login", frozenset({"GET"}), "None", "None"),
+        ("/api/auth/wecom/qr/callback", frozenset({"GET"}), "None", "None"),
+        ("/api/auth/wecom/qr/login", frozenset({"GET"}), "None", "None"),
         ("/api/contacts", frozenset({"GET"}), "list[ContactOut]", "None"),
         ("/api/conversations", frozenset({"GET"}), "list[ConversationOut]", "None"),
         (

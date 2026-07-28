@@ -1,56 +1,33 @@
-# 本轮升级 Ticket Review（功能 vs Bug + 逐个开发顺序）
+# F0 账号体系后端 — 完成度与前端对接核验（2026-07-28）
 
-> 生成时间：2026-07-28 16:09 · 项目：365企微会话存档（cfe726ec / team RND）
-> 范围：7/27 配置中心批次 + 7/28 v1 UI 后端批次 + 新报 bug。已核实 Linear 实时状态。
+## 结论：地基已完成且代码已提交，但上线前必须跑一次 migration
 
-## 一、范围与分类
+### Linear 状态（5 张计划内子票全部 Done）
+| 票 | 内容 | 状态 |
+|---|---|---|
+| RND-277 (F0-1) | AdminUser 模型扩展 + Alembic migration | Done / committed |
+| RND-276 (F0-2) | per-user 密码鉴权（替换 env 单 hash） | Done / committed |
+| RND-278 (F0-3) | password_reset_tokens 表 + 邮箱找回 | Done / committed |
+| RND-279 (F0-4) | 会话生命周期自动化 + last_active_at | Done / committed |
+| RND-280 (F0-5) | 角色枚举 + require_role scaffold | Done / committed |
+| RND-321 | 企业微信扫码登录 | **Backlog（未做，属增强，非地基）** |
 
-本轮升级产生的 **open 票** 共三类：
+> F0 epic 本身仍 `In Progress`，仅因 RND-321 未做；计划内 5 张已全部收口。
 
-1. **v1 UI 后端批次**（7/28 建）：14 Epic（RND-262~275）+ 41 子票（RND-276~319）
-2. **配置中心批次**（7/27 建，开源相关）：RND-244（epic）+ RND-245~256（12 子票）
-3. **Bug**：仅 **RND-320**（chatrecord 折叠态渲染媒体）
+### 代码实地核验（git 干净，5 commit 齐全：d35a017/aa7c676/84ea560/ad490c3/efa86b3）
+- `models.py`：`AdminUser` 已含 `password_hash/role/status/email/phone/department/last_active_at/invite_token/invited_by/invite_status`，`PasswordResetToken` 表存在。
+- `auth.py`：`password_login` 走 per-user（`func.lower(email)` + `password_hash` 校验），失败回退 env 凭据并 `_upsert_env_admin_user`；`/api/auth/me` 返回真实 `role`。
+- `session_lifecycle.py`：维护 `last_active_at`；`app/auth.py`：`require_role` scaffold 就位（`ADMIN_ROLES` 枚举）。
+- migration `0017_admin_users_account_fields.py` + `0018_password_reset_tokens.py` 已提交。
 
-不计入开发队列：RND-211 / RND-230（In Review，等评审非新开发）；FROZEN RND-104/107/108/129/130/175（WeCom 更名阻塞）；RND-234（已 Done）。
+### 对接前端前必须做的两件事
+1. **应用数据库迁移**（阻塞项）：`backend/app/main.py:54` 注释明确——服务启动前必须先 `alembic upgrade head`，否则新列不存在会抛 `UndefinedColumn`。项目无自动 migration，`scripts/deploy_server.sh` 会跑，本地 dev 需手动执行：
+   ```bash
+   cd backend && alembic upgrade head
+   ```
+2. **首次管理员是 env 引导账户**：`_upsert_env_admin_user`（auth.py:369）创建的账户 **role=None / status=None / password_hash=None**——它只用于密码模式（AUTH_MODE=password）下用 env 凭据登录，不会成为带角色的 per-user 账户。真正带角色、可改密、可走找回流程的账户，需经邀请流程（**A3-2，尚未建**）或手动补 `role/status`。现有 review_console 等前端不依赖 role，登录可用。
 
-## 二、功能 vs Bug
-
-- **Bug（1 张）**：`RND-320` — Medium / Todo / `type:fix` / `area:frontend`。其余 bug 类票（RND-243/227/226/225/210/182 等）均已 Done。
-- **功能（其余全部）**：v1 后端批次 + 配置中心均属功能 / enhancement。
-
-## 三、优先级现状（已核实）
-
-| 优先级 | 票 |
-|---|---|
-| **High (p2)** | F0(RND-263)+5子、A1/A2/A4/A5/A7/A8/A9 及子票（NOW 阶段） |
-| **Medium (p3)** | 配置中心 RND-244+子(245-256，除252/255)、A3/A6/B1/B2/C2/C3 及子、RND-320、RND-232/237/239（开源降级） |
-| **Low (p4)** | RND-252/255、RND-261、RND-235、RND-238 |
-| **None (p0)** | RND-259（白标）、RND-260（gitignore 恢复，In Progress） |
-
-## 四、推荐逐个开发顺序（依赖驱动，非纯优先级数字）
-
-**0. 热身（可选）** — `RND-320`：独立前端修复，~0.5d，不阻塞任何功能。
-
-**1. 地基 F0（解锁全部）**
-- **F0-1 `RND-277`** AdminUser 模型扩展 + Alembic migration ← **第一张动手票**
-- → F0-2 `RND-276` per-user 密码鉴权 → F0-3 `RND-278` 找回流程 → F0-4 `RND-279` 会话生命周期 → F0-5 `RND-280` 角色枚举 scaffold
-
-**2. 共享基建（多 Epic 依赖）**
-- A7-1 `RND-293` AuditLog 表（A1 最近活动 / A6 下载审计 / B1 内容 gate / C2 导出都依赖）→ A7-2 `RND-294` 写入钩子 → A7-3 `RND-295` 列表 API
-- A1-1 UsageService（A2 用量 / B1 跨租户聚合复用）
-
-**3. 租户内 NOW 功能**
-- A1-2 Dashboard API → A2-1 Analytics → A8 改密/偏好 → A9 向导(需 C3) → A4 外部联系人(实体→列表→详情) → A5 检索增强(需 A4)
-
-**4. NEXT（Medium）**
-- A3 用户管理 / A6 媒体库 / B1 平台总控台 / B2 开通配置 / C2 证据导出 / C3 数据留存
-
-**5. 延期（开源 ≥1 周，按你 01:34 决策）**
-- 配置中心 RND-244+245~256、RND-232/237/239/259/260/261/235/238
-
-## 五、PM 结论
-
-- 优先级数字本身合理，**无需重排**；真正决定开发快慢的是**依赖顺序**（上表已标）。
-- 第一张动手票 = **F0-1 / RND-277**（地基，子票互相独立、先做它零返工）。
-- `RND-320` 作为独立小 bug，可在任意间隙做，不必等 F0。
-- 本次仅做 review，**未改动 Linear**。需要我把 F0-1 置 In Progress 或调整某张优先级，你确认即可。
+### 前端对接可行性
+- ✅ 密码模式 + env 凭据：可直接登录、签发会话、`/api/auth/me` 可用。
+- ⚠️ 角色化前端页面（users/settings/RBAC，A1–A9）尚未建，当前无前端依赖 role 字段，故不阻塞。
+- ❌ 企业微信扫码登录（RND-321）未做，PC 端扫码场景暂不可用（企微内 OAuth 静默授权仍可用）。
