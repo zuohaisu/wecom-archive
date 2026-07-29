@@ -82,6 +82,23 @@ class TenantWecomConfig(Base):
     corp_id = Column(String(64), nullable=False)
     agent_id = Column(String(64), nullable=False)
     app_secret = Column(Text, nullable=False)
+
+    def set_app_secret(self, plain: str) -> None:
+        """Encrypt and assign the permanent WeCom app credential for storage."""
+        # Lazy import keeps this ORM model independent of crypto module import
+        # order and avoids circular imports during application startup.
+        from app.crypto import encrypt_value
+
+        self.app_secret = encrypt_value(plain)
+
+    @property
+    def decrypted_app_secret(self) -> str:
+        """Return the stored WeCom app credential; never log this value."""
+        # See set_app_secret() for why this import intentionally stays local.
+        from app.crypto import decrypt_value
+
+        return decrypt_value(self.app_secret)
+
     callback_domain = Column(String(255), nullable=False, default="")
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(
