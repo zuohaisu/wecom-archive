@@ -34,13 +34,13 @@
 - 判定：200 且无残留 token = PASS。
 
 ### AC-2 — 真实数据渲染（**先查语义**）
-- 证据：数据来自 `GET /api/contacts`（`backend/app/routers/conversations.py:325`），非 mock。
-- **语义核查（本票特有陷阱）**：仓库里 `Contact` 是**内部员工**（`wecom_userid/name/tenant_id`），`ExternalContact` 才是**外部联系人**。本页面语义是「外部联系人」。请核实页面实际展示的是哪一种。
-- 判定：真实端点驱动 **且** 展示语义与「外部联系人」一致 = PASS。若做成了员工列表 → FAIL（`IMPLEMENTATION_DEFECT`），或若开发 agent 已按要求上报 `BLOCKED_NEEDS_HUMAN` 则判 BLOCKED（这是正确行为，不算失败）。
+- 证据：数据来自 `GET /api/admin/external-contacts`（RND-288 交付，`backend/app/routers/external_contacts.py`），非 mock，含企业/标签/归属员工字段。
+- **语义核查（本票特有陷阱，2026-07-29 已在 RND-288 层解决，但仍需复查前端有没有走错端点）**：仓库里 `Contact` 是**内部员工**，`ExternalContact` 才是**外部联系人**；`GET /api/contacts` 是归档参与者，两者都**不是**本票该用的数据源。确认页面调用的是 `GET /api/admin/external-contacts`，不是 `GET /api/contacts` 或 `GET /api/search/contacts`。
+- 判定：真实调用 RND-288 端点 **且** 展示语义与「外部联系人」一致 = PASS。若仍在用 `GET /api/contacts`/`GET /api/search/contacts`（说明没读 2026-07-29 更正）→ FAIL（`IMPLEMENTATION_DEFECT`）。
 
-### AC-3 — 搜索可用
-- 证据：搜索走 `GET /api/search/contacts`（`backend/app/routers/search.py:177`），有测试覆盖关键词过滤。
-- 判定：搜索端点驱动且有用例 = PASS。
+### AC-3 — 筛选可用
+- 证据：企业/标签/归属员工筛选走 RND-288 端点的筛选参数（**不是**前端全量拉取后再过滤），有测试覆盖。
+- 判定：筛选走后端参数且有用例 = PASS。前端全量过滤 = FAIL（`IMPLEMENTATION_DEFECT`）。
 
 ### AC-4 — 不悬挂详情链接（**重点**）
 - 证据：列表项**不得**链接到 `/admin/contacts/{id}` 等未注册路由；测试显式断言页面无指向未注册路由的链接。
@@ -63,8 +63,8 @@
 1. **模板引擎误用**：`grep -rn '{%\|{{' backend/app/web/templates/contacts.html` —— 无 Jinja，出现即 FAIL。
 2. **架构边界**：`grep -n 'from app.main\|import app.main' backend/app/routers/admin_contacts_page.py` 应无输出。
 3. **架构冻结 D1**：无 React / Vue / 打包器 / SPA 路由。
-4. **未改后端 API**：`git diff --stat -- backend/app/routers/conversations.py backend/app/routers/search.py backend/app/db/models.py` **必须全无输出**。
-5. **未越界做 A4-2 / A4-3**：本票明确只做列表。若 diff 里出现新增 `/api/admin/external-contacts` 端点或详情时间线实现 → FAIL（`SCOPE_VIOLATION`）。
+4. **未改后端 API**：`git diff --stat -- backend/app/routers/external_contacts.py backend/app/routers/conversations.py backend/app/routers/search.py backend/app/db/models.py` **必须全无输出**（RND-288 已交付的端点不应被本票改动）。
+5. **未越界做 A4-3**：本票明确只做列表。若 diff 里出现详情时间线实现 → FAIL（`SCOPE_VIOLATION`）。
 6. **文件所有权（最危险项）**：`git status --porcelain` 改动文件必须**只有**：
    - `backend/app/web/templates/contacts.html`
    - `backend/app/routers/admin_contacts_page.py`
@@ -81,7 +81,7 @@
 make verify
 .venv/bin/python -m pytest backend/tests/test_contacts_page.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
-git diff --stat -- backend/app/web/sidenav.py backend/app/main.py backend/app/routers/conversations.py backend/app/routers/search.py   # 必须全无输出
+git diff --stat -- backend/app/web/sidenav.py backend/app/main.py backend/app/routers/external_contacts.py backend/app/routers/conversations.py backend/app/routers/search.py   # 必须全无输出
 grep -rn '{%\|{{' backend/app/web/templates/contacts.html   # 必须无输出
 git status --porcelain
 git log origin/main..HEAD                                    # 必须无输出
