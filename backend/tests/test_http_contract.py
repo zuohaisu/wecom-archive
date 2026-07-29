@@ -429,7 +429,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "ReachabilityAuditOut",
             "None",
         ),
-        ("/api/admin/settings/password", frozenset({"POST"}), "None", "None"),
+        (
+            "/api/admin/settings/password",
+            frozenset({"POST"}),
+            "None",
+            "None",
+        ),
         ("/api/admin/sync-now", frozenset({"POST"}), "SyncNowResponse", "None"),
         ("/api/admin/sync-status", frozenset({"GET"}), "SyncStatusResponse", "None"),
         ("/api/admin/users", frozenset({"GET"}), "AdminUserListOut", "None"),
