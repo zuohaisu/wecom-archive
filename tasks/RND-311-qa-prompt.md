@@ -9,7 +9,7 @@
 
 确认：
 1. `POST /api/platform/tenants` 能创建 `Tenant` + `TenantWecomConfig`；
-2. **`app_secret` 与 RSA 私钥均加密落盘**（F0 原语），明文绝不入库；
+2. **`app_secret` 与 RSA 私钥均加密落盘**（RND-332 KeyProvider 原语，2026-07-29 更正原误写 F0），明文绝不入库；
 3. 端点被平台超管门禁保护；错误/缺凭据 401；
 4. 零泄露（响应不含任何 secret / 私钥）；唯一性 409；
 5. 全局契约不变（`alembic check` 绿、route_count +1、schema 同步、scope 守门）。
@@ -19,14 +19,14 @@
 ## 二、逐条验收清单（PASS/FAIL，附证据）
 
 ### 前置依赖（硬门槛）
-- [ ] P0 **F0 加密原语已合并**：`python -c "import app.crypto"`（或实际模块）成功，`encrypt_value`/`decrypt_value` 存在。若失败 → 整体 FAIL，附「F0 未就绪，开发 agent 应已停下报告」说明。
+- [ ] P0 **RND-332 KeyProvider 加密原语已合并**（2026-07-29 更正，原误写 F0/`app.crypto`）：导入 RND-332 实际交付的加密模块成功，等价 `encrypt_value`/`decrypt_value` 能力存在。若失败 → 整体 FAIL，附「RND-332 未就绪，开发 agent 应已停下报告」说明。**若发现开发 agent 自建了替代加密模块（未复用 RND-332）→ 直接 FAIL（`SCOPE_VIOLATION`, blocker）**，即使功能上能跑通——那是重复实现，会在 RND-332 落地后需要整体返工。
 - [ ] P1 **RND-306 `verify_platform_admin` 已合并**：`from app.auth import verify_platform_admin` 成功。若失败 → 整体 FAIL。
-- [ ] P2 **`alembic check` 绿**：F0 + RND-306 迁移已 `upgrade head`，无 schema drift。
+- [ ] P2 **`alembic check` 绿**：RND-332 + RND-306 迁移已 `upgrade head`，无 schema drift。
 
 ### 加密落盘（核心 AC）
 - [ ] B1 **`app_secret` 加密入库**：构造一条 `TenantWecomConfig` 经 `set_credentials(secret, pem)` 落库后，`SELECT app_secret` 的值 ≠ 入参 `secret`（密文）。证据：直查 DB 或读测试输出。
 - [ ] B2 **RSA 私钥加密入库**：`SELECT private_key_encrypted` ≠ 入参 PEM。证据同上。
-- [ ] B3 **可还原**：`cfg.decrypted_app_secret == secret` 且 `cfg.decrypted_private_key == pem`（F0 原语对称）。证据：单测 `test_rnd311_tenant_provision.py`。
+- [ ] B3 **可还原**：`cfg.decrypted_app_secret == secret` 且 `cfg.decrypted_private_key == pem`（经 RND-332 原语对称加解密）。证据：单测 `test_rnd311_tenant_provision.py`。
 - [ ] B4 **模型列存在**：`TenantWecomConfig` 有 `private_key_encrypted`（Text, nullable）。证据：grep `models.py` + `alembic check` 绿。
 
 ### 端点行为
@@ -82,7 +82,7 @@ pytest backend/tests/test_http_contract.py backend/tests/test_rnd311_tenant_prov
 
 ```
 RND-311 验收结论：PASS / FAIL
-前置：F0 加密原语 ___（就绪/缺失）  RND-306 verify_platform_admin ___（就绪/缺失）  alembic check ___（绿/红）
+前置：RND-332 KeyProvider 加密原语 ___（就绪/缺失）  RND-306 verify_platform_admin ___（就绪/缺失）  alembic check ___（绿/红）
 加密落盘：app_secret 密文≠明文 ___  私钥密文≠明文 ___  可还原 ___
 端点：201 创建 ___  401 门禁 ___  409 唯一性 ___
 零泄露：响应无 secret/私钥 ___

@@ -12,7 +12,7 @@
 - AC：「租户 + 配置创建；secret 加密落盘。」Non-goals：「不洗历史」。
 - 设计稿 `design/ui-v1/pages/tenant-provisioning.html` 表单字段：租户名 / 首位管理员邮箱 / `corp_id` / `agent_id` / **会话存档 Secret** / **RSA 私钥（PEM）** / 留存周期。本票消费 `corp_id`+`agent_id`+`secret`+`private_key`；留存周期属 B2 Epic 后续子票（A9 留存策略），OUT OF SCOPE。
 - **本票是 B2 Epic 的基石**：B2-2（连通性自检）/ B2-3（激活邮件）/ B2-4（租户列表）全部 `[BLOCKED: B2-1]`，因此落点必须干净、契约必须稳定。
-- 状态：`[BLOCKED: F0]` —— **硬阻塞**（不同于 RND-306 的软阻塞）：本票必须调用 F0 提供的**字段级加密原语**（Fernet/Vault），而该原语目前不存在。
+- 状态：`[BLOCKED: RND-332]`（2026-07-29 更正，原写 `F0`）—— **硬阻塞**（不同于 RND-306 的软阻塞）：本票必须调用**字段级加密原语**（Fernet/KMS），而该原语目前不存在，正式归属 **RND-332（D2 KeyProvider 抽象）**，不是 F0/RND-244 配置中心（那是本提示词最初撰写时的假定，已过期）。**不要自建一套简化版 `app.crypto`**——RND-332 的 `KeyProvider` 设计了 `local_file`/`kms_envelope` 双实现 + 每次解密写审计，本票抢先造一个会导致 RND-332 落地后要回来重构本票的加密调用点。先做 RND-332，本票消费它的接口。
 
 ---
 
@@ -23,7 +23,7 @@
   - 模型 docstring（`models.py:56-58`）明写：`app_secret: Phase 1 stores plaintext ... Phase 3 must encrypt at rest using Fernet or Vault/KMS.` —— **本票即该 Phase 3**。
   - **RSA 私钥当前不在此模型**：私钥以**文件路径**存在 `KeyVersion.private_key_path`（`models.py:297`），运行时由 `decrypt_wecom_messages_once.py:178` 读 env `WECOM_PRIVATE_KEY_PATH` 加载。本票要把租户自己的 WeCom 应用 RSA 私钥（PEM）**加密入库**（新增列）。
 - **`app_secret` 运行期零消费**：全仓 grep `app_secret` 仅出现在 `models.py`（定义）、`bootstrap_default_tenant.py`（一次性 upsert 写）、测试、`0001`/`0002` 迁移。**没有任何 router / sync / decrypt 代码从 DB 读 `app_secret`**（sync/decrypt 用 env）。→ 把 `app_secret` 改为「存密文」的爆裂半径极低，不会弄坏同步链路。
-- **F0 加密原语不存在**：grep `fernet|encrypt|decrypt|cipher` 在 `app/` 下仅命中 `decrypt_isolation.py`（SDK 隔离，非字段加密）与迁移注释。**无 `app/crypto.py` / `config_service.encrypt_value`**。→ 硬阻塞证据。
+- **RND-332 的加密原语不存在**（2026-07-29 实测复核，原描述误归因 F0）：grep `fernet|encrypt|decrypt|cipher` 在 `app/` 下仅命中 `decrypt_isolation.py`（SDK 隔离，非字段加密）与迁移注释。**无 `app/crypto.py` / `KeyProvider`**。→ 硬阻塞证据，等 RND-332 交付。
 - **`verify_platform_admin` 不存在**（RND-306 B1-1 仅备了提示词未实现）：grep `verify_platform_admin|require_platform_admin` 零命中。→ 本票需 RND-306 先落地（见 §2 前置校验）。
 - **路由基线 = 49**（`backend/tests/test_http_contract.py:325` `assert route_count == 49`）。
 - **契约 schema**（手工 sqlite 镜像）两处：`test_http_contract.py:89-95` 与 `fakes.py:252`，均含 `app_secret TEXT`（无 `private_key_encrypted`）。改模型列必须同步这俩。
@@ -35,7 +35,7 @@
 ## 2. 实现清单（按序勾选 `[x]`）
 
 - [x] **前置校验（开工第一步，未满足即停下报告，严禁自造加密层 / 平台鉴权）**：
-  1. `python -c "import app.crypto"`（或 F0 实际模块名，如 `app.config_service`）成功，且存在 `encrypt_value(plain: str) -> str` / `decrypt_value(cipher: str) -> str`（Fernet，密钥取自 env）。**若导入失败 → STOP，报告「F0 加密原语未就绪」，不自行实现加密**。
+  1. 导入 RND-332 交付的加密模块成功（**不是** `app.crypto`/`app.config_service` 这两个旧猜测名——先读 RND-332 的实际交付确认真实模块路径/`KeyProvider` 接口名），且可用等价于 `encrypt_value(plain: str) -> str` / `decrypt_value(cipher: str) -> str` 的能力。**若 RND-332 尚未交付或模块不可导入 → STOP，报告「RND-332 KeyProvider 未就绪」，不自行实现加密**。
   2. `python -c "from app.auth import verify_platform_admin"` 成功（RND-306 已合并）。**若失败 → STOP，报告「RND-306 B1-1 未就绪」**。
   3. `alembic check` 绿（F0 + RND-306 迁移均已 upgrade head）。
   > 这三条是硬门槛；越界实现 F0 加密或 B1-1 实体 = 判失败。
@@ -51,19 +51,19 @@
   ```python
   # —— RND-311 (B2-1) 加解密访问器（依赖 F0 加密原语）——
   def set_credentials(self, secret: str, private_key_pem: str) -> None:
-      """Encrypt + persist secret & RSA private key (Fernet, F0-provided)."""
-      from app.crypto import encrypt_value  # F0 交付；若模块名不同请按前置校验结果替换
+      """Encrypt + persist secret & RSA private key (via RND-332 KeyProvider)."""
+      from app.crypto import encrypt_value  # 占位导入路径——RND-332 交付后按其实际模块/接口名替换，不要照抄这个猜测名
       self.app_secret = encrypt_value(secret)
       self.private_key_encrypted = encrypt_value(private_key_pem)
 
   @property
   def decrypted_app_secret(self) -> str:
-      from app.crypto import decrypt_value
+      from app.crypto import decrypt_value  # 同上，按 RND-332 实际交付替换
       return decrypt_value(self.app_secret)
 
   @property
   def decrypted_private_key(self) -> str:
-      from app.crypto import decrypt_value
+      from app.crypto import decrypt_value  # 同上，按 RND-332 实际交付替换
       return decrypt_value(self.private_key_encrypted)
   ```
   > 运行期消费者（B2-2 自检 / 未来 sync 改用 DB 配置时）一律经 `decrypted_*` 取明文；绝不直读 `app_secret` 当明文。
@@ -218,7 +218,7 @@
 | `TenantWecomConfig.private_key_encrypted` 列 + 迁移 | RND-311 | ✅ |
 | `app_secret` / `private_key` 加密落盘 + `decrypted_*` 访问器 | RND-311 | ✅ |
 | `POST /api/platform/tenants` + `require_platform_admin` 门禁 | RND-311 | ✅ |
-| F0 加密原语（`app/crypto.encrypt_value` 等） | RND-244 (F0) | ❌（硬前置，缺失即停） |
+| 字段级加密原语（`encrypt_value`/`decrypt_value` 等） | **RND-332（D2 KeyProvider，2026-07-29 更正，原误写 RND-244/F0）** | ❌（硬前置，缺失即停，也不得自建替代实现） |
 | `PlatformAdmin` 实体 + `verify_platform_admin` | RND-306 (B1-1) | ❌（硬前置，缺失即停） |
 | 平台超管 HTTP 登录端点 / session cookie 签发 | B1-2 (RND-305) | ❌（`require_platform_admin` 暂用 Basic auth，留单点替换） |
 | 连通性自检（调 WeCom API） | B2-2 (RND-312) | ❌ |
