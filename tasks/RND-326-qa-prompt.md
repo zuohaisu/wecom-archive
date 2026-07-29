@@ -1,4 +1,4 @@
-[Goal check] This work advances 独立验收（QA） by 逐条核对 RND-326 的 6 条 AC 并产出带证据的 PASS/FAIL 判定。
+[Goal check] This work advances 独立验收（QA） by 逐条核对 RND-326 的 7 条 AC 并产出带证据的 PASS/FAIL 判定。
 
 # RND-326 验收提示词（Acceptance / QA Prompt）
 
@@ -43,12 +43,17 @@
 - 证据：`make verify` exit 0；`test_architecture_boundary.py` 通过；8 个已上线页面路由返回 200 且响应 HTML 中**无残留 `__TOKEN__` 字面量**（`render_template` 对未提供 token 会抛 `KeyError` → 500，务必确认 `review_console` 所有渲染入口都传了 `sidenav=`）。
 - 判定：全部 exit 0 = PASS。
 
+### AC-7（2026-07-29 追加）— 生产路由与测试 shim 均已接入 sidenav，且改动范围最小
+- 证据：`GET /admin/conversations`（经 `backend/app/routers/web.py` 真实路由，不是直接调用 `render_template`）返回 200；`backend/tests/_rnd216_web_shims.py` 相关既有测试全绿。
+- **改动范围核查（本条重点）**：`git diff -- backend/app/routers/web.py backend/tests/_rnd216_web_shims.py` 逐行看，**每个文件应只新增一个 `sidenav=render_sidenav(...)` 关键字参数**，不得有其他改动（`web.py` 里其他路由函数、`_rnd216_web_shims.py` 里 `settings`/`diagnostics` 等其他函数必须逐字节未变）。
+- 判定：两处均已接入 + diff 范围仅限一行新增参数 = PASS。若 diff 超出这一行（哪怕是重构、加注释）→ FAIL（`type: SCOPE_VIOLATION`）。若两处任一未接入（仍会 `KeyError`）→ FAIL（`type: IMPLEMENTATION_DEFECT`, severity: blocker）。
+
 ## 本项目专属检查（必查）
 1. **模板引擎误用**：`grep -rn '{%\|{{' backend/app/web/templates/` —— 本项目**没有** Jinja。出现即 FAIL（`type: IMPLEMENTATION_DEFECT`），Jinja 标签会被原样吐给浏览器。
 2. **架构边界**：`grep -n 'import.*app\.main\|from app\.main' backend/app/web/sidenav.py` **应无输出**。`sidenav.py` 若 import `app.main` 会触发架构硬闸。
 3. **架构冻结 D1**：diff 中不得出现 React / Vue / 打包器 / SPA 路由假设 → 出现即 FAIL（`type: SCOPE_VIOLATION`）。
 4. **Out of scope 越界**：本票**明确不迁移** `review_console` / `search` 的内联 `<style>`。若 diff 里大规模重写了这两个页面的内联样式 → FAIL（`type: SCOPE_VIOLATION`）。同样，`base.css` 不得被改。
-5. **文件所有权**：`git status --porcelain` 中的改动文件必须全部落在本票拥有清单内：`design-system.css`、`sidenav.py`、`review_console.html`、4 个 `admin_*_page.py`、`main.py`、`i18n.js`、`test_sidenav.py`。出现清单外文件 → FAIL（`type: SCOPE_VIOLATION`），这会破坏并行波次。
+5. **文件所有权**：`git status --porcelain` 中的改动文件必须全部落在本票拥有清单内：`design-system.css`、`sidenav.py`、`review_console.html`、4 个 `admin_*_page.py`、`main.py`、`i18n.js`、`test_sidenav.py`、**`web.py`、`_rnd216_web_shims.py`（2026-07-29 追加授权，见 AC-7，仅限一行 `sidenav=` 新增）**。出现清单外文件 → FAIL（`type: SCOPE_VIOLATION`），这会破坏并行波次。
 
 ## 附加检查（Security）
 - 无凭证 / 密钥 / 真实域名 / 真实用户数据写入代码或测试 → 否则 FAIL（`SECURITY_VIOLATION`）。

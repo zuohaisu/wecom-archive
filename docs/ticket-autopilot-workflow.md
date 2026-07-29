@@ -45,10 +45,12 @@ RND-326 是**唯一**允许写共享文件的工单，它一次性把 4 个页�
 |---|---|---|
 | `backend/app/web/templates/review_console.html` — `.lang-menu` 样式块 | **RND-324**（须先合入） | 只读 |
 | `backend/app/web/sidenav.py`（新建，含全部 4 个导航项） | **RND-326** | 只读 |
-| `backend/app/web/templates/*.html`（8 个已上线页面的样式接入） | **RND-326** | 只读 |
-| `backend/app/web/static/styles.css`（设计系统） | **RND-326** | 只读 |
+| `backend/app/web/templates/review_console.html`（`.lang-menu` 之外的其余部分，含 `<nav>` → `__SIDENAV__`） | **RND-326** | 只读 |
+| `backend/app/web/static/design-system.css`（新建，设计系统落地；**不是** `styles.css`——那个名字已被现存 login/forgot/reset/settings 用了） | **RND-326** | 只读 |
 | `backend/app/main.py`（include 4 个 stub router） | **RND-326** | 只读 |
 | `backend/app/assets/i18n.js` — 全部 `nav.*` 键 + 4 个锚点注释 | **RND-326** | 只读 |
+| `backend/app/routers/web.py`（2026-07-29 追加，仅限 `render_template("review_console", ...)` 调用新增 `sidenav=` 一个参数） | **RND-326** | 只读 |
+| `backend/tests/_rnd216_web_shims.py`（2026-07-29 追加，仅限 `review_console_html()` 同样新增 `sidenav=` 一个参数） | **RND-326** | 只读 |
 | `backend/app/assets/i18n.js` — `users.*` 键（在 RND-327 锚点下） | RND-327 | 仅限自己锚点区间 |
 | `backend/app/assets/i18n.js` — `audit.*` 键（在 RND-328 锚点下） | RND-328 | 仅限自己锚点区间 |
 | `backend/app/assets/i18n.js` — `media.*` 键（在 RND-329 锚点下） | RND-329 | 仅限自己锚点区间 |
@@ -67,6 +69,7 @@ RND-326 是**唯一**允许写共享文件的工单，它一次性把 4 个页�
 - **只写自己拥有的文件。** 若实现过程中发现必须改他人拥有的文件 → 停止，标记 `BLOCKED_NEEDS_HUMAN`，说明原因。不要「顺手改一下」。
 - **i18n 锚点纪律：** RND-326 会在 `i18n.js` 的 3 个 locale 块（`zh-CN` / `zh-TW` / `en`）里各插入 4 行锚点注释，形如 `/* RND-327 users page keys — insert below */`。页面工单**只在自己的锚点正下方插入**，不得改动锚点本身、不得在他人锚点区间内写入。这样 4 个 agent 对同一文件的编辑区间互不重叠。
 - **导航自动点亮：** `sidenav.py` 按「路由是否已注册」决定导航项渲染成链接还是灰色占位（见 RND-326 AC-4）。页面工单注册自己的路由后，导航项**自动**变为可点击 —— 页面工单因此完全不需要碰 `sidenav.py`。
+- **拆所有权时要找到"实际调用点"，不只是"内容所在的文件"（2026-07-29 实例）：** 给 RND-326 划所有权清单时，只列了 `review_console.html`（模板文件本身），漏了真正调用 `render_template("review_console", ...)` 的两处代码——`backend/app/routers/web.py`（生产路由）与 `backend/tests/_rnd216_web_shims.py`（测试 shim）。模板加了 `__SIDENAV__` token 后，这两处不跟着传 `sidenav=` 参数就会 `KeyError`。开发 agent 正确地停在 `BLOCKED_NEEDS_HUMAN`，而不是猜测着去改清单外的文件——**这是设计里的期望行为**，说明"文件所有权錯峰"本身没问题，只是这次划分时漏看了模板与其调用点之间的间接依赖。已授权补齐，改动严格限定为各新增一行 `sidenav=render_sidenav(...)`。以后拆所有权前，对任何"新增模板变量"类工单，先 `grep -rn 'render_template("<模板名>"' backend/` 把全部调用点找全，再定清单。
 
 ## 4. 风险分级与自动化边界
 

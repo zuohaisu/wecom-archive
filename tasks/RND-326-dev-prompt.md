@@ -76,8 +76,12 @@
 - `backend/app/main.py`（仅 `include_router` 4 行）
 - `backend/app/assets/i18n.js`（仅 `nav.*` 键 + 4 个锚点注释）
 - `backend/tests/test_sidenav.py`（新）
+- **`backend/app/routers/web.py`（2026-07-29 追加授权，仅限第 47 行 `render_template("review_console", ...)` 调用新增 `sidenav=render_sidenav(...)` 一个关键字参数；`admin_conversations` 函数体其余逻辑、文件里其他路由一律不动）**
+- **`backend/tests/_rnd216_web_shims.py`（2026-07-29 追加授权，仅限第 99 行 `review_console_html()` 的 `render_template(...)` 调用同样新增 `sidenav=` 参数；`settings`/`diagnostics` 等其他函数一律不动）**
 
-**只读、绝不可写：** 其余全部文件，尤其 `base.css`、现存 `static/styles.css`、其他 7 个模板。
+> 这两个文件是 `render_template("review_console", ...)` 的实际调用点（模板文件本身不调用自己）。加了 `__SIDENAV__` token 后不补这两处会导致：生产 `/admin/conversations` 500（`KeyError`）+ 大量既有测试在 collection 阶段失败。**若你在开工前就读到这份文件，直接把它们当作本票范围的一部分，不需要再走一次 BLOCKED 流程。**
+
+**只读、绝不可写：** 其余全部文件，尤其 `base.css`、现存 `static/styles.css`、其他 7 个模板、`web.py`/`_rnd216_web_shims.py` 里上述两行以外的任何内容。
 
 ## 验收标准（Acceptance Criteria）
 
@@ -88,6 +92,7 @@
   Given `registered_paths` 不含 `/admin/users` → users 项渲染为 disabled；When 传入含 `/admin/users` 的集合 → Then 同一项渲染为 `<a href="/admin/users">`，**无需修改 `sidenav.py`**。
 - **AC-5 i18n 锚点就位**：3 个 locale 块中各存在 4 行 RND-327/328/329/330 锚点注释（共 12 行），且现有 i18n 键无一丢失。
 - **AC-6 无破版回归**：`make verify` 全绿；`test_architecture_boundary.py` 通过；8 个已上线页面路由均返回 200 且 HTML 中无残留 `__TOKEN__` 字面量。
+- **AC-7（2026-07-29 追加）生产路由与测试 shim 均已接入 sidenav**：`GET /admin/conversations` 返回 200（真实经 `web.py` 路由，非直接调用 `render_template`）；`backend/tests/_rnd216_web_shims.py` 相关的既有测试全绿；`git diff -- backend/app/routers/web.py backend/tests/_rnd216_web_shims.py` 人工核对每个文件只新增了一行 `sidenav=render_sidenav(...)`，无其他改动。
 
 ## 验证方式（Verification — 确定性闸）
 ```bash
@@ -96,8 +101,9 @@ make verify
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
 git diff --stat -- backend/app/web/static/styles.css   # 必须无输出（AC-1）
 grep -c "RND-32[7-9] \|RND-330 " backend/app/assets/i18n.js   # 应为 12（AC-5）
+git diff -- backend/app/routers/web.py backend/tests/_rnd216_web_shims.py   # 人工核对：各只多一行 sidenav=（AC-7）
 ```
-通过 = 6 条 AC 全满足且上述命令 Exit Code 均为 0。
+通过 = 7 条 AC 全满足且上述命令 Exit Code 均为 0。
 
 ## 依赖（Dependencies）
 无前置阻塞。**本票阻塞 RND-327 / 328 / 329 / 330**，应最优先完成。
