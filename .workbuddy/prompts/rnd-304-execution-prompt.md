@@ -24,8 +24,16 @@
 - `backend/tests/test_http_contract.py`：三处同步（见第五节）。
 
 ## 三、阶段一：复现 + 测量（RED）
-1. 启动环境（`make dev` / 测试 DB）。
-2. 校验依赖：**导入 F0 配置服务应失败** 或 `alembic check` 报错（缺配置表）。记录为「依赖未就绪」，按下文硬约束停下报告。
+1. **环境前置（必读，避免 `python`/`alembic` exit 127）**：本仓无系统级 `python`/`alembic`，必须用 venv；且 `.env` 不会被自动加载，须手动 `source`：
+   ```bash
+   cd backend && set -a && source .env && set +a
+   PY=../.venv/bin/python   # 或 .venv/bin/python 绝对路径
+   ```
+   之后所有 `python` / `alembic` / `pytest` / `make verify` 均在该 shell 内执行（`source .env` 才能拿到带密码的 `DATABASE_URL`，否则 `alembic check` 连不上 DB）。
+2. 校验依赖（用上面的 `$PY`）：
+   - `$PY -c "import app.config_service" 2>/dev/null && echo F0_READY || echo F0_MISSING`
+   - 或 `$PY -m alembic check`（缺配置表会报错）。
+   若 `F0_MISSING` / import 失败 → 记录「依赖未就绪」，按下文硬约束停下报告，**不自行补配置中心、不自行建表**。
 3. （F0 合并后）基线：`GET /api/onboarding/status` 应返回 `first_run=true`（默认未配置 → 视为未完成）。
 
 ## 四、阶段二：实现（GREEN，最小变更）
@@ -98,7 +106,7 @@ class OnboardingCompleteOut(BaseModel):
    - path 集合（L336-377）追加 `"/api/onboarding/status"`、`"/api/onboarding/complete"`；
    - snapshot（L410-432）追加
      `("/api/onboarding/status", frozenset({"GET"}), "OnboardingStatusOut", "None")`、`("/api/onboarding/complete", frozenset({"POST"}), "OnboardingCompleteOut", "None")`。
-3. 回归：`make verify` 全绿；重点 `test_http_contract.py` + `test_architecture_boundary.py`（无新建模型 / 迁移 / 服务模块 → **不改** `_FLAT_SERVICE_MODULES`，边界仍绿）。
+3. 回归：在 §三 的环境 shell 内（已 `source .env` + venv）跑 `make verify` 全绿；重点 `test_http_contract.py` + `test_architecture_boundary.py`（无新建模型 / 迁移 / 服务模块 → **不改** `_FLAT_SERVICE_MODULES`，边界仍绿）。
 4. 失败先修实现，不迁就测试（除非测试断言旧路径，需标注）。
 
 ## 六、硬约束（违反即判失败）
