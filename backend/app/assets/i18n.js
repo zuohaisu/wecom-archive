@@ -303,7 +303,13 @@
         "nav.staffSeats": "员工与坐席",
         "nav.externalContacts": "外部联系人",
         "nav.syncTasks": "同步与任务",
+        "nav.auditLog": "审计日志",
         "nav.comingSoon": "即将推出",
+
+        /* RND-327 users page keys — insert below */
+        /* RND-328 audit-log page keys — insert below */
+        /* RND-329 media page keys — insert below */
+        /* RND-330 contacts page keys — insert below */
 
         "console.auditMode": "审阅模式",
         "console.detailPanel": "详情面板",
@@ -682,7 +688,13 @@
         "nav.staffSeats": "員工與坐席",
         "nav.externalContacts": "外部聯絡人",
         "nav.syncTasks": "同步與任務",
+        "nav.auditLog": "稽核日誌",
         "nav.comingSoon": "即將推出",
+
+        /* RND-327 users page keys — insert below */
+        /* RND-328 audit-log page keys — insert below */
+        /* RND-329 media page keys — insert below */
+        /* RND-330 contacts page keys — insert below */
 
         "console.auditMode": "審閱模式",
         "console.detailPanel": "詳情面板",
@@ -1061,7 +1073,13 @@
         "nav.staffSeats": "Staff & Seats",
         "nav.externalContacts": "External Contacts",
         "nav.syncTasks": "Sync & Tasks",
+        "nav.auditLog": "Audit Log",
         "nav.comingSoon": "Coming soon",
+
+        /* RND-327 users page keys — insert below */
+        /* RND-328 audit-log page keys — insert below */
+        /* RND-329 media page keys — insert below */
+        /* RND-330 contacts page keys — insert below */
 
         "console.auditMode": "Audit Mode",
         "console.detailPanel": "Detail Panel",

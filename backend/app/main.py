@@ -6,6 +6,10 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db.schema_check import full_readiness_check
 from app.db.session import get_engine
+from app.routers.admin_audit_page import router as admin_audit_page_router
+from app.routers.admin_contacts_page import router as admin_contacts_page_router
+from app.routers.admin_media_page import router as admin_media_page_router
+from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
@@ -106,6 +110,10 @@ def create_app() -> FastAPI:
     app.include_router(settings_router, prefix="/api/admin")
     app.include_router(media_library_router, prefix="/api/admin")
     app.include_router(wecom_events_router)
+    app.include_router(admin_users_page_router)
+    app.include_router(admin_audit_page_router)
+    app.include_router(admin_media_page_router)
+    app.include_router(admin_contacts_page_router)
     app.include_router(web_router)
     app.include_router(messages_router)
 

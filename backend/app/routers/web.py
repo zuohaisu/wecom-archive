@@ -2,13 +2,14 @@ import json
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_html_session
 from app.i18n_assets import I18N_JS_SOURCE, I18N_SCRIPT_TAG
 from app.message_type_registry import build_filterable_type_options, build_frontend_registry_entries
 from app.web import render_template
+from app.web.sidenav import render_sidenav
 
 router = APIRouter()
 
@@ -38,6 +39,7 @@ _SEARCH_MSGTYPE_OPTIONS_JSON = json.dumps(build_filterable_type_options())
 
 @router.get("/admin/conversations", response_class=HTMLResponse)
 def admin_conversations(
+    request: Request,
     tenant_id: Optional[str] = Depends(require_html_session),
 ):
     """Conversation review console. Requires valid session."""
@@ -55,6 +57,7 @@ def admin_conversations(
             # a decorative no-op chip. Reuses the exact same pre-built JSON,
             # not a second computation.
             msgtype_options_json=_SEARCH_MSGTYPE_OPTIONS_JSON,
+            sidenav=render_sidenav("review", {route.path for route in request.app.routes if hasattr(route, "path")}),
         )
     )
 

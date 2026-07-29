@@ -34,6 +34,7 @@ from pathlib import Path
 from app.i18n_assets import I18N_JS_SOURCE, I18N_SCRIPT_TAG
 from app.routers.web import _MESSAGE_TYPE_REGISTRY_ENTRIES_JSON, _SEARCH_MSGTYPE_OPTIONS_JSON
 from app.web import render_template
+from app.web.sidenav import render_sidenav
 
 _STATIC_DIR = Path(__file__).parent.parent / "app" / "web" / "static"
 
@@ -104,6 +105,17 @@ def review_console_html() -> str:
         # injects the search msgtype catalog (reused, unchanged, from the
         # standalone search page) for its inline "全部类型" filter chip.
         msgtype_options_json=_SEARCH_MSGTYPE_OPTIONS_JSON,
+        sidenav=render_sidenav(
+            "review",
+            {
+                "/admin/conversations",
+                "/admin/search",
+                "/admin/messages",
+                "/admin/diagnostics/reachability",
+                "/admin/settings",
+                "/api/admin/sync-status",
+            },
+        ),
     )
 
 
