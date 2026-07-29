@@ -322,7 +322,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 48  # RND-286: +2 admin user lifecycle routes.
+    assert route_count == 49  # RND-291: +1 admin media-library route.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -342,6 +342,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/reset-password",
             "/admin/search",
             "/api/admin/audit-logs",
+            "/api/admin/media",
             "/api/admin/reachability-audit",
             "/api/admin/sync-now",
             "/api/admin/sync-status",
@@ -416,6 +417,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/reset-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/search", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
+        ("/api/admin/media", frozenset({"GET"}), "MediaLibraryPage", "None"),
         (
             "/api/admin/reachability-audit",
             frozenset({"GET"}),
