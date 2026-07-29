@@ -194,7 +194,7 @@ def put_me_preferences(
 3. **不改角色逻辑 / 不改登录语义**：仅加 2 列 + 1 写端点；不触碰 `role`/`status`/鉴权流程。
 4. **Non-goals**：**不实现 logo 上传 / 白标**（属 `RND-259`）；**不实现密度(density)** 持久化（设计稿 `settings.html:117` 的紧凑/标准/宽松分段不在本票范围，留作跟随）。
 5. **迁移纪律**：必须新增 Alembic 迁移 `0020`（`down_revision="0019"`），本地 `alembic upgrade head` 跑通；不得手工 `ALTER TABLE` 或改 `0019`。
-6. **路由基线**：`tests/test_http_contract.py:325` 必须同步 `== 47` 并注释 `RND-297`，否则 CI 失败。
+6. **路由基线**：`tests/test_http_contract.py:325` 改为「当前基线 N + 1」(本票新增 1 个写路由)，注释追加 `# RND-297: +1 preferences write route.`；**勿写死 47**（基线已因 RND-286/RND-291 等合并漂移至 49），否则 CI 失败。
 7. **D1 冻结**：仅极薄原生 JS 胶水（§5），不引 React/图表库/新框架。
 8. **取值强约束**：`theme` ∈ {light,dark}、`locale` ∈ {zh-CN,zh-TW,en}；非法 → 422。
 9. **代码标识符加反引号**（Linear markdown 约定）：如 `AdminUser`、`ui_theme`、`/api/auth/me`、`PreferencesUpdate`。
@@ -203,7 +203,7 @@ def put_me_preferences(
 
 ## 7. 验证（GREEN 判定）
 
-- `make test`（或 `pytest backend/tests`）全绿，含 `test_http_contract.py::test_router_count`（== 47）。
+- `make test`（或 `pytest backend/tests`）全绿，含 `test_http_contract.py::test_router_count`（== 当前基线 + 1，注释含 `RND-297`）。
 - 迁移：`alembic upgrade head` 成功；新列存在且带默认值。
 - 新增/并入测试（`tests/test_preferences_api.py` 或并入 auth 测试）：
   - 未登录 `PUT /api/auth/me/preferences` → 401。

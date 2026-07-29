@@ -45,7 +45,7 @@
 
 - 运行 `make test`（或 `pytest backend/tests`）全绿。
 - 重点运行：
-  - `tests/test_http_contract.py::test_router_count`（路由数 == 47）
+  - `tests/test_http_contract.py::test_router_count`（路由数 == 当前基线 + 1，注释含 `RND-297`）
   - 偏好 API 测试（`tests/test_preferences_api.py` 或并入 auth 测试）：未登录 401 / 写读往返 / 非法值 422 / partial update / DB 落库 / 隔离（结构上无越权入参）
 - 若开发 agent 未附测试，QA **自行补**最小集成测覆盖 AC-1~AC-6 + 硬约束 1/4/5，再判定。
 

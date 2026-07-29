@@ -18,7 +18,7 @@
 - 无 `routers/settings.py`、无 `web/templates/settings.html`、无 `/admin/settings` 路由（已 glob 确认）。
 - `render_template(name, i18n_script=...)`：`backend/app/web/__init__.py:39`；`name`→`templates/{name}.html`，`__I18N_SCRIPT__` 占位符由 `i18n_script` kwarg 注入（参照 `forgot_password.html` + `auth.py` 的 `render_template("forgot_password", i18n_script=I18N_SCRIPT_TAG, login_body=...)`）。
 - 既有密码强度规则：`backend/app/routers/auth.py:302` `len(body.password) < 8 → weak_password`（RND-278）。**保持一致，强制 ≥ 8 位**。`design/ui-v1/pages/settings.html` 里写的「至少 12 位」只是 UI mockup 措辞，不是强制规则，请勿改成 12。
-- 契约测试当前基线：`backend/tests/test_http_contract.py:325` `assert route_count == 46  # RND-285: +2 invitation routes.` → RND-302 新增 **2 条**路由（见 §3），目标 `== 48`。**务必先读文件确认基线未被其他在途票改动，用「当前值 + 2」**。
+- 契约测试当前基线：`backend/tests/test_http_contract.py:325` `assert route_count == 49  # RND-291: +1 admin media-library route.` → RND-302 新增 **2 条**路由（见 §3），目标 `== 51`。**务必先读文件确认基线未被其他在途票改动，用「当前值 + 2」**。
 
 ## 3. 实现落点（精确）
 
@@ -112,7 +112,7 @@ def admin_settings_page(tenant_id: Optional[str] = Depends(require_html_session)
   - `password_hash is None`（纯 WeCom 用户）→ 400 `no_password_set`。
 - **SSR 页**：`TestClient` GET `/admin/settings` 带有效会话 → 200 且含 `id="change-password-form"` 与 `/web/static/styles.css`；无会话 → 302 跳 `/admin/login`。
 - **契约更新**（关键，防 RND-323 类返工）：
-  - `test_http_contract.py:325` `assert route_count == 46` → 改为 `== 48`（RND-302 新增 `POST /api/admin/settings/password` + `GET /admin/settings` 共 2 条）。**先读文件确认基线是否仍是 46**，若已被其他在途票改过，用「当前值 + 2」。注释改为 `# RND-302: +2 (settings password + settings page).`。
+  - `test_http_contract.py:325` `assert route_count == 49` → 改为 `== 51`（RND-302 新增 `POST /api/admin/settings/password` + `GET /admin/settings` 共 2 条）。**先读文件确认基线是否仍是 49**，若已被其他在途票改过，用「当前值 + 2」。注释改为 `# RND-302: +2 (settings password + settings page).`。
   - `test_routers_are_registered` 的 `expected` 列表（约 line 335-385）追加两条：`"/api/admin/settings/password"`、`"/admin/settings"`（否则该测试会报 extra/missing）。
 
 ## 4. 范围守门（严禁）
