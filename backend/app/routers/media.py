@@ -16,6 +16,7 @@ dispatches to it.
 
 from __future__ import annotations
 
+from pathlib import Path
 import re
 from typing import Callable, Optional, Tuple
 
@@ -25,8 +26,9 @@ from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from app.audit import write_audit
 from app.auth import get_current_user
-from app.db.models import AdminUser
+from app.db.models import AdminUser, ArchiveMessage, MediaFile
 from app.db.session import get_db
 from app.schemas.media import MediaAccessOut, NestedMediaAccessOut
 from app.services.media_access import (
@@ -44,6 +46,63 @@ from app.services.timeline_service import (
 )
 
 router = APIRouter()
+
+
+@router.get("/api/admin/media/{media_id}/download")
+def download_media_library_file(
+    media_id: int,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+):
+    """Download one tenant-owned media-library item and append its audit row.
+
+    This is deliberately a controlled byte proxy for both local and Qiniu
+    storage. It shares the existing media route's provider resolution and
+    serving implementation rather than returning an object-storage URL.
+    """
+    admin_user, tenant_id = auth
+    media_file = (
+        db.query(MediaFile)
+        .join(
+            ArchiveMessage,
+            (MediaFile.archive_message_id == ArchiveMessage.id)
+            & (MediaFile.tenant_id == ArchiveMessage.tenant_id),
+        )
+        .filter(MediaFile.id == media_id)
+        .filter(MediaFile.tenant_id == tenant_id)
+        .filter(ArchiveMessage.tenant_id == tenant_id)
+        .first()
+    )
+    if media_file is None or media_file.download_status != "downloaded":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    effective_backend, effective_ref = _resolve_servable_backend_and_ref(
+        media_file, "media download route"
+    )
+    response = serve_media_bytes(
+        effective_backend, effective_ref, route_label="media download route"
+    )
+    # The ref has already passed the storage service's content-type allowlist.
+    # Only expose a stable media id plus its verified suffix, never a storage key.
+    suffix = Path(effective_ref).suffix.lower()
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="media-{media_file.id}{suffix}"'
+    )
+
+    # Write only after bytes have been successfully obtained/prepared. The
+    # existing hook is append-only and uses a savepoint; commit makes this
+    # read-route audit durable before the download response is returned.
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=admin_user.id,
+        action="media.download",
+        object_type="media_file",
+        object_id=str(media_file.id),
+        detail={"source": "media_library"},
+    )
+    db.commit()
+    return response
 
 
 # ---------------------------------------------------------------------------
