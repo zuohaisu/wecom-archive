@@ -74,6 +74,8 @@ def _make_admin_user(user_id: str, tenant_id: str, wecom_user_id: str) -> MagicM
     u.email = "admin@example.com"
     u.password_hash = None
     u.status = "active"
+    u.ui_theme = "light"
+    u.ui_locale = "zh-CN"
     return u
 
 

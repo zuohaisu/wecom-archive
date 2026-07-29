@@ -45,7 +45,9 @@ def db() -> Session:
                     last_active_at DATETIME,
                     invite_token TEXT,
                     invited_by TEXT,
-                    invite_status TEXT
+                    invite_status TEXT,
+                    ui_theme TEXT NOT NULL DEFAULT 'light',
+                    ui_locale TEXT NOT NULL DEFAULT 'zh-CN'
                 )
                 """
             )

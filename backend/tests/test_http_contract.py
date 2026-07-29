@@ -83,6 +83,7 @@ CREATE TABLE admin_users (
     status TEXT NOT NULL DEFAULT 'active', email TEXT, phone TEXT,
     department TEXT, last_active_at TEXT, invite_token TEXT,
     invited_by TEXT, invite_status TEXT,
+    ui_theme TEXT NOT NULL DEFAULT 'light', ui_locale TEXT NOT NULL DEFAULT 'zh-CN',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -322,7 +323,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 51  # RND-302: +2 (settings password + settings page).
+    assert route_count == 52  # RND-302: +2 settings routes; RND-297: +1 preferences write route.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -355,6 +356,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/users/{user_id}/reset-password",
             "/api/auth/logout",
             "/api/auth/me",
+            "/api/auth/me/preferences",
             "/api/auth/password/forgot",
             "/api/auth/password/login",
             "/api/auth/password/reset",
@@ -442,6 +444,12 @@ def test_route_snapshot_with_real_model_names() -> None:
         ),
         ("/api/auth/logout", frozenset({"POST"}), "None", "None"),
         ("/api/auth/me", frozenset({"GET"}), "None", "None"),
+        (
+            "/api/auth/me/preferences",
+            frozenset({"PUT"}),
+            "PreferencesOut",
+            "None",
+        ),
         ("/api/auth/password/forgot", frozenset({"POST"}), "None", "None"),
         ("/api/auth/password/login", frozenset({"POST"}), "None", "None"),
         ("/api/auth/password/reset", frozenset({"POST"}), "None", "None"),

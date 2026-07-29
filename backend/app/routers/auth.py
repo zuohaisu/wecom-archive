@@ -55,6 +55,7 @@ from app.auth import (
 from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
+from app.schemas.auth import DEFAULT_LOCALE, DEFAULT_THEME, PreferencesOut, PreferencesUpdate
 from app.session_lifecycle import cleanup_expired_sessions
 from app.settings import (
     get_auth_settings,
@@ -941,16 +942,11 @@ def wecom_qr_callback(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/auth/me")
-def auth_me(request: Request, db: Session = Depends(get_db)):
-    """
-    Return current session metadata. Always returns HTTP 200.
-    {"authenticated": false} when no valid session.
-    No secrets, tokens, or cookie values in the response.
-    """
+def _resolve_session_user(request: Request, db: Session) -> Optional[AdminUser]:
+    """Return the valid session's user, or ``None`` without exposing session data."""
     session_id = request.cookies.get(SESSION_COOKIE)
     if not session_id:
-        return JSONResponse({"authenticated": False})
+        return None
 
     now = datetime.now(timezone.utc)
     session = (
@@ -963,9 +959,18 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
         .first()
     )
     if session is None:
-        return JSONResponse({"authenticated": False})
+        return None
+    return db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
 
-    user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
+
+@router.get("/api/auth/me")
+def auth_me(request: Request, db: Session = Depends(get_db)):
+    """
+    Return current session metadata. Always returns HTTP 200.
+    {"authenticated": false} when no valid session.
+    No secrets, tokens, or cookie values in the response.
+    """
+    user = _resolve_session_user(request, db)
     if user is None:
         return JSONResponse({"authenticated": False})
 
@@ -979,10 +984,35 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
             "authenticated": True,
             "wecom_user_id": exposed_wecom_id,
             "display_name": user.name or user.wecom_user_id,
-            "tenant_id": session.tenant_id,
+            "tenant_id": user.tenant_id,
             "id": user.id,
             "role": user.role,
+            "theme": user.ui_theme or DEFAULT_THEME,
+            "locale": user.ui_locale or DEFAULT_LOCALE,
         }
+    )
+
+
+@router.put("/api/auth/me/preferences", response_model=PreferencesOut)
+def put_me_preferences(
+    payload: PreferencesUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Update only the authenticated user's UI preferences (fail-closed)."""
+    user = _resolve_session_user(request, db)
+    if user is None:
+        raise HTTPException(status_code=401, detail="not_authenticated")
+
+    if payload.theme is not None:
+        user.ui_theme = payload.theme
+    if payload.locale is not None:
+        user.ui_locale = payload.locale
+    db.commit()
+    db.refresh(user)
+    return PreferencesOut(
+        theme=user.ui_theme or DEFAULT_THEME,
+        locale=user.ui_locale or DEFAULT_LOCALE,
     )
 
 

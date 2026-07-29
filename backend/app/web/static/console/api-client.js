@@ -4,6 +4,11 @@ function loadCurrentUser(){
     if(!d.authenticated){window.location.href='/admin/login';return;}
     currentTenantId=d.tenant_id||null;
     currentUserId=d.id||null;
+    // RND-297: server preferences take precedence; I18N/theme localStorage
+    // remains the fallback until an authenticated preference is available.
+    if(d.locale&&typeof I18N!=='undefined')I18N.setLocale(d.locale);
+    if(d.theme)document.documentElement.setAttribute('data-theme',d.theme);
+    if(typeof applyLocale==='function')applyLocale();
     var el=document.getElementById('current-user');
     if(el)el.textContent=d.display_name||d.wecom_user_id||'';
   }).catch(function(){});

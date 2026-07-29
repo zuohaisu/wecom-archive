@@ -200,6 +200,10 @@ class AdminUser(Base):
     invited_by = Column(String(36), ForeignKey("admin_users.id"), nullable=True)
     invite_status = Column(Text, nullable=True)
 
+    # RND-297 (A8-2): persisted UI appearance and language preferences.
+    ui_theme = Column(String(16), nullable=False, server_default=text("'light'"))
+    ui_locale = Column(String(16), nullable=False, server_default=text("'zh-CN'"))
+
 
 class AdminSession(Base):
     """Active admin login sessions. session_id (cookie value) is the PK.
