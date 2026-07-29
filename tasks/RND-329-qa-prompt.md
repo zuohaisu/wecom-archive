@@ -43,9 +43,9 @@
 - 判定：后端筛选 = PASS；前端全量过滤 = FAIL（`IMPLEMENTATION_DEFECT`）。
 
 ### AC-4 — 缩略图经既有媒体路由，无七牛直连（**重点**）
-- 证据：`grep -rniE 'qiniu|QINIU_|\.clouddn\.com' backend/app/web/templates/media.html` **必须无输出**；预览 / 缩略图 URL 指向既有媒体访问路由（`backend/app/routers/media.py` 提供）。
-- 背景：媒体存储是双 provider（`local` / `qiniu_kodo`）。前端直连七牛意味着要么暴露签名逻辑，要么绕过访问控制 —— 两者都不可接受。
-- 判定：无直连痕迹 + 走既有路由 = PASS。发现直连或任何签名密钥出现在前端 → FAIL（`SECURITY_VIOLATION`, severity: blocker）。
+- 证据：`grep -rniE 'qiniu|QINIU_|\.clouddn\.com' backend/app/web/templates/media.html` **必须无输出**；预览 / 缩略图 URL 用 `GET /api/admin/media` 返回的 `conversation_id`+`msgid`（RND-334 交付）拼出 `/api/conversations/{conversation_id}/messages/{msgid}/media`（`backend/app/routers/media.py` 提供）。
+- 背景：媒体存储是双 provider（`local` / `qiniu_kodo`）。前端直连七牛意味着要么暴露签名逻辑，要么绕过访问控制 —— 两者都不可接受。这三个字段是 2026-07-29 从 RND-334 补齐的，若本票的实现没有用到它们（比如自己拼了别的 URL 或直接用了 `room_id`/`message_id`）也判 FAIL，因为那要么打不开预览要么打开的是错误资源。
+- 判定：无直连痕迹 + 走既有路由 + 确实使用了 `conversation_id`/`msgid` 拼接 = PASS。发现直连、签名密钥、或用 `room_id`/数据库 `message_id` 冒充 `conversation_id`/`msgid` → FAIL（`SECURITY_VIOLATION` 或 `IMPLEMENTATION_DEFECT`, severity: blocker）。
 
 ### AC-5 — 导航自动点亮且未碰 sidenav（**关键**）
 - 证据：`git diff --stat -- backend/app/web/sidenav.py` **必须无输出**；有测试证明路由注册后导航项渲染为 `<a href="/admin/media">`。

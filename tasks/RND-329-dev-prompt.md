@@ -10,12 +10,18 @@
 - **可与 RND-327/328/330 并行**（前提：严守下方文件所有权）
 
 ## 背景与项目现状
-后端 **列表能力已就绪，本票不需要改后端一行代码**（已实地核实）：
+后端 **列表能力已就绪**（已实地核实）：
 
 | 端点 | 位置 | 用途 |
 |---|---|---|
-| `GET /api/admin/media` | `backend/app/routers/media_library.py:42` | 媒体列表 / 筛选（`MediaLibraryPage`） |
+| `GET /api/admin/media` | `backend/app/routers/media_library.py:42` | 媒体列表 / 筛选（`MediaLibraryPage`），**RND-334 已补充 `msgid`/`conversation_id`/`session_title` 三个字段** |
 | 既有媒体访问路由 | `backend/app/routers/media.py` | 缩略图 / 预览取流（**只读复用，不得修改**） |
+
+## ⚠️ 2026-07-29 更正：AC-4 不是"零后端改动"就能做完的
+
+上一轮开发 agent 正确执行到 `BLOCKED_NEEDS_HUMAN`：`GET /api/admin/media` 当时缺 `conversation_id`/`msgid`/`session_title`，无法拼出既有预览路由 `/api/conversations/{conversation_id}/messages/{msgid}/media` 的 URL——列表接口只给 `room_id` + 数据库 `message_id`（不是 WeCom `msgid`），语义对不上；唯一 `media_id` 键控的路由是下载路由（RND-292，已 Done），强制 `Content-Disposition: attachment`，不能内嵌预览。
+
+**RND-334 已交付这三个字段**（复用 `conversation_membership.py`/`display_names.py` 既有逻辑）。**开工前先读 `GET /api/admin/media` 的实际响应，确认这三个字段的最终名字**（RND-334 的 QA Summary 里会记录，若与本提示词假设的名字不同以实际为准）。
 
 设计稿：`design/Crowntime WeCom Archive Design System/pages/media.html`。
 
@@ -62,7 +68,7 @@
 - **AC-1 路由可用**：`GET /admin/media` 返回 200，HTML 中无残留 `__TOKEN__`。
 - **AC-2 真实数据渲染**：网格由 `GET /api/admin/media` 真实响应填充（非 mock），含类型 / 大小 / 上传时间 / 所属会话字段。
 - **AC-3 筛选可用**：按媒体类型与时间范围筛选生效，走后端筛选参数（**不得**前端全量拉取后再过滤）。
-- **AC-4 缩略图经既有媒体路由**：预览 / 缩略图 URL 指向既有媒体访问路由，**不得**在前端拼接七牛地址或包含任何签名密钥。测试须断言模板与 JS 中不出现 `QINIU_` / `qiniu.com` 等直连痕迹。
+- **AC-4 缩略图经既有媒体路由**：用 `GET /api/admin/media` 返回的 `conversation_id` + `msgid`（RND-334 交付）拼出 `/api/conversations/{conversation_id}/messages/{msgid}/media`，**不得**在前端拼接七牛地址或包含任何签名密钥。测试须断言模板与 JS 中不出现 `QINIU_` / `qiniu.com` 等直连痕迹。
 - **AC-5 导航自动点亮**：`/admin/media` 注册后侧栏「媒体与附件」渲染为 `<a href>`，**且 `sidenav.py` 未被修改**。
 - **AC-6 i18n 三语齐全**：新增每个 `media.*` 键在三个 locale 中均存在，且位于 RND-329 锚点下方。
 - **AC-7 回归**：`make verify` 全绿；`test_architecture_boundary.py` 通过；8 个已上线页面无破版。
@@ -78,8 +84,8 @@ grep -rniE 'qiniu|QINIU_' backend/app/web/templates/media.html        # 必须�
 ```
 
 ## 依赖（Dependencies）
-**阻塞于 RND-326**。其产物缺失 → `BLOCKED_NEEDS_HUMAN`。
-RND-292（下载端点 + 审计钩子）是 fast-follow，**不阻塞本票**，也**不属于本票范围**。
+**阻塞于 RND-326 与 RND-334**（媒体列表补充会话定位字段）。任一产物缺失 → `BLOCKED_NEEDS_HUMAN`，不要自己在前端猜字段名或自造 conversation_id 计算逻辑。
+RND-292（下载端点 + 审计钩子）**已 Done**，不属于本票范围，本票不涉及下载功能本身（只是复用同一批预览/取流路由做展示）。
 
 ## 完成定义
 - [ ] AC-1 ~ AC-7 全满足，每条有测试
@@ -94,9 +100,9 @@ RND-292（下载端点 + 审计钩子）是 fast-follow，**不阻塞本票**，
 - 回滚：新增文件为主，`git checkout -- <files>`。
 
 ## 人工点位
-- **Trigger**：RND-326 完成后置 In Progress。
+- **Trigger**：RND-326 与 RND-334 均完成后置 In Progress。
 - **Gate**：Haisu 审阅后批准 commit。
-- **Escalation**：若列表 API 缺少设计稿所需字段（如所属会话标题）→ `BLOCKED_NEEDS_HUMAN`，**不要改后端补字段**。
+- **Escalation**：若 RND-334 交付的字段名/语义与本提示词描述不符，或仍不足以拼出预览 URL → `BLOCKED_NEEDS_HUMAN`，**不要改后端补字段**（那还是 RND-334 或新票的范围）。
 
 ## 执行指引
 1. 读 `DEV_AGENT_RULES.md`、`docs/ticket-autopilot-workflow.md`、`media_library.py`、`media.py`（只读，理解既有访问路由）、`sidenav.py`（只读）、设计稿 `pages/media.html`。
