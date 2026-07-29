@@ -9,18 +9,26 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "0022"
 down_revision: Union[str, None] = "0021"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_ROLE_ENUM = sa.Enum("superadmin", name="platform_admin_role")
-_STATUS_ENUM = sa.Enum("active", "disabled", name="platform_admin_status")
+# create_type=False: unlike add_column(), create_table() DOES create native
+# enum types for its columns automatically, which would duplicate the
+# explicit checkfirst creation below.
+_ROLE_ENUM = postgresql.ENUM(
+    "superadmin", name="platform_admin_role", create_type=False
+)
+_STATUS_ENUM = postgresql.ENUM(
+    "active", "disabled", name="platform_admin_status", create_type=False
+)
 
 
 def upgrade() -> None:
-    # create_table() does not create PostgreSQL native enum types itself.
+    # Created explicitly (idempotently) so a partially-applied run can retry.
     _ROLE_ENUM.create(op.get_bind(), checkfirst=True)
     _STATUS_ENUM.create(op.get_bind(), checkfirst=True)
 
