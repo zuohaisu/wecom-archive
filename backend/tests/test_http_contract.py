@@ -323,7 +323,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 52  # RND-302: +2 settings routes; RND-297: +1 preferences write route.
+    assert route_count == 53  # RND-302: +2 settings routes; RND-297: +1 preferences write route; media download route: +1.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -345,6 +345,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/settings",
             "/api/admin/audit-logs",
             "/api/admin/media",
+            "/api/admin/media/{media_id}/download",
             "/api/admin/reachability-audit",
             "/api/admin/settings/password",
             "/api/admin/sync-now",
@@ -423,6 +424,12 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         ("/api/admin/media", frozenset({"GET"}), "MediaLibraryPage", "None"),
+        (
+            "/api/admin/media/{media_id}/download",
+            frozenset({"GET"}),
+            "None",
+            "None",
+        ),
         (
             "/api/admin/reachability-audit",
             frozenset({"GET"}),
