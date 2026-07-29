@@ -89,3 +89,74 @@ def fetch_external_contact_display_name(
 
     contact = data.get("external_contact") or {}
     return _clean(contact.get("name"))
+
+
+def _external_contact_get(
+    path: str, access_token: str, **params: str
+) -> Optional[dict]:
+    """Call an external-contact read endpoint without exposing response data."""
+    try:
+        with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
+            resp = client.get(
+                f"https://qyapi.weixin.qq.com/cgi-bin/externalcontact/{path}",
+                params={"access_token": access_token, **params},
+            )
+        data = resp.json()
+    except Exception:
+        logger.warning("external-contact request failed")
+        return None
+
+    return data if isinstance(data, dict) and data.get("errcode", -1) == 0 else None
+
+
+def list_follow_userids(access_token: str) -> Optional[list[str]]:
+    """Return internal userids which follow at least one external contact."""
+    data = _external_contact_get("get_follow_user_list", access_token)
+    if data is None:
+        return None
+    users = data.get("follow_user")
+    if not isinstance(users, list):
+        return None
+    return [userid for value in users if (userid := _clean(value))]
+
+
+def list_external_userids_by_user(
+    access_token: str, userid: str
+) -> Optional[list[str]]:
+    """Return external userids followed by one internal WeCom user."""
+    data = _external_contact_get("list", access_token, userid=userid)
+    if data is None:
+        return None
+    userids = data.get("external_userid")
+    if not isinstance(userids, list):
+        return None
+    return [
+        external_userid for value in userids if (external_userid := _clean(value))
+    ]
+
+
+def get_external_contact(access_token: str, external_userid: str) -> Optional[dict]:
+    """Return the complete externalcontact/get payload, or None on failure."""
+    return _external_contact_get(
+        "get", access_token, external_userid=external_userid
+    )
+
+
+def get_corp_tag_list(access_token: str) -> Optional[dict[str, str]]:
+    """Return a mapping of corporate external-contact tag id to tag name."""
+    data = _external_contact_get("get_corp_tag_list", access_token)
+    if data is None:
+        return None
+
+    tags: dict[str, str] = {}
+    for group in data.get("tag_group", []) or []:
+        if not isinstance(group, dict):
+            continue
+        for tag in group.get("tag", []) or []:
+            if not isinstance(tag, dict):
+                continue
+            tag_id = _clean(tag.get("id"))
+            tag_name = _clean(tag.get("name"))
+            if tag_id and tag_name:
+                tags[tag_id] = tag_name
+    return tags

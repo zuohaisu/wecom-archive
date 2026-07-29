@@ -798,3 +798,50 @@ class Contact(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class ExternalContact(Base):
+    """WeCom external contact, populated by the external-contact API."""
+
+    __tablename__ = "external_contacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "external_userid",
+            name="uq_external_contacts_tenant_ext_userid",
+        ),
+        Index(
+            "ix_external_contacts_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_external_contacts_company_trgm",
+            "company",
+            postgresql_using="gin",
+            postgresql_ops={"company": "gin_trgm_ops"},
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    external_userid = Column(String(64), nullable=False)
+    name = Column(Text, nullable=True)
+    company = Column(Text, nullable=True)
+    tags = Column(Text, nullable=True)
+    source = Column(Text, nullable=True)
+    owner_wecom_userid = Column(String(64), nullable=True)
+    last_interaction_at = Column(DateTime(timezone=True), nullable=True)
+    message_count = Column(Integer, nullable=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
