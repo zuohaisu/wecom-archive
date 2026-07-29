@@ -164,6 +164,27 @@ def verify_password(plain: str, stored_hash: str) -> bool:
         return False
 
 
+# —— RND-306 (B1-1) 平台超管认证原语（HTTP 登录/session 属 B1-2/RND-305）——
+def verify_platform_admin(db, email: str, password: str):
+    """Return the active PlatformAdmin for correct credentials, else None.
+
+    Reuses hash_password/verify_password (PBKDF2). Does NOT issue sessions
+    or cookies — that is B1-2's job. Disabled admins are rejected.
+    """
+    from app.db.models import PlatformAdmin  # lazy import to avoid cycles
+
+    admin = (
+        db.query(PlatformAdmin)
+        .filter(PlatformAdmin.email == email.strip().lower())
+        .first()
+    )
+    if admin is None or admin.status != "active":
+        return None
+    if not verify_password(password, admin.password_hash):
+        return None
+    return admin
+
+
 # ---------------------------------------------------------------------------
 # Password reset tokens (RND-278 / F0-3)
 # ---------------------------------------------------------------------------

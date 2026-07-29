@@ -265,6 +265,39 @@ class AuditLog(Base):
     )
 
 
+# —— RND-306 (B1-1) 平台超管实体（独立于 admin_users，tenant-less）——
+class PlatformAdmin(Base):
+    """Platform super-admin, isolated from per-tenant admin_users.
+
+    Tenant-less by design: a platform admin operates across all tenants
+    (cross-tenant scope is enforced at the auth layer, see B1-2 / RND-305).
+    """
+
+    __tablename__ = "platform_admins"
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_platform_admins_email"),
+        Index("ix_platform_admins_status", "status"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    email = Column(Text, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    role = Column(
+        Enum("superadmin", name="platform_admin_role"),
+        nullable=False,
+        server_default=text("'superadmin'"),
+    )
+    status = Column(
+        Enum("active", "disabled", name="platform_admin_status"),
+        nullable=False,
+        server_default=text("'active'"),
+    )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_active_at = Column(DateTime(timezone=True), nullable=True)
+
+
 # —— RND-278 (F0-3) 密码重置令牌 ——
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
