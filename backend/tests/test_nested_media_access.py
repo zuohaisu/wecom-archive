@@ -333,7 +333,7 @@ def test_descriptor_provider_outage_is_unavailable(monkeypatch) -> None:
     media_file = MediaFile(
         sdkfileid="sdk-1", archive_message_id=1, tenant_id=_TENANT_A,
         download_status="downloaded", storage_backend="qiniu_kodo",
-        storage_ref="tenants/tenant-a/images/1.jpg",
+        storage_ref="tenants/tenant-a/images/1.jpg", file_size=1,
     )
     descriptor = _build_nested_media_descriptor("image", media_file, "conv-1", "msg-1", "0")
     assert descriptor["status"] == "unavailable"

@@ -604,6 +604,7 @@ def test_select_candidates_skips_already_downloaded_servable_rows(tmp_path, monk
         MediaFile(
             sdkfileid="sdk-1", archive_message_id=1, tenant_id="tenant-a",
             file_type="voice", local_path=str(good_path), download_status="downloaded",
+            file_size=len(good_path.read_bytes()),
         )
     )
     session.commit()
@@ -640,6 +641,7 @@ def test_select_candidates_skips_already_downloaded_servable_image_row(tmp_path,
         MediaFile(
             sdkfileid="sdk-1", archive_message_id=1, tenant_id="tenant-a",
             file_type="image", local_path=str(good_path), download_status="downloaded",
+            file_size=len(good_path.read_bytes()),
         )
     )
     session.commit()
@@ -675,7 +677,7 @@ def test_select_candidates_repairs_stale_downloaded_image_row(tmp_path, monkeypa
         MediaFile(
             sdkfileid="sdk-1", archive_message_id=1, tenant_id="tenant-a",
             file_type="image", local_path=str(tmp_path / "missing.jpg"),
-            download_status="downloaded",
+            download_status="downloaded", file_size=1,
         )
     )
     session.commit()
@@ -1091,7 +1093,7 @@ def test_select_nested_media_candidates_excludes_already_downloaded_sdkfileids(t
             sdkfileid="sdk-already-downloaded",
             archive_message_id=1,
             tenant_id="tenant-a",
-            download_status="downloaded",
+            download_status="downloaded", file_size=1,
         )
     )
     session.commit()

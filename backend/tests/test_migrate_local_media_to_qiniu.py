@@ -737,7 +737,7 @@ def test_select_candidates_skips_already_migrated_rows(tmp_path) -> None:
             tenant_id="tenant-a",
             storage_backend="qiniu_kodo",
             storage_ref="tenants/tenant-a/images/2.jpg",
-            download_status="downloaded",
+            download_status="downloaded", file_size=1,
             migration_status="migrated",
         )
     )
@@ -1099,7 +1099,7 @@ def test_main_media_type_mismatch_leaves_row_local_and_records_failure(
         storage_backend="local",
         storage_ref=str(local_file),
         local_path=str(local_file),
-        download_status="downloaded",
+        download_status="downloaded", file_size=len(_JPEG_BYTES),
         migration_status=None,
     )
 

@@ -326,7 +326,7 @@ def test_revoked_image_message_media_access_unaffected(client, db, monkeypatch, 
     media = MediaFile(
         sdkfileid="sdk-img-1", archive_message_id=original.id, tenant_id=_TENANT_A,
         download_status="downloaded", storage_backend="local", storage_ref=str(img_path),
-        local_path=str(img_path), file_type="image",
+        local_path=str(img_path), file_type="image", file_size=len(img_path.read_bytes()),
     )
     db.add(media)
     db.commit()

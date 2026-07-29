@@ -1742,7 +1742,7 @@ def _insert_media_file(
         archive_message_id=archive_message_id,
         download_status="downloaded",
         local_path=local_path,
-        file_type="image",
+        file_type="image", file_size=1,
     )
     db.add(mf)
     db.flush()

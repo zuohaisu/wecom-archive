@@ -3,6 +3,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -606,6 +607,10 @@ class MediaFile(Base):
         UniqueConstraint(
             "tenant_id", "sdkfileid", name="uq_media_files_tenant_sdkfileid"
         ),
+        CheckConstraint(
+            "download_status != 'downloaded' OR file_size IS NOT NULL",
+            name="ck_media_files_downloaded_requires_file_size",
+        ),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -657,6 +662,35 @@ class MediaFile(Base):
         server_default=text("'not_applicable'"),
         index=True,
     )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class TenantStorageDaily(Base):
+    """Daily materialized media-byte total for one tenant (RND-331).
+
+    The rollup service is the sole writer. ``used_bytes`` is calculated only
+    from MediaFile rows whose download_status is ``downloaded``.
+    """
+
+    __tablename__ = "tenant_storage_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "usage_date", name="uq_tenant_storage_daily_tenant_date"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    usage_date = Column(Date, nullable=False)
+    used_bytes = Column(BigInteger, nullable=False)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

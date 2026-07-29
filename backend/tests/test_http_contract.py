@@ -882,7 +882,7 @@ class TestHeaderContracts:
             archive_message_id=msg.id,
             download_status="downloaded",
             local_path=str(img_path),
-            file_type="image",
+            file_type="image", file_size=len(img_path.read_bytes()),
         )
         db_session.add(mf)
         db_session.commit()
@@ -1026,7 +1026,7 @@ class TestMediaEntityContext:
                 local_path=str(media_dir / fname),
                 storage_backend="local",
                 storage_ref=str(media_dir / fname),
-                mime_type="image/jpeg",
+                mime_type="image/jpeg", file_size=1,
             )
             db.add(mf)
         db.commit()
