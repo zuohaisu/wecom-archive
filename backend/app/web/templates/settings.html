@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>设置</title>
+<link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
+<link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
+<link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/styles.css?v=__STATIC_VERSION__">
+</head>
+<body>
+<main class="page page-narrow settings-page">
+  <div class="page-hd">
+    <div>
+      <h1>设置</h1>
+      <p>账号安全设置。</p>
+    </div>
+  </div>
+
+  <section class="card">
+    <div class="card-hd"><h2>账号</h2></div>
+    <div class="set-row">
+      <div class="set-label">
+        <h3>修改密码</h3>
+        <p>仅影响账号密码登录方式；企业微信授权登录不受影响。</p>
+      </div>
+      <form id="change-password-form" class="set-ctl" novalidate>
+        <div class="field">
+          <label class="field-label" for="old-password">当前密码</label>
+          <input class="input" id="old-password" name="old_password" type="password" autocomplete="current-password" required>
+        </div>
+        <div class="field">
+          <label class="field-label" for="new-password">新密码</label>
+          <input class="input" id="new-password" name="new_password" type="password" autocomplete="new-password" required>
+          <span class="field-help">至少 8 位。</span>
+        </div>
+        <div class="field">
+          <label class="field-label" for="confirm-new-password">确认新密码</label>
+          <input class="input" id="confirm-new-password" type="password" autocomplete="new-password" required>
+        </div>
+        <p id="change-password-message" class="field-help" role="status" aria-live="polite"></p>
+        <button class="btn btn-primary" id="update-password-button" type="submit">更新密码</button>
+      </form>
+    </div>
+  </section>
+</main>
+__I18N_SCRIPT__
+<script>
+(function () {
+  var form = document.getElementById('change-password-form');
+  var message = document.getElementById('change-password-message');
+  var button = document.getElementById('update-password-button');
+
+  function showMessage(text, isError) {
+    message.textContent = text;
+    message.className = isError ? 'field-error' : 'field-help';
+  }
+
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var oldPassword = document.getElementById('old-password').value;
+    var newPassword = document.getElementById('new-password').value;
+    var confirmation = document.getElementById('confirm-new-password').value;
+
+    if (newPassword.length < 8) {
+      showMessage('新密码至少需要 8 位。', true);
+      return;
+    }
+    if (newPassword !== confirmation) {
+      showMessage('两次输入的新密码不一致。', true);
+      return;
+    }
+
+    button.disabled = true;
+    showMessage('', false);
+    fetch('/api/admin/settings/password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({old_password: oldPassword, new_password: newPassword})
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (body) {
+        return {response: response, body: body};
+      });
+    }).then(function (result) {
+      if (result.response.status === 200) {
+        form.reset();
+        showMessage('密码更新成功。', false);
+        return;
+      }
+      var messages = {
+        weak_password: '新密码至少需要 8 位。',
+        same_as_old: '新密码不能与当前密码相同。',
+        no_password_set: '当前账号未设置密码，无法在此修改。',
+        invalid_old_password: '当前密码不正确。'
+      };
+      showMessage(messages[result.body.detail] || '密码更新失败，请稍后重试。', true);
+    }).catch(function () {
+      showMessage('网络错误，请稍后重试。', true);
+    }).finally(function () {
+      button.disabled = false;
+    });
+  });
+}());
+</script>
+</body>
+</html>

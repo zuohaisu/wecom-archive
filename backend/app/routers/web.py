@@ -59,6 +59,16 @@ def admin_conversations(
     )
 
 
+@router.get("/admin/settings", response_class=HTMLResponse)
+def admin_settings_page(
+    tenant_id: Optional[str] = Depends(require_html_session),
+):
+    """Settings page (RND-302). Requires valid session."""
+    if tenant_id is None:
+        return RedirectResponse("/admin/login", status_code=302)
+    return HTMLResponse(content=render_template("settings", i18n_script=I18N_SCRIPT_TAG))
+
+
 @router.get("/admin/search", response_class=HTMLResponse)
 def admin_search_page(
     tenant_id: Optional[str] = Depends(require_html_session),

@@ -322,7 +322,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 49  # RND-291: +1 admin media-library route.
+    assert route_count == 51  # RND-302: +2 (settings password + settings page).
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -341,9 +341,11 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/messages/{msgid}",
             "/admin/reset-password",
             "/admin/search",
+            "/admin/settings",
             "/api/admin/audit-logs",
             "/api/admin/media",
             "/api/admin/reachability-audit",
+            "/api/admin/settings/password",
             "/api/admin/sync-now",
             "/api/admin/sync-status",
             "/api/admin/users",
@@ -416,6 +418,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/messages/{msgid}", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/reset-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/search", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         ("/api/admin/media", frozenset({"GET"}), "MediaLibraryPage", "None"),
         (
@@ -424,6 +427,7 @@ def test_route_snapshot_with_real_model_names() -> None:
             "ReachabilityAuditOut",
             "None",
         ),
+        ("/api/admin/settings/password", frozenset({"POST"}), "None", "None"),
         ("/api/admin/sync-now", frozenset({"POST"}), "SyncNowResponse", "None"),
         ("/api/admin/sync-status", frozenset({"GET"}), "SyncStatusResponse", "None"),
         ("/api/admin/users", frozenset({"GET"}), "AdminUserListOut", "None"),

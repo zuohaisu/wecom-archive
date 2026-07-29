@@ -15,6 +15,7 @@ from app.routers.media_library import router as media_library_router
 from app.routers.messages import router as messages_router
 from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.search import router as search_router
+from app.routers.settings import settings_router
 from app.routers.sync import router as sync_router
 from app.routers.users import users_router
 from app.routers.web import router as web_router
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(sync_router, prefix="/api/admin")
     app.include_router(audit_router, prefix="/api/admin")
     app.include_router(users_router, prefix="/api/admin")
+    app.include_router(settings_router, prefix="/api/admin")
     app.include_router(media_library_router, prefix="/api/admin")
     app.include_router(wecom_events_router)
     app.include_router(web_router)
