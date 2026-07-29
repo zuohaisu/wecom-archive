@@ -1,0 +1,124 @@
+<!-- @dsCard group="Components" viewport="1280x980" name="Controls" subtitle="Buttons, inputs, badges, chips, tabs" -->
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Controls</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+body{padding:32px;background:var(--color-canvas)}
+.spec-card{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-xl);padding:20px;margin-bottom:16px}
+.spec-card h2{margin-bottom:4px}
+.spec-card .note{font-size:12px;color:var(--color-text-4);margin-bottom:14px;max-width:64em;line-height:1.65}
+.demo{display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:14px;border:1px dashed var(--color-border-strong);border-radius:var(--radius-lg);background:var(--color-surface-sunken)}
+.vars{font-family:var(--font-mono);font-size:10.5px;color:var(--color-text-4);margin-top:10px;line-height:1.8}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+</style>
+</head>
+<body>
+<h1>控件 Controls</h1>
+<p class="muted mb-5" style="max-width:64em">所有控件高度对齐 32px（紧凑变体 28px），与既有审阅控制台顶栏一致。焦点态一律为 2px 主色描边 + 3px 柔光环，禁止移除 outline。</p>
+
+<section class="spec-card">
+  <h2>按钮 Button</h2>
+  <p class="note">主按钮每屏最多一个。危险操作（停用、删除、缩短留存）使用 danger 变体并必须二次确认。</p>
+  <div class="demo">
+    <button class="btn btn-primary" type="button">立即同步</button>
+    <button class="btn" type="button">刷新</button>
+    <button class="btn btn-danger" type="button">停用租户</button>
+    <button class="btn btn-ghost" type="button">忽略</button>
+    <button class="btn active" type="button">已选中</button>
+    <button class="btn" type="button" disabled>禁用</button>
+    <button class="btn btn-sm" type="button">紧凑 28px</button>
+    <button class="btn btn-lg btn-primary" type="button">登录 38px</button>
+    <button class="btn-link" type="button">文字按钮</button>
+  </div>
+  <div class="vars">--control-h 32 · --radius-md 7 · --text-sm 12.5 · hover: --color-surface-hover / --color-primary-hover · focus: --focus-ring<br>a11y：主按钮 #fff on #1677ff = 3.6:1（≥14px 加粗合规）；文字按钮命中区不小于 24×24。</div>
+</section>
+
+<div class="cols">
+  <section class="spec-card">
+    <h2>表单 Form</h2>
+    <p class="note">标签始终在控件上方；帮助文字与错误文字位于控件下方，错误不替换帮助文字而是追加。</p>
+    <div class="demo" style="display:block">
+      <div class="field"><label class="field-label" for="a">企业邮箱<span class="req">*</span></label><input class="input" id="a" type="email" placeholder="name@company.com"><span class="field-help">用于接收重置链接与审批通知。</span></div>
+      <div class="field"><label class="field-label" for="b">角色</label><select class="select" id="b"><option>合规管理员</option><option>HR</option><option>法务</option></select></div>
+      <div class="field"><label class="field-label" for="c">留存周期</label><input class="input has-error" id="c" value="30"><span class="field-error">不得低于策略下限 365 天</span></div>
+      <div class="field"><label class="field-label" for="d">申请事由</label><textarea class="textarea" id="d" rows="2" placeholder="说明用途，将写入审计日志"></textarea></div>
+      <div class="row gap-4 wrap"><label class="checkbox"><input type="checkbox" checked> 包含附件原件</label><label class="radio"><input type="radio" name="r" checked> PDF</label><label class="radio"><input type="radio" name="r"> Excel</label><label class="row gap-2"><span class="switch"><input type="checkbox" checked><span></span></span><span style="font-size:12.5px">冷存储</span></label></div>
+    </div>
+    <div class="vars">--color-border-input · --radius-md · disabled: --color-surface-sunken<br>a11y：每个输入必须有 &lt;label for&gt;；错误同时用颜色 + 文案表达，不单靠颜色。</div>
+  </section>
+
+  <section class="spec-card">
+    <h2>状态徽章 Badge</h2>
+    <p class="note">保留既有类名 <span class="mono">.badge / .badge-success / .badge-failed / .badge-pending</span>，新增 <span class="mono">.badge-silent</span>（静默坐席）与 <span class="mono">.badge-info</span>。点状变体用于「持续状态」，无点用于「一次性结果」。</p>
+    <div class="demo">
+      <span class="badge badge-success badge-dot">归档中</span>
+      <span class="badge badge-pending badge-dot">同步滞后</span>
+      <span class="badge badge-failed badge-dot">凭证失效</span>
+      <span class="badge badge-silent">静默 63 天</span>
+      <span class="badge badge-info">单聊</span>
+      <span class="badge">已停用</span>
+      <span class="badge badge-success">成功</span>
+      <span class="badge badge-failed">失败</span>
+      <span class="badge badge-pending">待审批</span>
+      <span class="tag">重点客户</span>
+      <span class="tag tag-neutral">A 类</span>
+    </div>
+    <div class="vars">三元组：--color-&lt;state&gt;-fg / -bg / -border · --radius-xs 3<br>a11y：所有徽章文字与底色对比 ≥4.5:1；状态永远同时以文字表达，不只有颜色。</div>
+  </section>
+</div>
+
+<div class="cols">
+  <section class="spec-card">
+    <h2>筛选 Filter</h2>
+    <p class="note">筛选片可点开为浮层；已生效条件在下方以可移除 chip 复述，永远提供「清除全部」。</p>
+    <div class="demo" style="display:block">
+      <div class="toolbar" style="margin-bottom:10px">
+        <div class="search-input" style="flex-basis:220px"><span class="ico">⌕</span><input class="input" type="search" placeholder="搜索…"></div>
+        <button class="chip active" type="button">时间 · 近 90 天 ▾</button>
+        <button class="chip" type="button">员工 ▾</button>
+        <button class="chip" type="button">消息类型 ▾</button>
+      </div>
+      <div class="filter-chips" style="margin:0">
+        <span class="chip active">2026-04-29 – 2026-07-28 <button class="chip-x" type="button" aria-label="移除">×</button></span>
+        <span class="chip active">张伟 <button class="chip-x" type="button" aria-label="移除">×</button></span>
+        <button class="btn-link" type="button">清除全部</button>
+      </div>
+      <div class="row gap-3 mt-4"><div class="segmented"><button class="active" type="button">14 天</button><button type="button">30 天</button><button type="button">90 天</button></div>
+      <div class="tabs" style="margin:0;border:none"><button class="tab active" type="button">监控坐席</button><button class="tab" type="button">控制台账号</button></div></div>
+    </div>
+    <div class="vars">chip 高 28px · active: --color-primary-soft + --color-primary 描边</div>
+  </section>
+
+  <section class="spec-card">
+    <h2>提示条 Alert</h2>
+    <p class="note">四种语气对应四组状态色。合规提示（🔒）统一使用 neutral / info，不用红色制造无谓的紧张感。</p>
+    <div class="demo" style="display:block">
+      <div class="alert mb-3"><span class="alert-ico">🔒</span><div>你正在查看归档内容，本次访问已记录。</div></div>
+      <div class="alert alert-warning mb-3"><span class="alert-ico">⚠</span><div><strong>2 个坐席同步滞后</strong> · 系统将自动重试。</div><div class="right"><button class="btn btn-sm" type="button">查看诊断</button></div></div>
+      <div class="alert alert-danger mb-3"><span class="alert-ico">⚠</span><div>检索失败，索引服务暂时不可用（<span class="mono">SEARCH_5031</span>）。</div></div>
+      <div class="alert alert-success"><span class="alert-ico">✓</span><div>哈希链校验通过，覆盖 184,209 条记录。</div></div>
+    </div>
+    <div class="vars">--radius-lg 9 · 图标列固定不换行 · 右侧动作用 .right</div>
+  </section>
+</div>
+
+<section class="spec-card">
+  <h2>弹窗 Modal</h2>
+  <p class="note">高敏感操作（导出、内容访问申请、缩短留存）必须走弹窗，并在弹窗内以等宽「证据摘要」复述本次操作将被记录的内容。</p>
+  <div class="demo" style="justify-content:center;padding:24px">
+    <div class="modal" style="box-shadow:var(--shadow-3)">
+      <div class="modal-hd"><h2>导出取证材料</h2><button class="modal-close" type="button" aria-label="关闭">×</button></div>
+      <div class="modal-bd">
+        <div class="field"><span class="field-label">范围</span><label class="radio"><input type="radio" checked> 当前会话（1,284 条）</label></div>
+        <div class="evidence">导出人 陈静 · 2026-07-28 14:36 (UTC+8) · scope=contact:wmABC123ext · 记录数 1,284 · sha256:9f2c…d417</div>
+      </div>
+      <div class="modal-ft"><button class="btn" type="button">取消</button><button class="btn btn-primary" type="button">确认导出</button></div>
+    </div>
+  </div>
+  <div class="vars">宽 560px · --radius-xl 12 · --shadow-3 · 遮罩 --color-overlay<br>a11y：role="dialog" aria-modal + aria-labelledby；Esc 关闭；焦点循环限制在弹窗内。</div>
+</section>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Crowntime WeCom Archive — UI v1 交付</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+body{background:var(--color-canvas);overflow:auto;height:auto}
+.wrap{max-width:1180px;margin:0 auto;padding:48px 32px 80px}
+.hd{display:flex;align-items:flex-start;gap:24px;margin-bottom:36px}
+.hd img{height:40px}
+.hd p{font-size:13px;color:var(--color-text-4);max-width:52em;line-height:1.7;margin-top:8px}
+h2{margin:32px 0 4px}
+.sec-note{font-size:12.5px;color:var(--color-text-4);margin-bottom:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:14px}
+.pc{display:block;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-xl);padding:16px 18px;box-shadow:var(--shadow-1);transition:border-color .12s,box-shadow .12s;color:inherit}
+.pc:hover{border-color:var(--color-primary);box-shadow:var(--shadow-2);text-decoration:none}
+.pc-t{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.pc-d{font-size:12px;color:var(--color-text-4);line-height:1.65;margin-top:6px}
+.pc-m{font-family:var(--font-mono);font-size:10.5px;color:var(--color-text-5);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hd">
+    <img src="brand/logo-horizontal.svg" alt="康冠时代">
+    <div>
+      <h1>企业微信会话存档 · UI v1</h1>
+      <p>本目录为设计交付索引。设计语言在既有线上页面（审阅控制台、搜索、诊断）基础上抽取并形式化为一套 CSS 变量，新页面全部基于 <span class="mono">styles.css</span> 构建：原生 HTML + 原生 JS，无框架、无构建、无外部图表库，可直接由 SSR 模板消费。</p>
+    </div>
+  </div>
+
+  <h2>设计语言</h2>
+  <p class="sec-note">Design tokens 与组件规范。所有卡片同时在「Design System」标签页中可浏览。</p>
+  <div class="cards">
+    <a class="pc" href="styles.css"><div class="pc-t">styles.css</div><div class="pc-d">全部 token 与组件类。含浅色 + 深色两套皮肤，切换仅替换 <span class="mono">[data-theme]</span> 上的变量值。</div><div class="pc-m">--color-* · --space-* · --radius-* · --shadow-*</div></a>
+    <a class="pc" href="ds/colors.html"><div class="pc-t">色彩</div><div class="pc-d">品牌色、中性表面、文字层级、状态三元组、数据可视化序列，含对比度标注。</div><div class="pc-m">ds/colors.html</div></a>
+    <a class="pc" href="ds/type-space.html"><div class="pc-t">字体 · 间距 · 层级</div><div class="pc-d">13px 基准字号阶梯、4px 间距网格、圆角与阴影、栅格与断点。</div><div class="pc-m">ds/type-space.html</div></a>
+    <a class="pc" href="ds/controls.html"><div class="pc-t">控件</div><div class="pc-d">按钮、表单、徽章、筛选、提示条、弹窗，含变量映射与无障碍要求。</div><div class="pc-m">ds/controls.html</div></a>
+    <a class="pc" href="ds/data-display.html"><div class="pc-t">数据展示</div><div class="pc-d">表格、指标卡、SVG 图表、分页，以及空 / 加载 / 错误三态与取证观感。</div><div class="pc-m">ds/data-display.html</div></a>
+    <a class="pc" href="ds/shell-patterns.html"><div class="pc-t">外壳与权限分层</div><div class="pc-d">侧栏 + 面包屑骨架、租户平面与平台平面的 chrome 区分、信息分层规则。</div><div class="pc-m">ds/shell-patterns.html</div></a>
+  </div>
+
+  <h2>A · 认证与账号</h2>
+  <p class="sec-note">未登录态与账号生命周期。</p>
+  <div class="cards">
+    <a class="pc" href="pages/login.html"><div class="pc-t">登录 <span class="badge badge-success">P0</span></div><div class="pc-d">企业微信授权为主入口，账号密码为次入口；含非腾讯官方产品声明与白标插槽。</div><div class="pc-m">pages/login.html</div></a>
+    <a class="pc" href="pages/forgot-password.html"><div class="pc-t">找回密码 <span class="badge badge-success">P0</span></div><div class="pc-d">邮箱找回三步 + 链接失效态，页内可切换四种状态查看。</div><div class="pc-m">pages/forgot-password.html</div></a>
+    <a class="pc" href="pages/settings.html"><div class="pc-t">设置 <span class="badge badge-success">P0</span></div><div class="pc-d">账号设置 / 偏好（换肤、语言、静默阈值）/ 租户策略三个分区。</div><div class="pc-m">pages/settings.html</div></a>
+  </div>
+
+  <h2>B · 租户管理面板</h2>
+  <p class="sec-note">Line A，租户管理员日常工作区。</p>
+  <div class="cards">
+    <a class="pc" href="pages/dashboard.html"><div class="pc-t">总览 <span class="badge badge-success">P0</span></div><div class="pc-d">五张关键指标卡 + 异常提示条 + 归档量趋势 + 同步健康 + 最近活动。登录后落地页。</div><div class="pc-m">pages/dashboard.html</div></a>
+    <a class="pc" href="pages/analytics.html"><div class="pc-t">用量分析 <span class="badge badge-success">P0</span></div><div class="pc-d">趋势折线、类型构成环形图、存储构成、按小时活跃分布，全部为手写 SVG。</div><div class="pc-m">pages/analytics.html</div></a>
+    <a class="pc" href="pages/users.html"><div class="pc-t">用户管理 <span class="badge badge-success">P0</span></div><div class="pc-d">坐席与控制台账号；以「最后活跃 + 静默 N 天」替代离职继承概念。</div><div class="pc-m">pages/users.html</div></a>
+    <a class="pc" href="pages/contacts.html"><div class="pc-t">外部联系人 <span class="badge badge-success">P0</span></div><div class="pc-d">列表：姓名 / 企业 / 标签 / 来源 / 归属员工 / 会话数。</div><div class="pc-m">pages/contacts.html</div></a>
+    <a class="pc" href="pages/contact-detail.html"><div class="pc-t">联系人详情 <span class="badge badge-success">P0</span></div><div class="pc-d">档案 + 完整会话时间线，含撤回、媒体、附件与导出取证弹窗。</div><div class="pc-m">pages/contact-detail.html</div></a>
+    <a class="pc" href="pages/search-advanced.html"><div class="pc-t">高级搜索 <span class="badge badge-pending">P1</span></div><div class="pc-d">在既有搜索结果卡样式上增加时间 / 员工 / 联系人 / 类型筛选与结果导出。</div><div class="pc-m">pages/search-advanced.html</div></a>
+    <a class="pc" href="pages/audit-log.html"><div class="pc-t">审计日志 <span class="badge badge-pending">P1</span></div><div class="pc-d">谁 / 何时 / 看了或导出了什么 / 范围；哈希链校验条强调不可篡改。</div><div class="pc-m">pages/audit-log.html</div></a>
+    <a class="pc" href="pages/media.html"><div class="pc-t">媒体库 <span class="badge badge-pending">P1</span></div><div class="pc-d">网格浏览全部附件，含冷存储与「原件已过期」两种降级态。</div><div class="pc-m">pages/media.html</div></a>
+  </div>
+
+  <h2>C · 平台控制台</h2>
+  <p class="sec-note">Line C，超级管理员跨租户视图。默认只见元数据与聚合指标。</p>
+  <div class="cards">
+    <a class="pc" href="pages/platform.html"><div class="pc-t">平台控制台 <span class="badge badge-success">P0</span></div><div class="pc-d">租户列表与平台聚合指标、内容访问授权闸门。</div><div class="pc-m">pages/platform.html</div></a>
+    <a class="pc" href="pages/tenant-provisioning.html"><div class="pc-t">多租户开通配置 <span class="badge badge-pending">P1</span></div><div class="pc-d">新租户表单（企业微信密钥接入、初始策略）+ 已开通租户列表管理。</div><div class="pc-m">pages/tenant-provisioning.html</div></a>
+  </div>
+
+  <h2>D · 合规核心与首次配置</h2>
+  <p class="sec-note">跨线能力：取证导出入口已嵌入审阅控制台 / 搜索结果 / 联系人详情；留存策略见设置页「租户策略」分区；此处为独立的首次配置向导（P2）。</p>
+  <div class="cards">
+    <a class="pc" href="pages/onboarding.html"><div class="pc-t">首次配置向导 <span class="badge badge-plain">P2</span></div><div class="pc-d">连接企业微信 → 监控范围 → 留存策略 → 邀请团队 → 完成，五步进度条贯穿全程。</div><div class="pc-m">pages/onboarding.html</div></a>
+  </div>
+
+  <h2>既有线上页面（基线）</h2>
+  <p class="sec-note">新页面必须与这些页面视觉同源；它们本身不在本次改动范围内。</p>
+  <div class="cards">
+    <a class="pc" href="reference/review_console.html"><div class="pc-t">对话审阅控制台</div><div class="pc-d">三栏审阅工作台，本次设计语言的主要抽取来源。</div><div class="pc-m">reference/review_console.html</div></a>
+    <a class="pc" href="reference/search.html"><div class="pc-t">搜索结果</div><div class="pc-d">结果卡与筛选浮层，高级搜索在其之上扩展。</div><div class="pc-m">reference/search.html</div></a>
+    <a class="pc" href="reference/diagnostics.html"><div class="pc-t">消息可达性诊断</div><div class="pc-d">聚合统计页，指标卡样式的来源之一。</div><div class="pc-m">reference/diagnostics.html</div></a>
+  </div>
+</div>
+</body>
+</html>

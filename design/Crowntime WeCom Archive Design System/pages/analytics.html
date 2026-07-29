@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>用量分析 · 会话存档控制台</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>
+.legend-table{width:100%;font-size:var(--text-sm)}
+.legend-table td{padding:6px 0;border-bottom:1px solid var(--color-border)}
+.legend-table tr:last-child td{border-bottom:none}
+.legend-table .sw{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:8px}
+.legend-table .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--color-text-3)}
+.legend-table .pct{text-align:right;font-variant-numeric:tabular-nums;color:var(--color-text-4);width:52px}
+.stack-bar{display:flex;height:22px;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:var(--space-3)}
+.stack-bar i{display:block;height:100%}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav data-sidenav="analytics"></nav>
+<div class="main">
+  <header class="topbar">
+    <div class="breadcrumb"><span>康冠时代</span><span class="sep">/</span><span class="cur">用量分析</span></div>
+    <div class="topbar-actions">
+      <span class="tz-note">统计口径：北京时间自然日</span>
+      <button class="btn btn-sm" type="button">导出 Excel</button>
+    </div>
+  </header>
+
+  <div class="page">
+    <div class="page-hd">
+      <div><h1>用量分析</h1><p>归档规模、消息构成与存储走势。所有指标均为聚合统计，不含消息内容。</p></div>
+      <div class="page-hd-actions">
+        <div class="segmented"><button type="button">近 7 天</button><button class="active" type="button">近 30 天</button><button type="button">近 90 天</button><button type="button">自定义</button></div>
+      </div>
+    </div>
+
+    <div class="grid grid-4 mb-5">
+      <div class="stat"><span class="stat-k">归档天数</span><span class="stat-v tnum">386<small>天</small></span><span class="stat-sub">首条 2025-07-06 09:12</span></div>
+      <div class="stat"><span class="stat-k">消息总量</span><span class="stat-v tnum">2,847,193</span><span class="stat-sub"><span class="delta delta-up">+8.4%</span> 环比上月</span></div>
+      <div class="stat"><span class="stat-k">日均消息</span><span class="stat-v tnum">7,376</span><span class="stat-sub">工作日均值 9,142</span></div>
+      <div class="stat"><span class="stat-k">存储占用</span><span class="stat-v tnum">1.84<small>TB</small></span><span class="stat-sub"><span class="delta delta-up">+62 GB</span> 近 30 天</span></div>
+    </div>
+
+    <div class="grid mb-5" style="grid-template-columns:1.4fr 1fr">
+      <section class="card">
+        <div class="card-hd"><h2>消息量趋势</h2><div class="right"><span class="badge badge-plain">按日</span></div></div>
+        <div class="card-bd">
+          <svg class="chart" id="trend" viewBox="0 0 700 240" style="height:240px" role="img" aria-label="近 30 天消息量趋势折线图"></svg>
+          <div class="chart-legend"><span><i style="background:var(--color-viz-1)"></i>本期</span><span><i style="background:var(--color-viz-4)"></i>上一周期</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-hd"><h2>消息类型构成</h2></div>
+        <div class="card-bd">
+          <div class="row gap-6" style="align-items:center">
+            <svg id="donut" viewBox="0 0 180 180" style="width:168px;height:168px;flex-shrink:0" role="img" aria-label="消息类型占比环形图"></svg>
+            <table class="legend-table">
+              <tbody>
+                <tr><td><span class="sw" style="background:var(--color-viz-1)"></span>文本</td><td class="num">1,908,610</td><td class="pct">67.0%</td></tr>
+                <tr><td><span class="sw" style="background:var(--color-viz-2)"></span>图片</td><td class="num">455,551</td><td class="pct">16.0%</td></tr>
+                <tr><td><span class="sw" style="background:var(--color-viz-3)"></span>文件</td><td class="num">227,775</td><td class="pct">8.0%</td></tr>
+                <tr><td><span class="sw" style="background:var(--color-viz-4)"></span>语音</td><td class="num">142,360</td><td class="pct">5.0%</td></tr>
+                <tr><td><span class="sw" style="background:var(--color-viz-6)"></span>视频</td><td class="num">85,416</td><td class="pct">3.0%</td></tr>
+                <tr><td><span class="sw" style="background:var(--color-viz-5)"></span>其他 / 结构化</td><td class="num">27,481</td><td class="pct">1.0%</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card-ft">结构化消息含红包、日程、会议、投票等 11 种类型</div>
+      </section>
+    </div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <section class="card">
+        <div class="card-hd"><h2>存储构成</h2><div class="right"><span class="muted" style="font-size:var(--text-xs)">共 1.84 TB / 配额 3 TB</span></div></div>
+        <div class="card-bd">
+          <div class="stack-bar">
+            <i style="background:var(--color-viz-1);width:9%" title="文本与索引"></i>
+            <i style="background:var(--color-viz-2);width:34%" title="图片"></i>
+            <i style="background:var(--color-viz-3);width:28%" title="文件"></i>
+            <i style="background:var(--color-viz-4);width:11%" title="语音"></i>
+            <i style="background:var(--color-viz-6);width:16%" title="视频"></i>
+            <i style="background:var(--color-neutral-bg);width:2%"></i>
+          </div>
+          <table class="legend-table">
+            <tbody>
+              <tr><td><span class="sw" style="background:var(--color-viz-1)"></span>文本与索引</td><td class="num">168 GB</td><td class="pct">9%</td></tr>
+              <tr><td><span class="sw" style="background:var(--color-viz-2)"></span>图片</td><td class="num">641 GB</td><td class="pct">34%</td></tr>
+              <tr><td><span class="sw" style="background:var(--color-viz-3)"></span>文件</td><td class="num">528 GB</td><td class="pct">28%</td></tr>
+              <tr><td><span class="sw" style="background:var(--color-viz-4)"></span>语音</td><td class="num">207 GB</td><td class="pct">11%</td></tr>
+              <tr><td><span class="sw" style="background:var(--color-viz-6)"></span>视频</td><td class="num">302 GB</td><td class="pct">16%</td></tr>
+            </tbody>
+          </table>
+          <div class="alert alert-neutral mt-4"><span class="alert-ico">◷</span><div>媒体文件超过 365 天将自动转入冷存储，冷存储读取需 1–3 分钟解冻，不影响检索命中。</div></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-hd"><h2>会话活跃分布</h2><div class="right"><span class="muted" style="font-size:var(--text-xs)">按小时 · 近 30 天平均</span></div></div>
+        <div class="card-bd">
+          <svg class="chart" id="hours" viewBox="0 0 700 200" style="height:200px" role="img" aria-label="按小时分布的会话活跃度柱状图"></svg>
+          <div class="alert alert-warning mt-4"><span class="alert-ico">◐</span><div><strong>非工作时段占比 11.4%</strong> · 22:00–06:00 之间仍有 324,580 条消息，建议纳入重点审阅范围。</div></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</div>
+<script src="shell.js"></script>
+<script>
+(function(){
+  var W=700,H=240,pad=28;
+  var cur=[62,71,68,74,80,41,32,78,84,79,72,88,45,36,81,86,90,84,77,49,38,88,92,86,80,95,52,41,90,97];
+  var prev=cur.map(function(v,i){return Math.round(v*(0.78+((i*37)%13)/100))});
+  function path(a){var n=a.length,mx=110;return a.map(function(v,i){
+    var x=pad+i*((W-pad*2)/(n-1)), y=H-pad-(v/mx)*(H-pad*2);
+    return (i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1);}).join(' ');}
+  var out='';
+  [0,.25,.5,.75,1].forEach(function(t){var y=pad+(H-pad*2)*t;out+='<line class="grid-line" x1="'+pad+'" x2="'+(W-pad)+'" y1="'+y+'" y2="'+y+'"/>'});
+  out+='<path d="'+path(prev)+'" fill="none" stroke="var(--color-viz-4)" stroke-width="1.5" stroke-dasharray="4 3"/>';
+  out+='<path d="'+path(cur)+' L '+(W-pad)+' '+(H-pad)+' L '+pad+' '+(H-pad)+' Z" fill="var(--color-primary-soft)" opacity=".7"/>';
+  out+='<path d="'+path(cur)+'" fill="none" stroke="var(--color-viz-1)" stroke-width="2" stroke-linejoin="round"/>';
+  ['06-28','07-05','07-12','07-19','07-26'].forEach(function(l,i){
+    out+='<text class="axis-label" x="'+(pad+i*((W-pad*2)/4))+'" y="'+(H-8)+'" text-anchor="middle">'+l+'</text>'});
+  document.getElementById('trend').innerHTML=out;
+
+  var seg=[[67,'var(--color-viz-1)'],[16,'var(--color-viz-2)'],[8,'var(--color-viz-3)'],[5,'var(--color-viz-4)'],[3,'var(--color-viz-6)'],[1,'var(--color-viz-5)']];
+  var r=64,cx=90,cy=90,C=2*Math.PI*r,off=0,d='';
+  seg.forEach(function(s){
+    var len=C*s[0]/100;
+    d+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+s[1]+'" stroke-width="26" stroke-dasharray="'+(len-2)+' '+(C-len+2)+'" stroke-dashoffset="'+(-off)+'" transform="rotate(-90 '+cx+' '+cy+')"/>';
+    off+=len;
+  });
+  d+='<text x="90" y="86" text-anchor="middle" font-size="21" font-weight="600" fill="var(--color-text)" font-family="var(--font-sans)">284.7万</text>';
+  d+='<text x="90" y="104" text-anchor="middle" font-size="11" fill="var(--color-text-4)" font-family="var(--font-sans)">消息总量</text>';
+  document.getElementById('donut').innerHTML=d;
+
+  var hrs=[8,5,3,2,2,3,9,26,58,84,96,88,52,61,92,97,90,74,46,38,44,39,24,14];
+  var W2=700,H2=200,p2=24,bw=(W2-p2*2)/24-6,o='';
+  hrs.forEach(function(v,i){
+    var x=p2+i*((W2-p2*2)/24), h=(v/100)*(H2-p2*2), off=(i<7||i>=22);
+    o+='<rect x="'+x+'" y="'+(H2-p2-h)+'" width="'+bw+'" height="'+h+'" rx="2" fill="'+(off?'var(--color-warning-fg)':'var(--color-viz-2)')+'" opacity="'+(off?.8:1)+'"/>';
+    if(i%3===0)o+='<text class="axis-label" x="'+(x+bw/2)+'" y="'+(H2-6)+'" text-anchor="middle">'+(i<10?'0'+i:i)+':00</text>';
+  });
+  document.getElementById('hours').innerHTML=o;
+})();
+</script>
+</body>
+</html>

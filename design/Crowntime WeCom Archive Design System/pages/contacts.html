@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>外部联系人 · 会话存档控制台</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>.c-cell{display:flex;align-items:center;gap:10px;min-width:0}.tags{display:flex;gap:4px;flex-wrap:wrap}</style>
+</head>
+<body>
+<div class="shell">
+<nav data-sidenav="contacts"></nav>
+<div class="main">
+  <header class="topbar">
+    <div class="breadcrumb"><span>康冠时代</span><span class="sep">/</span><span>通讯录</span><span class="sep">/</span><span class="cur">外部联系人</span></div>
+    <div class="topbar-actions"><span class="tz-note">通讯录同步于 今日 02:00</span><button class="btn btn-sm" type="button">导出名单</button></div>
+  </header>
+
+  <div class="page">
+    <div class="page-hd">
+      <div><h1>外部联系人</h1><p>由企业微信通讯录同步而来的客户与合作方。点击任一联系人可查看其与本企业全部员工的会话时间线。</p></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="search-input"><span class="ico">⌕</span><input class="input" type="search" placeholder="搜索姓名、企业或备注…"></div>
+      <select class="select" style="width:130px"><option>全部来源</option><option>扫码添加</option><option>手机号添加</option><option>名片分享</option><option>群内添加</option></select>
+      <select class="select" style="width:140px"><option>全部归属员工</option><option>张伟</option><option>王磊</option><option>赵敏</option></select>
+      <select class="select" style="width:120px"><option>全部标签</option><option>重点客户</option><option>渠道</option><option>供应商</option></select>
+      <div class="right"><span class="muted" style="font-size:var(--text-sm)">共 1,932 位</span></div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>联系人</th><th>所属企业</th><th>标签</th><th>来源</th><th>归属员工</th><th class="num">会话数</th><th>最后互动</th><th class="actions">操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="c-cell"><span class="avatar avatar-sm" style="background:var(--color-viz-1)">王</span><div class="ellipsis"><div class="cell-primary">王建国</div><div class="cell-id">wmABC123ext</div></div></div></td>
+            <td>深圳同盛供应链</td>
+            <td><div class="tags"><span class="tag">重点客户</span><span class="tag tag-neutral">A 类</span></div></td>
+            <td>名片分享</td><td>张伟</td><td class="num">1,284</td><td>今天 11:24</td>
+            <td class="actions"><a class="btn-link" href="contact-detail.html">查看会话</a></td>
+          </tr>
+          <tr>
+            <td><div class="c-cell"><span class="avatar avatar-sm" style="background:var(--color-viz-6)">陈</span><div class="ellipsis"><div class="cell-primary">陈丽华</div><div class="cell-id">wmDEF456ext</div></div></div></td>
+            <td>广州明信科技</td>
+            <td><div class="tags"><span class="tag tag-neutral">渠道</span></div></td>
+            <td>扫码添加</td><td>王磊</td><td class="num">642</td><td>今天 09:58</td>
+            <td class="actions"><a class="btn-link" href="contact-detail.html">查看会话</a></td>
+          </tr>
+          <tr>
+            <td><div class="c-cell"><span class="avatar avatar-sm" style="background:var(--color-viz-2)">刘</span><div class="ellipsis"><div class="cell-primary">刘鹏</div><div class="cell-id">wmGHI789ext</div></div></div></td>
+            <td>东莞正联电子</td>
+            <td><div class="tags"><span class="tag tag-neutral">供应商</span></div></td>
+            <td>手机号添加</td><td>赵敏</td><td class="num">318</td><td>2026-05-21</td>
+            <td class="actions"><a class="btn-link" href="contact-detail.html">查看会话</a></td>
+          </tr>
+          <tr>
+            <td><div class="c-cell"><span class="avatar avatar-sm" style="background:var(--color-viz-5)">Y</span><div class="ellipsis"><div class="cell-primary">Yuki Tanaka</div><div class="cell-id">wmJKL012ext</div></div></div></td>
+            <td>Sunrise Trading K.K.</td>
+            <td><div class="tags"><span class="tag">重点客户</span><span class="tag tag-neutral">海外</span></div></td>
+            <td>群内添加</td><td>李文博</td><td class="num">97</td><td>2026-07-14</td>
+            <td class="actions"><a class="btn-link" href="contact-detail.html">查看会话</a></td>
+          </tr>
+          <tr>
+            <td><div class="c-cell"><span class="avatar avatar-sm" style="background:var(--color-text-disabled)">未</span><div class="ellipsis"><div class="cell-primary">未命名联系人 <span class="badge badge-silent">已删除好友</span></div><div class="cell-id">wmMNO345ext</div></div></div></td>
+            <td class="muted">—</td>
+            <td><div class="tags"><span class="tag tag-neutral">已流失</span></div></td>
+            <td>扫码添加</td><td>孙浩</td><td class="num">56</td><td>2026-03-08</td>
+            <td class="actions"><a class="btn-link" href="contact-detail.html">查看会话</a></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="card-ft">
+        <div class="pagination" style="width:100%"><span>共 1,932 条 · 每页 20 条</span>
+        <div class="pages"><button class="page-btn" type="button" disabled>‹</button><button class="page-btn active" type="button">1</button><button class="page-btn" type="button">2</button><button class="page-btn" type="button">3</button><span class="page-btn" style="border:none;background:none">…</span><button class="page-btn" type="button">97</button><button class="page-btn" type="button">›</button></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<script src="shell.js"></script>
+</body>
+</html>

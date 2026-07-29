@@ -1,0 +1,90 @@
+<!-- @dsCard group="Components" viewport="1280x980" name="Data display" subtitle="Tables, metrics, charts, pagination, states" -->
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Data display</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+body{padding:32px;background:var(--color-canvas)}
+.spec-card{background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-xl);padding:20px;margin-bottom:16px}
+.spec-card .note{font-size:12px;color:var(--color-text-4);margin:4px 0 14px;max-width:64em;line-height:1.65}
+.vars{font-family:var(--font-mono);font-size:10.5px;color:var(--color-text-4);margin-top:10px;line-height:1.8}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+</style>
+</head>
+<body>
+<h1>数据展示 Data display</h1>
+<p class="muted mb-5" style="max-width:64em">合规工具的主体是表格与日志：高密度、可扫读、状态明确。行高 40px、单元格 12.5px、表头 11.5px 大写——与既有 <span class="mono">base.css</span> 表格的信息密度保持一致，只是把硬编码颜色换成了变量。</p>
+
+<section class="spec-card">
+  <h2>表格 Table</h2>
+  <p class="note">主标识列用 <span class="mono">.cell-primary</span> + <span class="mono">.cell-sub</span> 双行；ID 列用 <span class="mono">.cell-id</span>（等宽）；数值右对齐并启用 tabular-nums；操作列固定在右侧且不换行。</p>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th class="row-select"><input type="checkbox" aria-label="全选"></th><th>姓名 / 账号</th><th>角色</th><th>状态</th><th>最后活跃</th><th class="num">近 30 天消息</th><th class="actions">操作</th></tr></thead>
+      <tbody>
+        <tr><td><input type="checkbox" aria-label="选择"></td><td><div class="row gap-3"><span class="avatar avatar-sm" style="background:var(--color-viz-1)">张</span><div><div class="cell-primary">张伟</div><div class="cell-id">zhangwei_wx</div></div></div></td><td><span class="badge badge-plain">坐席</span></td><td><span class="badge badge-success badge-dot">归档中</span></td><td>2 分钟前</td><td class="num">3,412</td><td class="actions"><button class="btn-link" type="button">查看</button><button class="btn-link" type="button">停用</button></td></tr>
+        <tr><td><input type="checkbox" aria-label="选择"></td><td><div class="row gap-3"><span class="avatar avatar-sm" style="background:var(--color-neutral-fg)">赵</span><div><div class="cell-primary">赵敏</div><div class="cell-id">zhaomin</div></div></div></td><td><span class="badge badge-plain">坐席</span></td><td><span class="badge badge-silent">静默 63 天</span></td><td style="color:var(--color-warning-fg)">63 天前</td><td class="num">0</td><td class="actions"><button class="btn-link" type="button">查看</button><button class="btn-link" type="button">移出监控</button></td></tr>
+        <tr style="opacity:.72"><td><input type="checkbox" aria-label="选择"></td><td><div class="row gap-3"><span class="avatar avatar-sm" style="background:var(--color-text-disabled)">周</span><div><div class="cell-primary">周颖</div><div class="cell-id">zhouying</div></div></div></td><td><span class="badge badge-plain">HR</span></td><td><span class="badge">已停用</span></td><td>—</td><td class="num">—</td><td class="actions"><button class="btn-link" type="button">启用</button></td></tr>
+      </tbody>
+    </table>
+    <div class="card-ft"><div class="pagination" style="width:100%"><span>共 248 条 · 每页 20 条</span><div class="pages"><button class="page-btn" type="button" disabled>‹</button><button class="page-btn active" type="button">1</button><button class="page-btn" type="button">2</button><button class="page-btn" type="button">3</button><button class="page-btn" type="button">›</button></div></div></div>
+  </div>
+  <div class="vars">行 hover: --color-surface-sunken · 分隔线 --color-border · 停用行 opacity .72（不使用删除线）<br>a11y：表头 &lt;th&gt; 必填；排序列需 aria-sort；行内操作为真实 &lt;button&gt;，可 Tab 到达。</div>
+</section>
+
+<div class="cols">
+  <section class="spec-card">
+    <h2>指标卡 Metric</h2>
+    <p class="note">数值 26px 半粗 + tabular-nums，单位缩小随行。变化量只用文字色区分方向，不加背景块。</p>
+    <div class="grid grid-2">
+      <div class="stat"><span class="stat-k">消息总量</span><span class="stat-v tnum">2,847,193</span><span class="stat-sub"><span class="delta delta-up">+12,480</span> 较昨日</span></div>
+      <div class="stat"><span class="stat-k">静默 ≥30 天</span><span class="stat-v tnum" style="color:var(--color-warning-fg)">12</span><span class="stat-sub">建议复核是否仍在职</span></div>
+    </div>
+    <div class="vars">--text-3xl 26 · letter-spacing -.02em · 卡片 --radius-xl</div>
+  </section>
+
+  <section class="spec-card">
+    <h2>图表容器 Chart</h2>
+    <p class="note">选型：手写 SVG，不引入图表库。理由——SSR + 原生 JS 架构下无需打包依赖，SVG 元素可直接吃 CSS 变量，换肤/深色模式零成本，且可被无障碍工具读取（role + aria-label）。</p>
+    <svg class="chart" id="c1" viewBox="0 0 420 130" style="height:130px" role="img" aria-label="示例柱状图"></svg>
+    <div class="chart-legend"><span><i style="background:var(--color-viz-1)"></i>文本</span><span><i style="background:var(--color-viz-3)"></i>媒体</span></div>
+    <div class="vars">网格线 --color-grid · 轴标签 10px --color-text-5 · 序列 --color-viz-1…6</div>
+  </section>
+</div>
+
+<div class="cols">
+  <section class="spec-card">
+    <h2>空 / 加载 / 错误</h2>
+    <p class="note">三态必须成套交付。空状态给出下一步动作；错误状态给出错误码与重试；加载用骨架屏而非转圈，避免密集列表跳动。</p>
+    <div class="grid" style="grid-template-columns:1fr">
+      <div class="card"><div class="empty" style="padding:28px"><div class="empty-title">没有匹配的聊天内容</div><div class="empty-hint">试试更短的关键词，或放宽时间范围</div><button class="btn btn-sm" type="button">清除全部筛选</button></div></div>
+      <div class="card"><div class="card-bd stack gap-2"><div class="sk" style="width:45%"></div><div class="sk"></div><div class="sk" style="width:70%"></div></div></div>
+      <div class="card"><div class="card-bd"><div class="alert alert-danger"><span class="alert-ico">⚠</span><div><strong>加载失败</strong> · 错误码 <span class="mono">SEARCH_5031</span></div><div class="right"><button class="btn btn-sm" type="button">重试</button></div></div></div></div>
+    </div>
+  </section>
+
+  <section class="spec-card">
+    <h2>取证观感 Evidence</h2>
+    <p class="note">审计类信息用等宽 + 内嵌浅底块呈现，形成「记录已固化」的观感；哈希、范围、操作人、时间四要素齐备。</p>
+    <div class="evidence mb-3">导出人 陈静 · 2026-07-28 14:36 (UTC+8) · scope=contact:wmABC123ext · 记录数 1,284 · sha256:9f2c…d417</div>
+    <div class="timeline-rail">
+      <div class="timeline-item"><div style="font-size:12.5px"><strong>陈静</strong> 导出会话 PDF · 412 条</div><div class="hash">14:12:07 · audit#a9f31c40e7</div></div>
+      <div class="timeline-item is-muted"><div style="font-size:12.5px">系统 · 媒体下载失败 6 条</div><div class="hash">09:30:44 · reason=media_expired</div></div>
+    </div>
+    <div class="vars">--font-mono · --color-surface-sunken · 左侧竖轴 1px --color-border-strong</div>
+  </section>
+</div>
+<script>
+(function(){
+  var d=[[54,18],[62,22],[48,15],[71,26],[66,19],[38,12],[80,30]],W=420,H=130,p=12,g=8,bw=(W-p*2-g*6)/7,o='';
+  [0,.5,1].forEach(function(t){var y=p+(H-p*2)*t;o+='<line class="grid-line" x1="0" x2="'+W+'" y1="'+y+'" y2="'+y+'"/>'});
+  d.forEach(function(v,i){var tot=v[0]+v[1],h=(tot/120)*(H-p*2),hm=(v[1]/120)*(H-p*2),x=p+i*(bw+g);
+    o+='<rect x="'+x+'" y="'+(H-p-h)+'" width="'+bw+'" height="'+(h-hm)+'" rx="2" fill="var(--color-viz-1)"/>';
+    o+='<rect x="'+x+'" y="'+(H-p-hm)+'" width="'+bw+'" height="'+hm+'" rx="2" fill="var(--color-viz-3)"/>';});
+  document.getElementById('c1').innerHTML=o;
+})();
+</script>
+</body>
+</html>

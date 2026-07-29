@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>多租户开通配置 · 平台控制台</title>
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles.css">
+<style>
+.step-hd{display:flex;align-items:center;gap:8px;font-size:var(--text-sm);font-weight:var(--weight-semibold);margin-bottom:var(--space-3)}
+.step-n{width:20px;height:20px;border-radius:50%;background:var(--color-primary-soft);color:var(--color-primary-hover);display:flex;align-items:center;justify-content:center;font-size:var(--text-xs);flex-shrink:0}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav data-sidenav="platform"></nav>
+<div class="main">
+  <div class="admin-bar"><strong>平台控制台</strong><span class="badge">超级管理员</span><div class="right"><a href="platform.html">‹ 返回租户总览</a></div></div>
+  <header class="topbar">
+    <div class="breadcrumb"><span>平台</span><span class="sep">/</span><a href="platform.html">租户总览</a><span class="sep">/</span><span class="cur">开通配置</span></div>
+  </header>
+
+  <div class="page page-narrow">
+    <div class="page-hd"><div><h1>新租户开通配置</h1><p>接入企业微信「会话存档」应用密钥，创建后自动执行连通性自检。</p></div></div>
+
+    <section class="card mb-5">
+      <div class="card-hd"><div class="step-hd"><span class="step-n">1</span>租户信息</div></div>
+      <div class="card-bd">
+        <div class="form-grid">
+          <div class="field"><label class="field-label" for="tn">租户名称<span class="req">*</span></label><input class="input" id="tn" type="text" placeholder="例如：同盛供应链"></div>
+          <div class="field"><label class="field-label" for="plan">套餐</label><select class="select" id="plan"><option>标准版 · 500 席位</option><option>企业版 · 不限席位</option><option>试用（30 天）</option></select></div>
+        </div>
+        <div class="field"><label class="field-label" for="adm">首位管理员邮箱<span class="req">*</span></label><input class="input" id="adm" type="email" placeholder="admin@company.com"><span class="field-help">该账号将收到激活邮件，并作为默认合规管理员登录后引导至首次配置向导。</span></div>
+      </div>
+    </section>
+
+    <section class="card mb-5">
+      <div class="card-hd"><div class="step-hd"><span class="step-n">2</span>企业微信接入</div></div>
+      <div class="card-bd">
+        <div class="form-grid">
+          <div class="field"><label class="field-label" for="cid">corp_id<span class="req">*</span></label><input class="input mono" id="cid" type="text" placeholder="ww…"></div>
+          <div class="field"><label class="field-label" for="agid">会话存档 AgentId<span class="req">*</span></label><input class="input mono" id="agid" type="text" placeholder="1000002"></div>
+        </div>
+        <div class="field"><label class="field-label" for="sec">会话存档 Secret<span class="req">*</span></label><input class="input mono" id="sec" type="password" placeholder="从企业微信管理后台 › 会话存档 获取"><span class="field-help">加密存储；创建后仅可替换、不可读取明文。</span></div>
+        <div class="field"><label class="field-label" for="pk">RSA 私钥（PEM）<span class="req">*</span></label><textarea class="textarea mono" id="pk" rows="4" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea><span class="field-help">用于解密拉取到的会话密文，版本号需与企业微信后台配置一致。</span></div>
+      </div>
+    </section>
+
+    <section class="card mb-5">
+      <div class="card-hd"><div class="step-hd"><span class="step-n">3</span>初始策略</div></div>
+      <div class="card-bd">
+        <div class="form-grid">
+          <div class="field"><label class="field-label" for="ret">留存周期</label><div class="row gap-2"><input class="input" id="ret" type="number" value="1095" style="width:100px"><span class="muted">天</span></div></div>
+          <div class="field"><label class="field-label" for="cold">冷存储阈值</label><div class="row gap-2"><input class="input" id="cold" type="number" value="365" style="width:100px"><span class="muted">天</span></div></div>
+        </div>
+        <label class="checkbox"><input type="checkbox"> 允许平台超管在审批后查看该租户会话内容（默认关闭）</label>
+      </div>
+      <div class="card-ft">共 14 个租户 · 新建后自动排到列表末尾，可在「租户总览」中随时停用</div>
+    </section>
+
+    <div class="alert alert-neutral mb-5"><span class="alert-ico">ℹ</span><div>创建后系统将依次执行：Secret 有效性 → 通讯录读取 → 会话拉取 → 解密验签，全部通过才会开始归档；任一环节失败会在下方显示具体错误与重试入口。</div></div>
+
+    <div class="row gap-2"><a class="btn" href="platform.html">取消</a><button class="btn btn-primary" type="button">创建并自检</button></div>
+
+    <h2 class="mt-6 mb-3">已开通租户</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>租户</th><th>corp_id</th><th>套餐</th><th>创建时间</th><th>自检状态</th><th class="actions">操作</th></tr></thead>
+        <tbody>
+          <tr><td class="cell-primary">康冠时代</td><td class="cell-id">ww3f8a21c9d0e4b7</td><td>企业版</td><td>2025-07-06</td><td><span class="badge badge-success">通过</span></td><td class="actions"><button class="btn-link" type="button">编辑</button></td></tr>
+          <tr><td class="cell-primary">同盛供应链</td><td class="cell-id">ww71b4d0e93a2f16</td><td>标准版</td><td>2025-11-18</td><td><span class="badge badge-success">通过</span></td><td class="actions"><button class="btn-link" type="button">编辑</button></td></tr>
+          <tr><td class="cell-primary">正联电子</td><td class="cell-id">ww5d8f01ba63c497</td><td>试用</td><td>2026-07-01</td><td><span class="badge badge-failed">凭证失效</span></td><td class="actions"><button class="btn-link" type="button">重新验证</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</div>
+<script src="shell.js"></script>
+</body>
+</html>

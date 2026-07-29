@@ -1,0 +1,85 @@
+<!-- @dsCard group="Foundations" viewport="1280x860" name="Color tokens" subtitle="Light + dark, semantic status triads" -->
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Color tokens</title>
+<link rel="stylesheet" href="../styles.css">
+<style>
+body{padding:32px;background:var(--color-canvas)}
+.sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
+.sw{border:1px solid var(--color-border);border-radius:var(--radius-lg);overflow:hidden;background:var(--color-surface)}
+.sw-chip{height:56px;border-bottom:1px solid var(--color-border)}
+.sw-b{padding:8px 10px}
+.sw-n{font-size:12px;font-weight:600}
+.sw-v{font-family:var(--font-mono);font-size:10.5px;color:var(--color-text-4);margin-top:2px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+h2{margin:28px 0 12px}
+.dark-scope{background:#0d1117;border-radius:var(--radius-xl);padding:16px}
+</style>
+</head>
+<body>
+<h1>色彩 Color</h1>
+<p class="muted mb-5" style="max-width:62em">全部颜色以 CSS 变量提供，元素上不得硬编码颜色。换肤 = 替换 <span class="mono">[data-theme]</span> 上的变量值。状态色沿用既有 <span class="mono">.badge-success / -failed / -pending</span> 语义类名。</p>
+
+<h2>品牌与主色</h2>
+<div class="sw-grid">
+  <div class="sw"><div class="sw-chip" style="background:var(--color-primary)"></div><div class="sw-b"><div class="sw-n">--color-primary</div><div class="sw-v">#1677ff · 主按钮 / 选中 / 焦点</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-primary-hover)"></div><div class="sw-b"><div class="sw-n">--color-primary-hover</div><div class="sw-v">#0958d9</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-primary-soft)"></div><div class="sw-b"><div class="sw-n">--color-primary-soft</div><div class="sw-v">#e8f1fd · 选中底色</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-primary-border)"></div><div class="sw-b"><div class="sw-n">--color-primary-border</div><div class="sw-v">#a9c9f5</div></div></div>
+</div>
+
+<h2>中性与表面</h2>
+<div class="sw-grid">
+  <div class="sw"><div class="sw-chip" style="background:var(--color-canvas)"></div><div class="sw-b"><div class="sw-n">--color-canvas</div><div class="sw-v">#eef0f4 · 页面底</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-surface)"></div><div class="sw-b"><div class="sw-n">--color-surface</div><div class="sw-v">#ffffff · 卡片 / 表格</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-surface-sunken)"></div><div class="sw-b"><div class="sw-n">--color-surface-sunken</div><div class="sw-v">#f8fafd · 内嵌区块</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-surface-nav)"></div><div class="sw-b"><div class="sw-n">--color-surface-nav</div><div class="sw-v">#f4f7fb · 侧栏</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-border)"></div><div class="sw-b"><div class="sw-n">--color-border</div><div class="sw-v">#eceff3 · 分隔线</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-border-strong)"></div><div class="sw-b"><div class="sw-n">--color-border-strong</div><div class="sw-v">#e3e7ee · 控件描边</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-admin-bar)"></div><div class="sw-b"><div class="sw-n">--color-admin-bar</div><div class="sw-v">#101720 · 平台超管条</div></div></div>
+</div>
+
+<h2>文字层级</h2>
+<div class="sw-grid">
+  <div class="sw"><div class="sw-chip" style="background:var(--color-text)"></div><div class="sw-b"><div class="sw-n">--color-text</div><div class="sw-v">#1f2329 · 正文 / 标题 · 15.9:1</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-text-2)"></div><div class="sw-b"><div class="sw-n">--color-text-2</div><div class="sw-v">#3d4552 · 表格单元格 · 9.7:1</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-text-3)"></div><div class="sw-b"><div class="sw-n">--color-text-3</div><div class="sw-v">#6b7280 · 次要 · 5.3:1</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-text-4)"></div><div class="sw-b"><div class="sw-n">--color-text-4</div><div class="sw-v">#8a8f99 · 元信息 · 3.5:1（仅 ≥12px）</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-text-5)"></div><div class="sw-b"><div class="sw-n">--color-text-5</div><div class="sw-v">#a6adb8 · 占位 · 非文本用途</div></div></div>
+</div>
+
+<h2>状态色（badge 三元组）</h2>
+<div class="sw-grid">
+  <div class="sw"><div class="sw-chip" style="background:var(--color-success-bg);border-bottom:1px solid var(--color-success-border)"><div style="padding:16px"><span class="badge badge-success badge-dot">成功 / 归档中</span></div></div><div class="sw-b"><div class="sw-n">success</div><div class="sw-v">fg #237804 · bg #f6ffed · bd #b7eb8f</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-danger-bg);border-bottom:1px solid var(--color-danger-border)"><div style="padding:16px"><span class="badge badge-failed badge-dot">失败 / 拒绝</span></div></div><div class="sw-b"><div class="sw-n">failed</div><div class="sw-v">fg #cf1322 · bg #fff2f0 · bd #ffccc7</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-warning-bg);border-bottom:1px solid var(--color-warning-border)"><div style="padding:16px"><span class="badge badge-pending badge-dot">待处理 / 滞后</span></div></div><div class="sw-b"><div class="sw-n">pending</div><div class="sw-v">fg #ad6800 · bg #fffbe6 · bd #ffe58f</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-neutral-bg);border-bottom:1px solid var(--color-neutral-border)"><div style="padding:16px"><span class="badge badge-silent">静默 63 天</span></div></div><div class="sw-b"><div class="sw-n">silent（新增）</div><div class="sw-v">fg #7c8797 · bg #f5f6f8 · 斜体</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-info-bg);border-bottom:1px solid var(--color-info-border)"><div style="padding:16px"><span class="badge badge-info">信息 / 单聊</span></div></div><div class="sw-b"><div class="sw-n">info</div><div class="sw-v">fg #0958d9 · bg #e6f4ff · bd #91caff</div></div></div>
+</div>
+
+<h2>数据可视化</h2>
+<div class="sw-grid">
+  <div class="sw"><div class="sw-chip" style="background:var(--color-viz-1)"></div><div class="sw-b"><div class="sw-n">--color-viz-1</div><div class="sw-v">主序列</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-viz-2)"></div><div class="sw-b"><div class="sw-n">--color-viz-2</div><div class="sw-v">次序列</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-viz-3)"></div><div class="sw-b"><div class="sw-n">--color-viz-3</div><div class="sw-v">第三序列</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-viz-4)"></div><div class="sw-b"><div class="sw-n">--color-viz-4</div><div class="sw-v">对比 / 上周期</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-viz-6)"></div><div class="sw-b"><div class="sw-n">--color-viz-6</div><div class="sw-v">辅助强调</div></div></div>
+  <div class="sw"><div class="sw-chip" style="background:var(--color-viz-5)"></div><div class="sw-b"><div class="sw-n">--color-viz-5</div><div class="sw-v">其他 / 灰序列</div></div></div>
+</div>
+
+<h2>深色皮肤（同名变量，仅换值）</h2>
+<div class="dark-scope" data-theme="dark">
+  <div class="sw-grid">
+    <div class="sw"><div class="sw-chip" style="background:var(--color-primary)"></div><div class="sw-b"><div class="sw-n">--color-primary</div><div class="sw-v">#3b8cff</div></div></div>
+    <div class="sw"><div class="sw-chip" style="background:var(--color-canvas)"></div><div class="sw-b"><div class="sw-n">--color-canvas</div><div class="sw-v">#0d1117</div></div></div>
+    <div class="sw"><div class="sw-chip" style="background:var(--color-surface)"></div><div class="sw-b"><div class="sw-n">--color-surface</div><div class="sw-v">#151a21</div></div></div>
+    <div class="sw"><div class="sw-chip" style="background:var(--color-surface-nav)"></div><div class="sw-b"><div class="sw-n">--color-surface-nav</div><div class="sw-v">#11161d</div></div></div>
+    <div class="sw"><div class="sw-chip" style="background:var(--color-border)"></div><div class="sw-b"><div class="sw-n">--color-border</div><div class="sw-v">#232b35</div></div></div>
+    <div class="sw"><div class="sw-chip" style="background:var(--color-text)"></div><div class="sw-b"><div class="sw-n">--color-text</div><div class="sw-v">#e6eaf0</div></div></div>
+  </div>
+  <div class="row gap-2 mt-4"><span class="badge badge-success badge-dot">归档中</span><span class="badge badge-failed">失败</span><span class="badge badge-pending">滞后</span><span class="badge badge-silent">静默</span><span class="badge badge-info">单聊</span></div>
+</div>
+</body>
+</html>

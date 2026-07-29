@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title></title>
+<link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
+<link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
+<link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/base.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/diagnostics.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="diag-header">
+  <div class="diag-header-text">
+    <h1 data-i18n="diagnostics.pageTitle">消息可达性诊断</h1>
+    <p data-i18n="diagnostics.pageDescription">本页仅展示消息可达性审计的聚合统计数据，不包含消息内容或原始标识符。</p>
+  </div>
+  <div class="diag-actions">
+    <a href="/admin/conversations"><span data-i18n="diagnostics.backToConsole">返回审阅控制台</span></a>
+    <button id="btn-diag-refresh" data-i18n="diagnostics.refresh">刷新</button>
+  </div>
+</div>
+<div id="diag-root"><div class="diag-loading" data-i18n="diagnostics.loading">正在加载诊断数据…</div></div>
+<script src="/web/static/diagnostics.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>
