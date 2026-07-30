@@ -1,284 +1,119 @@
-# Crowntime WeCom Archive
+# WeCom Archive
 
-「康冠时代」企业微信会话存档
+A self-hosted archive and review console for WeCom conversation data. It
+retrieves archive records through the WeCom Conversation Archive API, decrypts
+and stores them, and gives authorized administrators a web-based review
+console.
 
-Crowntime WeCom Archive is an internal WeCom (企业微信) conversation archive, media storage, and admin review system. It pulls messages from the WeCom Conversation Archive API, decrypts and stores them, and provides a conversation review console for authorized administrators.
+> This is an independent project. “WeCom” and “企业微信” are trademarks of
+> Tencent and are used here only to describe compatibility.
 
-> 本项目为第三方独立开源项目，与腾讯公司无关联，非腾讯官方产品。"企业微信/WeCom"为腾讯公司商标，本项目名称仅用于描述产品用途。
+## Features
 
----
+- SDK-backed archive synchronization and message decryption
+- Tenant-aware data model and administrator authentication
+- Conversation review, search, reachability diagnostics, and media access
+- Local filesystem or Qiniu Kodo media storage
+- One-shot worker scripts and systemd timer units for archive and media work
 
-## Quick Start
+## Architecture
+
+```text
+WeCom Conversation Archive API
+             │ (C SDK)
+             ▼
+FastAPI application and worker scripts ──► PostgreSQL
+             │
+             ├── server-rendered administrator console
+             └── local filesystem or Qiniu Kodo media storage
+```
+
+The application code is under `backend/app/`; migrations and operational
+scripts are under `backend/alembic/` and `backend/scripts/`. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and data-flow
+reference.
+
+## Quick start
 
 ### Prerequisites
 
 - Python 3.11+
-- PostgreSQL 14+ running locally (or via Docker)
+- PostgreSQL 14+
 
-### Local Console Bring-Up
+### WeCom SDK requirement
 
-This path is for local admin-console development. It does **not** require a
-working WeCom SDK or live WeCom credentials, but it **does** require:
+`backend/vendor/wecom_sdk/` is reserved for the Tencent proprietary WeCom C
+SDK. It is excluded by `.gitignore`, and this repository does **not** include
+its binary or source distribution. If you need archive synchronization,
+decryption, or media download, obtain the SDK yourself from Tencent under its
+applicable terms and set `WECOM_SDK_LIB_PATH` to the resulting shared library.
 
-- a PostgreSQL database
-- a bootstrapped default tenant row
-- password auth mode for local login
+You can run the local password-authenticated console and mock-data workflow
+without a working SDK or live WeCom credentials.
 
-### Setup
+### Local console
 
 ```bash
-# 1. Clone the repo
-git clone <repo-url>
-cd crowntime-wecom-archive
-
-# 2. Enter backend directory
-cd backend
-
-# 3. Create and activate a virtual environment
+# 1. Clone and prepare an environment
+cd <repository-directory>
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r backend/requirements.txt
 
-# 4. Install dependencies
-pip install -r requirements.txt
+# 2. Create local configuration (never commit it)
+cp .env.example backend/.env
 
-# 5. Configure environment
-cp ../.env.example .env
-
-# 6. Generate a local password hash
-python -c "from app.auth import hash_password; print(hash_password('change-me'))"
-
-# 7. Edit backend/.env
-# Required for local bring-up:
-#   DATABASE_URL=postgresql://postgres:change-me@localhost:5432/wecom_archive
-#   AUTH_MODE=password
-#   ADMIN_USERNAME=admin
-#   ADMIN_PASSWORD_HASH=<paste the generated hash>
-#
-# Still required by bootstrap_default_tenant.py even in password mode:
-#   WECOM_CORP_ID=dev-corp
-#   WECOM_AGENT_ID=dev-agent
-#   WECOM_OAUTH_SECRET=dev-oauth-secret
-#
-# Optional for local bootstrap:
-#   ADMIN_DOMAIN=localhost
-
-# 8. Initialize schema + default tenant
+# 3. Configure backend/.env, then initialize the database
+cd backend
 alembic upgrade head
 python scripts/bootstrap_default_tenant.py
-```
 
-### Run
-
-```bash
+# 4. Start the application
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8035
 ```
 
-Health check: `http://127.0.0.1:8035/health` → `{"status": "ok"}`
+For a local password login, set at least `DATABASE_URL`, `AUTH_MODE=password`,
+`ADMIN_USERNAME`, and `ADMIN_PASSWORD_HASH` in `backend/.env`. The
+[`.env.example`](.env.example) file is the configuration reference and uses
+placeholders only.
 
-Interactive API docs: `http://127.0.0.1:8035/docs`
+After startup, use `http://127.0.0.1:8035/health` for the health check and
+`http://127.0.0.1:8035/docs` for the interactive API documentation. You can
+load non-production sample records with `python scripts/mock_ingest.py` from
+`backend/`.
 
-Admin login: `http://127.0.0.1:8035/admin/login`
+## Configuration and deployment
 
-Admin console: `http://127.0.0.1:8035/admin/conversations`
+Keep secrets only in an ignored `.env` file; do not replace placeholder values
+in `.env.example`. WeCom-backed archive processing additionally requires the
+SDK, `WECOM_SDK_LIB_PATH`, and the applicable WeCom credentials.
 
-### Optional: Load Mock Archive Data
+For a production deployment, set `ARCHIVE_DOMAIN` to the public archive
+hostname. It must match the hostname configured in the reverse proxy. The
+repository contains worker units and deployment guidance; the web-service unit,
+reverse-proxy configuration, and TLS certificates are operator-managed. See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full deployment procedure.
 
-```bash
-python scripts/mock_ingest.py
-```
+## FAQ
 
-This is the fastest way to exercise the review console locally without real
-WeCom traffic.
+**Why do sync or decryption commands fail without the SDK?** The archive
+cryptography and media APIs are provided by Tencent’s proprietary C SDK. Obtain
+it from Tencent, place it outside version control (the ignored
+`backend/vendor/wecom_sdk/` location is available if useful), and point
+`WECOM_SDK_LIB_PATH` at its shared library.
 
-### What Needs Real WeCom Integration
+## License
 
-The following features require real WeCom credentials and, for SDK-backed
-paths, a valid `WECOM_SDK_LIB_PATH`:
-
-- `AUTH_MODE=wecom`
-- `sync_wecom_archive_once.py`
-- `decrypt_wecom_messages_once.py`
-- `download_wecom_media_once.py`
-- `sync_contact_display_names_once.py`
-
----
-
-## Stack
-
-| Layer | Choice | Notes |
-|-------|--------|-------|
-| Backend | Python FastAPI | REST API + server-rendered HTML |
-| Database | PostgreSQL 14+ | Primary store |
-| Auth | WeCom OAuth (`snsapi_base`) or password fallback | Switchable via `AUTH_MODE` |
-| Media storage | Pluggable provider — local disk (Phase 1) | `MEDIA_STORAGE_PROVIDER=local` |
-| Deploy | Alibaba Cloud ECS + systemd + reverse proxy | Worker timers are versioned here; web service/proxy assets are documented separately |
-| UI | Server-rendered HTML + JS | Conversation review console |
-
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         WeCom Platform                          │
-│   Conversation Archive API  │  OAuth 2.0 (corp identity)        │
-└──────────────┬──────────────┴──────────────────────────────────┘
-               │ HTTPS (SDK)
-┌──────────────▼──────────────────────────────────────────────────┐
-│                     FastAPI Backend (Python)                     │
-│                                                                  │
-│  ┌──────────────┐  ┌─────────────────┐  ┌────────────────────┐  │
-│  │  Sync Worker  │  │   REST API      │  │   Auth Middleware   │  │
-│  │  (scheduler)  │  │  (admin routes) │  │   (WeCom OAuth)    │  │
-│  └──────┬───────┘  └────────┬────────┘  └────────────────────┘  │
-│         │                   │                                    │
-│  ┌──────▼───────────────────▼────────────────────────────────┐  │
-│  │               PostgreSQL (primary store)                   │  │
-│  │  messages · rooms · media_refs · sync_cursors             │  │
-│  │  tenants · wecom_configs · admin_users · sessions         │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │              Media Storage Provider (pluggable)           │   │
-│  │   local disk (implemented)  │  OSS/S3 (future)            │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────────────┐
-│              Admin UI (server-rendered HTML + JS)                │
-│              Conversation Review Console (three-column)         │
-│              System Diagnostics page (message reachability)     │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-For a detailed architecture reference, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
----
-
-## Capabilities
-
-### Implemented
-
-| Capability | Status | Details |
-|-----------|--------|---------|
-| WeCom Archive API integration | ✅ | SDK-based encrypted message pull |
-| Message decryption | ✅ | RSA + AES decryption pipeline |
-| Tenant foundation | ✅ | Multi-tenant data model (RND-156) |
-| Auth — WeCom OAuth | ✅ | Employee login via WeCom (RND-110) |
-| Auth — Password fallback | ✅ | Temporary mode for dev (RND-112) |
-| Conversation review console | ✅ | Three-column UI (RND-154/157) |
-| Message timeline | ✅ | Ordered timeline with auto-load older |
-| Auto-refresh | ✅ | Periodic refresh (RND-153) |
-| i18n / language switching | ✅ | Chinese + English (RND-157) |
-| Media download worker | ✅ | Scheduled image media download (RND-151/168) |
-| Media storage abstraction | ✅ | Pluggable provider contract (RND-185) |
-| System diagnostics | ✅ | Message reachability audit page (RND-180) |
-| Message type display | ✅ | Named placeholders for all WeCom types (RND-173/177) |
-| WeCom chat bubble style | ✅ | RND-154 matching WeCom appearance |
-| Corp ID uniqueness | ✅ | RND-184 constraint |
-| Company homepage | ✅ | For ICP beian filing (RND-171) |
-
-### In Progress / Recent
-
-- (See [docs/ai/current-status.md](docs/ai/current-status.md) for the latest status)
-
----
-
-## Project Structure
-
-```
-crowntime-wecom-archive/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                   # FastAPI app entry point + HTML routes
-│   │   ├── auth.py                   # Auth dependencies, session handling
-│   │   ├── media_storage.py          # Media storage provider abstraction
-│   │   ├── media_classification.py   # Media type detection
-│   │   ├── reachability_audit.py     # Message reachability audit logic
-│   │   ├── wecom_contacts.py         # WeCom contact sync
-│   │   ├── i18n_assets.py            # i18n JS asset loader
-│   │   ├── display_names.py          # Display name resolution
-│   │   ├── db/
-│   │   │   ├── models.py             # SQLAlchemy ORM models
-│   │   │   ├── session.py            # DB session management
-│   │   │   ├── base.py               # Declarative base
-│   │   │   └── contacts.py           # Contact DB operations
-│   │   ├── routers/
-│   │   │   ├── auth.py               # Auth endpoints (OAuth + password)
-│   │   │   ├── conversations.py      # Conversation aggregation API
-│   │   │   ├── reachability_audit.py # Reachability audit API
-│   │   │   └── wecom_events.py       # WeCom event callback
-│   │   ├── sdk/
-│   │   │   └── wecom_sdk.py          # WeCom C SDK wrapper
-│   │   └── assets/
-│   │       └── i18n.js               # Locale registry + i18n helpers
-│   ├── scripts/
-│   │   ├── run_archive_worker_once.py     # Worker entrypoint (sync + decrypt)
-│   │   ├── sync_wecom_archive_once.py     # Archive pull
-│   │   ├── decrypt_wecom_messages_once.py # Decryption pipeline
-│   │   ├── download_wecom_media_once.py   # Unified media download (image/voice/video/file/emotion)
-│   │   ├── bootstrap_default_tenant.py    # First-time tenant setup
-│   │   ├── backfill_missing_seqs_once.py  # Data repair
-│   │   ├── sync_contact_display_names_once.py  # Contact name sync
-│   │   ├── mock_ingest.py                 # Mock data for dev
-│   │   └── smoke_*.py                     # Smoke tests
-│   ├── alembic/                       # DB migrations
-│   └── requirements.txt
-├── docs/
-│   ├── ARCHITECTURE.md               # Architecture reference
-│   ├── API.md                        # Route catalog + request/response notes
-│   ├── DEPLOYMENT.md                 # Local/prod deployment guidance
-│   ├── DATA_MODEL.md                  # Database schema documentation
-│   ├── AGENTS.md                      # AI agent roster and handoff
-│   ├── CONVERSATION_REVIEW_CONSOLE_PRD.md   # PRD (spec)
-│   ├── wecom_archive_worker_runbook.md      # Worker deployment runbook
-│   ├── wecom_archive_media_download_runbook.md  # Media download runbook
-│   ├── ai/                            # AI context docs (see docs/ai/)
-│   └── research/                      # Research documents
-├── deploy/
-│   └── systemd/                       # systemd service/timer units
-├── scripts/
-│   └── deploy_server.sh               # Deployment automation
-├── static_site/
-│   └── company_homepage/              # Beian ICP filing homepage
-├── .env.example                       # Environment variable template
-├── DEV_AGENT_RULES.md                 # AI agent working rules
-└── README.md
-```
-
----
-
-## Secrets Warning
-
-> **Never commit `.env` or any file containing real secrets.**
->
-> `.env` is gitignored. Use `.env.example` as the template.
-> See [DEV_AGENT_RULES.md](DEV_AGENT_RULES.md) §4 for the full secrets policy.
-
----
-
-## Documentation
-
-| Document | Audience | Purpose |
-|----------|----------|---------|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Developers | System architecture, data flow, auth, deployment |
-| [docs/API.md](docs/API.md) | Developers | HTTP route catalog and auth expectations |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Developers / Ops | Local bring-up, server bootstrap, repo-owned vs operator-managed deploy assets |
-| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Developers | PostgreSQL schema and design decisions |
-| [docs/AGENTS.md](docs/AGENTS.md) | AI Agents | Agent roster, responsibilities, handoff protocol |
-| [docs/ai/project-overview.md](docs/ai/project-overview.md) | AI Agents | Project summary for first-time AI agents |
-| [docs/ai/architecture-summary.md](docs/ai/architecture-summary.md) | AI Agents | Concise architecture for AI consumption |
-| [docs/ai/business-terms.md](docs/ai/business-terms.md) | AI Agents | Domain terminology |
-| [docs/ai/current-status.md](docs/ai/current-status.md) | Everyone | What's done, what's next |
-| [docs/ai/onboarding.md](docs/ai/onboarding.md) | AI Agents | Recommended reading order |
-| [docs/ai/known-pitfalls.md](docs/ai/known-pitfalls.md) | Developers | Common traps and rules |
-| [docs/wecom_archive_worker_runbook.md](docs/wecom_archive_worker_runbook.md) | Ops | Archive worker deployment and operation |
-| [docs/wecom_archive_media_download_runbook.md](docs/wecom_archive_media_download_runbook.md) | Ops | Media download timer deployment |
-| [DEV_AGENT_RULES.md](DEV_AGENT_RULES.md) | AI Agents | Binding working rules |
-
----
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE)
+(AGPL-3.0). Third-party components, including the WeCom SDK, remain subject to
+their own terms.
 
 ## Contributing
 
-This project is built by AI agents under human review.
-Read [DEV_AGENT_RULES.md](DEV_AGENT_RULES.md) and [docs/AGENTS.md](docs/AGENTS.md) before making any change.
+Contributions are welcome, but every external contributor must sign the
+[Contributor License Agreement](CLA.md) before a pull request can be accepted.
+The signing mechanism will be published separately; before submitting a PR,
+ask the project maintainers for signing instructions through the repository.
+
+Please also read the [security policy](SECURITY.md) before reporting a
+vulnerability.

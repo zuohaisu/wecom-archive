@@ -147,8 +147,10 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments and local configuration
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -217,8 +219,18 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Backend dependencies
+# Backend dependencies and proprietary SDKs obtained by the operator
 backend/vendor/
+backend/vendor/wecom_sdk/
+
+# Secrets and local private material
+secrets*
+*.key
+*.pem
+*.crt
+
+# Local AI-editor workspace
+.qoder/
 
 # SSL renewal (ssl-renew/) — never commit private keys, certificates,
 # acme.sh account state, or per-domain secrets/state files.
