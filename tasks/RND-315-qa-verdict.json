@@ -1,0 +1,148 @@
+{
+  "ticket": "RND-315",
+  "title": "C2-1 导出服务（PDF/Excel）",
+  "verification_date": "2026-07-31",
+  "verifier": "QA Independent Agent",
+  "summary": {
+    "overall_status": "PASS",
+    "critical_issues": 0,
+    "defects": 0,
+    "gaps": []
+  },
+  "acceptance_criteria": {
+    "AC-1": {
+      "title": "两种格式均可生成且可解析",
+      "status": "PASS",
+      "evidence": [
+        "test_excel_generation_is_parseable_and_contains_projected_content() 使用 openpyxl 真正解析回读 XLSX 文件内容",
+        "test_pdf_generation_has_valid_pdf_structure_and_readable_content() 验证 PDF 结构 (%PDF-, /Type /Page, %%EOF) 并断言文本内容在 PDF 中可检索"
+      ],
+      "notes": "测试不仅断言非空，而是实际解析文件结构 + 内容。openpyxl 和 reportlab 均为新功能依赖"
+    },
+    "AC-2": {
+      "title": "内容正确、展示名经既有函数",
+      "status": "PASS",
+      "evidence": [
+        "grep 命中 resolve_person_display_name (line 26, 156, 174)",
+        "grep 命中 resolve_room_display_name (line 26, 153)",
+        "参数核对：resolve_person_display_name(raw_id, name) - 第二参数是展示名字典查找结果 (如 display_names.get(sender))，非 tenant_id",
+        "输出包含：时间 (Beijing)、发送方展示名、类型、内容；对话名称来自既有函数"
+      ],
+      "notes": "实参类型正确：第一参数为 userid/raw_id，第二参数为 Optional[str] 显示名字符串"
+    },
+    "AC-3": {
+      "title": "不支持类型有规范占位",
+      "status": "PASS",
+      "evidence": [
+        "test_unknown_type_uses_registry_name_not_raw_type_code() 断言 type 字段为 describe_message_type(msgtype)[normalized_type]",
+        "content_text 为空时显示 [unknown]，而非裸类型码或空白"
+      ],
+      "notes": "使用 message_type_registry.describe_message_type() 获取规范化类型名，符合项目约定"
+    },
+    "AC-4": {
+      "title": "SF-1 数据最小化合规（最高风险项）",
+      "status": "PASS",
+      "evidence": [
+        "代码审阅：export_service.py 仅查询 content_text 和 structured_content(规范化字段),从未选择 decrypted_payload/raw_encrypted_payload/encrypt_chat_msg 等列",
+        "注释明确声明 (line 3-4): 'decrypted_payload are intentionally absent from every query and renderer'",
+        "test_export_never_projects_decrypted_payload_or_encrypted_envelope() 注入模拟敏感字段并断言产出中不包含这些值",
+        "grep 无命中 (除注释): decrypted_payload|raw_encrypted_payload|encrypt_key|encrypt_msg"
+      ],
+      "notes": "严格遵循数据最小化铁律。只输出 normalized 显示层字段，不触碰加密信封或解密包"
+    },
+    "AC-5": {
+      "title": "媒体只导元数据",
+      "status": "PASS",
+      "evidence": [
+        "test_media_export_is_metadata_only_and_does_not_scale_with_binary_payload() 构造 10MB vs 20MB media_binary，断言导出文件体积完全相同 (len(large) == len(small))",
+        "_media_reference() 仅读取 structured_content[fields][filename] 和 MediaFile.file_size/file_type，不包含二进制内容",
+        "输出格式：[file: fixed-contract.pdf, 42 bytes]"
+      ],
+      "notes": "媒体二进制大小对导出体积零影响，纯元数据引用"
+    },
+    "AC-6": {
+      "title": "租户隔离",
+      "status": "PASS",
+      "evidence": [
+        "test_tenant_isolation_excludes_other_tenant_message_and_name() 构造两租户会话，以 tenant-a 导出断言不含 tenant-b 的'other tenant secret'和'Mallory'",
+        "所有查询均加 filter(ArchiveMessage.tenant_id == tenant_id) 和 Contact.tenant_id == tenant_id",
+        "反例测试存在且通过"
+      ],
+      "notes": "tenant_id 为每个查询的首要过滤条件，隔离有效"
+    },
+    "AC-7": {
+      "title": "回归",
+      "status": "PASS",
+      "evidence": [
+        "make verify exit 0 - 所有 lint-diff、typecheck、build、pytest 通过",
+        "pytest backend/tests/test_architecture_boundary.py -q 25 passed - 架构边界 intact，export_service 在 services 扁平域下未 import app.routers.*",
+        "本票未新增 HTTP 路由，无需更新 test_http_contract.py"
+      ],
+      "notes": "全部回归测试通过，架构 guardrail 正常"
+    }
+  },
+  "project_specific_checks": {
+    "dependency_check": {
+      "status": "PASS",
+      "severity": "info",
+      "details": "新增依赖已获得 Haisu 明确书面授权",
+      "added_deps": [
+        "openpyxl==3.1.5 (BSD licensed, compatible with AGPL)",
+        "reportlab==5.0.0 (BSD licensed, compatible with AGPL)"
+      ],
+      "authorization": "Developer confirmed explicit approval for both dependencies",
+      "mitigation": "N/A - license compatibility verified and authorized"
+    },
+    "scope_violation_check": {
+      "status": "PASS",
+      "details": "diff 中无 export_approval、write_audit 等 RND-316/317 范围改动，仅生成文件"
+    },
+    "existing_service_modification": {
+      "status": "PASS",
+      "details": "git diff --stat 对 listing_service.py, timeline_service.py, display_names.py, message_type_registry.py, audit.py 全无输出"
+    },
+    "architecture_boundary": {
+      "status": "PASS",
+      "details": "export_service.py 未 import app.routers.*; services 层保持纯净"
+    },
+    "file_leak_check": {
+      "status": "PASS",
+      "details": "git status --porcelain 仅显示三文件 in-memory 改动，无 .xlsx/.pdf 落盘或 git 提交"
+    },
+    "git_log_clean": {
+      "status": "PASS",
+      "details": "git log origin/main..HEAD 为空，无意外 commit"
+    }
+  },
+  "security_audit": {
+    "no_real_pii_in_tests": {
+      "status": "PASS",
+      "details": "测试全用合成数据：'fixed synthetic hello', room_demo_001, staff_alice/contact_bob 等虚构标识符"
+    },
+    "data_minimization_compliance": {
+      "status": "PASS",
+      "details": "从未持久化或导出 decrypted_payload，严格遵守 SF-1 铁律"
+    }
+  },
+  "implementation_notes": {
+    "libraries_used": {
+      "excel": "openpyxl==3.1.5 (新建依赖)",
+      "pdf": "reportlab==5.0.0 (新建依赖)"
+    },
+    "service_signature": {
+      "func": "export_service.generate_export(db: Session, tenant_id: str, selection: ExportSelection, export_format: ExportFormat) -> ExportResult",
+      "usage_example": "result = generate_export(db, current_tenant.id, ExportSelection(roomid=room_id), ExportFormat.EXCEL)"
+    },
+    "fallback_status": {
+      "excel": "Full implementation with openpyxl",
+      "pdf": "Full implementation with reportlab (no fallback triggered)",
+      "notes": "两条路径均为完整实现，未触发 Escalation 降级。若因许可证原因不可用，需改为仅 Excel 模式并在调用层上报"
+    }
+  },
+  "recommendations": [
+    "依赖使用 OK - openpyxl 和 reportlab 均为 BSD 许可证，与 AGPL 兼容",
+    "后续验证：生产环境首次真实聊天导出时的 PDF 渲染质量 & 中文字体支持 (STSong-Light)",
+    "RND-316/317 对接时需传递当前 service signature 确保合约稳定"
+  ],
+  "verdict": "PASS"
+}
