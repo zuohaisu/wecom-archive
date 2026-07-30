@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from dataclasses import dataclass
 import hmac
 import logging
 import secrets
@@ -33,10 +34,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 import httpx
-from fastapi import Cookie, Depends, HTTPException, Request
+from fastapi import Cookie, Depends, HTTPException, Query, Request
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
-from app.db.models import AdminSession, AdminUser, PasswordResetToken
+from app.audit import write_audit
+from app.db.models import AdminSession, AdminUser, PasswordResetToken, PlatformAdmin
 from app.db.session import get_db
 from app.session_lifecycle import touch_last_active
 from app.settings import get_auth_settings
@@ -183,6 +186,81 @@ def verify_platform_admin(db, email: str, password: str):
     if not verify_password(password, admin.password_hash):
         return None
     return admin
+
+
+# ---------------------------------------------------------------------------
+# RND-305 (B1-2) — platform-admin cross-tenant scope
+# ---------------------------------------------------------------------------
+# This helper is the sole temporary HTTP Basic integration point. B1 can
+# replace it with a platform-admin session-cookie resolver without touching
+# require_platform_admin or any consumer of the cross-tenant scope primitive.
+_platform_admin_basic = HTTPBasic(auto_error=False)
+
+
+def _get_platform_admin_credentials(
+    credentials: Optional[HTTPBasicCredentials] = Depends(_platform_admin_basic),
+) -> Optional[HTTPBasicCredentials]:
+    """Resolve temporary platform-admin credentials; replace this for B1 sessions."""
+    return credentials
+
+
+def require_platform_admin(
+    credentials: Optional[HTTPBasicCredentials] = Depends(_get_platform_admin_credentials),
+    db: Session = Depends(get_db),
+) -> PlatformAdmin:
+    """Return an authenticated active PlatformAdmin, or raise HTTP 401.
+
+    Platform-admin credentials are deliberately independent of tenant admin
+    sessions: a ``session_id`` cookie and any tenant role cannot satisfy this
+    dependency.
+    """
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Platform admin authentication required")
+
+    admin = verify_platform_admin(db, credentials.username, credentials.password)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Invalid platform admin credentials")
+    return admin
+
+
+PLATFORM_TENANT_ACCESS_ACTION = "platform.tenant_accessed"
+PLATFORM_TENANT_OBJECT_TYPE = "tenant"
+
+
+@dataclass(frozen=True)
+class PlatformAdminTenantScope:
+    """An audited target-tenant scope granted to a platform super-admin."""
+
+    platform_admin: PlatformAdmin
+    tenant_id: str
+
+
+def require_platform_tenant_scope(
+    # INTENTIONAL EXCEPTION: tenant APIs must never obtain tenant_id from a
+    # request parameter; they must use the tenant_id in their authenticated
+    # session. This platform-only dependency is different: its identity has
+    # already been proven as a tenant-less PlatformAdmin, and every explicit
+    # target tenant access is written through write_audit. Do not copy this
+    # pattern into tenant APIs.
+    tenant_id: str = Query(..., min_length=1),
+    platform_admin: PlatformAdmin = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> PlatformAdminTenantScope:
+    """Resolve explicit ``tenant_id`` and append its mandatory access audit row."""
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        action=PLATFORM_TENANT_ACCESS_ACTION,
+        object_type=PLATFORM_TENANT_OBJECT_TYPE,
+        object_id=tenant_id,
+        # AuditLog.admin_user_id references tenant-scoped admin_users, so the
+        # isolated PlatformAdmin identity is stored as structured detail.
+        detail={
+            "platform_admin_id": platform_admin.id,
+            "platform_admin_email": platform_admin.email,
+        },
+    )
+    return PlatformAdminTenantScope(platform_admin=platform_admin, tenant_id=tenant_id)
 
 
 # ---------------------------------------------------------------------------
