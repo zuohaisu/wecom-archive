@@ -42,6 +42,9 @@ class AuditAction:
     USER_ENABLED = "user.enabled"
     CONFIG_VIEWED = "config.viewed"
     CONFIG_CHANGED = "config.changed"
+    EXPORT_APPROVAL_GRANTED = "export.approval_granted"
+    EXPORT_APPROVAL_CONSUMED = "export.approval_consumed"
+    EXPORT_APPROVAL_DENIED = "export.approval_denied"
 
 
 class AuditObjectType:
@@ -49,6 +52,7 @@ class AuditObjectType:
     SESSION = "admin_session"
     TENANT_CONFIG = "tenant_config"
     PASSWORD_RESET_TOKEN = "password_reset_token"
+    EXPORT_APPROVAL_TOKEN = "export_approval_token"
 
 
 def write_audit(

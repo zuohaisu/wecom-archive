@@ -15,6 +15,7 @@ from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
 from app.routers.dashboard import router as dashboard_router
+from app.routers.export_approval import router as export_approval_router
 from app.routers.external_contacts import router as external_contacts_router
 from app.routers.media import MediaAccessNoStoreMiddleware
 from app.routers.media import router as media_router
@@ -123,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(web_router)
     app.include_router(analytics_router)
     app.include_router(messages_router)
+    app.include_router(export_approval_router)
     app.include_router(platform_router, prefix="/api/platform")
 
     @app.get("/health/live")

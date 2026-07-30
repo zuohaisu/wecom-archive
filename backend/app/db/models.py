@@ -348,6 +348,26 @@ class PasswordResetToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+# —— RND-316 (C2-2) 导出安全审批令牌 ——
+class ExportApprovalToken(Base):
+    __tablename__ = "export_approval_tokens"
+
+    id = Column(String(36), primary_key=True)
+    admin_user_id = Column(
+        String(36), ForeignKey("admin_users.id"), nullable=False, index=True
+    )
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    # Only the SHA-256 hex digest is persisted; the raw token is returned once.
+    token = Column(String(64), nullable=False, unique=True, index=True)
+    # SHA-256 of canonical export parameters binds approval to one request.
+    params_hash = Column(String(64), nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class KeyVersion(Base):
     """Maps WeCom publickey_ver to the private key used for decryption."""
 

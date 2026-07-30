@@ -74,6 +74,7 @@ _FLAT_SERVICE_MODULES = {
     "app.crypto",
     "app.display_names",
     "app.email",
+    "app.export_approval",
     "app.html_helpers",
     "app.i18n_assets",
     "app.key_provider",
