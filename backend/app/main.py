@@ -13,6 +13,7 @@ from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
+from app.routers.external_contacts import router as external_contacts_router
 from app.routers.media import MediaAccessNoStoreMiddleware
 from app.routers.media import router as media_router
 from app.routers.media_library import router as media_library_router
@@ -109,6 +110,7 @@ def create_app() -> FastAPI:
     app.include_router(users_router, prefix="/api/admin")
     app.include_router(settings_router, prefix="/api/admin")
     app.include_router(media_library_router, prefix="/api/admin")
+    app.include_router(external_contacts_router, prefix="/api/admin")
     app.include_router(wecom_events_router)
     app.include_router(admin_users_page_router)
     app.include_router(admin_audit_page_router)
