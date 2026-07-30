@@ -17,6 +17,8 @@ Design rules
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -45,6 +47,7 @@ class AuditAction:
     EXPORT_APPROVAL_GRANTED = "export.approval_granted"
     EXPORT_APPROVAL_CONSUMED = "export.approval_consumed"
     EXPORT_APPROVAL_DENIED = "export.approval_denied"
+    EXPORT = "export.executed"
 
 
 class AuditObjectType:
@@ -53,6 +56,7 @@ class AuditObjectType:
     TENANT_CONFIG = "tenant_config"
     PASSWORD_RESET_TOKEN = "password_reset_token"
     EXPORT_APPROVAL_TOKEN = "export_approval_token"
+    EXPORT = "export"
 
 
 def write_audit(
@@ -84,3 +88,46 @@ def write_audit(
     except Exception:
         # Isolated by the savepoint above — outer transaction is untouched.
         logger.exception("write_audit: failed to record audit row (action=%s)", action)
+
+
+def record_export_audit(
+    db: Session,
+    *,
+    tenant_id: str,
+    admin_user_id: Optional[str],
+    export_format: str,
+    record_count: Optional[int] = None,
+    scope: Optional[Mapping[str, Any]] = None,
+    approval_ref: Optional[str] = None,
+    gate_enforced: Optional[bool] = None,
+) -> None:
+    """Record one export event with non-sensitive, hash-only scope context.
+
+    The underlying ``write_audit`` call is fail-safe and does not commit; the
+    caller commits it atomically with its own export operation. Message bodies
+    and decrypted payloads must never be passed here.
+    """
+    params_hash = None
+    if scope is not None:
+        canonical = json.dumps(
+            {"format": export_format, "scope": scope},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        params_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        action=AuditAction.EXPORT,
+        object_type=AuditObjectType.EXPORT,
+        admin_user_id=admin_user_id,
+        detail={
+            "format": export_format,
+            "record_count": record_count,
+            "params_hash": params_hash,
+            "approval_ref": approval_ref,
+            "gate_enforced": gate_enforced,
+        },
+    )

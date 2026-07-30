@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 62  # RND-311: +1 platform tenant-provisioning route.
+    assert route_count == 65  # RND-317: +1 export audit record route.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -351,6 +351,9 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/users",
             "/api/admin/audit-logs",
             "/api/admin/dashboard",
+            "/api/admin/export/approve",
+            "/api/admin/export/execute",
+            "/api/admin/export/record",
             "/api/admin/external-contacts",
             "/api/admin/media",
             "/api/admin/media/{media_id}/download",
@@ -439,6 +442,9 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         ("/api/admin/dashboard", frozenset({"GET"}), "DashboardOut", "None"),
+        ("/api/admin/export/approve", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/export/execute", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/export/record", frozenset({"POST"}), "None", "None"),
         (
             "/api/admin/external-contacts",
             frozenset({"GET"}),
