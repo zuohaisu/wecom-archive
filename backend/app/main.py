@@ -20,6 +20,7 @@ from app.routers.media import MediaAccessNoStoreMiddleware
 from app.routers.media import router as media_router
 from app.routers.media_library import router as media_library_router
 from app.routers.messages import router as messages_router
+from app.routers.platform import router as platform_router
 from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.search import router as search_router
 from app.routers.settings import settings_router
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(web_router)
     app.include_router(analytics_router)
     app.include_router(messages_router)
+    app.include_router(platform_router, prefix="/api/platform")
 
     @app.get("/health/live")
     def health_live():

@@ -54,9 +54,8 @@ class Tenant(Base):
 class TenantWecomConfig(Base):
     """Per-tenant WeCom app credentials. One row per tenant for MVP.
 
-    app_secret: Phase 1 stores plaintext (internal deployment only).
-    Phase 3 must encrypt at rest using Fernet or Vault/KMS.
-    Do NOT log app_secret — it is a permanent credential.
+    app_secret and private_key_encrypted are Fernet ciphertext at rest.
+    Do NOT log either credential or their decrypted accessors.
     """
 
     __tablename__ = "tenant_wecom_configs"
@@ -83,6 +82,8 @@ class TenantWecomConfig(Base):
     corp_id = Column(String(64), nullable=False)
     agent_id = Column(String(64), nullable=False)
     app_secret = Column(Text, nullable=False)
+    # RND-311 (B2-1): encrypted PEM private key; nullable for existing rows.
+    private_key_encrypted = Column(Text, nullable=True)
 
     def set_app_secret(self, plain: str) -> None:
         """Encrypt and assign the permanent WeCom app credential for storage."""
@@ -99,6 +100,20 @@ class TenantWecomConfig(Base):
         from app.crypto import decrypt_value
 
         return decrypt_value(self.app_secret)
+
+    def set_credentials(self, secret: str, private_key_pem: str) -> None:
+        """Encrypt and assign the WeCom secret and RSA PEM private key."""
+        from app.crypto import encrypt_value
+
+        self.app_secret = encrypt_value(secret)
+        self.private_key_encrypted = encrypt_value(private_key_pem)
+
+    @property
+    def decrypted_private_key(self) -> str:
+        """Return the stored RSA PEM private key; never log this value."""
+        from app.crypto import decrypt_value
+
+        return decrypt_value(self.private_key_encrypted)
 
     callback_domain = Column(String(255), nullable=False, default="")
     is_active = Column(Boolean, nullable=False, default=True)

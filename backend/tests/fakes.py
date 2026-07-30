@@ -251,6 +251,7 @@ CREATE TABLE tenant_wecom_configs (
     agent_id TEXT NOT NULL,
     app_secret TEXT NOT NULL,
     callback_domain TEXT NOT NULL DEFAULT '',
+    private_key_encrypted TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT,
     updated_at TEXT

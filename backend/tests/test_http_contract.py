@@ -90,6 +90,7 @@ CREATE TABLE admin_users (
 CREATE TABLE tenant_wecom_configs (
     id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, corp_id TEXT NOT NULL,
     agent_id TEXT, app_secret TEXT, callback_domain TEXT,
+    private_key_encrypted TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -323,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 61  # RND-282: +1 dashboard aggregate route.
+    assert route_count == 62  # RND-311: +1 platform tenant-provisioning route.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -384,6 +385,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/messages",
             "/api/messages/{msgid}",
             "/api/monitored-accounts",
+            "/api/platform/tenants",
                 "/api/search/contacts",
                 "/api/search/messages",
                 "/api/wecom/archive/events",
@@ -536,6 +538,7 @@ def test_route_snapshot_with_real_model_names() -> None:
             "list[MonitoredAccountOut]",
             "None",
         ),
+        ("/api/platform/tenants", frozenset({"POST"}), "TenantProvisionOut", "None"),
         (
             "/api/search/contacts",
             frozenset({"GET"}),
