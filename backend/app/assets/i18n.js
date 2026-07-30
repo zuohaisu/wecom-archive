@@ -330,6 +330,7 @@
         "audit.results": "{n} 条结果",
         "audit.page": "第 {page} / {pages} 页",
         /* RND-329 media page keys — insert below */
+        "media.pageTitle": "媒体与附件", "media.breadcrumbData": "数据", "media.description": "浏览归档会话中的图片、文件、语音与视频。", "media.searchPlaceholder": "搜索文件名", "media.allTypes": "全部类型", "media.type.image": "图片", "media.type.file": "文件", "media.type.voice": "语音", "media.type.video": "视频", "media.allTime": "全部时间", "media.days7": "近 7 天", "media.days30": "近 30 天", "media.days90": "近 90 天", "media.sortNewest": "最新在前", "media.sortOldest": "最早在前", "media.sortLargest": "体积从大到小", "media.preview": "预览媒体", "media.unnamed": "未命名附件", "media.empty": "没有匹配的媒体", "media.results": "共 {n} 个附件", "media.loadMore": "加载更多", "media.loadFailed": "媒体加载失败，请稍后重试。",
         /* RND-330 contacts page keys — insert below */
 
         "console.auditMode": "审阅模式",
@@ -736,6 +737,7 @@
         "audit.results": "{n} 筆結果",
         "audit.page": "第 {page} / {pages} 頁",
         /* RND-329 media page keys — insert below */
+        "media.pageTitle": "媒體與附件", "media.breadcrumbData": "資料", "media.description": "瀏覽歸檔會話中的圖片、檔案、語音與影片。", "media.searchPlaceholder": "搜尋檔案名稱", "media.allTypes": "全部類型", "media.type.image": "圖片", "media.type.file": "檔案", "media.type.voice": "語音", "media.type.video": "影片", "media.allTime": "全部時間", "media.days7": "近 7 天", "media.days30": "近 30 天", "media.days90": "近 90 天", "media.sortNewest": "最新在前", "media.sortOldest": "最早在前", "media.sortLargest": "體積從大到小", "media.preview": "預覽媒體", "media.unnamed": "未命名附件", "media.empty": "沒有符合的媒體", "media.results": "共 {n} 個附件", "media.loadMore": "載入更多", "media.loadFailed": "媒體載入失敗，請稍後再試。",
         /* RND-330 contacts page keys — insert below */
 
         "console.auditMode": "審閱模式",
@@ -1142,6 +1144,7 @@
         "audit.results": "{n} results",
         "audit.page": "Page {page} of {pages}",
         /* RND-329 media page keys — insert below */
+        "media.pageTitle": "Media & Attachments", "media.breadcrumbData": "Data", "media.description": "Browse archived conversation images, files, voice messages, and videos.", "media.searchPlaceholder": "Search file names", "media.allTypes": "All types", "media.type.image": "Image", "media.type.file": "File", "media.type.voice": "Voice", "media.type.video": "Video", "media.allTime": "All time", "media.days7": "Last 7 days", "media.days30": "Last 30 days", "media.days90": "Last 90 days", "media.sortNewest": "Newest first", "media.sortOldest": "Oldest first", "media.sortLargest": "Largest first", "media.preview": "Preview media", "media.unnamed": "Unnamed attachment", "media.empty": "No matching media", "media.results": "{n} attachments", "media.loadMore": "Load more", "media.loadFailed": "Failed to load media. Please try again.",
         /* RND-330 contacts page keys — insert below */
 
         "console.auditMode": "Audit Mode",
