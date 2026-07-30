@@ -60,6 +60,10 @@ RND-330（contacts 页面）原计划对接 `GET /api/contacts` + `GET /api/sear
 - `backend/app/routers/external_contacts.py`（新）
 - `backend/app/main.py`（仅 `include_router` 1-2 行）
 - `backend/tests/test_external_contacts_api.py`（新）
+- **`backend/tests/test_http_contract.py`（2026-07-30 追加授权，强制随附改动）** —— 本票新增 1 个路由，必须同步：① 第 326 行 `route_count`（**先跑 `make verify` 读出当前真实基线 N，改成 N+1；截至撰写时 main 上是 53，但以你实际读到的为准，禁止写死数字**）；② expected path 集合追加 `/api/admin/external-contacts`；③ snapshot 列表追加对应条目。**不得**改动他票条目。
+- **`backend/tests/test_rnd280_rbac_scaffold.py`（2026-07-30 追加授权，强制随附改动）** —— 第 77-86 行 `test_require_role_is_attached_only_to_authorized_admin_routes` 是**闭世界白名单**：它遍历 `app/routers/*.py`，对不在 `{audit.py, media_library.py, users.py}` 里的文件断言 `"Depends(require_role" not in source`。本票的 `external_contacts.py` 用了 `require_role()`，**不加进白名单必然失败**。只在白名单加本票 router（照 `audit.py`/`media_library.py` 的 `assert "Depends(require_role())" in source` 写法），**不得**放松既有条目断言。
+
+> **为什么这两个文件属于本票**（2026-07-30 更正）：首轮实现漏了它们，QA 判 FAIL 并建议"另开契约维护票"——那个建议是错的，拆开会让 `main` 在两票之间持续红灯。契约测试同步是新增路由的**强制随附改动**，不是别人的活。详见 `docs/ticket-autopilot-workflow.md` §3.3。
 
 **只读、绝不可写：**
 - `backend/app/db/models.py`（不改模型）
@@ -74,16 +78,23 @@ RND-330（contacts 页面）原计划对接 `GET /api/contacts` + `GET /api/sear
 - **AC-1 真实数据**：列表由 `external_contacts` 表真实查询填充（非 mock）。
 - **AC-2 三种筛选生效**：`company`、`tags`、`owner_wecom_userid` 各自独立筛选正确（有测试）。
 - **AC-3 标签筛选精确匹配（关键）**：筛 `"VIP"` 不得连带命中标签含 `"VIP2026"` 的行——必须有一条测试构造这个反例并断言不误命中。
-- **AC-4 owner_display_name 经既有函数产出**：代码可见 `from app.display_names import resolve_person_display_name` 的 import 与调用；不是本票自己写的展示名逻辑。
+- **AC-4 owner_display_name 经既有函数产出、且参数传对（2026-07-30 加强）**：代码可见 `from app.display_names import resolve_person_display_name` 的 import 与调用，**且实参顺序/语义正确**。
+  > ⚠️ **首轮实现疑似在此出错，务必看清签名**：`resolve_person_display_name(raw_id: Optional[str], name: Optional[str] = None)`——第二个参数是**展示名**（通常取自 `Contact.name`），**不是 `tenant_id`**。函数体是「`name` 非空就直接返回 `name`，否则回退到 `raw_id`」。若误传 `tenant_id` 作第二个参数，每一行的 `owner_display_name` 都会渲染成**租户 UUID**，而且不报错——页面上看起来"有值"，实际全是错的。
+  > 归属员工的真实展示名需要从 `Contact` 表按 `owner_wecom_userid` 查（参考 `conversation_membership.py` 的 `_load_display_names_for_ids` 批量取法，避免 N+1），查不到时传 `None` 让它回退到 raw_id。
+  - **必须有测试断言**：构造一条 `Contact`（`wecom_userid=owner_wecom_userid`, `name="张三"`）+ 一条 `ExternalContact`，断言返回的 `owner_display_name == "张三"`；再构造一条无对应 `Contact` 的，断言回退为 `owner_wecom_userid` 本身。**断言 `owner_display_name != tenant_id`**（防住上面那个误传 bug）。
 - **AC-5 分页**：`offset`/`limit`（或等价参数）存在且生效，大于总数时不报错、返回空列表而非异常。
 - **AC-6 租户隔离**：跨租户请求不返回其他租户的 `ExternalContact` 行（有测试直接构造两个租户的数据并验证隔离）。
-- **AC-7 回归**：`make verify` 全绿；`test_architecture_boundary.py` 通过。
+- **AC-7 回归（含契约测试同步）**：`make verify` **全绿**；`test_architecture_boundary.py` 通过；`test_http_contract.py` 与 `test_rnd280_rbac_scaffold.py` 均已按上方授权同步且通过。
+  > 若 `make verify` 因**他票的在途未提交改动**而失败（本项目并行方案是共享工作树，见 `docs/ticket-autopilot-workflow.md` §3.4）：先 `git status --porcelain` 分离归因，在交付报告里如实说明"哪些失败属于本票、哪些来自他票"，**不要**为了让整棵树变绿去改他票的文件。
 
 ## 验证方式（Verification — 确定性闸）
 ```bash
 make verify
 .venv/bin/python -m pytest backend/tests/test_external_contacts_api.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py -q          # 契约同步后必须绿
+.venv/bin/python -m pytest backend/tests/test_rnd280_rbac_scaffold.py -q   # 白名单同步后必须绿
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
+git status --porcelain    # 先看清哪些改动是自己的（共享工作树可能有他票在途改动）
 git diff --stat -- backend/app/db/models.py backend/app/services/external_contact_sync.py backend/app/db/external_contacts.py backend/app/display_names.py backend/app/routers/conversations.py backend/app/routers/search.py   # 必须全无输出
 ```
 通过 = 7 条 AC 全满足且上述命令 Exit Code 均为 0。

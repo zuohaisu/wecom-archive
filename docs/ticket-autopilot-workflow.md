@@ -71,6 +71,30 @@ RND-326 是**唯一**允许写共享文件的工单，它一次性把 4 个页�
 - **导航自动点亮：** `sidenav.py` 按「路由是否已注册」决定导航项渲染成链接还是灰色占位（见 RND-326 AC-4）。页面工单注册自己的路由后，导航项**自动**变为可点击 —— 页面工单因此完全不需要碰 `sidenav.py`。
 - **拆所有权时要找到"实际调用点"，不只是"内容所在的文件"（2026-07-29 实例）：** 给 RND-326 划所有权清单时，只列了 `review_console.html`（模板文件本身），漏了真正调用 `render_template("review_console", ...)` 的两处代码——`backend/app/routers/web.py`（生产路由）与 `backend/tests/_rnd216_web_shims.py`（测试 shim）。模板加了 `__SIDENAV__` token 后，这两处不跟着传 `sidenav=` 参数就会 `KeyError`。开发 agent 正确地停在 `BLOCKED_NEEDS_HUMAN`，而不是猜测着去改清单外的文件——**这是设计里的期望行为**，说明"文件所有权錯峰"本身没问题，只是这次划分时漏看了模板与其调用点之间的间接依赖。已授权补齐，改动严格限定为各新增一行 `sidenav=render_sidenav(...)`。以后拆所有权前，对任何"新增模板变量"类工单，先 `grep -rn 'render_template("<模板名>"' backend/` 把全部调用点找全，再定清单。
 
+### 3.3 ⚠️ 全项目不变量：新增路由必须同步两个契约测试
+
+**这不是可选项，是数学上的必然。** 任何新增路由的工单，**必须**在自己的所有权清单里包含下面两个文件（**范围严格限定为下述最小改动**），否则 `make verify` 必然红，且不是实现的问题：
+
+| 文件 | 为什么必须改 | 允许的改动范围 |
+|---|---|---|
+| `backend/tests/test_http_contract.py` | 第 326 行 `assert route_count == <N>` 是**硬编码基线**；每新增一个路由必然对不上。另有 expected path 集合与 snapshot 列表两处需同步。 | 只改 `route_count` 数值（**读当前真实值 N，改 N+本票新增数**，禁止写死具体数字）+ 在 expected/snapshot 里追加本票的新路由条目。**不得**删改他票的条目。 |
+| `backend/tests/test_rnd280_rbac_scaffold.py` | 第 77-86 行 `test_require_role_is_attached_only_to_authorized_admin_routes` 是**闭世界白名单**：它遍历 `app/routers/*.py`，对不在 `{audit.py, media_library.py, users.py}` 名单里的文件断言 `"Depends(require_role" not in source`。**任何新 router 只要用了 `require_role` 就必然失败。** | 只在白名单里加本票的 router 文件名 + 对应断言。**不得**放松或删除既有条目的断言。 |
+
+**判定纪律：**
+- 新增路由但**没改** `route_count` → 是实现不完整，判 **FAIL（`REGRESSION`）**，不是"契约测试该由别人维护"。
+- 契约测试更新**不可以**拆成独立工单——那会让 `main` 在两张票之间持续处于红灯状态，违反「main 始终可部署」。它是新增路由的**强制随附改动**。
+- 只用 `require_html_session` 的页面路由（如 4 张 R1 页面票）**不触发** RBAC 白名单，但**仍然触发** `route_count`。
+
+> **沿革（2026-07-29）**：RND-288 首轮 QA 因此判 FAIL 并建议"另开契约维护票"——**该建议是错的**（会让 main 长期红灯），但 QA 判 FAIL 本身是对的（`make verify` 确实红）。根因是本项目自己写的提示词漏了这条随附改动；反观更早的 WorkBuddy 提示词（如 `tasks/RND-311-dev-prompt.md` §2「契约测试三处同步」）**本来就写对了**，是新体系没继承这个约定。已回填进本节与 `tasks/_templates/dev-prompt-template.md`。
+
+### 3.4 ⚠️ `make verify` 在共享工作树上会包含他票的在途改动
+
+本项目并行方案是「直接在 main 上、靠文件所有权错峰」（§2），因此**多个 agent 的未提交改动会同时存在于同一个工作树**。`make verify` 跑的是**整棵树**，不是单张票的增量。
+
+后果：QA agent 看到的 `make verify` 失败**可能来自他票**。RND-288 首轮 QA 就把 `+3 routes`（含 `/admin/users`、`/admin/audit-logs`——那是 RND-327/328 的路由，不是 RND-288 的）全部归因给了 RND-288，而 RND-288 实际只新增 1 个路由。
+
+**QA agent 必须先分离归因**：`git status --porcelain` 列出全部改动文件，确认哪些属于被验工单；若失败的断言指向清单外文件带来的路由/契约变化，如实写进 `notes` 并**只**就本票应负责的部分判定，不要把他票的在途改动记在本票账上。
+
 ## 4. 风险分级与自动化边界
 
 | 等级 | 含义 | 处理 |

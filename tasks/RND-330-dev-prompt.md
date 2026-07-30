@@ -65,6 +65,10 @@
 - `backend/app/assets/i18n.js` —— **仅限 `/* RND-330 contacts page keys */` 锚点正下方**
 - `backend/tests/test_contacts_page.py`（新）
 
+**⚠️ 强制随附改动（2026-07-30 追加授权）：本票新增 1 个路由，因此 `backend/tests/test_http_contract.py` 也属于本票拥有清单** —— 必须同步 ① 第 326 行 `route_count`（**先跑 `make verify` 读当前真实基线 N，改成 N+1，禁止写死数字**）② expected path 集合追加本票新路由 ③ snapshot 列表追加对应条目。**不得**改他票条目。
+> 本票的页面路由用 `require_html_session`（不是 `require_role`），因此**不触发** `test_rnd280_rbac_scaffold.py` 的 RBAC 白名单，那个文件不用改。
+> 契约测试同步不是独立工单——拆开会让 `main` 在两票之间红灯。详见 `docs/ticket-autopilot-workflow.md` §3.3。
+
 **只读、绝不可写：** `sidenav.py`、`main.py`、`design-system.css`、`routers/external_contacts.py`、`routers/conversations.py`、`routers/search.py`、其他 `admin_*_page.py`、其他锚点区间。
 
 > 若发现必须改他人文件 → **停止**，`BLOCKED_NEEDS_HUMAN`。
