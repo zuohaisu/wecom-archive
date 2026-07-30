@@ -323,7 +323,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 53  # RND-302: +2 settings routes; RND-297: +1 preferences write route; media download route: +1.
+    assert route_count == 55  # RND-302: +2 settings routes; RND-297: +1 preferences write route; media download route: +1; RND-327: +1 admin users page; RND-328: +1 admin audit-logs page.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -334,6 +334,7 @@ def test_routers_are_registered(client: TestClient) -> None:
     )
     expected = sorted(
         [
+            "/admin/audit-logs",
             "/admin/conversations",
             "/admin/diagnostics/reachability",
             "/admin/forgot-password",
@@ -343,6 +344,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/reset-password",
             "/admin/search",
             "/admin/settings",
+            "/admin/users",
             "/api/admin/audit-logs",
             "/api/admin/media",
             "/api/admin/media/{media_id}/download",
@@ -413,6 +415,7 @@ def test_route_snapshot_with_real_model_names() -> None:
             )
         )
     expected = [
+        ("/admin/audit-logs", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/conversations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/forgot-password", frozenset({"GET"}), "None", "HTMLResponse"),
@@ -422,6 +425,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/reset-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/search", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/settings", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         ("/api/admin/media", frozenset({"GET"}), "MediaLibraryPage", "None"),
         (
