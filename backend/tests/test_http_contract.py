@@ -323,7 +323,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 57  # RND-302: +2 settings routes; RND-297: +1 preferences write route; media download route: +1; RND-327: +1 admin users page; RND-328: +1 admin audit-logs page; RND-288: +1 external contacts route; RND-329: +1 admin media page.
+    assert route_count == 58  # RND-302: +2 settings routes; RND-297: +1 preferences write route; media download route: +1; RND-327: +1 admin users page; RND-328: +1 admin audit-logs page; RND-288: +1 external contacts route; RND-329: +1 admin media page; RND-330: +1 admin contacts page.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -336,6 +336,7 @@ def test_routers_are_registered(client: TestClient) -> None:
         [
             "/admin/audit-logs",
             "/admin/conversations",
+            "/admin/contacts",
             "/admin/diagnostics/reachability",
             "/admin/forgot-password",
             "/admin/login",
@@ -419,6 +420,7 @@ def test_route_snapshot_with_real_model_names() -> None:
     expected = [
         ("/admin/audit-logs", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/conversations", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/contacts", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/forgot-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/login", frozenset({"GET"}), "None", "HTMLResponse"),
