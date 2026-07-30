@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from sqlalchemy.orm import Session
 
+from app.audit import write_audit
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.message_type_registry import ParserStrategy, get_parser_strategy
 from app.revoke_reconciliation import (
@@ -587,6 +588,18 @@ def run_decrypt_once(
     # repair_missing_recipients above and the main query at the top of
     # this function.
     summary.revocations_reconciled = reconcile_pending_revocations(session, tenant_id)
+
+    # One batch-level event is sufficient evidence of each private-key access
+    # while avoiding an audit row (and sensitive operational metadata) per
+    # message. write_audit itself is fail-safe and participates in this commit.
+    write_audit(
+        session,
+        tenant_id=tenant_id,
+        action="decrypt.completed",
+        object_type="key_version",
+        object_id=str(expected_pubkey_ver),
+        detail={"publickey_ver": expected_pubkey_ver, "scanned": summary.scanned},
+    )
 
     # --- Commit all changes ---
     try:

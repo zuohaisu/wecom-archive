@@ -76,6 +76,7 @@ _FLAT_SERVICE_MODULES = {
     "app.email",
     "app.html_helpers",
     "app.i18n_assets",
+    "app.key_provider",
     "app.media_classification",
     "app.media_download",
     "app.media_event_dispatch",

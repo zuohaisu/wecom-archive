@@ -55,6 +55,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from app.db.models import TenantWecomConfig
+from app.key_provider import KeyProviderError, get_key_provider
 from app.sdk import wecom_sdk
 from app.services.decrypt_worker import (  # noqa: F401 -- re-exported for backward-compat imports
     DecryptCommitError,
@@ -175,7 +176,9 @@ def main() -> None:
     lib_path = _require_env("WECOM_SDK_LIB_PATH")
     corp_id = _require_env("WECOM_CORP_ID")
     secret = _require_env("WECOM_ARCHIVE_SECRET")
-    private_key_path = _require_env("WECOM_PRIVATE_KEY_PATH")
+    # Retained as the local_file compatibility fallback. kms_envelope reads
+    # the tenant-scoped encrypted value from KeyVersion instead.
+    private_key_path = os.environ.get("WECOM_PRIVATE_KEY_PATH", "").strip()
     expected_pubkey_ver_str = _require_env("WECOM_PUBLIC_KEY_VERSION")
 
     try:
@@ -188,20 +191,7 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # --- 2. Load RSA private key ---
-    try:
-        private_key = _load_private_key(private_key_path)
-    except FileNotFoundError:
-        print(
-            f"[FAIL] Private key file not found: {os.path.basename(private_key_path)}",
-            flush=True,
-        )
-        sys.exit(1)
-    except Exception as exc:
-        print(f"[FAIL] Failed to load private key: {exc}", flush=True)
-        sys.exit(1)
-
-    # --- 3. Resolve tenant (before SDK init — RND-222 tenant-scope audit
+    # --- 2. Resolve tenant (before SDK init — RND-222 tenant-scope audit
     # fix; fail fast, matching sync_wecom_archive_once.py and
     # download_wecom_media_once.py's existing tenant-first ordering) ---
     engine = create_engine(database_url)
@@ -209,6 +199,18 @@ def main() -> None:
 
     with Session(engine) as session:
         tenant_id: str = _require_tenant_id(session, corp_id)
+
+    # --- 3. Resolve the tenant/version private key. The provider owns all
+    # file/database key material handling and intentionally exposes no detail
+    # on failure, so a PEM can never reach CLI output.
+    with Session(engine) as session:
+        try:
+            private_key = get_key_provider(
+                session, legacy_private_key_path=private_key_path or None
+            ).get_private_key(tenant_id, expected_pubkey_ver)
+        except KeyProviderError:
+            print("[FAIL] Private key retrieval failed", flush=True)
+            sys.exit(1)
 
     # --- 4. Initialise WeCom SDK ---
     try:
