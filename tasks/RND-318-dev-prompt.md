@@ -1,154 +1,134 @@
-# RND-318 开发 agent 执行提示词
-> 面向开发 agent（单人端到端实现 RND-318 / C3-1 留存配置）。
-> 本文件即你的完整 brief。全程不执行 git commit / push（由用户本人操作）。只改工作树，交用户 Review。
+[Goal check] This work advances 开发（Development） by 交付按租户独立配置的消息保留策略表 + 读写端点，为首次配置向导（RND-301）与到期清理任务（RND-319）提供数据地基。
 
-## 一、任务（一句话）
-为「数据留存策略」提供**留存配置（保留天数 / 锁定策略）的读写端点**，配置以**租户级**粒度存储于 F0 配置中心的 KV。
-后端-only（标签 `backend`，Epic RND-272 C3 数据留存策略 的 C3-1 子票）；**不**实现到期锁定/清理逻辑（那是 C3-2 / RND-319 的职责）。**不**自建配置中心（属 F0 / RND-244）。
+# RND-318 开发提示词（Developer Prompt）
 
-## 二、精确落点 / 依赖
-### 依赖 F0（RND-244）—— 配置中心 KV 存储（硬前置闸门）
-- RND-318 在 Linear 为 `[BLOCKED: F0]`，描述明确 `Dependencies F0`，且 scope 为「留存配置表/**租户设置**」、non-goals 为「不做跨租户统一策略（每租户独立）」、被 A8/A9 引用 → 设计意图是**每租户一份留存策略，存于 F0 配置中心租户级 KV**（与 RND-304 的 `onboarding_completed` 同属 F0 租户 KV 范畴）。
-- **已核实 F0 配置中心（RND-244）当前未合并**（grep 全仓确认）：
-  - `backend/app/db/models.py` 无通用 config 表（仅有 `TenantWecomConfig`，是企微连接配置，非 F0 配置中心）；
-  - `backend/app/services/` 无 `config_service`；
-  - `_FLAT_SERVICE_MODULES`（`tests/test_architecture_boundary.py`）无 config 模块；
-  - 无 `backend/app/routers/config.py` / `routers/settings.py`（后者 RND-302 尚未合并）；
-  - `app/audit.py:50` 的 `TENANT_CONFIG = "tenant_config"` 仅是审计动作类型常量，非配置存储；
-  - `app/settings.py` 的 `Settings` 类是 env 级 `pydantic-settings` 封装，非租户 KV。
-- **禁止**：自建 `retention_policies` 表 / 迁移 / 配置服务模块（越界即判失败，且会撞 RND-287/297/306 的 `0020` 迁移定序雷）。
-- **因此 F0 是硬前置**：开工必须校验 F0 配置服务已合并，否则 **STOP 并报告 BLOCKED**（见第三节 Phase 0）。
+> 开始前必须先读 `DEV_AGENT_RULES.md` 与 `docs/ticket-autopilot-workflow.md`，并在工作开头输出上面那行 `[Goal check]`。
 
-### 落点（F0 已合并的前提下）
-- **发现 F0 配置服务 API（Phase 0，必做）**：在 `app/` 下 grep `def get_config` / `def set_config` / `class ConfigStore` / `ConfigService` / `routers/config`；常见落点 `app/config_service.py` 或 `app/services/config_service.py`。读取其公开签名（期望形如 `get_config(tenant_id, key, default=...)` / `set_config(tenant_id, key, value)`，或同语义的 `config_get`/`config_set`）。**以实际模块为准**，下文用 `get_config`/`set_config` 作占位名。
-- `backend/app/routers/retention.py`（**新建**，distinct 文件名，避免与 RND-302 未来的 `settings.py` 撞名）：`retention_router = APIRouter()` + 2 端点。
-- `backend/app/main.py`：在现有 `app.include_router(...)` 列表（L97–108 区域）追加 `app.include_router(retention_router, prefix="/api/admin/settings")`。
-- `backend/app/schemas/retention.py`（**新建**）：`LockStrategy` / `RetentionConfigOut` / `RetentionConfigUpdate`。
-- `backend/tests/test_http_contract.py`：三处同步（见第五节）。
-- **不**新建 DB 模型 / **不**写迁移 / **不**改 `_FLAT_SERVICE_MODULES`（存储归 F0，RND-318 零架构边界改动）。
+## ⚠️ 2026-07-31：本版设计取代 2026-07-29 的旧稿（PM 决策，附理由）
 
-## 三、阶段一：复现 + 测量（RED + Phase 0 硬闸门）
-1. 启动环境；解释器用 `../.venv/bin/python`，跑命令前 `cd backend && set -a && source .env && set +a`（本仓 `app/settings.py` 的 `DatabaseSettings` 是裸 `BaseSettings`，**不自动读 `.env`**，必须 source 才能拿到带密码的 `DATABASE_URL`；无 DB 时涉及 DB 的测试按 `if not DATABASE_URL: skip` 处理）。
-2. **Phase 0 — F0 合并校验（最关键，先做）**：
-   ```bash
-   grep -rn "def get_config\|def set_config\|class ConfigStore\|ConfigService\|routers/config" app/ | grep -viE "test"
-   ```
-   - **若 grep 无命中** → F0 未合并。**STOP，不写任何实现代码**，输出 BLOCKED 报告（列证据：无 config_service / 无 routers/config.py / models.py 无通用 config 表），并向用户说明「RND-318 须等 F0/RND-244 合并后由开发 agent 重跑本提示词」。结束。
-   - **若 grep 命中** → 读取实际模块与 `get_config`/`set_config` 真实签名，后续以真实符号替换下方占位名。
-3. （F0 合并后）基线：`GET /api/admin/settings/retention` 应返回 fail-safe 默认值（`retention_days=365`、`lock_strategy="lock"`）；`PUT` 写入后 `GET` 返回新值。
+本文件此前的版本假设留存配置必须存于 F0（<issue>RND-244</issue> 配置中心）的租户级 KV，理由是"和 RND-304 的 `onboarding_completed` 同属 F0 KV 范畴"。**重新核实后判定该假设不成立，本票改为独立数据表**，理由：
+1. `RND-244`（配置中心）**至今仍是 In Progress，未 Done**，且是一个 12 张子票的完整 epic——把 C3-1 挂在它身上意味着一个小票被一个大 epic 的进度锁死，ETA 不可控。
+2. 留存策略是**合规关键数据**（保留天数 + 锁定语义），字段结构固定、需要唯一约束（一租户一份）+ 校验（天数范围）+"锁定后不可逆"这种数据库层面的完整性保证——这比 RND-304 那种"一个布尔标志位"复杂得多，用字符串 KV 存并不合适。
+3. 工单标题本身写的是「留存配置（**表**/租户设置）」——"表"是标题里就写明的可选落点，不是本次臆造。
 
-## 四、阶段二：实现（GREEN，最小变更）
-### 路 A — schema（新建 `schemas/retention.py`）
-```python
-from __future__ import annotations
-from enum import Enum
-from typing import Optional
-from pydantic import BaseModel, Field
+**若这个判断有误（例如 Haisu 确认就是要挂 F0 KV），按下方 Escalation 处理，不要自行改回旧设计。**
 
-class LockStrategy(str, Enum):
-    LOCK = "lock"          # 到期后锁定（保留数据，禁止访问/导出）—— 默认，最安全
-    DELETE = "delete"      # 到期后删除
-    ANONYMIZE = "anonymize"  # 到期后匿名化（去标识）
+## ⚡ 立即执行，不要询问意图
 
-class RetentionConfigOut(BaseModel):
-    retention_days: int
-    lock_strategy: LockStrategy
+你现在收到的不是一份要讨论或确认的文档，而是一个**已经批准、待立即执行的任务指令**。你就是 RND-318 的开发 agent，任务从你读到这句话开始。不要问"你希望我做什么"；不要先输出计划再等确认；直接开始下面的实现清单。唯一允许停下的情况是触发「人工点位」里定义的 `BLOCKED_NEEDS_HUMAN`。
 
-class RetentionConfigUpdate(BaseModel):
-    # 部分更新：任一字段可省略
-    retention_days: Optional[int] = Field(default=None, ge=1, le=3650)
-    lock_strategy: Optional[LockStrategy] = None
+---
+
+## 任务身份
+- 工单：RND-318「C3-1 留存配置（表/租户设置）」｜父 Epic RND-272（C3 留存与清理）
+- 优先级：Medium｜风险等级：**R2**（新表 + 新迁移；本票是合规留存策略的地基，一旦有租户依赖该配置做清理，误改会有数据影响）｜milestone：R2 · 开源发布闭环
+
+## 背景与项目现状（已实地核实）
+
+全仓 `grep -rln "retention\|留存" backend/app/` **无任何既有留存配置代码**——本票是全新领域，没有可复用的服务模块，但**鉴权/迁移的基础设施都已就绪**，遵循既有范式即可：
+- 租户内鉴权范式：`backend/app/routers/users.py:33-38` 的 `require_role()`，`tenant_id` 从会话解包，不接受请求参数。
+- **RBAC 白名单是闭世界测试**：`backend/tests/test_rnd280_rbac_scaffold.py:77-86` 断言只有 `{audit.py, media_library.py, users.py}` 可以出现 `require_role`。**本票新建 router 会触发该断言，必须同步白名单**（见 `docs/ticket-autopilot-workflow.md` §3.3）。
+
+## 迁移序位（重要）
+
+当前 alembic head = **0026**（`0026_export_approval_tokens.py`，来自 <issue>RND-316</issue>）。本票 = `0027`。**实现时先 `git pull` 确认实际 head 仍是 0026**；若已漂移（本波次其他票也可能已推进 head），按实际 head 顺延并在 QA Summary 注明，**不要**硬凑 `0027` 这个文件名如果实际前置版本号已经变化。
+
+**❗ 本项目高频踩坑：**
+- 架构冻结 D1：纯后端。
+- **本票不碰 `platform.py`**——本波次 RND-307/310/312/313/314 在改那个文件，本票是独立的租户内配置领域，走 `require_role`，与平台超管无关，不要混淆两套鉴权模型。
+
+## 目标（Goal）
+交付一张按租户独立的留存策略表（保留天数 + 是否锁定）+ 读写端点，供首次配置向导写入初始策略、供未来的到期清理任务读取。
+
+## 范围边界
+
+**In scope：**
+1. **迁移** `0027_retention_config.py`：新表 `retention_configs`（`id`/`tenant_id` FK **唯一约束**（一租户一份配置）/`retention_days` Integer NOT NULL/`is_locked` Boolean NOT NULL default False/`created_at`/`updated_at`）。
+2. `app/db/models.py` **新增** `RetentionConfig` ORM 类（紧邻其他租户级配置模型，仿 `TenantWecomConfig` 的风格）。
+3. `app/routers/retention.py`（**新建**）：
+   - `GET /api/admin/retention-config`：`require_role()`（任意已登录租户角色可读），返回当前租户配置；**若尚未配置**（首次访问，本票不预置默认行）→ 返回 `configured: false` + `retention_days: null`，不是 404（前端向导需要能区分"未配置"和"服务器错误"）。
+   - `PUT /api/admin/retention-config`：`require_role("admin", "owner")`，请求体 `{"retention_days": int, "lock": bool}`。
+     - `retention_days` 校验：`1 <= retention_days <= 3650`（10 年上限，防误配），非法值 → 422。
+     - **一旦 `is_locked=True`，后续任何 `PUT` 一律拒绝**（423 Locked），即便请求体想把 `lock` 改回 `false`——本票**不提供解锁机制**（解锁是更高权限的独立范围，本票不做）。首次 `PUT` 若 `lock=true` 则本次写入后立即生效锁定。
+4. 测试：`backend/tests/test_rnd318_retention_config.py`。
+
+**Out of scope（显式非目标）：**
+- **不做到期清理任务本身**（<issue>RND-319</issue>，C3-2 到期锁定/清理任务——本票只交付配置表，不消费它触发清理）。
+- **不做跨租户统一策略**——每租户独立（ticket 原文 Non-goals 已写明）。
+- **不提供解锁端点**——锁定后不可逆，是本票的既有约束，不是遗漏。
+- 不做前端向导页面（属 <issue>RND-301</issue>）。
+- 不依赖 F0/<issue>RND-244</issue>（配置中心）——见本文件开头的设计变更说明。
+
+**本工单拥有的文件（只许写这些）：**
+- `backend/alembic/versions/0027_retention_config.py`（新，若 head 漂移则改用实际顺延版本号）
+- `backend/app/db/models.py` —— **仅新增** `RetentionConfig` 类
+- `backend/app/routers/retention.py`（新）
+- `backend/app/schemas/retention.py`（新）
+- `backend/app/main.py` —— **仅新增** 1 行 import + 1 行 `include_router`
+- `backend/tests/test_rnd318_retention_config.py`（新）
+- `backend/tests/test_rnd280_rbac_scaffold.py` —— 同步白名单（新增 `retention.py`），只加必要条目
+- `backend/tests/test_http_contract.py` —— 契约同步（新增 2 个路由：GET + PUT）
+
+**只读、绝不可写：** `app/routers/users.py`（只参考范式）、`app/routers/platform.py`（他票拥有）、其他票拥有的一切文件。
+
+> 若发现必须改他人拥有的文件 → **停止**，`BLOCKED_NEEDS_HUMAN`。
+
+## 验收标准（Acceptance Criteria）
+
+- **AC-1 策略可配**：`PUT` 合法请求 → `retention_configs` 表出现/更新对应行；`GET` 返回刚写入的值。
+- **AC-2 未配置态可区分**：从未 `PUT` 过的租户 `GET` → `configured: false`，不是 404 / 500。
+- **AC-3 锁定后不可再改（关键）**：`PUT` 一次 `lock=true` 后，任何后续 `PUT`（无论内容）→ 423，且**数据库中的值确实未被改动**（须有测试验证锁定后再 `PUT` 不同 `retention_days`，查库确认原值不变）。
+- **AC-4 输入校验**：`retention_days` ≤ 0 或 > 3650 → 422；须有边界测试（0、3651、负数）。
+- **AC-5 租户隔离**：`tenant_id` 只来自 `require_role()` 会话解包；跨租户反例测试——租户 A 的配置对租户 B 不可见/不可改。
+- **AC-6 鉴权分级**：`GET` 任意角色可读；`PUT` 仅 `admin`/`owner`（普通角色 `PUT` → 403）。
+- **AC-7 迁移可逆**：`upgrade`/`downgrade` 均可执行；`alembic check` 无 drift。
+- **AC-8 契约同步 + RBAC 同步 + 回归**：`test_http_contract.py`（route_count 当前基线 +2）与 `test_rnd280_rbac_scaffold.py`（白名单加 `retention.py`）均已同步；`make verify` 全绿；`test_architecture_boundary.py` 通过。
+
+## 验证方式（Verification — 确定性闸）
+```bash
+git pull   # 确认 alembic head，见「迁移序位」
+make verify
+.venv/bin/python -m pytest backend/tests/test_rnd318_retention_config.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
+.venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
+.venv/bin/python -m alembic check    # AC-7：无 drift
+git diff -- backend/app/db/models.py    # 人工核对：只新增 RetentionConfig
+git status --porcelain
+git log origin/main..HEAD    # 必须无输出
 ```
 
-### 路 B — retention 路由（新建 `routers/retention.py`）
-```python
-from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException
-from app.auth import require_role
-from app.schemas.retention import (
-    LockStrategy, RetentionConfigOut, RetentionConfigUpdate,
-)
-# F0 配置服务（RND-244 合并后存在；以实际模块名为准）：
-from app.config_service import get_config, set_config  # 或 app.services.config_service
+## 依赖（Dependencies）
+无剩余前置（"F0" 通用基础鉴权/租户脚手架 RND-276~280 均已 Done；本票**不**依赖 RND-244 配置中心，见开头设计变更说明）。本票 **blocks** <issue>RND-301</issue>（A9-1 首次向导写留存策略）与 <issue>RND-319</issue>（C3-2 到期清理任务）。
 
-retention_router = APIRouter()
+## 完成定义（Definition of Done）
+- [ ] AC-1 ~ AC-8 全满足，每条有测试
+- [ ] `make verify` 全绿
+- [ ] `git status` 只显示本票拥有的文件
+- [ ] QA Summary 已产出，说明表结构字段（供 RND-301/RND-319 对接）
+- [ ] **未 commit、未 push**
 
-_KEY_DAYS = "retention_days"
-_KEY_STRATEGY = "retention_lock_strategy"
-_DEFAULT_DAYS = 365
-_DEFAULT_STRATEGY = LockStrategy.LOCK
+## 风险与回滚
+- **风险 1（关键）**：锁定语义实现不严，锁定后仍可被改——由 AC-3 防守，这是本票唯一带"不可逆"性质的地方，必须扎实。
+- 风险 2：迁移版本号与实际 head 不符——实现前先 `git pull` 核实。
+- 回滚：`downgrade` 迁移 + `git checkout -- backend/app/db/models.py backend/app/main.py`；已锁定的行不受迁移回滚影响（回滚只删表结构，不涉及"锁定不可逆"的应用层语义）。
 
+## 人工点位
+- **Trigger**：Haisu 置 In Progress。
+- **Gate（R2）**：涉及新迁移，**Haisu 需人工审阅迁移文件**后才可 approve commit。
+- **Escalation**：若"锁定策略"的产品含义与本票假设（一次性锁定、无解锁端点）不符，或 Haisu 认为本票确实应该依赖 F0/RND-244 配置中心而非独立表 → `BLOCKED_NEEDS_HUMAN`，说明具体歧义，不要自行改回旧设计或猜测另一种语义。
 
-def _read_config(tenant_id: str) -> RetentionConfigOut:
-    """读取租户留存配置；缺失时返回 fail-safe 默认值，绝不抛 500。"""
-    try:
-        days_raw = get_config(tenant_id, _KEY_DAYS, default=None)
-        days = int(days_raw) if days_raw not in (None, "") else _DEFAULT_DAYS
-    except Exception:
-        days = _DEFAULT_DAYS
-    try:
-        strat_raw = get_config(tenant_id, _KEY_STRATEGY, default=None)
-        strat = LockStrategy(strat_raw) if strat_raw else _DEFAULT_STRATEGY
-    except Exception:
-        strat = _DEFAULT_STRATEGY
-    return RetentionConfigOut(retention_days=days, lock_strategy=strat)
+## 开发 agent 执行指引
+1. 读 `DEV_AGENT_RULES.md`、`docs/ticket-autopilot-workflow.md`、`app/routers/users.py:33-38`（`require_role` 范式）、`app/db/models.py`（`TenantWecomConfig` 作为新表风格参考）。
+2. `git pull` 确认 alembic head，写迁移。
+3. 新增 `RetentionConfig` 模型 + `retention.py` router（GET/PUT）。
+4. 挂载到 `main.py`。
+5. 写测试覆盖 AC-1~AC-6（**AC-3 锁定不可逆是重点**）。
+6. 同步 `test_http_contract.py` 与 `test_rnd280_rbac_scaffold.py`。
+7. 跑全部验证命令，输出 QA Summary + `git status`，**不 commit**。
 
-
-@retention_router.get("/retention", response_model=RetentionConfigOut)
-def get_retention(auth=Depends(require_role())):
-    """读取当前租户留存配置（任意 admin 可读）。"""
-    _, tenant_id = auth
-    return _read_config(tenant_id)
-
-
-@retention_router.put("/retention", response_model=RetentionConfigOut)
-def update_retention(
-    payload: RetentionConfigUpdate,
-    auth=Depends(require_role("admin", "owner")),
-):
-    """更新留存配置（敏感操作，限 admin/owner）。部分更新：只写提供的字段。"""
-    _, tenant_id = auth
-    if payload.retention_days is not None:
-        set_config(tenant_id, _KEY_DAYS, str(payload.retention_days))
-    if payload.lock_strategy is not None:
-        set_config(tenant_id, _KEY_STRATEGY, payload.lock_strategy.value)
-    return _read_config(tenant_id)
-```
-- **租户隔离（fail-closed）**：`tenant_id` 仅来自 `require_role()` 解包，**绝不**接受请求参数。
-- **fail-safe 读取**：F0 KV 缺键 / 解析异常一律回落默认值，不抛 500。
-- **部分更新**：`PUT` 只写提供的字段，未提供的保留原值（先读后写可由 F0 层保证；若 F0 `set_config` 为全量覆盖，则先 `_read_config` 取当前再合并再写）。
-- **最小暴露**：响应只含 `retention_days` / `lock_strategy`，不泄露 F0 KV 其它键。
-
-### 路 C — main.py 注册
-在 `app.include_router(...)` 列表（现有 `users_router` / `media_library_router` 之后，L104–105 附近）追加：
-```python
-from app.routers.retention import retention_router
-app.include_router(retention_router, prefix="/api/admin/settings")
-```
-> 注：用 `prefix="/api/admin/settings"` + 路由 `/retention` → 完整 URL `GET/PUT /api/admin/settings/retention`。**不要**复用 RND-302 未来的 `settings.py` 文件名（避免并行未合并冲突），本票独立 `retention.py`。
-
-## 五、阶段三：验证（GREEN + 回归 + make verify）
-1. 功能验证（F0 合并后）：
-   - `GET /api/admin/settings/retention` 默认返回 `{retention_days:365, lock_strategy:"lock"}`；
-   - `PUT` 改 `retention_days=180`、`lock_strategy="delete"` 后 `GET` 返回新值；
-   - 部分更新：`PUT {retention_days:90}` 后 `lock_strategy` 保持原值；
-   - 跨租户不串：租户 B 仍为默认值（不读 A 的写入）。
-2. 契约测试三处同步（`backend/tests/test_http_contract.py`，**用 grep 定位，勿死磕行号**）：
-   - `assert route_count == 49` → 改为「读当前 N，+2」实际值（**勿硬编码**：今天基线 49，实现时若已有兄弟票合并会更高，用 `make verify` 报错给出的真实 count 回填）；注释 `# RND-318: +2 retention settings routes.`
-   - 路由路径集合（搜包含 `/api/admin/users` 的 list）追加 `"/api/admin/settings/retention"`；
-   - snapshot 集合（搜 `("/api/admin/users", ...)` 附近）追加
-     `("/api/admin/settings/retention", frozenset({"GET"}), "RetentionConfigOut", "None")`、
-     `("/api/admin/settings/retention", frozenset({"PUT"}), "RetentionConfigOut", "None")`。
-3. 回归：`make verify` 全绿；重点 `test_http_contract.py` + `test_architecture_boundary.py`（无新建模型 / 迁移 / 服务模块 → **不改** `_FLAT_SERVICE_MODULES`，边界仍绿）。
-4. 失败先修实现，不迁就测试（除非测试断言旧路径，需标注）。
-
-## 六、硬约束（违反即判失败）
-- **不**自建留存表 / 迁移 / 配置服务模块（属 F0，越界即失败）。
-- **F0 未合并 → STOP 报告 BLOCKED**，不自行补配置中心、不自行建表。
-- 不改既有 URL / status / body 形状（新增端点除外）；租户隔离 fail-closed（`tenant_id` 仅来自会话）。
-- `response_model` 之外不暴露字段；不泄露 F0 KV 其它键。
-- 不引 React / 不改 i18n / 不动前端（D1 冻结 SSR + 原生 JS；本票纯后端）。
-- 不 commit / push。
-
-## 七、收尾（交付物）
-向用户交付：RED 基线数字、GREEN 数字、改动文件清单、`make verify` 日志、未提交声明、**F0 就绪状态说明**（含实际使用的 F0 配置服务模块名与 `get_config`/`set_config` 签名），以及「若当前 F0 未合并则本票停在 Phase 0 BLOCKED」的结论。
+## 硬性约束（DEV_AGENT_RULES.md）
+- 不 commit / push / 建分支 / 改 git 历史；不改 CI/CD、`.gitignore`、部署配置。
+- 不碰生产数据与密钥；测试用固定假租户数据。
+- 不扩大 Scope：不做清理任务本身、不做解锁端点、不做前端。
+- 复用优先：鉴权范式仿 `users.py`，不重新发明。
+- 证据优先，以 exit 0 / 测试通过为证。

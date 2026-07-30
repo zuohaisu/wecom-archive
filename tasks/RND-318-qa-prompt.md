@@ -1,69 +1,89 @@
-# RND-318 QA agent 验收提示词
+[Goal check] This work advances 独立验收（QA） by 逐条核对 RND-318 的 8 条 AC（重点验证锁定后不可逆、未误依赖 F0 配置中心）并产出带证据的 PASS/FAIL 判定。
 
----
+# RND-318 验收提示词（Acceptance / QA Prompt）
+
+## ⚠️ 2026-07-31：本版取代 2026-07-30 的旧稿
+
+旧版验收提示词假设留存配置存于 F0（RND-244）配置中心 KV，本版已改为独立数据表设计（理由见 `tasks/RND-318-dev-prompt.md` 开头）。**若交付物仍是 KV 存储路线，按旧假设走，不代表本版判 FAIL——先确认开发 agent 实际采用了哪种设计，用对应版本验收**；但若两种都不是（既没有独立表也没接 F0 KV，凭空造了别的存储）→ FAIL。
 
 ## ⚡ 立即执行，不要询问意图
 
-你现在收到的不是一份要讨论或确认的文档，而是一个**已经批准、待立即执行的任务指令**。你就是本工单的独立验收 agent，任务从你读到这句话开始。
-
-- **不要**问"你希望我做什么"、"这份提示词的目的是什么"、"需要我现在开始吗"——目的已经写在下面，答案永远是"是"。
-- **不要**先输出一份执行计划再等回复确认——直接开始下面的验收步骤，逐条往下核对。
-- **不要**因为这是只读任务就等待许可——只读操作不需要许可，直接跑。
-- 唯一允许中途停下、不产出 PASS/FAIL 判定的情况，是触发文档规则要求的 `BLOCKED`（附具体缺口说明），**这是写进产出文件里的判定结果，不是向用户提出的问题**。
-- 现在开始：确认工单号，然后直接进入验收核对步骤。
+你现在收到的不是一份要讨论或确认的文档，而是一个**已经批准、待立即执行的任务指令**。你就是本工单的独立验收 agent，任务从你读到这句话开始。不要问"你希望我做什么"；不要先输出计划再等确认；只读操作不需要许可，直接开始下面的验收步骤。唯一允许中途停下、不产出 PASS/FAIL 的情况，是触发规则要求的 `BLOCKED`——这是写进产出文件的判定，不是向用户提问。
 
 ---
 
-> 面向独立 QA agent，对 RND-318（C3-1 留存配置）的开发交付做独立验收。
-> 你**不写业务代码**，只验证开发 agent 的交付是否符合本票 AC 与硬约束。全程不执行 git commit / push。
+> 交给**独立验收 agent**。只做验证与判定，**不修改任何文件**。
 
-## 一、验收范围与边界
-- **本票 AC（来自 Linear RND-318）**：`策略可配` —— 每租户的「保留天数 / 锁定策略」可读取与更新。
-- **明确不在本票范围**：到期锁定/清理任务的执行（属 C3-2 / RND-319）；配置中心的实现（属 F0 / RND-244）；任何前端页面。
-- **依赖闸门**：RND-318 为 `[BLOCKED: F0]`，留存配置必须存于 F0 配置中心租户级 KV。当前 F0（RND-244）**未合并** → 开发 agent 应停在 Phase 0 报告 BLOCKED；本验收须覆盖「闸口行为」与「F0 合并后的功能」两种情形。
+## 任务身份
+- 工单：RND-318「C3-1 留存配置（表/租户设置）」｜风险等级 **R2**（新表 + 迁移，合规留存策略地基）
 
-## 二、前置条件
-1. 解释器 `../.venv/bin/python`；跑命令前 `cd backend && set -a && source .env && set +a`（本仓 `settings.py` 的 `DatabaseSettings` 裸 `BaseSettings` 不自动读 `.env`）。
-2. 拉取开发 agent 的交付说明（RED/GREEN 数字、改动文件、未提交声明、F0 就绪状态）。
-3. 先判定 F0 是否在树：`grep -rn "def get_config\|def set_config\|class ConfigStore\|ConfigService\|routers/config" app/ | grep -viE test`。
-   - **无命中** → 走「情形 A：闸口验证」。
-   - **有命中** → 走「情形 B：功能验证」。
+## 你的角色与权限
+- 可以：读所有文件、跑只读命令。
+- 不可以：改任何文件、commit、push、放松 AC。
+- 缺口 → FAIL 并列具体缺口，**不替开发 agent 补做**。
 
-## 三、情形 A — 当前 F0 未合并（预期主路径）
-开发 agent 必须**未写任何实现代码**并输出 BLOCKED 报告。逐项核对：
-1. **无实现残留**：`app/routers/retention.py`、`app/schemas/retention.py` **不应存在**；`main.py` 无 `include_router(retention_router...)`；`test_http_contract.py` 未改。
-2. **BLOCKED 报告完整**：开发 agent 交付说明须含「F0 未合并」结论 + 证据（无 `config_service` / 无 `routers/config.py` / `models.py` 无通用 config 表）。
-3. **未越界**：未自建 `retention_policies` 表 / 迁移 / 配置服务模块；未为绕过 F0 而自造存储。
-4. 若上述任一项不满足（例如 agent 擅自建表或伪造 config 存储）→ **判 FAIL**，要求开发 agent 回退并停在 Phase 0。
-> 注：情形 A 下「功能验证」暂缓，QA 报告须明确「功能验收待 F0/RND-244 合并后由开发 agent 重跑执行提示词，再走情形 B」。
+## 验收方法（证据优先）
 
-## 四、情形 B — F0 已合并（功能验收）
-开发 agent 已实现。逐项核对：
-1. **端点存在**：`GET /api/admin/settings/retention`、`PUT /api/admin/settings/retention` 均可达（200）。
-2. **默认 fail-safe**：未配置时 `GET` 返回 `{retention_days:365, lock_strategy:"lock"}`（与执行提示词默认值一致）。
-3. **更新生效**：`PUT {retention_days:180, lock_strategy:"delete"}` → `GET` 返回新值；再次 `GET` 幂等一致。
-4. **部分更新**：`PUT {retention_days:90}`（不带 `lock_strategy`）→ `GET` 中 `lock_strategy` 保持上次值，不被重置。
-5. **持久化跨请求**：两次独立 `GET`（或重启 worker 后）返回一致值（证明写入 F0 KV，非内存）。
-6. **租户隔离 fail-closed**：
-   - 路由签名中 `tenant_id` **仅**来自 `require_role()` 解包，请求体/query **无** `tenant_id` 参数；
-   - 租户 A 写入后，以租户 B 身份 `GET` 返回 B 的默认值（不读 A 数据）；跨租户零泄露。
-7. **角色门禁**：`GET` 任意 admin 可读；`PUT` 限 `admin`/`owner`（owner-only 或低权限角色调用 `PUT` 应 403）。
+### AC-1 — 策略可配
+- 证据：测试断言 `PUT` 后 `retention_configs` 表出现/更新对应行；`GET` 返回刚写入的值。
+- 判定：PASS/FAIL 按是否符合。
 
-## 五、硬约束审计（两种情形都查）
-1. **无越界存储**：无新建 DB 模型、无 Alembic 迁移、无新增 service 模块 → `test_architecture_boundary.py` 不变、`_FLAT_SERVICE_MODULES` 未改、架构边界绿。
-2. **路由基线（delta，非硬编码）**：`tests/test_http_contract.py` 的 `assert route_count == N` 应为「读当前值 +2」后的真实数（注释 `# RND-318: +2 retention settings routes.`）；路由路径集合与 snapshot 集合各 +2 条 `/api/admin/settings/retention`（GET/PUT）。**严禁写死具体数字**（如 `== 51`）——以 `make verify` 报错给出的真实 count 回填。
-3. **零泄露**：响应体只含 `retention_days` / `lock_strategy`，不泄露 F0 KV 其它键、原始值、租户敏感信息。
-4. **不引 React / 不改 i18n / 不动前端**（D1 冻结 SSR + 原生 JS；本票纯后端）。
-5. **未提交**：工作树改动 `git status` 可见，但**无 commit / push**（由用户本人操作）。
+### AC-2 — 未配置态可区分
+- 证据：从未 `PUT` 过的租户 `GET` → `configured: false`，不是 404/500。
+- 判定：符合 = PASS。
 
-## 六、回归
-- `make verify`（或项目等价命令）全绿：`test_http_contract.py` + `test_architecture_boundary.py` + 相关单测。
-- 既有 `users` / `media_library` / `audit` 等 `/api/admin` 路由不受影响（回归冒烟）。
+### AC-3 — 锁定后不可再改（关键）
+- 证据：测试构造"先 `PUT lock=true`，再 `PUT` 不同 `retention_days`"，断言第二次调用返回 423，**且查库确认 `retention_days` 未被第二次调用改动**。
+- 判定：锁定语义严格生效 = PASS。**若锁定后仍可被改（哪怕只是响应体显示新值但库里没变、或库里真的被改了）→ 直接 FAIL（`IMPLEMENTATION_DEFECT`, severity: blocker）**——这是合规数据的完整性防线。
 
-## 七、交付报告（向用户）
-给出 PASS / FAIL / BLOCKED-待F0 结论，并附：
-- 实际命中的 F0 配置服务模块名与 `get_config`/`set_config` 真实签名（情形 B）；
-- 功能核对 1–7 的逐条结果；
-- 硬约束审计结果；
-- 未提交声明；
-- 若为情形 A：明确「待 F0/RND-244 合并后重跑」的后续步骤。
+### AC-4 — 输入校验
+- 证据：`retention_days` 为 0、负数、3651 → 均 422，测试逐一覆盖边界。
+- 判定：边界值测试齐全且行为正确 = PASS。
+
+### AC-5 — 租户隔离
+- 证据：跨租户反例测试——租户 A 写入的配置，租户 B 读取应看到 B 自己的（未配置）状态，不串数据。代码审阅：`tenant_id` 仅来自 `require_role()`，不接受请求参数。
+- 判定：符合 = PASS。任一缺失 → FAIL（`SECURITY_VIOLATION`, blocker）。
+
+### AC-6 — 鉴权分级
+- 证据：`GET` 任意角色可读；`PUT` 普通角色（非 admin/owner）→ 403，有测试覆盖。
+- 判定：分级正确 = PASS。
+
+### AC-7 — 迁移可逆
+- 证据：`alembic upgrade head` 与 `alembic downgrade -1` 均可执行；`alembic check` 无 drift。
+- 判定：符合 = PASS。
+
+### AC-8 — 契约同步 + RBAC 同步 + 回归
+- 判定：`test_http_contract.py`（route_count 当前基线 +2）与 `test_rnd280_rbac_scaffold.py`（白名单含 `retention.py`）均已同步 = PASS；任一未同步 → FAIL（`REGRESSION`），`recommended_next_state: FIXING`。`make verify` exit 0；`test_architecture_boundary.py` 通过。
+
+## 本项目专属检查（必查）
+1. **设计路线一致性**：确认开发 agent 实际采用的存储方案（独立表 vs F0 KV vs 其他）与其自己的 QA Summary 描述一致；若两者矛盾（比如建了表但 Summary 说存在 KV 里）→ 记 finding。
+2. **未越界依赖 RND-244**：`grep -rn "config_service\|get_config\|set_config" backend/app/routers/retention.py` **不应有命中**（本设计不依赖配置中心）。若有命中，说明开发 agent 选择了 KV 路线而非本版假设的独立表——**不直接判 FAIL**，改用本文件开头说明的方式核实其正确性（是否真的有 F0 config_service 存在、行为是否符合"策略可配"的 AC 本质）。
+3. **锁定不可撤销无后门**：确认代码中**没有**任何绕过锁定检查的路径（如管理员角色特殊豁免、内部 API）。
+4. **架构边界**：router 未 import `app.main`；service 层未 import `app.routers.*`；`_FLAT_SERVICE_MODULES` 若改动需核实必要性。
+5. **文件所有权**：`git status --porcelain` 中属于本票的改动应限于 `alembic/versions/0027_retention_config.py`（新，或实际顺延版本号）、`app/db/models.py`（仅新增 `RetentionConfig`）、`routers/retention.py`（新）、`schemas/retention.py`（新）、`main.py`（仅两行）、`tests/test_rnd318_retention_config.py`（新）、`tests/test_rnd280_rbac_scaffold.py`（白名单同步）、`tests/test_http_contract.py`（契约同步）。
+
+## 附加检查（Security）
+- 测试中使用固定假租户数据，非真实客户数据。
+- `git log origin/main..HEAD` **应为空** → 有输出即 FAIL。
+
+## 验证命令（只读）
+```bash
+make verify
+.venv/bin/python -m pytest backend/tests/test_rnd318_retention_config.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
+.venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
+.venv/bin/python -m alembic check                                          # AC-7
+ls backend/alembic/versions/ | tail -3
+git diff -- backend/app/db/models.py
+git status --porcelain
+git log origin/main..HEAD    # 必须无输出
+```
+
+## 产出
+写入 `tasks/RND-318-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
+`notes` 中记录：实际采用的存储方案（独立表/F0 KV/其他）、表结构或 KV 键名（供 RND-301/RND-319 对接）。
+
+## 禁止事项
+- 不改任何文件、不补做缺失内容、不放松 AC。
+- **AC-3 若锁定后配置仍可被改 → 直接 FAIL（blocker）**，不接受"这种情况很少见"。
+- **AC-5 若跨租户数据串了 → 直接 FAIL（blocker）**。
