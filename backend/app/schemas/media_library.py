@@ -27,6 +27,9 @@ class MediaFileListItem(BaseModel):
     has_thumbnail: bool = False
     created_at: datetime
     message_id: int
+    msgid: str
+    conversation_id: str
+    session_title: str
     room_id: Optional[str] = None
     msgtime: Optional[int] = None
     name: Optional[str] = None

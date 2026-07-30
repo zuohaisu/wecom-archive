@@ -14,7 +14,9 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_role
-from app.db.models import AdminUser, ArchiveMessage, MediaFile
+from app.conversation_membership import _direct_conv_id
+from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
+from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.db.session import get_db
 from app.schemas.media_library import MediaLibraryPage
 
@@ -101,23 +103,73 @@ def list_media(
 
     total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
     rows = db.execute(statement.offset(offset).limit(limit)).all()
-    items = [
-        {
-            "id": media_file.id,
-            "file_type": media_file.file_type,
-            "mime_type": media_file.mime_type,
-            "file_size": media_file.file_size,
-            "image_width": media_file.image_width,
-            "image_height": media_file.image_height,
-            "download_status": media_file.download_status,
-            "storage_backend": media_file.storage_backend,
-            "has_thumbnail": bool(media_file.thumbnail_ref),
-            "created_at": media_file.created_at,
-            "message_id": media_file.archive_message_id,
-            "room_id": message.roomid,
-            "msgtime": message.msgtime,
-            "name": _media_label(message.structured_content),
-        }
-        for media_file, message in rows
-    ]
+    message_ids = [message.id for _, message in rows]
+    recipients_by_message: dict[int, list[str]] = {}
+    if message_ids:
+        for message_id, receiver_userid in db.execute(
+            select(
+                ArchiveMessageRecipient.message_id,
+                ArchiveMessageRecipient.receiver_userid,
+            ).where(
+                ArchiveMessageRecipient.tenant_id == tenant_id,
+                ArchiveMessageRecipient.message_id.in_(message_ids),
+            )
+        ):
+            recipients_by_message.setdefault(message_id, []).append(receiver_userid)
+
+    person_ids = {
+        user_id
+        for _, message in rows
+        if not message.roomid
+        for user_id in [message.sender, *recipients_by_message.get(message.id, [])]
+        if user_id
+    }
+    display_names = {
+        user_id: name
+        for user_id, name in db.execute(
+            select(Contact.wecom_userid, Contact.name).where(
+                Contact.tenant_id == tenant_id,
+                Contact.wecom_userid.in_(person_ids),
+            )
+        )
+    } if person_ids else {}
+
+    items = []
+    for media_file, message in rows:
+        if message.roomid:
+            conversation_id = message.roomid
+            session_title = resolve_room_display_name(message.roomid, None)
+        else:
+            # Direct messages normally have exactly one recipient. Keep a
+            # visible, non-empty fallback for malformed legacy rows rather
+            # than silently returning an unusable blank field.
+            sender = message.sender or "unknown"
+            receiver = next(
+                (user_id for user_id in recipients_by_message.get(message.id, []) if user_id != sender),
+                "unknown",
+            )
+            conversation_id = _direct_conv_id(sender, receiver)
+            session_title = resolve_person_display_name(receiver, display_names.get(receiver))
+
+        items.append(
+            {
+                "id": media_file.id,
+                "file_type": media_file.file_type,
+                "mime_type": media_file.mime_type,
+                "file_size": media_file.file_size,
+                "image_width": media_file.image_width,
+                "image_height": media_file.image_height,
+                "download_status": media_file.download_status,
+                "storage_backend": media_file.storage_backend,
+                "has_thumbnail": bool(media_file.thumbnail_ref),
+                "created_at": media_file.created_at,
+                "message_id": media_file.archive_message_id,
+                "msgid": message.msgid,
+                "conversation_id": conversation_id,
+                "session_title": session_title,
+                "room_id": message.roomid,
+                "msgtime": message.msgtime,
+                "name": _media_label(message.structured_content),
+            }
+        )
     return MediaLibraryPage(items=items, total=total, has_more=len(items) == limit)
