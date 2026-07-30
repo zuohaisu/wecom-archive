@@ -14,6 +14,7 @@ from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.conversations import router as conversations_router
+from app.routers.dashboard import router as dashboard_router
 from app.routers.external_contacts import router as external_contacts_router
 from app.routers.media import MediaAccessNoStoreMiddleware
 from app.routers.media import router as media_router
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router)
     app.include_router(media_router)
     app.include_router(reachability_audit_router)
+    app.include_router(dashboard_router)
     app.include_router(search_router)
     app.include_router(sync_router, prefix="/api/admin")
     app.include_router(audit_router, prefix="/api/admin")
