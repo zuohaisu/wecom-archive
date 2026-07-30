@@ -21,15 +21,16 @@ def test_design_system_is_a_new_copy_of_the_design_source() -> None:
     assert _DESIGN_TARGET.read_bytes() == _DESIGN_SOURCE.read_bytes()
 
 
-def test_navigation_has_one_configuration_with_twelve_items_and_audit_log() -> None:
+def test_navigation_has_one_configuration_with_thirteen_items_and_analytics() -> None:
     items = [item for group in NAV for item in group["items"]]
-    assert len(items) == 12
+    assert len(items) == 13
     assert {item["id"] for item in items} == {
         "review",
         "search",
         "review-tasks",
         "audit-log",
         "messages",
+        "analytics",
         "media",
         "exports",
         "users",
@@ -40,6 +41,8 @@ def test_navigation_has_one_configuration_with_twelve_items_and_audit_log() -> N
     }
     audit_log = next(item for item in items if item["id"] == "audit-log")
     assert audit_log["path"] == "/admin/audit-logs"
+    analytics = next(item for item in items if item["id"] == "analytics")
+    assert analytics["path"] == "/admin/analytics"
 
 
 def test_registered_path_changes_users_from_disabled_to_link_without_config_change() -> None:

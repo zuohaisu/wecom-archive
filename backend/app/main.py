@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.db.schema_check import full_readiness_check
 from app.db.session import get_engine
 from app.routers.admin_audit_page import router as admin_audit_page_router
+from app.routers.analytics import router as analytics_router
 from app.routers.admin_contacts_page import router as admin_contacts_page_router
 from app.routers.admin_media_page import router as admin_media_page_router
 from app.routers.admin_users_page import router as admin_users_page_router
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_media_page_router)
     app.include_router(admin_contacts_page_router)
     app.include_router(web_router)
+    app.include_router(analytics_router)
     app.include_router(messages_router)
 
     @app.get("/health/live")

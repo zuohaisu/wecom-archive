@@ -88,6 +88,16 @@ def admin_search_page(
     )
 
 
+@router.get("/admin/analytics", response_class=HTMLResponse)
+def admin_analytics(
+    tenant_id: Optional[str] = Depends(require_html_session),
+):
+    """Usage analytics page. Requires valid session."""
+    if tenant_id is None:
+        return RedirectResponse("/admin/login", status_code=302)
+    return HTMLResponse(content=render_template("analytics", i18n_script=I18N_SCRIPT_TAG))
+
+
 @router.get("/admin/diagnostics/reachability", response_class=HTMLResponse)
 def admin_diagnostics_reachability(
     tenant_id: Optional[str] = Depends(require_html_session),
