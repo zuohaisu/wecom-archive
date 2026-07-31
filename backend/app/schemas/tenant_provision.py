@@ -1,13 +1,14 @@
 """Request and safe response schemas for platform tenant provisioning."""
 
 from datetime import datetime
-from pydantic import BaseModel
+
+from pydantic import BaseModel, EmailStr
 
 
 class TenantProvisionIn(BaseModel):
     name: str
     slug: str
-    admin_email: str
+    admin_email: EmailStr
     corp_id: str
     agent_id: str
     secret: str

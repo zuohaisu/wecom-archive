@@ -176,23 +176,14 @@ def verify_platform_admin(db, email: str, password: str):
     """
     from app.db.models import PlatformAdmin  # lazy import to avoid cycles
 
-    print(f"DEBUG verify_platform_admin - db: {db}")
-    print(f"DEBUG verify_platform_admin - email: {email}")
-    try:
-        admin = (
-            db.query(PlatformAdmin)
-            .filter(PlatformAdmin.email == email.strip().lower())
-            .first()
-        )
-        print(f"DEBUG verify_platform_admin - query result: {admin}")
-    except Exception as e:
-        print(f"DEBUG verify_platform_admin - query FAILED: {type(e).__name__}: {e}")
-        raise
+    admin = (
+        db.query(PlatformAdmin)
+        .filter(PlatformAdmin.email == email.strip().lower())
+        .first()
+    )
     if admin is None or admin.status != "active":
-        print(f"DEBUG verify_platform_admin - returning None (admin={admin}, status={admin.status if admin else 'N/A'})")
         return None
     if not verify_password(password, admin.password_hash):
-        print("DEBUG verify_platform_admin - password verification failed")
         return None
     return admin
 
@@ -223,15 +214,10 @@ def require_platform_admin(
     sessions: a ``session_id`` cookie and any tenant role cannot satisfy this
     dependency.
     """
-    print(f"DEBUG require_platform_admin - credentials: {credentials}")
-    print(f"DEBUG require_platform_admin - db: {db}")
     if credentials is None:
-        print("DEBUG require_platform_admin - no credentials, raising 401")
         raise HTTPException(status_code=401, detail="Platform admin authentication required")
 
-    print(f"DEBUG require_platform_admin - calling verify_platform_admin for {credentials.username}")
     admin = verify_platform_admin(db, credentials.username, credentials.password)
-    print(f"DEBUG require_platform_admin - verify result: {admin}")
     if admin is None:
         raise HTTPException(status_code=401, detail="Invalid platform admin credentials")
     return admin

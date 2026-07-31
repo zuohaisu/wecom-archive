@@ -5,14 +5,17 @@ from __future__ import annotations
 import base64
 import json
 import os
+from collections.abc import Generator
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
+from sqlalchemy import StaticPool, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import PlatformAdmin, Tenant, TenantWecomConfig
+from app.db.session import get_db
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +24,71 @@ def setup_field_encryption():
     if "FIELD_ENCRYPTION_KEY" not in os.environ:
         os.environ["FIELD_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
     yield
+
+
+@pytest.fixture
+def db_session(setup_field_encryption) -> Generator[Session, None, None]:
+    """Create an isolated SQLite database session for each test.
+
+    StaticPool keeps the single in-memory database shared across threads, so the
+    TestClient's request thread sees the rows this fixture writes.
+    """
+    from app.db.models import Base
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            PlatformAdmin.__table__,
+            Tenant.__table__,
+            TenantWecomConfig.__table__,
+        ],
+    )
+
+    session = sessionmaker(bind=engine)()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+@pytest.fixture
+def client(db_session: Session) -> Generator[TestClient, None, None]:
+    """Create a TestClient bound to the fixture's database session."""
+    from app.main import app
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def platform_admin_user(db_session: Session) -> PlatformAdmin:
+    """Provision the active platform admin backing this suite's Basic auth."""
+    from app.auth import hash_password
+
+    admin = PlatformAdmin(
+        id="rnd314-platform-admin",
+        email=PLATFORM_ADMIN_EMAIL,
+        password_hash=hash_password(PLATFORM_ADMIN_PASSWORD),
+        role="superadmin",
+        status="active",
+    )
+    db_session.add(admin)
+    db_session.commit()
+    db_session.refresh(admin)
+    return admin
 
 
 # Test data constants

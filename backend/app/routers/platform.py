@@ -73,9 +73,11 @@ def list_tenants(
     db: Session = Depends(get_db),
 ) -> TenantListOut:
     """Return all provisioned tenants with their config status (no key leakage)."""
-    print(f"DEBUG list_tenants - db: {db}")
-    print(f"DEBUG list_tenants - _admin: {_admin.email if _admin else 'None'}")
-    tenants = db.query(Tenant).join(TenantWecomConfig).all()
+    rows = (
+        db.query(Tenant, TenantWecomConfig)
+        .join(TenantWecomConfig, TenantWecomConfig.tenant_id == Tenant.id)
+        .all()
+    )
     return TenantListOut(
         tenants=[
             TenantListItemOut(
@@ -88,7 +90,7 @@ def list_tenants(
                 config_is_active=c.is_active,
                 created_at=t.created_at,
             )
-            for t, c in tenants
+            for t, c in rows
         ]
     )
 
