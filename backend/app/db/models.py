@@ -910,6 +910,26 @@ class MessageRevocation(Base):
     )
 
 
+class RetentionLock(Base):
+    """One immutable retention-lock record per expired archive message."""
+
+    __tablename__ = "retention_locks"
+    __table_args__ = (
+        UniqueConstraint(
+            "archive_message_id", name="uq_retention_locks_archive_message_id"
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    archive_message_id = Column(
+        Integer, ForeignKey("archive_messages.id"), nullable=False
+    )
+    locked_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class Contact(Base):
     """Lightweight registry of WeCom user identities seen in the archive."""
 

@@ -1,0 +1,143 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-319",
+  "run_id": "rnd-319-qa-20260731-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "main (working tree uncommitted)",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "新增文件：backend/alembic/versions/0030_retention_locks.py, backend/scripts/apply_retention_lock_once.py, backend/tests/test_rnd319_retention_lock.py；修改文件：backend/app/db/models.py（仅新增 RetentionLock 类，ArchiveMessage 零改动）"
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "test_locks_only_expired_messages_for_configured_tenants_and_audits: 测试构造过期消息 + 已配置租户，脚本运行后 retention_locks 表出现对应 archive_message_id 的一行，locked_at 为传入的 now",
+        "assert summary == {'configured-expired': 1, 'configured-current': 0}",
+        "assert locks[0].archive_message_id == 1, assert locks[0].tenant_id == 'configured-expired'"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "test_locks_only_expired_messages_for_configured_tenants_and_audits: msgtime 在 cutoff 之后的消息 (id=2, id=3)，retention_locks 里没有对应行",
+        "assert db.query(RetentionLock).filter_by(archive_message_id=2).count() == 0",
+        "assert db.query(RetentionLock).filter_by(archive_message_id=3).count() == 0"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "test_locks_only_expired_messages_for_configured_tenants_and_audits: 未配置 RetentionConfig 的租户 (unconfigured) 有极老消息 (msgtime = -365 days)，但 retention_locks 中无对应行",
+        "assert db.query(RetentionLock).filter_by(archive_message_id=4).count() == 0",
+        "summary 中不包含 'unconfigured' key，证明该租户未被考虑"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "test_second_run_is_idempotent_and_does_not_write_empty_audit: 第一次运行 locked_count=1，第二次运行 locked_count=0",
+        "db.expire_all() 后 assert db.query(RetentionLock).count() == 1（唯一约束防止重复插入）",
+        "assert _as_utc(db.query(RetentionLock).one().locked_at) == _NOW（时间戳未更新）"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "test_locks_only_expired_messages_for_configured_tenants_and_audits: new_locked_count > 0 的租户产生恰好一条 AuditLog",
+        "assert len(audits) == 1, assert audits[0].action == 'retention.messages_locked'",
+        "assert audits[0].detail == {'locked_count': 1, 'cutoff': cutoff.isoformat()}",
+        "test_second_run...: locked_count=0 的租户不产生审计记录（审计日志总数仍为 1）"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "grep -n 'db.delete\\|DELETE FROM\\|\\.delete(' backend/scripts/apply_retention_lock_once.py: 无命中",
+        "git diff -- backend/app/db/models.py: ArchiveMessage 类范围内零改动，仅看到新增的 RetentionLock 类",
+        "脚本对 retention_locks 只有 INSERT，对 archive_messages 只有只读 SELECT"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "grep -n 'is_revoked\\|revoked_at' backend/scripts/apply_retention_lock_once.py: 无命中",
+        "脚本未读取或写入撤回相关字段，业务概念清晰分离"
+      ]
+    },
+    {
+      "id": "AC-8",
+      "status": "PASS",
+      "evidence": [
+        "migration upgrade/downgrade test passed: test_retention_lock_migration_upgrade_and_downgrade",
+        "columns == {'id', 'tenant_id', 'archive_message_id', 'locked_at'}",
+        "constraints == [{'name': 'uq_retention_locks_archive_message_id', 'column_names': ['archive_message_id']}",
+        "unique constraint on archive_message_id confirmed as idempotency backstop",
+        "git status --porcelain: 无既有测试文件出现（fakes.py、test_http_contract.py 等）",
+        "architecture_boundary tests: 25 passed"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd319_retention_lock.py -v",
+      "result": "EXIT=0 (4 passed)"
+    },
+    {
+      "command": "make lint-diff",
+      "result": "EXIT=0 (lint-diff: OK)"
+    },
+    {
+      "command": "make build",
+      "result": "EXIT=0 (build: OK)"
+    },
+    {
+      "command": "grep -n 'db.delete\\|DELETE FROM\\|\\.delete(' backend/scripts/apply_retention_lock_once.py",
+      "result": "EXIT=1 (no match)"
+    },
+    {
+      "command": "grep -n 'is_revoked\\|revoked_at' backend/scripts/apply_retention_lock_once.py",
+      "result": "EXIT=1 (no match)"
+    },
+    {
+      "command": "grep -n 'def run_retention_lock_once' -A 5 backend/scripts/apply_retention_lock_once.py",
+      "result": "EXIT=0 (now: Optional[datetime] = None - parameterized)"
+    },
+    {
+      "command": "git diff -- backend/app/db/models.py | head -100",
+      "result": "EXIT=0 (only RetentionLock class added, ArchiveMessage unchanged)"
+    },
+    {
+      "command": "git diff --stat -- backend/app/routers/retention.py",
+      "result": "EXIT=0 (no output - file not modified)"
+    },
+    {
+      "command": "git log origin/main..HEAD",
+      "result": "EXIT=0 (empty - no commits)"
+    },
+    {
+      "command": "/Users/zuohaisu/Documents/code/wecom-archive-365/backend/.venv/bin/python -m pytest tests/test_architecture_boundary.py -q",
+      "result": "EXIT=0 (25 passed)"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "## Script Call Signature\nrun_retention_lock_once(db: Session, *, now: Optional[datetime] = None) -> dict[str, int]\n\n## RetentionLock Table Structure\ntable name: retention_locks\n- id: String(36), PK\n- tenant_id: String(36), FK to tenants.id, NOT NULL\n- archive_message_id: Integer, FK to archive_messages.id, UNIQUE, NOT NULL\n- locked_at: DateTime(timezone=True), NOT NULL, server_default=now()\n\nIndexes:\n- Primary Key: id\n- Unique Constraint: archive_message_id (critical for idempotency)\n- Foreign Keys: tenant_id -> tenants.id, archive_message_id -> archive_messages.id\n\nNote: tenant_id index recommended for tenant-scoped queries but not currently present. Migration is reversible via downgrade() which drops the table.\n\n## Deployment Recommendation\nTrigger via cron (example): 0 * * * *  (hourly)\ncd /path/to/wecom-archive-365 && DATABASE_URL=postgresql://... .venv/bin/python backend/scripts/apply_retention_lock_once.py\n\nCron expression suggestions based on business needs:\n- Conservative: 0 2 * * * (daily at 2 AM)\n- Aggressive: 0 */6 * * * (every 6 hours)\n- Weekly maintenance: 0 3 * * 0 (Sunday at 3 AM)\n\nThe script should NOT be integrated into any application scheduler (Celery/APScheduler); it's a standalone batch job."
+}
