@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-245",
+  "run_id": "rnd-245-qa-20260801-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "origin/main",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "新增 backend/app/config/crypto.py (85 行); backend/app/settings.py 仅追加 SettingsEncryptionSettings 类与 getter (+8 行); 新增 backend/tests/test_rnd245_config_crypto.py (103 行). 未触碰 backend/app/crypto.py 及其他模块."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "test_encrypt_decrypt_are_symmetric_for_unicode — encrypt_value/decrypt_value 对含中文+特殊字符的字符串往返一致",
+        "pytest backend/tests/test_rnd245_config_crypto.py: 12 passed in 0.28s"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "test_operations_without_key_fail_closed_without_exposing_values — monkeypatch.delenv 后 encrypt_value 与 decrypt_value 均抛出 SettingsEncryptionConfigurationError",
+        "backend/app/config/crypto.py:28-31 — _fernet() 在 key 为空时 raise SettingsEncryptionConfigurationError, fail-closed 语义正确"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "test_decryption_error_does_not_expose_ciphertext — 断言 cipher 不在异常消息中",
+        "test_operations_without_key_fail_closed_without_exposing_values — 断言 plain/cipher 不在异常消息中",
+        "backend/app/config/crypto.py:53 — raise SettingsDecryptionError('Unable to decrypt settings value') 为固定泛化消息"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "test_is_encrypted_distinguishes_fernet_tokens_from_plaintext — 覆盖 Fernet token / 明文 / 畸形 base64 / 空字符串 / None",
+        "backend/app/config/crypto.py:56-72 — 通过版本字节 0x80 启发式判断"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "test_mask_exposes_only_the_last_four_characters_for_long_values — 参数化覆盖 7 种长度: '' → '****', 'a' → '****', 'ab12' (4字符) → '****', '配置密钥' (4字符) → '****', 'abcde' (5字符) → '****bcde', '前缀配置密钥' → '****配置密钥', 'secret-ab12' → '****ab12'",
+        "backend/app/config/crypto.py:82-84 — len(value) <= 4 返回 '****', 否则返回 '****' + value[-4:]; 短字符串完全掩码, 不暴露原文"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "git diff --stat -- backend/app/crypto.py — 无输出, 文件未被修改"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "git diff -- backend/app/settings.py — 仅在文件末尾追加 SettingsEncryptionSettings 类与 get_settings_encryption_settings 函数 (+8 行), 既有类/函数逐行未变"
+      ]
+    },
+    {
+      "id": "AC-8",
+      "status": "PASS",
+      "evidence": [
+        "make verify — exit 0, 2515 passed, 82 skipped, 0 failed",
+        "test_architecture_boundary.py — 25 passed"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": "make verify",
+      "result": "EXIT=0 — 2515 passed, 82 skipped, 0 failed"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd245_config_crypto.py -q",
+      "result": "EXIT=0 — 12 passed in 0.28s"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q",
+      "result": "EXIT=0 — 25 passed in 0.82s"
+    },
+    {
+      "command": "git diff --stat -- backend/app/crypto.py",
+      "result": "EXIT=0 — 无输出"
+    },
+    {
+      "command": "git diff -- backend/app/settings.py",
+      "result": "EXIT=0 — 仅追加 +8 行 (SettingsEncryptionSettings + getter)"
+    },
+    {
+      "command": "git status --porcelain",
+      "result": "EXIT=0 — M backend/app/settings.py, ?? backend/app/config/, ?? backend/tests/test_rnd245_config_crypto.py"
+    },
+    {
+      "command": "git log origin/main..HEAD",
+      "result": "EXIT=0 — 无输出"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "mask() 输出格式示例: mask('') → '****'; mask('a') → '****'; mask('ab12') → '****'; mask('配置密钥') → '****'; mask('abcde') → '****bcde'; mask('secret-ab12') → '****ab12'. 短字符串 (≤4 字符) 完全掩码为 '****', 长字符串仅暴露末 4 字符. 独立 key: crypto.py 读取 SETTINGS_ENCRYPTION_KEY, 与 app/crypto.py 的 FIELD_ENCRYPTION_KEY 完全隔离, 无 import 复用. 测试使用 Fernet.generate_key() 现场生成密钥, 无硬编码."
+}

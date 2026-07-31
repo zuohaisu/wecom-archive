@@ -146,3 +146,11 @@ class EventMediaDownloadSettings(BaseSettings):
 
 def get_event_media_download_settings() -> EventMediaDownloadSettings:
     return EventMediaDownloadSettings()
+
+
+class SettingsEncryptionSettings(BaseSettings):
+    settings_encryption_key: str = ""
+
+
+def get_settings_encryption_settings() -> SettingsEncryptionSettings:
+    return SettingsEncryptionSettings()
