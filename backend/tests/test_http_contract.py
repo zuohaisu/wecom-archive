@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 65  # RND-317: +1 export audit record route.
+    assert route_count == 66  # RND-303: +1 onboarding batch invite route.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -365,6 +365,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/users",
             "/api/admin/users/accept",
             "/api/admin/users/invite",
+            "/api/admin/users/invite-batch",
             "/api/admin/users/{user_id}",
             "/api/admin/users/{user_id}/reset-password",
             "/api/auth/logout",
@@ -476,6 +477,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/users", frozenset({"GET"}), "AdminUserListOut", "None"),
         ("/api/admin/users/accept", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/users/invite-batch", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/{user_id}", frozenset({"PATCH"}), "None", "None"),
         (
             "/api/admin/users/{user_id}/reset-password",

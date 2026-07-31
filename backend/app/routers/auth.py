@@ -250,6 +250,16 @@ class _AcceptBody(BaseModel):
     name: Optional[str] = None
 
 
+class _InviteBatchItem(BaseModel):
+    email: str
+    role: str
+    name: Optional[str] = None
+
+
+class _InviteBatchBody(BaseModel):
+    invites: list[_InviteBatchItem]
+
+
 def _password_reset_ttl_hours() -> int:
     """Read a valid reset TTL, falling back to the safe one-hour default."""
     try:
@@ -309,28 +319,31 @@ def password_reset(body: _ResetBody, db: Session = Depends(get_db)):
     return JSONResponse({"ok": True})
 
 
-@router.post("/api/admin/users/invite")
-def invite_user(
-    body: _InviteBody,
-    current: Tuple[AdminUser, str] = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Create a disabled pending account and deliver its invitation link."""
-    if body.role not in {"owner", "admin", "compliance", "legal", "readonlyaudit"}:
+def _create_pending_invite(
+    db: Session,
+    *,
+    tenant_id: str,
+    admin_user_id: str,
+    email: Optional[str],
+    name: Optional[str],
+    role: str,
+    wecom_user_id: Optional[str] = None,
+) -> None:
+    """Create or resend a tenant-scoped pending invitation and its email."""
+    if role not in {"owner", "admin", "compliance", "legal", "readonlyaudit"}:
         raise HTTPException(status_code=400, detail="invalid_role")
 
-    admin_user, tenant_id = current
-    wecom_user_id = (body.wecom_user_id or "").strip()
-    if not wecom_user_id:
-        if not body.email:
+    resolved_wecom_user_id = (wecom_user_id or "").strip()
+    if not resolved_wecom_user_id:
+        if not email:
             raise HTTPException(status_code=400, detail="wecom_user_id_or_email_required")
-        wecom_user_id = f"invited:{body.email.lower()}"
+        resolved_wecom_user_id = f"invited:{email.lower()}"
 
     existing = (
         db.query(AdminUser)
         .filter(
             AdminUser.tenant_id == tenant_id,
-            AdminUser.wecom_user_id == wecom_user_id,
+            AdminUser.wecom_user_id == resolved_wecom_user_id,
             AdminUser.invite_status == "pending",
         )
         .first()
@@ -343,14 +356,14 @@ def invite_user(
             AdminUser(
                 id=str(uuid.uuid4()),
                 tenant_id=tenant_id,
-                wecom_user_id=wecom_user_id,
-                email=(body.email or "").strip() or None,
-                name=body.name,
-                role=body.role,
+                wecom_user_id=resolved_wecom_user_id,
+                email=(email or "").strip() or None,
+                name=name,
+                role=role,
                 status="disabled",
                 invite_status="pending",
                 invite_token=raw_token,
-                invited_by=admin_user.id,
+                invited_by=admin_user_id,
             )
         )
     db.commit()
@@ -360,9 +373,57 @@ def invite_user(
     settings = get_email_settings()
     base = settings.invite_base_url or get_wecom_oauth_settings().admin_domain
     accept_link = f"{base.rstrip('/')}/admin/accept-invite?token={raw_token}"
-    if body.email:
-        send_invite_email(body.email, accept_link)
+    if email:
+        send_invite_email(email, accept_link)
+
+
+@router.post("/api/admin/users/invite")
+def invite_user(
+    body: _InviteBody,
+    current: Tuple[AdminUser, str] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a disabled pending account and deliver its invitation link."""
+    admin_user, tenant_id = current
+    _create_pending_invite(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=admin_user.id,
+        email=body.email,
+        name=body.name,
+        role=body.role,
+        wecom_user_id=body.wecom_user_id,
+    )
     return JSONResponse({"ok": True})
+
+
+@router.post("/api/admin/users/invite-batch")
+def invite_users_batch(
+    body: _InviteBatchBody,
+    current: Tuple[AdminUser, str] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Invite up to 20 users, reporting failures without aborting the batch."""
+    if len(body.invites) > 20:
+        raise HTTPException(status_code=400, detail="invite_batch_limit_exceeded")
+
+    admin_user, tenant_id = current
+    results = []
+    for invite in body.invites:
+        try:
+            _create_pending_invite(
+                db,
+                tenant_id=tenant_id,
+                admin_user_id=admin_user.id,
+                email=invite.email,
+                name=invite.name,
+                role=invite.role,
+            )
+        except HTTPException as exc:
+            results.append({"email": invite.email, "ok": False, "error": str(exc.detail)})
+        else:
+            results.append({"email": invite.email, "ok": True})
+    return JSONResponse({"results": results})
 
 
 @router.post("/api/admin/users/accept")
