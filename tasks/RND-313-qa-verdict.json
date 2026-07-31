@@ -1,0 +1,121 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-313",
+  "run_id": "rnd-313-qa-20260731-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "main",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "Modified files: backend/app/routers/platform.py (create_tenant implementation), backend/app/schemas/tenant_provision.py (added owner_email input + owner_invite_sent output fields), backend/tests/test_rnd311_tenant_provision.py (added owner_email to test payload). New file: backend/tests/test_rnd313_tenant_activation_email.py. Did NOT modify: backend/app/routers/auth.py (verified empty diff)."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-0",
+      "status": "PASS",
+      "evidence": [
+        "grep -n '_create_pending_invite' backend/app/routers/auth.py returned 3 matches at lines 322, 388, 414",
+        "Function exists and is properly implemented from RND-303"
+      ]
+    },
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "test_create_tenant_creates_owner_pending_invite_and_sends_email passed",
+        "Test verifies AdminUser created with role='owner', invite_status='pending'",
+        "send_invite_email mocked and verified called once with target email 'owner@example.com'",
+        "Response status_code=201 with owner_invite_sent=true"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "grep -n '_create_pending_invite' backend/app/routers/platform.py returns import at line 14 and usage at line 74",
+        "Code review shows single function call at platform.py:74-81, no inline rewriting of role validation/dedup/token generation/email sending logic",
+        "Pure reuse pattern confirmed"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "test_invite_email_failure_does_not_rollback_tenant_provisioning passed",
+        "Mock RuntimeError raised in send_invite_email does not rollback Tenant/TenantWecomConfig/AdminUser creation",
+        "Response status_code=201 with owner_invite_sent=false confirms decoupling",
+        "db.commit() at platform.py:63 occurs BEFORE _create_pending_invite call at platform.py:74",
+        "Data persistence fully decoupled from email delivery"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "test_rnd311_tenant_provision.py: 3 tests passed",
+        "TenantProvisionOut original fields preserved (tenant_id, tenant_name, tenant_slug, config_id, corp_id, agent_id, is_active)",
+        "Only new field added: owner_invite_sent",
+        "No deletions or renames detected"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "test_http_contract.py passed as part of make verify suite",
+        "Response shape changes captured in schema additions only"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "make verify: EXIT=0",
+        "2491 passed, 82 skipped in 162.09s",
+        "test_architecture_boundary.py passed (included in make verify)"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": "grep -n '_create_pending_invite' backend/app/routers/auth.py",
+      "result": "EXIT=0 (3 matches found at lines 322, 388, 414)"
+    },
+    {
+      "command": "grep -n '_create_pending_invite' backend/app/routers/platform.py",
+      "result": "EXIT=0 (import at line 14, usage at line 74)"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd313_tenant_activation_email.py -q --tb=short",
+      "result": "EXIT=0 (3 passed in 3.07s)"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd311_tenant_provision.py -q --tb=short",
+      "result": "EXIT=0 (3 passed in 3.39s)"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_architecture_boundary.py -q --tb=short",
+      "result": "EXIT=0 (83 passed in 2.91s)"
+    },
+    {
+      "command": "git diff --stat -- backend/app/routers/auth.py",
+      "result": "EXIT=0 (no output - no changes)"
+    },
+    {
+      "command": "make verify",
+      "result": "EXIT=0 (2491 passed, 82 skipped in 162.09s)"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "所有 AC 通过验证。关键检查点：(1) 真复用 _create_pending_invite 而非重写；(2) db.commit() 先于邀请调用实现了解耦；(3) 测试完全 mock 邮件发送未真实调用 SMTP；(4) 未修改 auth.py；(5) owner_email 参数严格单个非多个；(6) 文件改动范围符合预期（platform.py、tenant_provision.py、相关测试文件）。无 BLOCKER/MINOR/MINOR 问题，无需修复。"
+}

@@ -10,6 +10,7 @@ class TenantProvisionIn(BaseModel):
     name: str
     slug: str
     admin_email: EmailStr
+    owner_email: EmailStr
     corp_id: str
     agent_id: str
     secret: str
@@ -25,6 +26,7 @@ class TenantProvisionOut(BaseModel):
     corp_id: str
     agent_id: str
     is_active: bool
+    owner_invite_sent: bool
 
 
 class TenantConnectivityCheckOut(BaseModel):

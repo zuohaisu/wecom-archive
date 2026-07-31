@@ -11,6 +11,7 @@ from app.auth import get_wecom_token, require_platform_admin
 from app.audit import write_audit
 from app.db.models import DuplicateCorpIdError, Tenant, TenantWecomConfig
 from app.db.session import get_db
+from app.routers.auth import _create_pending_invite
 from app.schemas.tenant_provision import (
     TenantListItemOut,
     TenantConnectivityCheckOut,
@@ -68,6 +69,19 @@ def create_tenant(
         )
 
     db.refresh(config)
+    owner_invite_sent = True
+    try:
+        _create_pending_invite(
+            db,
+            tenant_id=tenant.id,
+            admin_user_id=None,
+            email=payload.owner_email,
+            name=None,
+            role="owner",
+        )
+    except Exception:
+        owner_invite_sent = False
+
     return TenantProvisionOut(
         tenant_id=tenant.id,
         tenant_name=tenant.name,
@@ -76,6 +90,7 @@ def create_tenant(
         corp_id=config.corp_id,
         agent_id=config.agent_id,
         is_active=config.is_active,
+        owner_invite_sent=owner_invite_sent,
     )
 
 

@@ -30,6 +30,7 @@ def _payload(slug: str = "acme", corp_id: str = "ww-rnd311") -> dict[str, str]:
         "name": "Acme Corporation",
         "slug": slug,
         "admin_email": "first-admin@example.com",
+        "owner_email": "owner@example.com",
         "corp_id": corp_id,
         "agent_id": "1000001",
         "secret": _SECRET,
