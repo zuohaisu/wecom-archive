@@ -19,6 +19,14 @@ from app.schemas.tenant_provision import (
     TenantProvisionOut,
     TenantStatusUpdateIn,
     TenantStatusUpdateOut,
+    TenantUsageItemOut,
+    TenantUsageListOut,
+)
+from app.services.usageservice import (
+    count_messages,
+    count_monitored_employees,
+    sum_storage,
+    sync_health,
 )
 
 router = APIRouter()
@@ -209,4 +217,28 @@ def check_tenant_connectivity(
             reason=_connectivity_failure_reason(error),
         )
     return TenantConnectivityCheckOut(ok=True)
+
+
+@router.get("/tenants/usage", response_model=TenantUsageListOut)
+def list_tenant_usage(
+    _admin=Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> TenantUsageListOut:
+    """Return read-only usage summaries for every tenant, including inactive ones."""
+    tenants = db.query(Tenant).all()
+    # First release accepts these per-tenant aggregates; batch them if tenant
+    # cardinality grows enough for the N+1 queries to become material.
+    return TenantUsageListOut(
+        tenants=[
+            TenantUsageItemOut(
+                tenant_id=tenant.id,
+                tenant_name=tenant.name,
+                message_count=count_messages(db, tenant_id=tenant.id),
+                storage_bytes=sum_storage(db, tenant_id=tenant.id),
+                employee_count=count_monitored_employees(db, tenant_id=tenant.id),
+                sync_health=sync_health(db, tenant_id=tenant.id),
+            )
+            for tenant in tenants
+        ]
+    )
 

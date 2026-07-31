@@ -55,6 +55,32 @@ class TenantListOut(BaseModel):
     tenants: list[TenantListItemOut]
 
 
+class SyncHealthOut(BaseModel):
+    """Safe aggregate sync status returned with a tenant usage summary."""
+
+    status: str
+    error_message: Optional[str]
+    last_seq: Optional[int]
+    updated_at: Optional[str]
+
+
+class TenantUsageItemOut(BaseModel):
+    """Read-only per-tenant aggregates for the platform console."""
+
+    tenant_id: str
+    tenant_name: str
+    message_count: int
+    storage_bytes: int
+    employee_count: int
+    sync_health: SyncHealthOut
+
+
+class TenantUsageListOut(BaseModel):
+    """Platform-wide list of individually scoped tenant usage summaries."""
+
+    tenants: list[TenantUsageItemOut]
+
+
 class TenantStatusUpdateIn(BaseModel):
     """Request body for PATCH /tenants/{tenant_id}."""
 
