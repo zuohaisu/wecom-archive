@@ -1,69 +1,85 @@
-# RND-304 QA / 验收 agent 提示词
+[Goal check] This work advances 独立验收（QA） by 逐条核对 RND-304 的 7 条 AC（重点验证幂等、租户隔离、未依赖 F0/RND-244）并产出带证据的 PASS/FAIL 判定。
 
----
+# RND-304 验收提示词（Acceptance / QA Prompt）
 
 ## ⚡ 立即执行，不要询问意图
 
-你现在收到的不是一份要讨论或确认的文档，而是一个**已经批准、待立即执行的任务指令**。你就是本工单的独立验收 agent，任务从你读到这句话开始。
-
-- **不要**问"你希望我做什么"、"这份提示词的目的是什么"、"需要我现在开始吗"——目的已经写在下面，答案永远是"是"。
-- **不要**先输出一份执行计划再等回复确认——直接开始下面的验收步骤，逐条往下核对。
-- **不要**因为这是只读任务就等待许可——只读操作不需要许可，直接跑。
-- 唯一允许中途停下、不产出 PASS/FAIL 判定的情况，是触发文档规则要求的 `BLOCKED`（附具体缺口说明），**这是写进产出文件里的判定结果，不是向用户提出的问题**。
-- 现在开始：确认工单号，然后直接进入验收核对步骤。
+你现在收到的不是一份要讨论或确认的文档，而是一个**已经批准、待立即执行的任务指令**。你就是本工单的独立验收 agent，任务从你读到这句话开始。不要问"你希望我做什么"；不要先输出计划再等确认；只读操作不需要许可，直接开始下面的验收步骤。唯一允许中途停下、不产出 PASS/FAIL 的情况，是触发规则要求的 `BLOCKED`——这是写进产出文件的判定，不是向用户提问。
 
 ---
 
-> 面向独立测试 / QA agent。只读言、不改实现、不 commit / push。
-> 验收对象：开发 agent 按 `RND-304-dev-prompt.md` 产出的改动。
+> 交给**独立验收 agent**。只做验证与判定，**不修改任何文件**。
 
-## 一、验收目标
-确认 `first_run` 标志的**存储 + 读写端点**正确：默认未完成 → 完成后置位 → 幂等 → 租户隔离；且零回归、契约不变、不越界自建配置中心。
+## 任务身份
+- 工单：RND-304「A9-3 标记首次完成」｜风险等级 R1
+- 本票是设计反转后的版本——**不再依赖 F0/RND-244 配置中心**，改为 `Tenant` 表直接加列。若交付物仍走 F0 KV 路线，说明用的是旧稿，判 `BLOCKED` 并说明需要重新按当前设计执行。
 
-## 二、逐条验收清单（PASS/FAIL，附证据）
-### 依赖前置
-- [ ] P0 **F0 配置中心（RND-244）已合并**：能 `import app.config_service`（或实际模块名）且 `alembic check` 绿。若未合并，开发 agent 应已停下报告 —— 本项 FAIL 且整体判 FAIL，附「依赖未就绪」说明。
+## 你的角色与权限
+- 可以：读所有文件、跑只读命令。
+- 不可以：改任何文件、commit、push、放松 AC。
+- 缺口 → FAIL 并列具体缺口，**不替开发 agent 补做**。
 
-### 端点行为（B）
-- [ ] B1 `GET /api/onboarding/status` 默认返回 `{"first_run": true}`（无配置 → 视为未完成）—— 证据：curl + jq。
-- [ ] B2 `POST /api/onboarding/complete`（含合法 admin session）后 `status` 返回 `{"first_run": false}` —— 证据：curl。
-- [ ] B3 **幂等**：重复 `POST /api/onboarding/complete` 仍 `{"first_run": false}`，无 4xx/5xx、无副作用报错 —— 证据：连发两次对比。
-- [ ] B4 完成后 `GET /api/onboarding/status` 仍 `{"first_run": false}`（持久化生效） —— 证据：POST 后再 GET。
-- [ ] B5 **fail-safe**：F0 配置读取抛异常时 `status` 仍返回 `first_run=true`（不 500） —— 证据：可注入故障或审查源码 try/except。
+## 验收方法（证据优先）
 
-### 租户隔离（T）
-- [ ] T1 租户 A 完成向导后，租户 B 的 `GET /api/onboarding/status` 仍为 `{"first_run": true}`（不串） —— 证据：双租户 session 对比。
-- [ ] T2 端点**不**接受请求级 `tenant_id` 参数（tenant 仅来自 `require_role()` 解包） —— 证据：grep 源码确认无 `tenant_id: str = Query(...)` / `Body(...)`。
+### AC-1 — 默认未完成
+- 证据：全新租户（从未调用 `complete`）→ `GET /api/onboarding/status` 返回 `first_run: true`。
+- 判定：PASS/FAIL 按是否符合。
 
-### 授权（A）
-- [ ] A1 `GET /api/onboarding/status` 需登录（匿名 401/302） —— 证据：无 session 直连。
-- [ ] A2 `POST /api/onboarding/complete` 需 admin/owner 角色（`require_role("admin","owner")`）；readonlyaudit 等被拒（403） —— 证据：多角色 session 对比。
+### AC-2 — 完成后置位
+- 证据：`POST /api/onboarding/complete` 后 `GET` 返回 `first_run: false`。
+- 判定：符合 = PASS。
 
-### 范围守门（S，越界即 FAIL）
-- [ ] S1 **无新建模型 / 迁移**：`git diff --stat` 不应含 `db/models.py` 新增表、`alembic/versions/*` 新文件 —— 证据：`git diff --stat` + `alembic check` 绿。
-- [ ] S2 **无自建配置服务**：不应新增 `app/config_service.py` / `app/services/config_*` 等（复用 F0） —— 证据：grep 改动文件。
-- [ ] S3 **未触碰向导页面 / i18n / 前端框架**：`design/`、`app/assets/i18n.js`、React 不引入 —— 证据：`git diff --stat` 路径审计。
-- [ ] S4 不改 `_FLAT_SERVICE_MODULES`（`test_architecture_boundary.py:70`） —— 证据：git diff 该文件为空。
+### AC-3 — 幂等（关键）
+- 证据：测试连续调用两次 `POST /api/onboarding/complete`，查库断言 `onboarding_completed_at` 两次调用后**值相同**（不是第二次调用把时间戳往后推）。
+- 判定：真正幂等 = PASS。**若第二次调用覆盖了时间戳 → 直接 FAIL（`IMPLEMENTATION_DEFECT`, major）**——虽然功能上 `first_run` 结果不变，但审计/排查时间线会被污染。
 
-### 全局契约（C）
-- [ ] C1 路由数：按「读当前 N → N+2」同步；`test_http_contract.py` route_count / path 集合 / snapshot 三处一致 —— 证据：`make verify`（test_http_contract 段）绿。
-- [ ] C2 `make verify` 全绿（lint / type / build / test） —— 证据：完整日志。
-- [ ] C3 `test_architecture_boundary.py` 绿（无反向依赖 / 组合根纯净） —— 证据：pytest 输出。
+### AC-4 — 租户隔离
+- 证据：跨租户反例测试——租户 A 完成向导后，租户 B 的 `GET` 仍返回 `first_run: true`。代码审阅：`tenant_id` 仅来自 `require_role()`，不接受请求参数。
+- 判定：符合 = PASS。任一缺失 → FAIL（`SECURITY_VIOLATION`, blocker）。
 
-## 三、回归套件（必须全绿）
-`make verify` + 重点：`backend/tests/test_http_contract.py`、`backend/tests/test_architecture_boundary.py`、以及 onboarding 相关新增测试（`test_onboarding.py` 或并入既有 auth 套件）。
+### AC-5 — 鉴权分级
+- 证据：`GET` 任意角色可读；`POST` 非 admin/owner 角色 → 403，有测试覆盖。
+- 判定：分级正确 = PASS。
 
-## 四、智能路由判定（每轮必给）
-- 源码有 Bug → 反馈开发 agent 修复，附错误 + 失败测试 + 期望；不自行改实现。
-- 测试代码有 Bug → 可自行修正测试（仅当断言旧路径，须标注）。
-- 全部通过 → 报告 SUCCESS，附清单结果。
-最多 2 轮：第1轮修复，第2轮回归；仍不过则标注遗留。
+### AC-6 — 迁移可逆
+- 证据：`alembic upgrade head` 与 `alembic downgrade -1` 均可执行；`alembic check` 无 drift。
+- 判定：符合 = PASS。
 
-## 五、交付报告格式
->RND-304 验收结论：PASS / FAIL
->依赖 F0：已合并 / 未合并（未合并→整体 FAIL）
->RED 基线：___（默认 first_run=true）
->GREEN：___（complete 后 first_run=false，幂等，租户隔离）
->回归：make verify ___（绿/红）
->契约：路由数 +2、_FLAT_SERVICE_MODULES 未改、无新建模型/迁移
->遗留：___
+### AC-7 — 契约同步 + RBAC 同步 + 回归
+- 判定：`test_http_contract.py`（route_count 当前基线 +2）与 `test_rnd280_rbac_scaffold.py`（白名单含 `onboarding.py`）均已同步 = PASS；任一未同步 → FAIL（`REGRESSION`），`recommended_next_state: FIXING`。`make verify` exit 0；`test_architecture_boundary.py` 通过。
+
+## 本项目专属检查（必查）
+1. **未依赖 F0/RND-244（关键）**：`grep -rn "config_service\|get_config\|set_config\|from app.config" backend/app/routers/onboarding.py` **应无命中**。若有命中，说明开发 agent 走的是旧的 F0 KV 设计——按当前设计判 `BLOCKED`，不是直接判 FAIL（这可能是开发 agent 拿到了过期的提示词版本，需要人工确认后重跑，而不是判定实现质量有问题）。
+2. **`Tenant` 表新增列**：`git diff -- backend/app/db/models.py` 应只看到 `Tenant.onboarding_completed_at` 一行新增，无其他改动。
+3. **未新建多余表**：`backend/alembic/versions/` 中本票的迁移文件应只涉及给 `tenants` 表加列，不应新建独立的 onboarding 状态表（那会是过度设计——单一布尔状态不需要单独一张表）。
+4. **未提供重置端点**：diff 中不应出现"取消完成"/"重新打开向导"相关的端点或参数。
+5. **架构边界**：router 未 import `app.main`；service 层未 import `app.routers.*`。
+6. **文件所有权**：`git status --porcelain` 中属于本票的改动应限于 `alembic/versions/0029_*.py`（或实际顺延版本号）、`app/db/models.py`（仅新增 `onboarding_completed_at`）、`routers/onboarding.py`（新）、`schemas/onboarding.py`（新）、`main.py`（仅两行）、`tests/test_rnd304_onboarding_status.py`（新）、`tests/test_rnd280_rbac_scaffold.py`（白名单同步）、`tests/test_http_contract.py`（契约同步）。
+   > 若 RND-319 同天并行推进，两票都会各自新增迁移文件（0028/0029）——先 `git status` 分离归因，只把本票的部分记在本票账上（见 `docs/ticket-autopilot-workflow.md` §3.4）。
+
+## 附加检查（Security）
+- 测试中使用固定假租户数据，非真实客户数据。
+- `git log origin/main..HEAD` **应为空** → 有输出即 FAIL。
+
+## 验证命令（只读）
+```bash
+make verify
+.venv/bin/python -m pytest backend/tests/test_rnd304_onboarding_status.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
+.venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
+.venv/bin/python -m alembic check                                          # AC-6
+grep -rn "config_service\|get_config\|set_config\|from app.config" backend/app/routers/onboarding.py   # 本项目专属检查 1：应无命中
+ls backend/alembic/versions/ | tail -3
+git diff -- backend/app/db/models.py
+git status --porcelain
+git log origin/main..HEAD    # 必须无输出
+```
+
+## 产出
+写入 `tasks/RND-304-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
+`notes` 中记录：实际采用的存储方案（应为 `Tenant` 列；若不是需说明），迁移文件的实际版本号。
+
+## 禁止事项
+- 不改任何文件、不补做缺失内容、不放松 AC。
+- **AC-3 若发现重复调用覆盖时间戳 → 直接 FAIL（major）**，不接受"结果反正一样"。
+- **AC-4 若跨租户数据串了 → 直接 FAIL（blocker）**。

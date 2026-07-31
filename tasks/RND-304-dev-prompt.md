@@ -1,121 +1,131 @@
-# RND-304 开发 agent 执行提示词
-> 面向开发 agent（单人端到端实现 RND-304 / A9-3 标记首次完成）。
-> 本文件即你的完整 brief。全程不执行 git commit / push（由用户本人操作）。只改工作树，交用户 Review。
+[Goal check] This work advances 开发（Development） by 交付租户级「首次向导已完成」标志的存储与读写端点，收口 A9 首次配置向导 epic，且不依赖仍在进行中的 F0/RND-244 配置中心。
 
-## 一、任务（一句话）
-为「首次配置向导」提供 `first_run` 标志的**存储 + 读写端点**：向导完成后置位，使下次跳过向导。
-仅动后端；不实现向导页面本身（属 A9-1/A9-2）；**不**自建配置中心（属 F0 / RND-244）。
+# RND-304 开发提示词（Developer Prompt）
 
-## 二、精确落点 / 依赖
-### 依赖 F0（RND-244）—— 配置中心 KV 存储
-- RND-304 在 Linear 为 `[BLOCKED: F0]`。**已核实 F0 配置中心（RND-244）当前未合并**：
-  - `backend/app/db/models.py` 无通用 config 表（仅有 `TenantWecomConfig`，是企微连接配置，非 F0 配置中心）；
-  - `backend/app/services/` 无 `config_service`（仅有 decrypt_worker / media_access / timeline_service / usageservice 等）；
-  - `backend/tests/test_architecture_boundary.py:70` 的 `_FLAT_SERVICE_MODULES` 无 config 模块；
-  - 无 `backend/app/routers/config.py` / `routers/settings.py`。
-- `first_run` 标志**必须**存于 F0 配置中心的**租户级 KV**：键 `onboarding_completed`，值 `"true"`/`"false"`，默认 `"false"`。
-- **禁止**：自建表 / 迁移 / 配置服务模块（越界即判失败）。
+> 开始前必须先读 `DEV_AGENT_RULES.md` 与 `docs/ticket-autopilot-workflow.md`，并在工作开头输出上面那行 `[Goal check]`。
 
-### 落点（F0 已合并的前提下）
-- **发现 F0 配置服务 API（Phase 0，必做）**：在 `app/` 下 grep `def get_config` / `def set_config` / `class ConfigStore` / `ConfigService`；常见落点 `app/config_service.py` 或 `app/services/config_service.py`。读取其公开签名（期望形如 `get_config(tenant_id, key, default=...)` / `set_config(tenant_id, key, value)`，或同语义的 `config_get`/`config_set`）。**以实际模块为准**，下文用 `get_config`/`set_config` 作占位名。
-- `backend/app/routers/onboarding.py`（**新建**）：两个端点 + `APIRouter()`。
-- `backend/app/main.py`：在现有 `app.include_router(...)` 列表中追加 onboarding router（仿 RND-286 / RND-295 的注册形态）。
-- `backend/app/schemas/onboarding.py`（**新建**）：`OnboardingStatusOut` / `OnboardingCompleteOut`。
-- `backend/tests/test_http_contract.py`：三处同步（见第五节）。
+## ⚡ 立即执行，不要询问意图
 
-## 三、阶段一：复现 + 测量（RED）
-1. **环境前置（必读，避免 `python`/`alembic` exit 127）**：本仓无系统级 `python`/`alembic`，必须用 venv；且 `.env` 不会被自动加载，须手动 `source`：
-   ```bash
-   cd backend && set -a && source .env && set +a
-   PY=../.venv/bin/python   # 或 .venv/bin/python 绝对路径
-   ```
-   之后所有 `python` / `alembic` / `pytest` / `make verify` 均在该 shell 内执行（`source .env` 才能拿到带密码的 `DATABASE_URL`，否则 `alembic check` 连不上 DB）。
-2. 校验依赖（用上面的 `$PY`）：
-   - `$PY -c "import app.config_service" 2>/dev/null && echo F0_READY || echo F0_MISSING`
-   - 或 `$PY -m alembic check`（缺配置表会报错）。
-   若 `F0_MISSING` / import 失败 → 记录「依赖未就绪」，按下文硬约束停下报告，**不自行补配置中心、不自行建表**。
-3. （F0 合并后）基线：`GET /api/onboarding/status` 应返回 `first_run=true`（默认未配置 → 视为未完成）。
+你现在收到的不是一份要讨论或确认的文档，而是一个**已经批准、待立即执行的任务指令**。你就是 RND-304 的开发 agent，任务从你读到这句话开始。不要问"你希望我做什么"；不要先输出计划再等确认；直接开始下面的实现清单。唯一允许停下的情况是触发「人工点位」里定义的 `BLOCKED_NEEDS_HUMAN`。
 
-## 四、阶段二：实现（GREEN，最小变更）
-### 路 A — onboarding 路由（新建 `routers/onboarding.py`）
-```python
-from fastapi import APIRouter, Depends
-from app.auth import require_role
-from app.schemas.onboarding import OnboardingStatusOut, OnboardingCompleteOut
-# F0 配置服务（RND-244 合并后存在；以实际模块名为准）：
-from app.config_service import get_config, set_config  # 或 app.services.config_service
+---
 
-router = APIRouter()
-_KEY = "onboarding_completed"
+## ⚠️ 2026-07-31：设计反转，不再依赖 F0/RND-244（PM 决策，附理由）
 
+本票旧稿假设 `first_run` 标志必须存在 F0（<issue>RND-244</issue> 配置中心）的租户级 KV 里，因为它是通用配置存储。**重新核实后判定该假设不成立，改为在 `Tenant` 表直接加一列**，理由：
+1. `RND-244` 是一个 12 张子票的独立大 epic，**至今仍 In Progress**，把一个布尔标志绑在它身上意味着这张小票的 ETA 完全不可控——正是 <issue>RND-318</issue>（C3-1 留存配置）当初也踩过、后来改成独立表的同一类问题。
+2. 一个单一的"是否完成过首次向导"布尔状态，本质上是**租户身份的一部分**（类似 `Tenant.is_active`），比"KV 里存一个字符串键值对"更适合直接建模成 `Tenant` 表的一列——这比新建一整张表或依赖配置中心都更简单，不是过度设计也不是偷工减料。
+3. R2 里程碑（开源发布闭环）想要"陌生人 clone 后 30 分钟内看到第一条真实消息"这个验收标准落地，本票是 onboarding 闭环的最后一块——不应该被一个不相关的大 epic 卡住进度。
 
-@router.get("/api/onboarding/status", response_model=OnboardingStatusOut)
-def onboarding_status(auth=Depends(require_role())):
-    """租户级首次运行标志读取。默认未完成 → first_run=true。"""
-    _, tenant_id = auth
-    try:
-        done = (get_config(tenant_id, _KEY, default="false") or "false").strip().lower() == "true"
-    except Exception:
-        # fail-safe：读取异常一律按「未配置」处理，绝不抛 500
-        done = False
-    return OnboardingStatusOut(first_run=not done)
+**若你认为这个判断有误（例如产品确实需要多个配置项共享同一套 KV 机制）→ 见下方 Escalation，不要自行改回依赖 F0 的设计。**
 
+## 任务身份
+- 工单：RND-304「A9-3 标记首次完成」｜父 Epic RND-269（A9 首次配置向导）
+- 优先级：High｜风险等级：**R1**｜milestone：R2 · 开源发布闭环
+- **本票是 A9 epic 的最后一块**（A9-1/A9-2 已通过 <issue>RND-318</issue>/<issue>RND-303</issue> 满足并 Done）
 
-@router.post("/api/onboarding/complete", response_model=OnboardingCompleteOut)
-def onboarding_complete(auth=Depends(require_role("admin", "owner"))):
-    """向导完成后置位标志。幂等：重复调用仍返回 first_run=false。"""
-    _, tenant_id = auth
-    set_config(tenant_id, _KEY, "true")
-    return OnboardingCompleteOut(first_run=False)
+## 背景与项目现状（已实地核实）
+
+`Tenant` 模型（`backend/app/db/models.py:39` 附近）当前字段：`id`/`name`/`slug`/`is_active`/`created_at`/`updated_at`。**没有**任何 onboarding 相关列——本票新增。
+
+**路由文件预留**：<issue>RND-303</issue>（A9-2 批量邀请）的实现说明里提到 `app/routers/onboarding.py` 是"预定给 RND-304 的新文件"，RND-303 特意避免创建它、改在 `routers/auth.py` 里加批量端点。**本票现在是第一个、也是唯一一个创建这个文件的票**，不会有冲突。
+
+**迁移序位**：当前 alembic head 在 <issue>RND-318</issue>（`0027`）之后。若 <issue>RND-319</issue>（C3-2）与本票在同一天并行推进，<issue>RND-319</issue> 占用 `0028`，**本票为** `0029`。**实现时先 `git pull` 确认实际 head**；若已漂移，按实际顺延并在 QA Summary 注明。
+
+**❗ 本项目高频踩坑：**
+- **RBAC 白名单是闭世界测试**：`backend/tests/test_rnd280_rbac_scaffold.py` 断言只有指定文件可以出现 `require_role`（<issue>RND-318</issue> 已把 `retention.py` 加进这份白名单，供参考同样的加法）。**本票新建 router 用 `require_role` 会触发该断言，必须同步白名单**（见 `docs/ticket-autopilot-workflow.md` §3.3）。
+- 架构冻结 D1：纯后端，无前端页面（"下次跳过向导"的判断逻辑消费方是前端，本票只交付判断所需的数据源）。
+
+## 目标（Goal）
+交付一个租户级"是否已完成首次配置向导"的标志：读取端点供前端判断是否要跳转到向导，完成端点供向导走完后置位，且置位后幂等、不可被状态回退。
+
+## 范围边界
+
+**In scope：**
+1. **迁移** `0029_tenant_onboarding_completed.py`（或实际顺延版本号）：`tenants` 表新增可空列 `onboarding_completed_at`（`DateTime(timezone=True)`, nullable，无需回填）。
+2. `app/db/models.py`：`Tenant` **仅新增** `onboarding_completed_at` 列定义。
+3. `backend/app/routers/onboarding.py`（**新建**）：
+   - `GET /api/onboarding/status`：`require_role()`（任意已登录角色可读），返回 `{"first_run": bool}` —— `onboarding_completed_at is None` 时 `first_run=true`。
+   - `POST /api/onboarding/complete`：`require_role("admin", "owner")`，若 `onboarding_completed_at` 为空则置为当前时间；**若已设置过，保持原值不变（幂等，不重置时间戳）**。返回 `{"first_run": false}`。
+   - 挂载到 `app/main.py`（仿既有 router 注册方式，仅新增 1 行 import + 1 行 `include_router`）。
+4. `backend/app/schemas/onboarding.py`（**新建**）：`OnboardingStatusOut` / `OnboardingCompleteOut`。
+5. 测试：`backend/tests/test_rnd304_onboarding_status.py`。
+
+**Out of scope（显式非目标）：**
+- 不做向导页面本身（属 A9-1/A9-2，均已交付）。
+- 不做"下次跳过"的前端跳转逻辑（本票只提供 `first_run` 布尔，消费方是前端）。
+- 不依赖 F0/<issue>RND-244</issue>（见上方设计反转说明）。
+- 不允许"重新打开向导"式的重置端点（一旦完成，只能通过直接改库回退，不提供 API 层面的"取消完成"）。
+
+**本工单拥有的文件（只许写这些）：**
+- `backend/alembic/versions/0029_tenant_onboarding_completed.py`（新，若 head 漂移则改用实际顺延版本号）
+- `backend/app/db/models.py` —— **仅新增** `Tenant.onboarding_completed_at` 列
+- `backend/app/routers/onboarding.py`（新）
+- `backend/app/schemas/onboarding.py`（新）
+- `backend/app/main.py` —— **仅新增** 1 行 import + 1 行 `include_router`
+- `backend/tests/test_rnd304_onboarding_status.py`（新）
+- `backend/tests/test_rnd280_rbac_scaffold.py` —— 同步白名单（新增 `onboarding.py`），只加必要条目
+- `backend/tests/test_http_contract.py` —— 契约同步（新增 2 个路由：GET + POST）
+
+**只读、绝不可写：** `app/routers/retention.py`（RND-318 拥有）、`app/routers/auth.py`（RND-303 拥有）、其他票拥有的一切文件。
+
+> 若发现必须改他人拥有的文件 → **停止**，`BLOCKED_NEEDS_HUMAN`。
+
+## 验收标准（Acceptance Criteria）
+
+- **AC-1 默认未完成**：从未调用过 `complete` 的租户，`GET /api/onboarding/status` → `first_run: true`。
+- **AC-2 完成后置位**：`POST /api/onboarding/complete` 后，`GET` 返回 `first_run: false`。
+- **AC-3 幂等（关键）**：连续调用两次 `POST /api/onboarding/complete`，第二次**不改变** `onboarding_completed_at` 的时间戳值（须有测试断言两次调用后时间戳相同，不是被覆盖成更新的时间）。
+- **AC-4 租户隔离**：`tenant_id` 只来自 `require_role()` 会话解包，不接受请求参数；跨租户反例测试——租户 A 完成向导，租户 B 的 `first_run` 仍为 `true`。
+- **AC-5 鉴权分级**：`GET` 任意角色可读；`POST` 仅 `admin`/`owner`（普通角色调用 `POST` → 403）。
+- **AC-6 迁移可逆**：`upgrade`/`downgrade` 均可执行；`alembic check` 无 drift。
+- **AC-7 契约同步 + RBAC 同步 + 回归**：`test_http_contract.py`（route_count 当前基线 +2）与 `test_rnd280_rbac_scaffold.py`（白名单加 `onboarding.py`）均已同步；`make verify` 全绿；`test_architecture_boundary.py` 通过。
+
+## 验证方式（Verification — 确定性闸）
+```bash
+git pull   # 确认 alembic head，见「迁移序位」
+make verify
+.venv/bin/python -m pytest backend/tests/test_rnd304_onboarding_status.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
+.venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
+.venv/bin/python -m alembic check    # AC-6：无 drift
+git diff -- backend/app/db/models.py    # 人工核对：只新增 onboarding_completed_at
+git status --porcelain
+git log origin/main..HEAD    # 必须无输出
 ```
-- **零枚举 / fail-safe**：`get_config` 默认 `"false"` → `first_run=true`；任何读取异常都按「未配置」处理（不抛 500）。
-- **幂等**：`complete` 重复调用仍返回 `first_run=false`，不报错、不重复副作用。
-- **租户隔离（fail-closed）**：`tenant_id` 仅来自 `require_role()` 解包，**绝不**接受请求参数。
-- **最小暴露**：状态端点只返回 `first_run` 布尔，不泄露配置中心其它键 / 原始值。
 
-### 路 B — schema（新建 `schemas/onboarding.py`）
-```python
-from pydantic import BaseModel
+## 依赖（Dependencies）
+无剩余前置（"F0" 通用基础鉴权/租户脚手架 RND-276~280 均已 Done；本票**不**依赖 RND-244 配置中心，见开头设计反转说明）。<issue>RND-303</issue>（A9-2）✅ Done，已确认 `routers/onboarding.py` 未被占用。本票是 A9 epic 最后一块。
 
-class OnboardingStatusOut(BaseModel):
-    first_run: bool
+## 完成定义（Definition of Done）
+- [ ] AC-1 ~ AC-7 全满足，每条有测试
+- [ ] `make verify` 全绿
+- [ ] `git status` 只显示本票拥有的文件
+- [ ] QA Summary 已产出
+- [ ] **未 commit、未 push**
 
-class OnboardingCompleteOut(BaseModel):
-    first_run: bool
-```
+## 风险与回滚
+- **风险 1（关键）**：`complete` 端点非幂等，重复调用重置时间戳——由 AC-3 防守。
+- 风险 2：迁移版本号与实际 head 不符——实现前先 `git pull` 核实（尤其注意 <issue>RND-319</issue> 若同天并行，可能已占用 `0028`）。
+- 回滚：`downgrade` 迁移 + `git checkout -- backend/app/db/models.py backend/app/main.py`；无数据影响（新增列默认 NULL）。
 
-### 路 C — main.py 注册
-- 在 `app.include_router(...)` 列表中追加（仿既有 router 注册）：
-  ```python
-  from app.routers.onboarding import router as onboarding_router
-  app.include_router(onboarding_router)
-  ```
+## 人工点位
+- **Trigger**：Haisu 置 In Progress。
+- **Gate**：涉及新迁移但仅新增可空列、无回填、风险很低，测试绿即可，无需额外人工审阅。
+- **Escalation**：若发现产品实际需要的是"可重新打开向导"（即需要一个取消完成的机制）→ `BLOCKED_NEEDS_HUMAN`，说明具体诉求，不要自行加一个重置端点（这不在本票 AC 里）。
 
-### 「下次跳过」消费端（协调，非严格 scope）
-- 机制由 `GET /api/onboarding/status` 提供；控制台 shell / 向导入口读取 `first_run` 决定跳转（未完成→向导，已完成→总览）。
-- RND-304 **不**新建向导 SSR 页面（属 A9-1/A9-2）。如需最小入口，可在 `routers/web.py` 追加 `GET /admin/onboarding` 重定向（已完成→`/admin/conversations`，未完成→`/admin/onboarding/start`），但向导页模板由兄弟票提供；**此重定向列为 optional，且必须幂等、不破坏既有路由、不引入新依赖**。本票 AC 不依赖该重定向。
+## 开发 agent 执行指引
+1. 读 `DEV_AGENT_RULES.md`、`docs/ticket-autopilot-workflow.md`、`app/db/models.py`（`Tenant` 定义位置）、`app/routers/retention.py`（RND-318 的新 router + 新迁移范式，直接照抄结构）、`app/auth.py`（`require_role` 用法）。
+2. `git pull` 确认 alembic head，写迁移。
+3. 新增 `onboarding.py` router（GET/POST）+ schema。
+4. 挂载到 `main.py`。
+5. 写测试覆盖 AC-1~AC-5（**AC-3 幂等是重点**）。
+6. 同步 `test_http_contract.py` 与 `test_rnd280_rbac_scaffold.py`。
+7. 跑全部验证命令，输出 QA Summary + `git status`，**不 commit**。
 
-## 五、阶段三：验证（GREEN + 回归 + make verify）
-1. 功能验证（F0 合并后）：
-   - `GET /api/onboarding/status` 默认 `first_run=true`；
-   - `POST /api/onboarding/complete` 后 `first_run=false`；
-   - 再次 GET 仍 `false`（幂等）；
-   - 跨租户不串：租户 B 仍 `first_run=true`。
-2. 契约测试三处同步（`backend/tests/test_http_contract.py`）：
-   - L325 `assert route_count == 49` → 改为「读当前 N，+2」实际值（**勿硬编码死值**：今天基线 49，实现时若已有兄弟票合并会更高，用 `make verify` 报错给出的真实 count 回填）；
-   - path 集合（L336-377）追加 `"/api/onboarding/status"`、`"/api/onboarding/complete"`；
-   - snapshot（L410-432）追加
-     `("/api/onboarding/status", frozenset({"GET"}), "OnboardingStatusOut", "None")`、`("/api/onboarding/complete", frozenset({"POST"}), "OnboardingCompleteOut", "None")`。
-3. 回归：在 §三 的环境 shell 内（已 `source .env` + venv）跑 `make verify` 全绿；重点 `test_http_contract.py` + `test_architecture_boundary.py`（无新建模型 / 迁移 / 服务模块 → **不改** `_FLAT_SERVICE_MODULES`，边界仍绿）。
-4. 失败先修实现，不迁就测试（除非测试断言旧路径，需标注）。
-
-## 六、硬约束（违反即判失败）
-- **不**自建 `first_run` 表 / 迁移 / 配置服务模块（属 F0，越界即失败）。
-- F0 未合并 → **停下报告**，不自行补配置中心、不自行建表。
-- 不改既有 URL / status / body 形状（新增端点除外）；租户隔离 fail-closed。
-- `response_model` 之外不暴露字段；不泄露配置中心其它键。
-- 不引 React / 不改 i18n / 不动向导页面（D1 冻结 SSR + 原生 JS）。
-- 不 commit / push。
-
-## 七、收尾（交付物）
-向用户交付：RED 基线数字、GREEN 数字、改动文件清单、`make verify` 日志、未提交声明、F0 就绪状态说明（含实际使用的 F0 配置服务模块名与 `get_config`/`set_config` 签名）。
+## 硬性约束（DEV_AGENT_RULES.md）
+- 不 commit / push / 建分支 / 改 git 历史；不改 CI/CD、`.gitignore`、部署配置。
+- 不碰生产数据与密钥；测试用固定假租户数据。
+- 不扩大 Scope：不做向导页面、不做重置端点、不依赖 F0。
+- 复用优先：鉴权范式仿 `retention.py`/`require_role`，不重新发明。
+- 证据优先，以 exit 0 / 测试通过为证。
