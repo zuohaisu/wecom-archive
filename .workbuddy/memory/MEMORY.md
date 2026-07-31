@@ -8,11 +8,24 @@
 ## 硬规则（必须遵守）
 - **Agent 绝不 git commit/push**——一律用户本人操作，即便 QA 通过/用户许可也只提示
 - **QA 先行**：实现后交独立 QA agent 验收，用户决定是否提交
-- 交付物=「开发提示词+验收提示词」两份文件（**2026-07-29 起统一存 `tasks/`，命名 `RND-<n>-dev-prompt.md`/`RND-<n>-qa-prompt.md`；不再写入 `.workbuddy/prompts/`——原 11 张开放工单提示词已搬迁改名进 `tasks/`，`.workbuddy/prompts/` 只保留 `archive/` 历史，勿在旧路径重新生成文件**），用户决定何时执行
+- 交付物=「开发提示词+验收提示词」两份文件，用户决定何时执行
+- **`tasks/` 是工单交付物唯一归属地（2026-07-31 收口，不可再变）**：dev/qa prompt、
+  `qa-verdict.json`、qa-report 全部只落 `tasks/`。命名 `RND-<n>-dev-prompt.md` /
+  `RND-<n>-qa-prompt.md` / `RND-<n>-qa-verdict.json` / `RND-<n>-qa-report.md`（大写前缀）。
+  工单 Done/Canceled 后整组 `git mv` 进 `tasks/archive/`，根目录只留未完成工单。
+  **`.workbuddy/prompts/` 已整个删除**——绝不在该路径或仓库根、`deliverables/` 下新建提示词/QA 文件。
+  规范见 `tasks/README.md` 与 `docs/ticket-autopilot-workflow.md` §8。
 
 ## Linear API 备忘
 - markdown `_` 会被解析为斜体→代码标识符一律加反引号
 - 新 issue 默认 Backlog，要用需显式 status="Todo"
+- **MCP 不稳时走 GraphQL 直连**（`search_issues` 常 Fetch failed）：key 在 `~/.workbuddy/mcp.json`
+  的 `mcpServers.linear.env.LINEAR_API_KEY`，POST `https://api.linear.app/graphql`，
+  header `Authorization: <key>`（不加 Bearer）。批量拉状态用
+  `project(id:$pid){issues(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{identifier state{name type}}}}`。
+  ⚠️ `project(id:)` 的变量类型是 **`String!`**，写 `ID!` 直接 HTTP 400。
+- **完成状态只认 Linear state**：`qa-verdict.json` 会停留在旧轮次结果（RND-314/328/329 verdict=FAIL、
+  327=BLOCKED，但 Linear 全 Done）。另有票 `project` 为 None（RND-244/257），只按 project 拉会漏。
 
 ## 架构约束（durable, verified 2026-07-27）
 - **SF-1 数据最小化**：`decrypted_payload` 恒 NULL，从不持久化全量解密包（decrypt_worker.py:531 + migration 0008 + 回归测试锁定）

@@ -329,6 +329,12 @@ Rules:
 
 ## QA Rules
 
+**All ticket artifacts live in `tasks/` — nowhere else.** Dev prompts, QA prompts,
+`qa-verdict.json` files and QA reports are written to `tasks/RND-<n>-*`. When a ticket
+reaches Done or Canceled in Linear, `git mv` its whole file set into `tasks/archive/`.
+Never create prompt or QA files at the repo root, under `.workbuddy/`, or in
+`deliverables/`. Full convention: `docs/ticket-autopilot-workflow.md` §8.
+
 Every implementation should include a QA summary before commit.
 
 QA summary should cover:

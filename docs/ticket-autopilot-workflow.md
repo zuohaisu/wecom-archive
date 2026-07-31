@@ -159,25 +159,36 @@ make test                                    # 仅 pytest 全量
 
 ## 8. 目录约定
 
+**`tasks/` 是开发提示词、验收提示词、QA 判定与 QA 报告的唯一归属地。** 不得在仓库其它位置（根目录、`.workbuddy/`、`deliverables/`）另建提示词或 QA 产物。
+
 ```
 tasks/
 ├── _templates/
 │   ├── dev-prompt-template.md      # 开发提示词模板（九字段合同）
 │   ├── qa-prompt-template.md       # 验收提示词模板
 │   └── qa-verdict.schema.json      # QA 判定输出 schema
-├── RND-326-dev-prompt.md
-├── RND-326-qa-prompt.md
-├── RND-326-qa-verdict.json         # QA 运行后产出
-└── ...
+├── RND-246-dev-prompt.md           # ← 仅「未完成工单」留在 tasks/ 根
+├── RND-246-qa-prompt.md
+└── archive/                        # ← 工单 Done/Canceled 后整组下沉至此
+    ├── RND-326-dev-prompt.md
+    ├── RND-326-qa-prompt.md
+    ├── RND-326-qa-verdict.json     # QA 运行后产出
+    ├── RND-316-qa-report.md        # QA 叙述性报告（如有）
+    └── ...
 ```
 
-### 8.1 与既有 WorkBuddy 提示词的合并（2026-07-29）
+**命名规范（强制）**：`RND-<n>-dev-prompt.md` / `RND-<n>-qa-prompt.md` / `RND-<n>-qa-verdict.json` / `RND-<n>-qa-report.md`。前缀大写 `RND-`。同一工单有多份开发提示词时用后缀区分，如 `RND-229-dev-prompt-search-pagination-flake.md`。
 
-`.workbuddy/prompts/` 是**另一套先于本文档存在、且仍在运行**的提示词产线——由 WorkBuddy 自动化（`.workbuddy/automations/`）每日读 Linear、写「执行提示词 / QA 提示词」、派发开发与 QA agent、完成后把该工单的提示词移进 `.workbuddy/prompts/archive/`。它的命名是 `rnd-<n>-execution-prompt.md` / `rnd-<n>-qa-prompt.md`（小写），产出验收结果直接写回 Linear 评论，不落 `qa-verdict.json`。
+**归档规则**：工单在 Linear 置为 Done 或 Canceled 后，把该工单的**全部**文件（dev/qa prompt + verdict + report）一次性 `git mv` 到 `tasks/archive/`。`tasks/` 根目录始终只剩「还要用的」，一眼可见待办面。归档只搬文件、不改内容，仅修正跨文件引用路径。
 
-2026-07-29 已把 `.workbuddy/prompts/` 里全部 **11 张仍开放工单**（RND-232/237/239/262/282/283/304/311/316/317/318，共 22 个文件，含 RND-239 的 2 份历史决策文档）迁移进本目录，统一改名为 `RND-<n>-dev-prompt.md` / `RND-<n>-qa-prompt.md`，内容原样保留，仅修正了文件间的交叉引用路径。**已归档的 108 个 Done 工单提示词原样留在 `.workbuddy/prompts/archive/`，未移动**——只合并"仍要用的"，不合并历史记录。
+### 8.1 双产线合并收口（2026-07-29 起，2026-07-31 完成）
 
-**⚠️ 运行时风险（未解决，需 Haisu 处理）**：WorkBuddy 自动化的下一次运行仍可能按旧路径 `.workbuddy/prompts/rnd-<n>-execution-prompt.md` 读写这 11 张工单——若它发现文件不在原处，可能报错，也可能在原路径重新生成一份，导致重复。本次迁移**没有、也无法**修改 WorkBuddy 自动化本身的配置（该自动化的调度定义不在本仓库文件系统内，只有一份 `memory.md` 日志）。**行动项**：Haisu 需要在 WorkBuddy 侧确认或更新这 11 张工单的提示词产出路径，指向 `tasks/`，否则下次自动化运行时两套文件可能重新分叉。
+历史上存在两套提示词产线：本文档定义的 `tasks/`，以及先于本文档存在的 `.workbuddy/prompts/`（由 WorkBuddy 自动化每日读 Linear、写「执行提示词 / QA 提示词」、派发 agent，完成后移进 `.workbuddy/prompts/archive/`；命名为小写 `rnd-<n>-execution-prompt.md`，验收结果写回 Linear 评论、不落 `qa-verdict.json`）。
+
+- **2026-07-29**：把 `.workbuddy/prompts/` 中 11 张仍开放工单（22 个文件）迁入 `tasks/`，改名为 `RND-<n>-dev-prompt.md` / `RND-<n>-qa-prompt.md`。已归档的 108 个 Done 工单当时留在原处。
+- **2026-07-31（收口）**：`.workbuddy/prompts/` **已整个撤销并删除**。其 `archive/` 下 108 个文件全部 `git mv` 到 `tasks/archive/`，并统一改名为大写 `RND-` 前缀、`-execution-prompt.md` → `-dev-prompt.md`；同时把仓库根目录散落的 4 份 QA 报告（`rnd-172` / `rnd-295` / `rnd-297` / `RND-316`）也收进 `tasks/archive/`。合计归档 200 个文件，`tasks/` 根仅保留 14 张未完成工单的 29 个文件。
+
+**自此仓库内只有一套产线、一个目录。** 任何 agent 或自动化若仍按 `.workbuddy/prompts/**` 旧路径读写，都是错的——该目录不再存在，写入会重新制造分叉。**行动项（Haisu）**：在 WorkBuddy 侧确认自动化的提示词产出路径已指向 `tasks/`。
 
 ## 9. 明确不做（v0.1 边界）
 

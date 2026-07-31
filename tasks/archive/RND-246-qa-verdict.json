@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-246",
+  "linear_url": "https://linear.app/crowntime/issue/RND-246",
+  "run_id": "rnd-246-qa-20260731-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "0aacc2a (main)",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "新增文件：backend/alembic/versions/0031_app_config_store.py, backend/tests/test_rnd246_app_config_store.py; 修改文件：backend/app/db/models.py（仅新增 AppConfigStore 类）。未改动任何 router/service 文件，符合 T1 交付范围。"
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "test_migration_creates_and_drops_app_config_store: 迁移成功创建 app_config_store 表，包含 key/group/value/is_secret/value_type/requires_restart/updated_at/updated_by 八个字段",
+        "table.primary_key.columns.keys() == ['key']: 主键为 key",
+        "所有字段类型正确：String/Text/Boolean/DateTime(timezone=True)"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "grep -n 'tenant_id' backend/alembic/versions/0031_app_config_store.py: 无命中",
+        "grep -n 'tenant_id' backend/app/db/models.py: AppConfigStore 类范围内（L159-L180）无 tenant_id 引用",
+        "AppConfigStore 为全局单例设计，不关联租户，符合冻结设计 G2"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "Updated_by defined as Column('updated_by', String, nullable=True): 纯字符串列",
+        "test_model_has_application_level_config_store_contract: table.foreign_keys == set(): 无任何外键约束",
+        "updated_by 非 ForeignKey('admin_users.id'), 避免错误的所有权语义"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "test_orm_can_insert_update_and_query_config_value: ORM insert/update/query 测试通过",
+        "插入配置项后 db.get(AppConfigStore, 'wecom_corp_id') 成功返回",
+        "更新 value 和 updated_by 后重新查询验证一致性"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "migration.upgrade(): 表创建成功",
+        "migration.downgrade(): 表 Drop 成功，'app_config_store' not in inspector.get_table_names()",
+        "迁移可逆性验证通过"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        ".venv/bin/python -m pytest backend/tests/test_rnd246_app_config_store.py: 3 passed in 0.66s",
+        ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py: 25 passed in 0.75s",
+        "架构边界检查通过，无违反依赖规则"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd246_app_config_store.py -v",
+      "result": "EXIT=0, 3 tests passed"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q",
+      "result": "EXIT=0, 25 passed"
+    },
+    {
+      "command": "grep -n 'tenant_id' backend/alembic/versions/0031_app_config_store.py backend/app/db/models.py | grep -A5 -B5 'class AppConfigStore'",
+      "result": "EXIT=1: AppConfigStore 类范围内无 tenant_id 引用"
+    },
+    {
+      "command": "git status --porcelain | grep -E '(M|A)\\s+backend/(alembic|app/db)'",
+      "result": "Only migration + model + test files modified"
+    },
+    {
+      "command": "git log origin/main..HEAD",
+      "result": "EXIT=0: No commits made"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "RND-246 T1 验收全部通过。迁移版本号为 0031（实际顺延自 0030，与 RND-319/RND-304 并行检查无冲突）。AppConfigStore 模型为全局单例配置表，无 tenant_id、无外键约束，符合冻结设计 G2。所有 CRUD 功能测试通过，迁移可逆。无 commit/push，符合开发规范。建议进入下一环节：T2/<issue>RND-245</issue> 加密模块或 T4/<issue>RND-248</issue> Settings API。"
+}
