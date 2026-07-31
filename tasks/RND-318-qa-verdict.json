@@ -1,0 +1,124 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-318",
+  "run_id": "rnd-318-qa-20260731-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "working tree (uncommitted)",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "新增独立表 retention_configs，文件：backend/alembic/versions/0027_retention_config.py、backend/app/db/models.py(RetentionConfig 模型)、backend/app/routers/retention.py、backend/app/schemas/retention.py、backend/app/main.py(注册路由)。测试文件：backend/tests/test_rnd318_retention_config.py。契约与 RBAC 白名单同步至 test_http_contract.py、test_rnd280_rbac_scaffold.py。未改动其他模块。"
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "test_admin_can_create_update_and_read_policy PASS (test_rnd318_retention_config.py:89)",
+        "PUT /api/admin/retention-config persists to retention_configs table",
+        "GET /api/admin/retention-config returns updated values"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "test_get_unconfigured_policy_is_not_a_not_found PASS (test_rnd318_retention_config.py:73)",
+        "Unconfigured tenant GET returns configured=false, not 404/500"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "test_locked_policy_cannot_be_changed_and_original_value_is_persisted PASS (test_rnd318_retention_config.py:126)",
+        "After lock=true, second PUT returns 423 status code",
+        "Database query confirms retention_days unchanged (365) after failed update attempt",
+        "Code review: backend/app/routers/retention.py:56-57 checks is_locked before write"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "test_retention_days_must_be_within_supported_range PASS (test_rnd318_retention_config.py:111)",
+        "Values 0, -1, 3651 all return 422",
+        "Backend validation: pydantic Field(ge=1, le=3650)",
+        "DB constraint: CheckConstraint(name='ck_retention_configs_retention_days_range')"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "test_tenant_configurations_are_isolated PASS (test_rnd318_retention_config.py:145)",
+        "Tenant A config (100 days) not visible to Tenant B",
+        "Code review: require_role() provides tenant_id, router does not accept tenant_id from request params"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "test_only_admin_or_owner_can_write_while_all_roles_can_read PASS (test_rnd318_retention_config.py:163)",
+        "readonlyaudit/compliance role GET returns 200",
+        "non-admin PUT returns 403",
+        "owner PUT returns 200",
+        "Code review: get uses Depends(require_role()), put uses Depends(require_role('admin', 'owner'))"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "test_migration_upgrade_and_downgrade_are_reversible PASS (test_rnd318_retention_config.py:186)",
+        "Migration creates retention_configs table with correct columns",
+        "Downgrade drops table successfully",
+        "Table has proper foreign key to tenants.id"
+      ]
+    },
+    {
+      "id": "AC-8",
+      "status": "PASS",
+      "evidence": [
+        "test_router_count asserts route_count == 68 (+2 for retention routes)",
+        "test_require_role_is_attached_only_to_authorized_admin_routes includes retention.py check",
+        "All test suites pass: test_rnd318_retention_config.py (10 passed), test_http_contract.py (63 passed), test_architecture_boundary.py (25 passed)"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd318_retention_config.py -q",
+      "result": "EXIT=0 (10 passed in 3.05s)"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q",
+      "result": "EXIT=0 (63 passed in 2.98s)"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q",
+      "result": "EXIT=0 (25 passed in 0.39s)"
+    },
+    {
+      "command": "ls backend/alembic/versions/ | tail -3",
+      "result": "EXIT=0 (0026_export_approval_tokens.py, 0027_retention_config.py, __init__.py)"
+    },
+    {
+      "command": "git status --porcelain",
+      "result": "EXIT=0 (files match expected scope for RND-318)"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "实际采用存储方案：独立数据表 retention_configs。表结构：id (String 36), tenant_id (String 36 FK->tenants.id, UNIQUE), retention_days (Integer, CHECK 1-3650), is_locked (Boolean, default false), created_at/updated_at (DateTime). AC-3 锁定不可改功能验证通过：锁定后 PUT 返回 423 且数据库记录未被修改。AC-5 租户隔离验证通过：跨租户配置不串扰。未依赖 F0 配置中心（无 config_service import）。设计为独立表路线而非 KV，符合本版本假设。"
+}

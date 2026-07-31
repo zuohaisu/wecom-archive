@@ -80,6 +80,9 @@ def test_require_role_is_attached_only_to_authorized_admin_routes() -> None:
         source = router_file.read_text()
         if router_file.name in {"audit.py", "external_contacts.py", "media_library.py"}:
             assert "Depends(require_role())" in source
+        elif router_file.name == "retention.py":
+            assert "Depends(require_role())" in source
+            assert 'Depends(require_role("admin", "owner"))' in source
         elif router_file.name == "users.py":
             assert source.count('Depends(require_role("admin", "owner"))') == 2
         else:

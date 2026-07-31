@@ -128,6 +128,33 @@ class TenantWecomConfig(Base):
     )
 
 
+class RetentionConfig(Base):
+    """Per-tenant message retention policy (RND-318)."""
+
+    __tablename__ = "retention_configs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_retention_configs_tenant"),
+        CheckConstraint(
+            "retention_days >= 1 AND retention_days <= 3650",
+            name="ck_retention_configs_retention_days_range",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    retention_days = Column(Integer, nullable=False)
+    is_locked = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 def _reject_duplicate_active_corp_id(connection, target: "TenantWecomConfig") -> None:
     """Application-level guard mirroring uq_tenant_wecom_configs_active_corp_id.
 
