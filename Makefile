@@ -132,8 +132,12 @@ build:
 ## tests (skipped automatically, not failed, if `node` isn't on PATH — see
 ## their own pytest.mark.skipif). Never touches a real database, DNS, or
 ## the real Qiniu API — Qiniu-backed tests mock the SDK boundary.
+##
+## The timeout runner permits one normal slow run and only retries timeouts:
+## 300s, then 600s, then 1200s. It reports the last pytest percentage before
+## each retry and treats a third timeout as a likely real hang.
 test:
-	$(BACKEND_PY) -m pytest backend/tests -q
+	$(BACKEND_PY) scripts/run_with_escalating_timeout.py -- $(BACKEND_PY) -m pytest backend/tests -q
 	@echo "test: OK"
 
 ## Composite entry point for developer acceptance: lint-diff -> typecheck ->
