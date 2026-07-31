@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '.qoder/**'
+      - '.workbuddy/**'
+      - '.trae/**'
+      - '.hermes/**'
+      - 'docs/**'
+      - 'tasks/**'
+      - '*.md'
 
 jobs:
   test:
