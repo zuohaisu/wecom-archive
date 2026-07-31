@@ -7,6 +7,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from app.schemas.listing import ConversationOut
+
 
 class ExternalContactListItem(BaseModel):
     id: int
@@ -25,3 +27,7 @@ class ExternalContactListPage(BaseModel):
     items: list[ExternalContactListItem]
     total: int
     has_more: bool
+
+
+class ExternalContactDetail(ExternalContactListItem):
+    conversations: list[ConversationOut]

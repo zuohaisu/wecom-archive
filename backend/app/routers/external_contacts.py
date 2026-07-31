@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,8 @@ from app.auth import require_role
 from app.db.models import AdminUser, Contact, ExternalContact
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name
-from app.schemas.external_contact import ExternalContactListPage
+from app.schemas.external_contact import ExternalContactDetail, ExternalContactListPage
+from app.services.listing_service import list_conversations
 
 router = APIRouter()
 
@@ -96,6 +97,50 @@ def list_external_contacts(
         ],
         total=total,
         has_more=offset + len(contacts) < total,
+    )
+
+
+@router.get("/external-contacts/{external_userid}", response_model=ExternalContactDetail)
+def get_external_contact_detail(
+    external_userid: str,
+    db: Session = Depends(get_db),
+    auth: tuple[AdminUser, str] = Depends(require_role()),
+) -> ExternalContactDetail:
+    """Return one tenant-scoped external contact and its conversations."""
+    _, tenant_id = auth
+    contact = db.scalar(
+        select(ExternalContact).where(
+            ExternalContact.tenant_id == tenant_id,
+            ExternalContact.external_userid == external_userid,
+        )
+    )
+    if contact is None:
+        raise HTTPException(status_code=404, detail="External contact not found")
+
+    owner_name = (
+        db.scalar(
+            select(Contact.name).where(
+                Contact.tenant_id == tenant_id,
+                Contact.wecom_userid == contact.owner_wecom_userid,
+            )
+        )
+        if contact.owner_wecom_userid
+        else None
+    )
+    return ExternalContactDetail(
+        id=contact.id,
+        external_userid=contact.external_userid,
+        name=contact.name,
+        company=contact.company,
+        tags=_decode_tags(contact.tags),
+        source=contact.source,
+        owner_wecom_userid=contact.owner_wecom_userid,
+        owner_display_name=resolve_person_display_name(
+            contact.owner_wecom_userid, owner_name
+        ),
+        last_interaction_at=contact.last_interaction_at,
+        message_count=contact.message_count,
+        conversations=list_conversations(db, tenant_id, entity_id=external_userid),
     )
 
 

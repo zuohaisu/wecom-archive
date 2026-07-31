@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-289",
+  "linear_url": "",
+  "run_id": "rnd-289-qa-20260731-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "working tree (uncommitted)",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "Only added detail endpoint GET /api/admin/external-contacts/{external_userid} in routers/external_contacts.py and Extended ExternalContactDetail schema. Did not modify listing_service.py, timeline_service.py, conversation_membership.py, display_names.py, or models.py."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "test_detail_returns_profile_and_all_conversations in test_external_contact_detail.py:115-153 passes with status_code=200",
+        "Response contains all expected fields: external_userid, name, company, tags, owner_wecom_userid, owner_display_name, message_count, conversations",
+        "Response does NOT contain 'messages' field - only conversations list"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "grep -n 'list_conversations' backend/app/routers/external_contacts.py:17 shows import from app.services.listing_service",
+        "grep -n 'list_conversations' backend/app/routers/external_contacts.py:143 shows call with entity_id=external_userid parameter",
+        "Implementation correctly delegates to listing_service.list_conversations(db, tenant_id, entity_id=external_userid) without parallel query logic",
+        "Conversations are returned as list[ConversationOut] with fields: conversation_id, last_message_time"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "test_detail_returns_profile_and_all_conversations:144 asserts 'messages' not in body",
+        "ExternalContactDetail schema extends ExternalContactListItem with conversations: list[ConversationOut], NO messages field",
+        "Endpoint returns session summary list only, no message content pagination needed"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "test_detail_hides_missing_and_other_tenant_contacts:167-176 tests cross-tenant isolation",
+        "Cross-tenant query (A 租户查 B 租户联系人) returns status_code=404 same as missing ID",
+        "router code line 110: tenant_id extracted exclusively from auth context: _, tenant_id = auth via require_role()",
+        "No tenant_id parameter accepted from HTTP request"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "test_detail_hides_missing_and_other_tenant_contacts:171-175 validates both missing ID and cross-tenant return 404",
+        "cross_tenant.status_code == 404 matches missing.status_code == 404",
+        "Both responses identical: {\"detail\": \"External contact not found\"}",
+        "Implementation prevents existence disclosure - does NOT return 403 for other-tenant valid IDs"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "grep -n 'resolve_person_display_name' backend/app/routers/external_contacts.py:15 imports from app.display_names",
+        "Line 138-140: resolve_person_display_name(contact.owner_wecom_userid, owner_name) passes owner_name (display name) as second argument",
+        "test_detail_returns_profile_and_all_conversations:142 asserts owner_display_name != 'tenant-a'",
+        "owner_names dict at line 120-129 queries Contact.name, NOT Contact.tenant_id"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "make verify exit code 0 - lint-diff OK, typecheck OK, build OK, tests OK",
+        "test_http_contract.py:327 route_count == 74 with comment 'RND-289: +1 GET external-contact detail endpoint'",
+        "test_http_contract.py:358 includes '/api/admin/external-contacts/{external_userid}' in expected path set",
+        "test_http_contract.py:462-466 snapshot response model as ExternalContactDetail",
+        "All 63 contract tests pass: .venv/bin/python -m pytest test_http_contract.py test_rnd280_rbac_scaffold.py -q passed",
+        "architecture_boundary.py: 25 tests pass"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": "cd /Users/zuohaisu/Documents/code/wecom-archive-365 && make verify",
+      "result": "ExitCode=0 - lint-diff OK, typecheck OK, build OK, all 400+ tests passed"
+    },
+    {
+      "command": "cd /Users/zuohaisu/Documents/code/wecom-archive-365 && grep -n 'list_conversations' backend/app/routers/external_contacts.py",
+      "result": "ExitCode=0 - Line 17: import statement, Line 143: function call with entity_id=external_userid"
+    },
+    {
+      "command": "cd /Users/zuohaisu/Documents/code/wecom-archive-365 && grep -n 'resolve_person_display_name' backend/app/routers/external_contacts.py",
+      "result": "ExitCode=0 - Line 15: import, Lines 89 & 138: two calls passing name (not tenant_id) as second arg"
+    },
+    {
+      "command": "cd /Users/zuohaisu/Documents/code/wecom-archive-365 && git diff --stat -- backend/app/services/listing_service.py backend/app/services/timeline_service.py backend/app/conversation_membership.py backend/app/display_names.py backend/app/db/models.py",
+      "result": "ExitCode=0 - No output (no modifications to these files)"
+    },
+    {
+      "command": "cd /Users/zuohaisu/Documents/code/wecom-archive-365 && git log origin/main..HEAD",
+      "result": "ExitCode=0 - No output (empty commit history on current branch)"
+    },
+    {
+      "command": "cd /Users/zuohaisu/Documents/code/wecom-archive-365 && .venv/bin/python -m pytest backend/tests/test_external_contact_detail.py -q",
+      "result": "ExitCode=0 - 3 passed in 1.77s"
+    },
+    {
+      "command": "cd /Users/zuohaisu/Documents/code/wecom-archive-365 && .venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q",
+      "result": "ExitCode=0 - 63 passed in 2.80s"
+    },
+    {
+      "command": "cd /Users/zuohaisu/Documents/code/wecom-archive-365 && .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q",
+      "result": "ExitCode=0 - 25 passed in 0.39s"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "## Endpoint Response Structure:\n\nGET /api/admin/external-contacts/{external_userid}\n\n### Response Model: ExternalContactDetail\n\n```json\n{\n  \"id\": int,\n  \"external_userid\": string,\n  \"name\": string | null,\n  \"company\": string | null,\n  \"tags\": list[string],\n  \"source\": string | null,\n  \"owner_wecom_userid\": string | null,\n  \"owner_display_name\": string,\n  \"last_interaction_at\": datetime | null,\n  \"message_count\": int | null,\n  \"conversations\": list[ConversationOut]   // From listing_service.list_conversations\n}\n```\n\n### ConversationOut Fields:\n\nThe `conversations` array contains `ConversationOut` objects from `listing_service.list_conversations()` with fields:\n\n```json\n{\n  \"conversation_id\": string,\n  \"conversation_type\": string,\n  \"display_name\": string,\n  \"raw_id\": string,\n  \"roomid\": string | null,\n  \"monitored_account_ids\": list[string],\n  \"monitored_account_raw_ids\": list[string],\n  \"monitored_account_display_names\": list[string],\n  \"contact_ids\": list[string],\n  \"contact_raw_ids\": list[string],\n  \"contact_display_names\": list[string],\n  \"room_display_name\": string | null,\n  \"room_raw_id\": string | null,\n  \"last_message_time\": int | null,\n  \"last_message_text\": string | null,\n  \"message_count\": int,\n  \"latest_sender_id\": string | null,\n  \"latest_sender_raw_id\": string | null,\n  \"latest_sender_display_name\": string | null,\n  \"review_status\": string | null,\n  \"ai_status\": string | null,\n  \"ai_summary\": string | null\n}\n```\n\n### Frontend Integration Guide:\n\n1. **Call detail endpoint**: `GET /api/admin/external-contacts/{external_userid}`\n2. **Receive session list** in `conversations` array (no message content)\n3. **For detailed message timeline**: For each conversation, call existing endpoint:\n   `GET /api/conversations/{conversation_id}/messages?mode=staff&staff_id={staff_id}&limit={N}`\n4. The `/api/conversations/{conversation_id}/messages` endpoint already implements full pagination (existing RND-288 functionality)\n\n### Design Decision (2026-07-31):\n\nOriginal design intended to merge cross-conversation message timeline directly into detail endpoint. Agent correctly identified that `timeline_service.resolve_timeline_page()` accepts only single `conversation_id`, while external contacts have multiple conversations. Solution changed to \"detail + session list\" pattern:\n\n- Detail endpoint returns: profile fields + session list (via `list_conversations`)\n- Message timeline fetched separately per session (existing pagination logic)\n- This is the established pattern in this project's conversations pages (select session first, then view messages)\n\n### Verification Evidence:\n\n- ✅ All 7 acceptance criteria PASS\n- ✅ `make verify` exits 0 (lint, typecheck, build, tests)\n- ✅ Correctly reuses `listing_service.list_conversations` - no parallel implementation\n- ✅ Cross-tenant isolation works (returns 404 for both missing AND other-tenant IDs)\n- ✅ Display name resolves correctly (passes Contact.name, NOT tenant_id)\n- ✅ No scope violations (only added new endpoint, extended schema, updated contracts)\n- ✅ No modifications to shared services (listing_service, timeline_service, etc.)\n- ✅ No database migrations required (reads existing ExternalContact table)\n- ✅ Contract tests synchronized (route_count=74, endpoint in expected paths)"
+}

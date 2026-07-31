@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 73  # RND-307: +1 GET tenant usage endpoint.
+    assert route_count == 74  # RND-289: +1 GET external-contact detail endpoint.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -355,6 +355,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/export/execute",
             "/api/admin/export/record",
             "/api/admin/external-contacts",
+            "/api/admin/external-contacts/{external_userid}",
             "/api/admin/media",
             "/api/admin/media/{media_id}/download",
             "/api/admin/reachability-audit",
@@ -455,6 +456,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/admin/external-contacts",
             frozenset({"GET"}),
             "ExternalContactListPage",
+            "None",
+        ),
+        (
+            "/api/admin/external-contacts/{external_userid}",
+            frozenset({"GET"}),
+            "ExternalContactDetail",
             "None",
         ),
         ("/api/admin/media", frozenset({"GET"}), "MediaLibraryPage", "None"),
