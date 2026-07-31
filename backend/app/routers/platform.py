@@ -7,12 +7,13 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.auth import require_platform_admin
+from app.auth import get_wecom_token, require_platform_admin
 from app.audit import write_audit
 from app.db.models import DuplicateCorpIdError, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.schemas.tenant_provision import (
     TenantListItemOut,
+    TenantConnectivityCheckOut,
     TenantListOut,
     TenantProvisionIn,
     TenantProvisionOut,
@@ -157,4 +158,55 @@ def update_tenant_status(
         tenant_is_active=tenant.is_active,
         updated_at=tenant.updated_at,
     )
+
+
+_INVALID_CREDENTIAL_ERRCODES = {"40001", "40013", "40125"}
+
+
+def _connectivity_failure_reason(error: RuntimeError) -> str:
+    """Map known token failures to safe, coarse response categories."""
+    message = str(error)
+    if message == "Failed to fetch WeCom access_token":
+        return "network_error"
+    if any(f"errcode={code}" in message for code in _INVALID_CREDENTIAL_ERRCODES):
+        return "invalid_credentials"
+    return "unknown"
+
+
+@router.post(
+    "/tenants/{tenant_id}/connectivity-check",
+    response_model=TenantConnectivityCheckOut,
+    response_model_exclude_none=True,
+)
+def check_tenant_connectivity(
+    tenant_id: str,
+    _admin=Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> TenantConnectivityCheckOut:
+    """Check whether the tenant's stored WeCom credentials can obtain a token."""
+    config = (
+        db.query(TenantWecomConfig)
+        .filter(TenantWecomConfig.tenant_id == tenant_id)
+        .first()
+    )
+    if config is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant WeCom configuration not found",
+        )
+
+    try:
+        # Isolate this from production consumers. A repeated check may reuse
+        # this key's cache for up to two hours; absolute bypass is out of scope.
+        get_wecom_token(
+            config.corp_id,
+            config.decrypted_app_secret,
+            cache_key=f"connectivity-check:{tenant_id}",
+        )
+    except RuntimeError as error:
+        return TenantConnectivityCheckOut(
+            ok=False,
+            reason=_connectivity_failure_reason(error),
+        )
+    return TenantConnectivityCheckOut(ok=True)
 

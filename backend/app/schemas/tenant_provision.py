@@ -1,6 +1,7 @@
 """Request and safe response schemas for platform tenant provisioning."""
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr
 
@@ -24,6 +25,13 @@ class TenantProvisionOut(BaseModel):
     corp_id: str
     agent_id: str
     is_active: bool
+
+
+class TenantConnectivityCheckOut(BaseModel):
+    """Safe result of a tenant's WeCom credential connectivity check."""
+
+    ok: bool
+    reason: Optional[str] = None
 
 
 class TenantListItemOut(BaseModel):
