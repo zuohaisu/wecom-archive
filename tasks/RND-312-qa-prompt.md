@@ -10,6 +10,10 @@
 
 > 交给**独立验收 agent**。只做验证与判定，**不修改任何文件**。
 
+## ⚠️ 2026-07-31：本版新增 AC-8（缓存隔离），因第一版 dev prompt 的指令曾经写反
+
+第一版 dev prompt 曾指示"不传 `cache_key`"，后核实这会导致自检复用生产路径共享的 corp_id 缓存（最长 ~2 小时），已反转为"必须传 `cache_key=f"connectivity-check:{tenant_id}"`"。若你验收到的实现仍是不传 `cache_key`，按 AC-8 判 FAIL，不要因为它"能跑通 mock 测试"就放过。
+
 ## 任务身份
 - 工单：RND-312「B2-2 连通性自检」｜风险等级 R1
 
@@ -45,6 +49,10 @@
 
 ### AC-7 — 契约同步 + 回归
 - 判定：`test_http_contract.py` 全绿 = PASS；未同步 → FAIL（`REGRESSION`），`recommended_next_state: FIXING`。`make verify` exit 0；`test_architecture_boundary.py` 通过；`test_rnd311_tenant_provision.py` 全绿。
+
+### AC-8 — 缓存隔离（关键，新增）
+- 证据：`grep -n "get_wecom_token(" backend/app/routers/platform.py` 找到调用点，**核对第三个实参 `cache_key` 是否被显式传入**，值应形如 `f"connectivity-check:{tenant_id}"`（或功能等价的自检专属前缀），而不是省略该参数。
+- 判定：显式传入自检专属 `cache_key` = PASS。**若调用时省略 `cache_key`（即让它默认落到 `corp_id`）→ 直接 FAIL（`IMPLEMENTATION_DEFECT`, severity: major）**——这会让自检读到生产解密/同步路径共享的缓存 token（最长 ~2 小时内），可能在密钥已经损坏的情况下仍返回"连通性正常"，完全违背自检的目的。
 
 ## 本项目专属检查（必查）
 1. **测试未发真实请求**：审阅 `test_rnd312_connectivity_check.py`，确认 `get_wecom_token` 被 mock（如 `unittest.mock.patch`），**没有**测试用例会真的打到 `qyapi.weixin.qq.com`。若发现真实网络调用 → FAIL（`IMPLEMENTATION_DEFECT`, major，且测试会在无网络环境下 flaky）。

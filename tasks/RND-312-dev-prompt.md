@@ -10,6 +10,10 @@
 
 ---
 
+## ⚠️ 2026-07-31：缓存策略决策（回应 agent 的 BLOCKED_NEEDS_HUMAN 上报）
+
+第一版本文件写的是"不传 `cache_key`"，**这个指令是错的，已反转**。实测 `get_wecom_token`（`app/auth.py:364`）的缓存 key 默认就是 `corp_id`——**不传** `cache_key` 才是复用生产解密/同步路径共享的那份缓存（最长可能读到 ~2 小时前的旧 token，自检可能悄悄返回"成功"而根本没发起新请求）。真正要"每次都是新鲜请求"，做法是反过来：**必须显式传一个自检专属的 `cache_key`**，与 corp_id 默认键区分开。这不需要改 `get_wecom_token` 本身——`cache_key` 本来就是它公开签名里为"独立于共享缓存的 token"设计的参数，直接用即可。见下方 In scope 第 1 点的更新版调用方式。
+
 ## 任务身份
 - 工单：RND-312「B2-2 连通性自检」｜父 Epic RND-270（B2 租户开通）
 - 优先级：Medium｜风险等级：**R1**｜milestone：R5 · 云商业化前台
@@ -41,7 +45,8 @@ def get_wecom_token(corp_id: str, oauth_secret: str, cache_key: Optional[str] = 
 1. `backend/app/routers/platform.py` **新增** `POST /tenants/{tenant_id}/connectivity-check`：
    - 鉴权：`require_platform_admin`。
    - 查目标租户的 `TenantWecomConfig`；不存在 → 404。
-   - 调用 `get_wecom_token(config.corp_id, config.decrypted_app_secret)`（**不传** `cache_key`，自检不应读写缓存，每次都应是新鲜请求——若 `get_wecom_token` 的缓存行为无法在不改函数签名的前提下绕开，见下方 Escalation）。
+   - 调用 `get_wecom_token(config.corp_id, config.decrypted_app_secret, cache_key=f"connectivity-check:{tenant_id}")`（**必须显式传这个自检专属 `cache_key`**——不传会默认用 `corp_id` 作 key，读到生产解密/同步路径共享的旧缓存，自检可能不发真实请求就返回"成功"。用固定的 `connectivity-check:{tenant_id}` 前缀而不是每次随机——足够与生产缓存隔离，同时避免无界增长 `_token_cache` 这个进程内 dict）。
+   - **已知取舍（写进代码注释）**：同一租户 2 小时内连续点自检，第二次仍可能读到第一次自检写入的缓存（`connectivity-check:{tenant_id}` 这个 key 自己也会被缓存 ~2 小时）。这在本票可接受——自检是手动触发的低频动作，核心目标是"与生产路径缓存隔离"，不是"每次物理请求"。若未来需要绝对每次新鲜，才需要真正的 cache-bypass 参数（超出本票范围）。
    - 成功 → `{"ok": true}`；`get_wecom_token` 抛 `RuntimeError` → 捕获，返回 `{"ok": false, "reason": "<脱敏后的简要原因>"}`（**不把原始异常消息透传到响应**，`get_wecom_token` 内部日志已脱敏，但异常 message 里可能仍带 `errcode` 之外的东西，需要在本票内二次判断只透出安全的分类，如 `"invalid_credentials"` / `"network_error"` / `"unknown"`）。
 2. 测试：`backend/tests/test_rnd312_connectivity_check.py`（**mock `get_wecom_token`**，不发真实企微请求）。
 
@@ -94,13 +99,13 @@ RND-311（B2-1）**已 Done 并已核实落地**（`backend/app/routers/platform
 
 ## 风险与回滚
 - 风险：自检失败信息透传过多，间接泄露企微侧诊断细节——由 AC-3 防守，只返回粗粒度分类。
-- 风险：`get_wecom_token` 的内部缓存导致"自检"实际读的是旧缓存结果而非新鲜请求——实现时确认这一点，若无法干净绕开缓存，按 Escalation 上报。
+- 风险：忘记传自检专属 `cache_key`，导致自检复用生产路径的 corp_id 缓存——由 In scope 第 1 点的显式调用方式防守。
 - 回滚：纯新增，`git checkout -- backend/app/routers/platform.py` 即可；无迁移、无数据影响（测试全程 mock，不发真实请求）。
 
 ## 人工点位
 - **Trigger**：Haisu 置 In Progress。
 - **Gate**：测试绿即可，无需额外人工审阅（R1，只读自检，不改数据）。
-- **Escalation**：若 `get_wecom_token` 的缓存机制导致自检无法保证读到新鲜结果、且不改函数签名就无法绕开 → `BLOCKED_NEEDS_HUMAN`，说明具体机制，**不要**为了绕开缓存去改 `get_wecom_token` 本身（它被生产解密链路依赖，改动风险高）。
+- **Escalation**：若 `cache_key=f"connectivity-check:{tenant_id}"` 这个方案仍不满足某条 AC（例如发现 `_token_cache` 内存增长在你的实现里确实成为问题）→ `BLOCKED_NEEDS_HUMAN`，说明具体情况，**不要**为了解决而去改 `get_wecom_token` 本身（它被生产解密链路依赖，改动风险高）。
 
 ## 开发 agent 执行指引
 1. 读 `DEV_AGENT_RULES.md`、`docs/ticket-autopilot-workflow.md`、`backend/app/routers/platform.py`（先 `git diff`/`git status` 看兄弟票是否已落地）、`app/auth.py:364`（`get_wecom_token`）、`app/db/models.py:96`（`decrypted_app_secret`）。
