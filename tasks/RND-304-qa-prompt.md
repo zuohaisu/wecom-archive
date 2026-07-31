@@ -48,13 +48,17 @@
 ### AC-7 — 契约同步 + RBAC 同步 + 回归
 - 判定：`test_http_contract.py`（route_count 当前基线 +2）与 `test_rnd280_rbac_scaffold.py`（白名单含 `onboarding.py`）均已同步 = PASS；任一未同步 → FAIL（`REGRESSION`），`recommended_next_state: FIXING`。`make verify` exit 0；`test_architecture_boundary.py` 通过。
 
+### AC-8 — 手写 tenants 表同步（关键）
+- 证据：`test_rnd307_cross_tenant_usage.py`/`test_rnd309_content_access_request.py` 全绿；`git diff` 这两个文件**只应看到**手写 `CREATE TABLE tenants` 里新增的 `onboarding_completed_at DATETIME` 一列。
+- 判定：符合 = PASS。**若这两个文件的 diff 涉及了 DDL 之外的任何断言/逻辑改动 → FAIL（`SCOPE_VIOLATION`, major）**——这两个文件属于已完成的 RND-307/RND-309，本票只有同步这一列的授权，没有改动其他内容的授权。**若这两个文件仍然是红的（未同步）→ FAIL（`REGRESSION`）**，`recommended_next_state: FIXING`（不是 `BLOCKED_NEEDS_HUMAN`——PM 已经明确授权了这个同步动作，不该再次卡住）。
+
 ## 本项目专属检查（必查）
 1. **未依赖 F0/RND-244（关键）**：`grep -rn "config_service\|get_config\|set_config\|from app.config" backend/app/routers/onboarding.py` **应无命中**。若有命中，说明开发 agent 走的是旧的 F0 KV 设计——按当前设计判 `BLOCKED`，不是直接判 FAIL（这可能是开发 agent 拿到了过期的提示词版本，需要人工确认后重跑，而不是判定实现质量有问题）。
 2. **`Tenant` 表新增列**：`git diff -- backend/app/db/models.py` 应只看到 `Tenant.onboarding_completed_at` 一行新增，无其他改动。
 3. **未新建多余表**：`backend/alembic/versions/` 中本票的迁移文件应只涉及给 `tenants` 表加列，不应新建独立的 onboarding 状态表（那会是过度设计——单一布尔状态不需要单独一张表）。
 4. **未提供重置端点**：diff 中不应出现"取消完成"/"重新打开向导"相关的端点或参数。
 5. **架构边界**：router 未 import `app.main`；service 层未 import `app.routers.*`。
-6. **文件所有权**：`git status --porcelain` 中属于本票的改动应限于 `alembic/versions/0029_*.py`（或实际顺延版本号）、`app/db/models.py`（仅新增 `onboarding_completed_at`）、`routers/onboarding.py`（新）、`schemas/onboarding.py`（新）、`main.py`（仅两行）、`tests/test_rnd304_onboarding_status.py`（新）、`tests/test_rnd280_rbac_scaffold.py`（白名单同步）、`tests/test_http_contract.py`（契约同步）。
+6. **文件所有权**：`git status --porcelain` 中属于本票的改动应限于 `alembic/versions/0029_*.py`（或实际顺延版本号）、`app/db/models.py`（仅新增 `onboarding_completed_at`）、`routers/onboarding.py`（新）、`schemas/onboarding.py`（新）、`main.py`（仅两行）、`tests/test_rnd304_onboarding_status.py`（新）、`tests/test_rnd280_rbac_scaffold.py`（白名单同步）、`tests/test_http_contract.py`（契约同步）、`tests/test_rnd307_cross_tenant_usage.py`/`tests/test_rnd309_content_access_request.py`（仅新增一列 DDL）。
    > 若 RND-319 同天并行推进，两票都会各自新增迁移文件（0028/0029）——先 `git status` 分离归因，只把本票的部分记在本票账上（见 `docs/ticket-autopilot-workflow.md` §3.4）。
 
 ## 附加检查（Security）
@@ -67,10 +71,12 @@ make verify
 .venv/bin/python -m pytest backend/tests/test_rnd304_onboarding_status.py -q
 .venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
+.venv/bin/python -m pytest backend/tests/test_rnd307_cross_tenant_usage.py backend/tests/test_rnd309_content_access_request.py -q   # AC-8
 .venv/bin/python -m alembic check                                          # AC-6
 grep -rn "config_service\|get_config\|set_config\|from app.config" backend/app/routers/onboarding.py   # 本项目专属检查 1：应无命中
 ls backend/alembic/versions/ | tail -3
 git diff -- backend/app/db/models.py
+git diff -- backend/tests/test_rnd307_cross_tenant_usage.py backend/tests/test_rnd309_content_access_request.py   # AC-8：只应有新增列
 git status --porcelain
 git log origin/main..HEAD    # 必须无输出
 ```

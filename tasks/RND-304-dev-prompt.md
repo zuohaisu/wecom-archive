@@ -19,6 +19,19 @@
 
 **若你认为这个判断有误（例如产品确实需要多个配置项共享同一套 KV 机制）→ 见下方 Escalation，不要自行改回依赖 F0 的设计。**
 
+## ⚠️ 2026-07-31 追加：两个测试文件的手写 tenants 表结构需要随本票同步一列（回应 agent 的 BLOCKED_NEEDS_HUMAN 上报）
+
+dev agent 正确指出：`backend/tests/test_rnd307_cross_tenant_usage.py`（第 19 行起）与 `backend/tests/test_rnd309_content_access_request.py`（第 37 行起）用**手写的 `CREATE TABLE tenants (...)` SQL 字符串**（不是 `Base.metadata.create_all()`/`Tenant.__table__.create()` 反射真实 ORM 元数据）搭建测试用的 SQLite 表，并且各自确实对这张手写表做了 `Tenant(...)` ORM insert——新增 `onboarding_completed_at` 列后，ORM 的 INSERT 语句会带上这一列，手写表里没有这一列，SQLite 会报错。
+
+**已核实排查范围**：全仓另有 10 个测试文件同样手写了 `CREATE TABLE tenants`，但逐一核对后，其余全部要么不做 `Tenant(...)` ORM insert，要么改用 `Base.metadata.create_all()`/`Tenant.__table__.create()` 反射真实模型（天然免疫这类改动，如 `test_rnd318_retention_config.py`、`test_media_file_size_backfill.py` 的相关用例）。**只有这两个文件受影响，且都是 RND-307/RND-309 已完成工单的既有测试。**
+
+**决策**：本票**同步收纳这两个文件的最小改动**（比照 `docs/ticket-autopilot-workflow.md` §3.3 的守卫文件原则——新增列导致既有守卫性测试失败时，同步它们是本票范围，不是另开工单，也不是 `BLOCKED_NEEDS_HUMAN`）：
+
+- `backend/tests/test_rnd307_cross_tenant_usage.py`：在第 19 行起的 `CREATE TABLE tenants (...)` 列表末尾追加一列 `onboarding_completed_at DATETIME`（SQLite 里不加 `NOT NULL` 即默认可空）。
+- `backend/tests/test_rnd309_content_access_request.py`：在第 37-40 行的 `CREATE TABLE tenants (...)` 字符串末尾同样追加 `onboarding_completed_at DATETIME`。
+
+**除了这一行 DDL 改动，这两个文件的其他任何内容（断言、fixture 逻辑、其他表结构）一律不动。**
+
 ## 任务身份
 - 工单：RND-304「A9-3 标记首次完成」｜父 Epic RND-269（A9 首次配置向导）
 - 优先级：High｜风险等级：**R1**｜milestone：R2 · 开源发布闭环
@@ -66,6 +79,8 @@
 - `backend/tests/test_rnd304_onboarding_status.py`（新）
 - `backend/tests/test_rnd280_rbac_scaffold.py` —— 同步白名单（新增 `onboarding.py`），只加必要条目
 - `backend/tests/test_http_contract.py` —— 契约同步（新增 2 个路由：GET + POST）
+- `backend/tests/test_rnd307_cross_tenant_usage.py` —— **仅**在手写 `CREATE TABLE tenants` 里追加 `onboarding_completed_at DATETIME` 一列，其余逐字不变
+- `backend/tests/test_rnd309_content_access_request.py` —— **仅**在手写 `CREATE TABLE tenants` 里追加 `onboarding_completed_at DATETIME` 一列，其余逐字不变
 
 **只读、绝不可写：** `app/routers/retention.py`（RND-318 拥有）、`app/routers/auth.py`（RND-303 拥有）、其他票拥有的一切文件。
 
@@ -80,6 +95,7 @@
 - **AC-5 鉴权分级**：`GET` 任意角色可读；`POST` 仅 `admin`/`owner`（普通角色调用 `POST` → 403）。
 - **AC-6 迁移可逆**：`upgrade`/`downgrade` 均可执行；`alembic check` 无 drift。
 - **AC-7 契约同步 + RBAC 同步 + 回归**：`test_http_contract.py`（route_count 当前基线 +2）与 `test_rnd280_rbac_scaffold.py`（白名单加 `onboarding.py`）均已同步；`make verify` 全绿；`test_architecture_boundary.py` 通过。
+- **AC-8 手写 tenants 表同步（关键，见上方追加说明）**：`test_rnd307_cross_tenant_usage.py`/`test_rnd309_content_access_request.py` 的 `Tenant(...)` insert 用例仍然通过；两个文件的 diff **只应有** `CREATE TABLE tenants` 里新增的那一列，不得触及其余任何断言/逻辑。
 
 ## 验证方式（Verification — 确定性闸）
 ```bash
@@ -88,8 +104,10 @@ make verify
 .venv/bin/python -m pytest backend/tests/test_rnd304_onboarding_status.py -q
 .venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
+.venv/bin/python -m pytest backend/tests/test_rnd307_cross_tenant_usage.py backend/tests/test_rnd309_content_access_request.py -q   # AC-8
 .venv/bin/python -m alembic check    # AC-6：无 drift
 git diff -- backend/app/db/models.py    # 人工核对：只新增 onboarding_completed_at
+git diff -- backend/tests/test_rnd307_cross_tenant_usage.py backend/tests/test_rnd309_content_access_request.py   # AC-8：只应有新增一列的 DDL 改动
 git status --porcelain
 git log origin/main..HEAD    # 必须无输出
 ```
@@ -98,7 +116,7 @@ git log origin/main..HEAD    # 必须无输出
 无剩余前置（"F0" 通用基础鉴权/租户脚手架 RND-276~280 均已 Done；本票**不**依赖 RND-244 配置中心，见开头设计反转说明）。<issue>RND-303</issue>（A9-2）✅ Done，已确认 `routers/onboarding.py` 未被占用。本票是 A9 epic 最后一块。
 
 ## 完成定义（Definition of Done）
-- [ ] AC-1 ~ AC-7 全满足，每条有测试
+- [ ] AC-1 ~ AC-8 全满足，每条有测试
 - [ ] `make verify` 全绿
 - [ ] `git status` 只显示本票拥有的文件
 - [ ] QA Summary 已产出
@@ -121,7 +139,8 @@ git log origin/main..HEAD    # 必须无输出
 4. 挂载到 `main.py`。
 5. 写测试覆盖 AC-1~AC-5（**AC-3 幂等是重点**）。
 6. 同步 `test_http_contract.py` 与 `test_rnd280_rbac_scaffold.py`。
-7. 跑全部验证命令，输出 QA Summary + `git status`，**不 commit**。
+7. 在 `test_rnd307_cross_tenant_usage.py`/`test_rnd309_content_access_request.py` 的手写 `CREATE TABLE tenants` 里各追加 `onboarding_completed_at DATETIME` 一列（**仅此一行改动**），跑一遍确认这两个文件恢复通过。
+8. 跑全部验证命令，输出 QA Summary + `git status`，**不 commit**。
 
 ## 硬性约束（DEV_AGENT_RULES.md）
 - 不 commit / push / 建分支 / 改 git 历史；不改 CI/CD、`.gitignore`、部署配置。
