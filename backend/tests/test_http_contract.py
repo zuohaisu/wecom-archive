@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 74  # RND-289: +1 GET external-contact detail endpoint.
+    assert route_count == 76  # RND-304: +2 onboarding status and completion endpoints.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -391,6 +391,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/messages",
             "/api/messages/{msgid}",
             "/api/monitored-accounts",
+            "/api/onboarding/complete",
+            "/api/onboarding/status",
             "/api/platform/content-access-requests",
             "/api/platform/tenants",
             "/api/platform/tenants/usage",
@@ -560,6 +562,8 @@ def test_route_snapshot_with_real_model_names() -> None:
             "list[MonitoredAccountOut]",
             "None",
         ),
+        ("/api/onboarding/complete", frozenset({"POST"}), "OnboardingCompleteOut", "None"),
+        ("/api/onboarding/status", frozenset({"GET"}), "OnboardingStatusOut", "None"),
         (
             "/api/platform/content-access-requests",
             frozenset({"POST"}),

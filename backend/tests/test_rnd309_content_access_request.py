@@ -37,7 +37,7 @@ def content_access_client() -> Generator[tuple[TestClient, Session], None, None]
                 "CREATE TABLE tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
                 "slug TEXT NOT NULL, is_active BOOLEAN NOT NULL DEFAULT 1, "
                 "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
-                "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+                "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, onboarding_completed_at DATETIME)"
             )
         )
         conn.execute(

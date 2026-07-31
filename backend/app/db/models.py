@@ -40,6 +40,7 @@ class Tenant(Base):
     name = Column(String(255), nullable=False)
     slug = Column(String(128), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
+    onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

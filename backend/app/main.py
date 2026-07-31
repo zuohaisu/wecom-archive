@@ -22,6 +22,7 @@ from app.routers.media import MediaAccessNoStoreMiddleware
 from app.routers.media import router as media_router
 from app.routers.media_library import router as media_library_router
 from app.routers.messages import router as messages_router
+from app.routers.onboarding import router as onboarding_router
 from app.routers.platform import router as platform_router
 from app.routers.platform_access import router as platform_access_router
 from app.routers.reachability_audit import router as reachability_audit_router
@@ -130,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(export_approval_router)
     app.include_router(export_audit_router)
     app.include_router(retention_router, prefix="/api/admin")
+    app.include_router(onboarding_router)
     app.include_router(platform_router, prefix="/api/platform")
     app.include_router(platform_access_router, prefix="/api/platform")
 

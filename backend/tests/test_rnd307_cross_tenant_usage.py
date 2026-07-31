@@ -19,7 +19,7 @@ _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT 1, created_at DATETIME,
-    updated_at DATETIME
+    updated_at DATETIME, onboarding_completed_at DATETIME
 );
 CREATE TABLE platform_admins (
     id TEXT PRIMARY KEY, email TEXT NOT NULL, password_hash TEXT NOT NULL,

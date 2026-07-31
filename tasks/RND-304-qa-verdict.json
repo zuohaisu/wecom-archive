@@ -1,0 +1,143 @@
+{
+  "ticket_id": "RND-304",
+  "title": "A9-3 标记首次完成 - Tenant onboarding completion status",
+  "qa_status": "PASS",
+  "qa_date": "2026-07-31",
+  "qa_engineer": "QA Agent",
+  "evidence": {
+    "ac_1_default_incomplete": {
+      "status": "PASS",
+      "test": "test_status_defaults_to_first_run_for_all_authenticated_roles",
+      "evidence": "新租户（从未调用 complete）→ GET /api/onboarding/status 返回 first_run: true"
+    },
+    "ac_2_complete_marks_done": {
+      "status": "PASS",
+      "test": "test_complete_marks_onboarding_done_and_preserves_first_timestamp",
+      "evidence": "POST /api/onboarding/complete 后 GET 返回 first_run: false"
+    },
+    "ac_3_idempotent_key": {
+      "status": "PASS",
+      "test": "test_complete_marks_onboarding_done_and_preserves_first_timestamp (line 98-105)",
+      "evidence": "通过 patch datetime.now() 模拟时间推进，第二次调用 POST /api/onboarding/complete 后数据库中的 onboarding_completed_at 值保持不变（assert second_completed_at == first_completed_at），验证真正幂等"
+    },
+    "ac_4_tenant_isolation": {
+      "status": "PASS",
+      "test": "test_completion_is_scoped_to_authenticated_tenant_only",
+      "evidence": "租户 A 完成向导后，租户 B 的 GET 仍返回 first_run: true。代码审阅确认 tenant_id 仅来自 require_role()，不接受请求参数"
+    },
+    "ac_5_auth_grading": {
+      "status": "PASS",
+      "test": "test_only_admin_or_owner_can_complete_onboarding",
+      "evidence": "GET 任意角色可读；POST 非 admin/owner 角色 → 403；readonlyaudit 角色测试为 403，owner/admin 角色为 200"
+    },
+    "ac_6_migration_reversible": {
+      "status": "PASS",
+      "test": "test_migration_upgrade_and_downgrade_are_reversible",
+      "evidence": "迁移文件 0029_tenant_onboarding_completed.py 包含完整的 upgrade/downgrade；make verify 执行所有测试包括迁移相关测试"
+    },
+    "ac_7_contract_rbac_sync": {
+      "status": "PASS",
+      "test": "test_http_contract.py + test_rnd280_rbac_scaffold.py",
+      "evidence": "test_http_contract.py: 58 passed; test_rnd280_rbac_scaffold.py: 5 passed; make verify 全部通过"
+    },
+    "ac_8_manual_tenants_sync": {
+      "status": "PASS",
+      "test": "test_rnd307_cross_tenant_usage.py + test_rnd309_content_access_request.py",
+      "evidence": "两个测试文件 diff 中只看到 tenants 表新增 onboarding_completed_at DATETIME 列，无其他改动"
+    }
+  },
+  "project_specific_checks": {
+    "no_f0_rnd244_dependency": {
+      "status": "PASS",
+      "command": "grep -rn \"config_service\\|get_config\\|set_config\\|from app.config\" backend/app/routers/onboarding.py",
+      "result": "无命中，未依赖 F0/RND-244 配置中心"
+    },
+    "tenant_model_column": {
+      "status": "PASS",
+      "command": "git diff -- backend/app/db/models.py",
+      "result": "只看到 Tenant.onboarding_completed_at = Column(DateTime(timezone=True), nullable=True) 一行新增"
+    },
+    "no_extra_tables": {
+      "status": "PASS",
+      "result": "迁移文件 0029 只为 tenants 表加列，未新建独立的 onboarding 状态表"
+    },
+    "no_reset_endpoint": {
+      "status": "PASS",
+      "result": "diff 中未发现'取消完成'/'重新打开向导'相关的端点或参数"
+    },
+    "architecture_boundary": {
+      "status": "PASS",
+      "test": "test_architecture_boundary.py",
+      "result": "25 passed，router 未 import app.main；service 层未 import app.routers.*"
+    },
+    "file_ownership": {
+      "status": "PASS",
+      "modified_files": [
+        "backend/alembic/versions/0029_tenant_onboarding_completed.py",
+        "backend/app/db/models.py (仅新增 onboarding_completed_at)",
+        "backend/app/routers/onboarding.py (新文件)",
+        "backend/app/schemas/onboarding.py (新文件)",
+        "backend/app/main.py (两行导入 + include_router)",
+        "backend/tests/test_rnd304_onboarding_status.py (新文件)",
+        "backend/tests/test_rnd280_rbac_scaffold.py (白名单同步)",
+        "backend/tests/test_http_contract.py (契约同步)",
+        "backend/tests/test_rnd307_cross_tenant_usage.py (DDL 同步)",
+        "backend/tests/test_rnd309_content_access_request.py (DDL 同步)"
+      ]
+    }
+  },
+  "verification_commands": {
+    "make_verify": {
+      "status": "PASS",
+      "output": "2496 passed, 82 skipped, 13 warnings in 165.87s"
+    },
+    "rnd304_tests": {
+      "status": "PASS",
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd304_onboarding_status.py -q",
+      "output": "5 passed in 2.73s"
+    },
+    "contract_rbac_tests": {
+      "status": "PASS",
+      "command": ".venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q",
+      "output": "test_http_contract.py: 58 passed; test_rnd280_rbac_scaffold.py: 5 passed"
+    },
+    "arch_boundary_tests": {
+      "status": "PASS",
+      "command": ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q",
+      "output": "25 passed in 0.41s"
+    },
+    "cross_tenant_sync_tests": {
+      "status": "PASS",
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd307_cross_tenant_usage.py backend/tests/test_rnd309_content_access_request.py -q",
+      "output": "9 passed in 5.36s"
+    },
+    "no_git_commits": {
+      "status": "PASS",
+      "command": "git log origin/main..HEAD",
+      "result": "空输出，无提交"
+    }
+  },
+  "implementation_details": {
+    "storage_solution": "Tenant 表直接新增 onboarding_completed_at DATETIME 列，未依赖 F0/RND-244 配置中心",
+    "migration_file_number": "0029_tenant_onboarding_completed.py",
+    "revision": "0029",
+    "down_revision": "0027",
+    "endpoint_get": "/api/onboarding/status → OnboardingStatusOut(first_run: bool)",
+    "endpoint_post": "/api/onboarding/complete → OnboardingCompleteOut(first_run: False)",
+    "rbac_control": "GET: any authenticated role; POST: admin/owner only (403 for others)"
+  },
+  "security_notes": {
+    "test_data": "测试中使用固定假租户数据 (tenant-a, tenant-b)，非真实客户数据",
+    "no_uncommitted_staged": "git log origin/main..HEAD 为空，git status 仅显示预期修改"
+  },
+  "conclusion": {
+    "verdict": "PASS",
+    "summary": "RND-304 所有接受标准 (AC-1~AC-8) 均已满足：默认未完成状态正确、完成后置位正确、幂等性验证通过 (时间戳不被覆盖)、租户隔离验证通过、鉴权分级正确、迁移可逆、契约同步完成、架构边界合规。实现未依赖 F0/RND-244 配置中心，采用 Tenant 表直接加列方案。",
+    "notable_findings": [
+      "幂等实现正确：第二次调用不覆盖原有时间戳 (通过 patch datetime 验证)",
+      "租户隔离正确：tenant_id 完全来自 require_role()，不接受请求参数",
+      "RBAC 控制正确：只有 admin/owner 可以调用 POST /complete",
+      "所有 2496 项回归测试通过"
+    ]
+  }
+}
