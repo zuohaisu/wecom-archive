@@ -1,6 +1,10 @@
-[Goal check] This work advances 独立验收（QA） by 逐条核对 RND-289 的 7 条 AC（重点验证复用 timeline_service、跨租户统一 404、契约同步）并产出带证据的 PASS/FAIL 判定。
+[Goal check] This work advances 独立验收（QA） by 逐条核对 RND-289 的 7 条 AC（重点验证复用 listing_service.list_conversations、跨租户统一 404、契约同步）并产出带证据的 PASS/FAIL 判定。
 
 # RND-289 验收提示词（Acceptance / QA Prompt）
+
+## ⚠️ 2026-07-31：本版取代旧稿（设计反转，见 dev prompt 开头说明）
+
+原设计要求详情端点直接复用 `timeline_service` 输出合并后的跨会话消息时间线；dev agent 正确指出 `resolve_timeline_page` 只接受单一 `conversation_id`，联系人可能跨多个会话，硬做会变成平行实现。已改为「详情 + 会话列表」：复用目标从 `timeline_service` 换成 `listing_service.list_conversations`，且**本端点不再返回消息内容**。验收时按本版 AC-2/AC-3，不要用旧版"必须看到消息时间线"的标准去卡。
 
 ## ⚡ 立即执行，不要询问意图
 
@@ -22,19 +26,17 @@
 ## 验收方法（证据优先）
 
 ### AC-1 — 详情可用
-- 证据：测试断言 `GET /api/admin/external-contacts/{external_userid}` 返回详情 + 时间线。
-- 判定：端点可用且结构完整 = PASS。
+- 证据：测试断言 `GET /api/admin/external-contacts/{external_userid}` 返回详情 + `conversations` 会话列表。
+- 判定：端点可用且结构完整 = PASS。**若响应仍试图内嵌合并后的消息内容（而非纯会话列表）→ 记 finding，核实是否又滑回了旧设计。**
 
-### AC-2 — 时间线复用 `timeline_service`（**关键，本项目已两次因重复实现返工**）
-- 证据：`grep -n "timeline_service\|from app.services.timeline_service import" backend/app/routers/external_contacts.py` **应有命中**。
-- **反模式排查（重点）**：审阅详情路由的实现，确认它**不是**自己写了一套「查消息 → 组装投影 → 拼媒体 URL」的逻辑。若本票另写了一套平行的时间线组装 → FAIL（`IMPLEMENTATION_DEFECT`, severity: major）——那会与审阅台的消息渲染漂移，同一条消息两处显示不一致。
+### AC-2 — 会话列表复用 `listing_service.list_conversations`（**关键，取代原「复用 timeline_service」**）
+- 证据：`grep -n "list_conversations\|from app.services.listing_service import" backend/app/routers/external_contacts.py` **应有命中**，且调用实参 `entity_id`（或等价形参名）传的是 `external_userid`。
+- **反模式排查（重点）**：审阅详情路由的实现，确认它**不是**自己写了一套「query `ArchiveMessage`/`ArchiveMessageRecipient` 找 distinct 会话」的逻辑。若本票另写了一套平行的会话枚举 → FAIL（`IMPLEMENTATION_DEFECT`, severity: major）——那会与 `GET /api/conversations` 的会话列表漂移，同一个联系人在两处显示不同的会话集合。
 - 判定：确实复用 = PASS。平行实现 = FAIL。
-- **例外**：若开发 agent 已按 dev prompt 的 Escalation 上报「`timeline_service` 接口无法直接服务按联系人聚合」并给出具体不匹配之处 → 判 `BLOCKED`（这是正确行为，不算失败）。
 
-### AC-3 — 分页生效
-- 证据：时间线走后端分页参数；`offset` 超总数返回空列表而非报错（有用例）。
-- 反模式：确认**不是**一次性拉全部消息再前端/内存切片（高频联系人可能有数万条）。
-- 判定：后端分页 + 边界用例 = PASS。
+### AC-3 — 不做消息级分页（范围已收窄，不是遗漏）
+- 证据：响应体中**不包含**消息正文/时间线数组，只有会话摘要列表（`conversation_id`/最近活动等）。
+- 判定：符合此范围 = PASS。**若响应里出现了消息内容却没有分页 → FAIL（`IMPLEMENTATION_DEFECT`）**——那说明范围又滑回了旧设计但没做分页防护，比"没做这功能"更危险（高频联系人可能一次性拖出数万条消息）。
 
 ### AC-4 — 租户隔离
 - 证据：跨租户反例测试——以租户 A 鉴权查租户 B 的联系人，断言拿不到数据。
@@ -63,7 +65,7 @@
   - `route_count` 被写死成具体数字而非"当前基线 +1" → 记 minor finding。
 
 ## 本项目专属检查（必查）
-1. **未改共享 service**：`git diff --stat -- backend/app/services/timeline_service.py backend/app/conversation_membership.py backend/app/display_names.py` **必须全无输出**（只调用不改）。
+1. **未改共享 service**：`git diff --stat -- backend/app/services/listing_service.py backend/app/services/timeline_service.py backend/app/conversation_membership.py backend/app/display_names.py` **必须全无输出**（只调用不改）。
 2. **未改模型 / 无迁移**：`git diff --stat -- backend/app/db/models.py` 无输出；`backend/alembic/versions/` 无新文件。
 3. **未破坏 RND-288 的列表端点**：审阅 `external_contacts.py` 的 diff，确认列表路由逻辑未被改动（本票只**新增**详情路由）。若列表行为被改 → FAIL（`REGRESSION`）。
 4. **未越界做前端**：diff 中不得出现 `templates/contacts.html` 或 `admin_contacts_page.py`（RND-330 已交付，详情跳转不在本票范围）。
@@ -81,18 +83,18 @@ make verify
 .venv/bin/python -m pytest backend/tests/test_external_contact_detail.py -q
 .venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
-grep -n "timeline_service" backend/app/routers/external_contacts.py    # AC-2：必须有命中
+grep -n "list_conversations" backend/app/routers/external_contacts.py    # AC-2：必须有命中
 grep -n "resolve_person_display_name" backend/app/routers/external_contacts.py   # AC-6
-git diff --stat -- backend/app/services/timeline_service.py backend/app/conversation_membership.py backend/app/display_names.py backend/app/db/models.py   # 必须全无输出
+git diff --stat -- backend/app/services/listing_service.py backend/app/services/timeline_service.py backend/app/conversation_membership.py backend/app/display_names.py backend/app/db/models.py   # 必须全无输出
 git status --porcelain
 git log origin/main..HEAD                                              # 必须无输出
 ```
 
 ## 产出
 写入 `tasks/RND-289-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
-`notes` 中记录：详情端点的确切响应结构、时间线分页参数名（供后续 contact-detail 页面对接）。
+`notes` 中记录：详情端点的确切响应结构（尤其 `conversations` 字段形状）（供后续 contact-detail 页面对接）。
 
 ## 禁止事项
 - 不改任何文件、不补做缺失实现或测试、不放松 AC。
-- **AC-2 若发现另写了一套时间线组装 → 直接 FAIL**，不接受"功能上也能跑"。
+- **AC-2 若发现另写了一套会话枚举逻辑 → 直接 FAIL**，不接受"功能上也能跑"。
 - **AC-5 若跨租户查询返回 403 而非 404 → 直接 FAIL**，那是存在性泄露。
