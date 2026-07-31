@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 70  # RND-314: +1 GET /tenants platform console list route.
+    assert route_count == 71  # RND-310: +1 PATCH /tenants/{tenant_id} tenant activation endpoint.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -392,6 +392,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/monitored-accounts",
             "/api/platform/content-access-requests",
             "/api/platform/tenants",
+            "/api/platform/tenants/{tenant_id}",
             "/api/search/contacts",
             "/api/search/messages",
             "/api/wecom/archive/events",
@@ -561,6 +562,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/platform/tenants",
             frozenset({"GET"}),
             "TenantListOut",
+            "None",
+        ),
+        (
+            "/api/platform/tenants/{tenant_id}",
+            frozenset({"PATCH"}),
+            "TenantStatusUpdateOut",
             "None",
         ),
         (

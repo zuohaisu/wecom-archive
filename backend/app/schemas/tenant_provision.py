@@ -45,3 +45,19 @@ class TenantListOut(BaseModel):
     """Response wrapper for tenant list endpoint."""
 
     tenants: list[TenantListItemOut]
+
+
+class TenantStatusUpdateIn(BaseModel):
+    """Request body for PATCH /tenants/{tenant_id}."""
+
+    is_active: bool
+
+
+class TenantStatusUpdateOut(BaseModel):
+    """Response after updating tenant status."""
+
+    tenant_id: str
+    tenant_name: str
+    tenant_slug: str
+    tenant_is_active: bool
+    updated_at: datetime

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_platform_admin
+from app.audit import write_audit
 from app.db.models import DuplicateCorpIdError, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.schemas.tenant_provision import (
@@ -15,6 +16,8 @@ from app.schemas.tenant_provision import (
     TenantListOut,
     TenantProvisionIn,
     TenantProvisionOut,
+    TenantStatusUpdateIn,
+    TenantStatusUpdateOut,
 )
 
 router = APIRouter()
@@ -92,5 +95,66 @@ def list_tenants(
             )
             for t, c in rows
         ]
+    )
+
+
+@router.patch(
+    "/tenants/{tenant_id}",
+    response_model=TenantStatusUpdateOut,
+    status_code=status.HTTP_200_OK,
+)
+def update_tenant_status(
+    tenant_id: str,
+    payload: TenantStatusUpdateIn,
+    admin_user=Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> TenantStatusUpdateOut:
+    """Activate or deactivate a tenant (platform admin only).
+
+    - **404**: Target tenant does not exist.
+    - **401**: Missing or invalid platform admin credentials.
+    - Always writes an audit log via `write_audit`.
+    """
+    # Find the target tenant
+    tenant = (
+        db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    )
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tenant with id '{tenant_id}' not found",
+        )
+
+    old_status = tenant.is_active
+    new_status = payload.is_active
+
+    # Update and persist
+    tenant.is_active = new_status
+    db.commit()
+    db.refresh(tenant)
+
+    # Write audit log with appropriate action based on status change
+    action = (
+        "platform.tenant_deactivated" if not new_status else "platform.tenant_activated"
+    )
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        action=action,
+        object_type="tenant_config",
+        admin_user_id=admin_user.id,
+        object_id=tenant_id,
+        detail={
+            "is_active": new_status,
+            "previous_is_active": old_status,
+        },
+    )
+
+    return TenantStatusUpdateOut(
+        tenant_id=tenant.id,
+        tenant_name=tenant.name,
+        tenant_slug=tenant.slug,
+        tenant_is_active=tenant.is_active,
+        updated_at=tenant.updated_at,
     )
 
