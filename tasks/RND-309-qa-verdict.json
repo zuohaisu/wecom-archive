@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-309",
+  "linear_url": "https://linear.app/crowntime/issue/RND-309",
+  "run_id": "rnd-309-qa-20260731-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "main",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "New files: backend/app/routers/platform_access.py, backend/app/schemas/platform_access.py, backend/tests/test_rnd309_content_access_request.py; Modified: backend/app/main.py (+2 lines), backend/tests/test_http_contract.py. No changes to backend/app/db/models.py or alembic migrations."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "test_content_access_request_records_exactly_one_audit_row_and_returns_no_content PASSED",
+        "AuditLog created with action=PLATFORM_TENANT_ACCESS_ACTION, tenant_id='tenant-rnd309'",
+        "Detail includes platform_admin_id and platform_admin_email"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "Response contains only: tenant_id, recorded=True, granted=False, note",
+        "No message body/media URL/contact details in response",
+        "Test verifies response.json() == {tenant_id, recorded, granted: False, note}"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "grep returns: from app.auth import PlatformAdminTenantScope, require_platform_tenant_scope",
+        "grep returns: scope: PlatformAdminTenantScope = Depends(require_platform_tenant_scope)",
+        "Endpoint function body has NO handwritten auth check or audit write logic",
+        "All security delegation to dependency injection"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "test_content_access_request_rejects_invalid_platform_credentials[None] PASSED - 401",
+        "test_content_access_request_rejects_invalid_platform_credentials[headers1] PASSED - 401 with wrong password",
+        "test_tenant_admin_session_cannot_request_content_access PASSED - 401 for non-platform admin",
+        "test_content_access_request_requires_explicit_tenant_id PASSED - 422 when tenant_id missing"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "grep 'write_audit' backend/app/routers/platform_access.py returns exit code 1 (no hits)",
+        "test asserts db.query(AuditLog).count() == 1 after single request",
+        "Dependency injection handles audit logging exactly once",
+        "No duplicate audit records in database"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "git diff --stat -- backend/app/db/models.py shows no output (no model changes)",
+        "ls backend/alembic/versions/ | tail -3 shows no new migration files",
+        "Latest migrations are 0026_export_approval_tokens.py, 0027_retention_config.py (pre-existing)",
+        "Uses AuditLog table (existing), not new approval token table"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        ".venv/bin/python -m pytest backend/tests/test_http_contract.py -q returned 83 tests passed",
+        ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q passed",
+        "Architecture boundary enforcement confirmed valid"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": "grep -n \"require_platform_tenant_scope\" backend/app/routers/platform_access.py",
+      "result": "EXIT=0 (line 6 import + line 15 usage)"
+    },
+    {
+      "command": "grep -n \"write_audit\" backend/app/routers/platform_access.py",
+      "result": "EXIT=1 (no hits in endpoint body)"
+    },
+    {
+      "command": "git diff --stat -- backend/app/db/models.py",
+      "result": "EXIT=0 (no output means no changes)"
+    },
+    {
+      "command": "ls backend/alembic/versions/ | tail -3",
+      "result": "EXIT=0: 0026_export_approval_tokens.py, 0027_retention_config.py, __init__.py (no new migrations)"
+    },
+    {
+      "command": "git diff -- backend/app/main.py",
+      "result": "EXIT=0 (+1 import + +1 include_router = 2 lines modified)"
+    },
+    {
+      "command": "git log origin/main..HEAD",
+      "result": "EXIT=0 (empty output, no commits pushed)"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd309_content_access_request.py -v",
+      "result": "EXIT=0: 5 passed"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_architecture_boundary.py -v",
+      "result": "EXIT=0: 83 passed"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "All 7 acceptance criteria verified successfully. Implementation correctly reuses require_platform_tenant_scope from app.auth without rewriting authentication or audit logic. No duplicate audit records detected. No approval workflow table created (stays within lightweight audit scope). All tests pass including HTTP contract and architecture boundary tests. File ownership restricted to RND-309 deliverables: platform_access.py (new router), platform_access.py (new schema), test_rnd309_content_access_request.py (new test file), main.py (minimal 2-line update). Used fixed test data (tenant-rnd309, platform-admin-rnd309) — no real customer data accessed."
+}

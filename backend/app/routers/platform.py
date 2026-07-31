@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from app.auth import require_platform_admin
 from app.db.models import DuplicateCorpIdError, Tenant, TenantWecomConfig
 from app.db.session import get_db
-from app.schemas.tenant_provision import TenantProvisionIn, TenantProvisionOut
+from app.schemas.tenant_provision import (
+    TenantListItemOut,
+    TenantListOut,
+    TenantProvisionIn,
+    TenantProvisionOut,
+)
 
 router = APIRouter()
 
@@ -60,3 +65,30 @@ def create_tenant(
         agent_id=config.agent_id,
         is_active=config.is_active,
     )
+
+
+@router.get("/tenants", response_model=TenantListOut)
+def list_tenants(
+    _admin=Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> TenantListOut:
+    """Return all provisioned tenants with their config status (no key leakage)."""
+    print(f"DEBUG list_tenants - db: {db}")
+    print(f"DEBUG list_tenants - _admin: {_admin.email if _admin else 'None'}")
+    tenants = db.query(Tenant).join(TenantWecomConfig).all()
+    return TenantListOut(
+        tenants=[
+            TenantListItemOut(
+                tenant_id=t.id,
+                tenant_name=t.name,
+                tenant_slug=t.slug,
+                corp_id=c.corp_id,
+                agent_id=c.agent_id,
+                tenant_is_active=t.is_active,
+                config_is_active=c.is_active,
+                created_at=t.created_at,
+            )
+            for t, c in tenants
+        ]
+    )
+

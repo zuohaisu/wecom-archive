@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 68  # RND-318: +2 retention configuration routes.
+    assert route_count == 70  # RND-314: +1 GET /tenants platform console list route.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -390,10 +390,11 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/messages",
             "/api/messages/{msgid}",
             "/api/monitored-accounts",
+            "/api/platform/content-access-requests",
             "/api/platform/tenants",
-                "/api/search/contacts",
-                "/api/search/messages",
-                "/api/wecom/archive/events",
+            "/api/search/contacts",
+            "/api/search/messages",
+            "/api/wecom/archive/events",
             "/docs",
             "/docs/oauth2-redirect",
             "/health",
@@ -549,7 +550,19 @@ def test_route_snapshot_with_real_model_names() -> None:
             "list[MonitoredAccountOut]",
             "None",
         ),
+        (
+            "/api/platform/content-access-requests",
+            frozenset({"POST"}),
+            "ContentAccessRequestOut",
+            "None",
+        ),
         ("/api/platform/tenants", frozenset({"POST"}), "TenantProvisionOut", "None"),
+        (
+            "/api/platform/tenants",
+            frozenset({"GET"}),
+            "TenantListOut",
+            "None",
+        ),
         (
             "/api/search/contacts",
             frozenset({"GET"}),
