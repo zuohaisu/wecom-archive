@@ -156,6 +156,28 @@ class RetentionConfig(Base):
     )
 
 
+class AppConfigStore(Base):
+    """Application-level configuration values for this deployment (RND-246)."""
+
+    __tablename__ = "app_config_store"
+
+    key = Column(String, primary_key=True)
+    group = Column(String, nullable=False)
+    value = Column(Text, nullable=True)
+    is_secret = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    value_type = Column(String, nullable=False)
+    requires_restart = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    updated_by = Column(String, nullable=True)
+
+
 def _reject_duplicate_active_corp_id(connection, target: "TenantWecomConfig") -> None:
     """Application-level guard mirroring uq_tenant_wecom_configs_active_corp_id.
 
