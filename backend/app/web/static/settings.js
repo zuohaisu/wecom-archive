@@ -384,6 +384,37 @@
     body.appendChild(form);
   }
 
+  function ExportSettingsButton() {
+    var sections = document.querySelector('.settings-sections');
+    if (!sections || document.querySelector('[data-settings-export]')) return;
+
+    var actions = makeElement('div', 'form-row');
+    var button = makeElement('button', 'btn btn-sm', t('settings.exportEnv', '复制为 .env'));
+    var status = makeElement('span', 'field-help');
+    button.type = 'button';
+    button.setAttribute('data-settings-export', 'env');
+    button.addEventListener('click', function () {
+      button.disabled = true;
+      status.textContent = t('settings.exporting', '正在复制…');
+      fetch('/api/admin/settings/export', {credentials: 'include'}).then(function (response) {
+        if (!response.ok) throw new Error('settings_export_failed');
+        return response.text();
+      }).then(function (text) {
+        return navigator.clipboard.writeText(text);
+      }).then(function () {
+        status.textContent = t('settings.exportCopied', '已复制');
+      }).catch(function () {
+        status.className = 'field-error';
+        status.textContent = t('settings.exportFailed', '无法复制配置');
+      }).finally(function () {
+        button.disabled = false;
+      });
+    });
+    actions.appendChild(button);
+    actions.appendChild(status);
+    sections.insertBefore(actions, sections.firstChild);
+  }
+
   function renderSettings(data) {
     Object.keys(CONFIG_GROUPS).forEach(function (group) {
       renderGroup(group, (data.groups && data.groups[group]) || []);
@@ -403,6 +434,7 @@
   }
 
   function initSettingsConfiguration() {
+    ExportSettingsButton();
     loadSettings();
   }
 

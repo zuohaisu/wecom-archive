@@ -7,7 +7,7 @@ import re
 from typing import Any, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -154,6 +154,21 @@ def get_settings(
             }
         )
     return SettingsGetOut(groups=groups)
+
+
+@settings_router.get("/settings/export", response_class=PlainTextResponse)
+def export_settings(
+    auth: Tuple[AdminUser, str] = Depends(require_role()),
+    db: Session = Depends(get_db),
+) -> PlainTextResponse:
+    """Export resolved settings as .env text without exposing secrets."""
+    del auth
+    resolver = get_config_resolver()
+    lines = []
+    for key, spec in CONFIG_REGISTRY.items():
+        value = "***" if spec.is_secret else (resolver.resolve(db, key) or "")
+        lines.append(f"{key.upper()}={value}")
+    return PlainTextResponse("\n".join(lines) + "\n")
 
 
 @settings_router.put("/settings", response_model=SettingsUpdateOut)

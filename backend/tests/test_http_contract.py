@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 82  # RND-252: +1 saved-configuration connectivity endpoint.
+    assert route_count == 83  # RND-256: +1 read-only .env settings export endpoint.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -365,6 +365,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/settings",
             "/api/admin/settings/bootstrap",
             "/api/admin/settings/bootstrap-status",
+            "/api/admin/settings/export",
             "/api/admin/settings/password",
             "/api/admin/settings/test-connection",
             "/api/admin/sync-now",
@@ -492,6 +493,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/settings", frozenset({"PUT"}), "SettingsUpdateOut", "None"),
         ("/api/admin/settings/bootstrap", frozenset({"POST"}), "dict", "None"),
         ("/api/admin/settings/bootstrap-status", frozenset({"GET"}), "dict", "None"),
+        ("/api/admin/settings/export", frozenset({"GET"}), "None", "PlainTextResponse"),
         (
             "/api/admin/settings/password",
             frozenset({"POST"}),
