@@ -8,6 +8,13 @@
 <link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
 <link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
 <link rel="stylesheet" href="/web/static/styles.css?v=__STATIC_VERSION__">
+<style>
+.settings-layout{display:flex;align-items:flex-start;gap:var(--space-5)}
+.settings-nav{width:160px;flex-shrink:0;position:sticky;top:var(--space-4)}
+.settings-nav-item{justify-content:flex-start;width:100%}
+.settings-sections{flex:1;min-width:0}
+@media (max-width:720px){.settings-layout{flex-direction:column}.settings-nav{position:static;width:100%;flex-direction:row;flex-wrap:wrap}.settings-nav-item{width:auto}}
+</style>
 </head>
 <body>
 <main class="page page-narrow settings-page">
@@ -18,6 +25,21 @@
     </div>
   </div>
 
+  <div class="settings-layout">
+    <nav class="settings-nav stack gap-2" aria-label="设置分组" role="tablist">
+      <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-general" data-settings-section="general" data-i18n="settings.group.general">通用</button>
+      <button class="btn btn-ghost settings-nav-item active" type="button" role="tab" aria-selected="true" aria-controls="settings-section-account" data-settings-section="account">账号</button>
+      <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-third-party" data-settings-section="third-party" data-i18n="settings.group.thirdParty">第三方</button>
+      <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-storage" data-settings-section="storage" data-i18n="settings.group.storage">存储</button>
+      <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-wecom" data-settings-section="wecom" data-i18n="settings.group.wecom">企微</button>
+      <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-advanced" data-settings-section="advanced" data-i18n="settings.group.advanced">高级</button>
+    </nav>
+
+    <div class="settings-sections">
+      <section id="settings-section-general" class="settings-section" role="tabpanel" aria-label="通用" hidden>
+        <div class="card"><div class="card-hd"><h2 data-i18n="settings.group.general">通用</h2></div><div class="card-bd"><p class="field-help">配置项加载中…</p></div></div>
+      </section>
+      <div id="settings-section-account" class="settings-section" role="tabpanel" aria-label="账号">
   <section class="card">
     <div class="card-hd"><h2>账号</h2></div>
     <div class="set-row">
@@ -44,8 +66,24 @@
       </form>
     </div>
   </section>
+      </div>
+      <section id="settings-section-third-party" class="settings-section" role="tabpanel" aria-label="第三方" hidden>
+        <div class="card"><div class="card-hd"><h2 data-i18n="settings.group.thirdParty">第三方</h2></div><div class="card-bd"><p class="field-help">配置项加载中…</p></div></div>
+      </section>
+      <section id="settings-section-storage" class="settings-section" role="tabpanel" aria-label="存储" hidden>
+        <div class="card"><div class="card-hd"><h2 data-i18n="settings.group.storage">存储</h2></div><div class="card-bd"><p class="field-help">配置项加载中…</p></div></div>
+      </section>
+      <section id="settings-section-wecom" class="settings-section" role="tabpanel" aria-label="企微" hidden>
+        <div class="card"><div class="card-hd"><h2 data-i18n="settings.group.wecom">企微</h2></div><div class="card-bd"><p class="field-help">配置项加载中…</p></div></div>
+      </section>
+      <section id="settings-section-advanced" class="settings-section" role="tabpanel" aria-label="高级" hidden>
+        <div class="card"><div class="card-hd"><h2 data-i18n="settings.group.advanced">高级</h2></div><div class="card-bd"><p class="field-help">配置项加载中…</p></div></div>
+      </section>
+    </div>
+  </div>
 </main>
 __I18N_SCRIPT__
+<script src="/web/static/settings.js?v=__STATIC_VERSION__"></script>
 <script>
 (function () {
   var form = document.getElementById('change-password-form');

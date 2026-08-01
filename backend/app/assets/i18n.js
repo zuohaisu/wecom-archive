@@ -322,6 +322,13 @@
         "nav.auditLog": "审计日志",
         "nav.comingSoon": "即将推出",
 
+        /* RND-251 settings groups */
+        "settings.group.general": "通用",
+        "settings.group.thirdParty": "第三方",
+        "settings.group.storage": "存储",
+        "settings.group.wecom": "企微",
+        "settings.group.advanced": "高级",
+
         /* RND-327 users page keys — insert below */
         "users.pageTitle": "用户管理", "users.breadcrumbDirectory": "通讯录", "users.description": "管理控制台账号的角色、状态和活跃情况。", "users.invite": "邀请管理员", "users.sendInvite": "发送邀请", "users.inviteSent": "邀请已发送。", "users.total": "控制台账号", "users.active": "已启用", "users.disabled": "已停用", "users.silent30": "静默 ≥30 天", "users.searchPlaceholder": "搜索姓名、账号或部门", "users.allRoles": "全部角色", "users.allStatuses": "全部状态", "users.user": "用户 / 账号", "users.department": "部门", "users.role": "角色", "users.status": "状态", "users.lastActive": "最后活跃", "users.messages30": "近 30 天消息", "users.actions": "操作", "users.name": "姓名", "users.email": "企业邮箱", "users.cancel": "取消", "users.loading": "正在加载用户…", "users.empty": "未找到用户", "users.never": "从未活跃", "users.unnamed": "未命名用户", "users.enable": "启用", "users.disable": "停用", "users.resetPassword": "重置密码", "users.resetSent": "重置密码邮件已发送。", "users.requestFailed": "请求失败，请稍后重试。", "users.confirmEnable": "确定要启用此用户吗？", "users.confirmDisable": "确定要停用此用户吗？", "users.confirmReset": "确定要发送重置密码邮件吗？", "users.role.owner": "所有者", "users.role.admin": "管理员", "users.role.compliance": "合规", "users.role.legal": "法务", "users.role.readonlyaudit": "只读审计",
         /* RND-328 audit-log page keys — insert below */
@@ -746,6 +753,13 @@
         "nav.auditLog": "稽核日誌",
         "nav.comingSoon": "即將推出",
 
+        /* RND-251 settings groups */
+        "settings.group.general": "一般",
+        "settings.group.thirdParty": "第三方",
+        "settings.group.storage": "儲存",
+        "settings.group.wecom": "企業微信",
+        "settings.group.advanced": "進階",
+
         /* RND-327 users page keys — insert below */
         "users.pageTitle": "使用者管理", "users.breadcrumbDirectory": "通訊錄", "users.description": "管理控制台帳號的角色、狀態和活躍情況。", "users.invite": "邀請管理員", "users.sendInvite": "傳送邀請", "users.inviteSent": "邀請已傳送。", "users.total": "控制台帳號", "users.active": "已啟用", "users.disabled": "已停用", "users.silent30": "靜默 ≥30 天", "users.searchPlaceholder": "搜尋姓名、帳號或部門", "users.allRoles": "全部角色", "users.allStatuses": "全部狀態", "users.user": "使用者 / 帳號", "users.department": "部門", "users.role": "角色", "users.status": "狀態", "users.lastActive": "最後活躍", "users.messages30": "近 30 天訊息", "users.actions": "操作", "users.name": "姓名", "users.email": "企業信箱", "users.cancel": "取消", "users.loading": "正在載入使用者…", "users.empty": "找不到使用者", "users.never": "從未活躍", "users.unnamed": "未命名使用者", "users.enable": "啟用", "users.disable": "停用", "users.resetPassword": "重設密碼", "users.resetSent": "重設密碼郵件已傳送。", "users.requestFailed": "要求失敗，請稍後再試。", "users.confirmEnable": "確定要啟用此使用者嗎？", "users.confirmDisable": "確定要停用此使用者嗎？", "users.confirmReset": "確定要傳送重設密碼郵件嗎？", "users.role.owner": "擁有者", "users.role.admin": "管理員", "users.role.compliance": "合規", "users.role.legal": "法務", "users.role.readonlyaudit": "唯讀稽核",
         /* RND-328 audit-log page keys — insert below */
@@ -1169,6 +1183,13 @@
         "nav.syncTasks": "Sync & Tasks",
         "nav.auditLog": "Audit Log",
         "nav.comingSoon": "Coming soon",
+
+        /* RND-251 settings groups */
+        "settings.group.general": "General",
+        "settings.group.thirdParty": "Third-party",
+        "settings.group.storage": "Storage",
+        "settings.group.wecom": "WeCom",
+        "settings.group.advanced": "Advanced",
 
         /* RND-327 users page keys — insert below */
         "users.pageTitle": "User Management", "users.breadcrumbDirectory": "Directory", "users.description": "Manage console account roles, status, and activity.", "users.invite": "Invite administrator", "users.sendInvite": "Send invitation", "users.inviteSent": "Invitation sent.", "users.total": "Console accounts", "users.active": "Active", "users.disabled": "Disabled", "users.silent30": "Inactive ≥30 days", "users.searchPlaceholder": "Search name, account, or department", "users.allRoles": "All roles", "users.allStatuses": "All statuses", "users.user": "User / account", "users.department": "Department", "users.role": "Role", "users.status": "Status", "users.lastActive": "Last active", "users.messages30": "Messages (30 days)", "users.actions": "Actions", "users.name": "Name", "users.email": "Work email", "users.cancel": "Cancel", "users.loading": "Loading users…", "users.empty": "No users found", "users.never": "Never active", "users.unnamed": "Unnamed user", "users.enable": "Enable", "users.disable": "Disable", "users.resetPassword": "Reset password", "users.resetSent": "Password reset email sent.", "users.requestFailed": "Request failed. Please try again.", "users.confirmEnable": "Enable this user?", "users.confirmDisable": "Disable this user?", "users.confirmReset": "Send a password reset email?", "users.role.owner": "Owner", "users.role.admin": "Administrator", "users.role.compliance": "Compliance", "users.role.legal": "Legal", "users.role.readonlyaudit": "Read-only audit",

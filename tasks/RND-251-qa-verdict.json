@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-251",
+  "run_id": "rnd-251-qa-20260801-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "c432366 (origin/main)",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "4 files, all additive: backend/app/web/templates/settings.html (M, +38, new <style>+<nav>+5 <section> containers, password card untouched) | backend/app/assets/i18n.js (M, +5 group keys ×3 locales = +15) | backend/app/web/static/settings.js (new, vanilla JS nav) | backend/tests/test_rnd251_settings_page.py (new, 6 tests). Untouched: sidenav.py, routers/web.py, routers/settings.py, app/settings.py."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "test_settings_page_requires_session_and_renders_group_navigation: TestClient GET /admin/settings → 200 (status_code==200)",
+        "response asserts class=\"settings-nav stack gap-2\" and /web/static/settings.js?v= present",
+        "response asserts all 6 sections both as data-settings-section and id=\"settings-section-...\": general/account/third-party/storage/wecom/advanced"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "git diff -- backend/app/web/templates/settings.html shows password card ONLY as context lines (lines 50-65 form + 89-115 script), zero '-' deletions → byte-for-byte unchanged",
+        "test_settings_page_keeps_the_existing_change_password_form asserts '<form id=\"change-password-form\" class=\"set-ctl\" novalidate>' and ids old-password/new-password/confirm-new-password/change-password-message/update-password-button all present",
+        "fetch('/api/admin/settings/password', { still at line 115; newPassword.length < 8 and newPassword !== confirmation logic intact"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "settings.js initSettingsNavigation(): querySelectorAll('[data-settings-section]') tabs + '.settings-section' panels",
+        "selectSection(name) toggles panel.hidden = panel.id !== 'settings-section-' + name → switches visible container",
+        "tab.addEventListener('click', ...) → selectSection(tab.dataset section); test_settings_navigation_script_switches_active_tab_and_visible_panel asserts toggle('active'), setAttribute('aria-selected'), panel.hidden logic, click listener all present"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "grep -rn '{%\\|{{' backend/app/web/templates/settings.html → EXIT 1, no matches",
+        "test_settings_template_has_no_template_engine_syntax asserts '{%' not in source AND '{{' not in source",
+        "template uses only __TOKEN__-style placeholders (__STATIC_VERSION__, __I18N_SCRIPT__)"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "git diff -- backend/app/assets/i18n.js adds 5 group keys under each of zh-CN (通用/第三方/存储/企微/高级), zh-TW (一般/第三方/儲存/企業微信/進階), en (General/Third-party/Storage/WeCom/Advanced)",
+        "test_settings_group_i18n_keys_exist_in_each_locale asserts source.count('\"settings.group.<group>\"') == 3 for each of 5 groups",
+        "keys: settings.group.general|thirdParty|storage|wecom|advanced present in all 3 locale blocks"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "git status shows no package.json/webpack.config/vite.config anywhere; settings.js is a plain IIFE",
+        "grep -n 'import React|import Vue|webpack|vite|package.json' backend/app/web/static/settings.js → EXIT 1, no framework/build-tooling strings",
+        "no React/Vue import in any changed file (D1: SSR + vanilla JS preserved)"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "make verify → EXIT 0: 2529 passed / 82 skipped / 0 failed (verify: OK)",
+        "backend/tests/test_architecture_boundary.py passes (run as part of make verify and separately: 30 passed incl. architecture boundary)",
+        "full suite green → other admin pages (e.g. /admin/conversations) smoke tests still pass, no regression"
+      ]
+    }
+  ],
+  "commands": [
+    {"command": "git status --porcelain", "result": "EXIT=0 — exactly 4 expected changes: M i18n.js, M settings.html, ?? settings.js, ?? test_rnd251_settings_page.py"},
+    {"command": "git log origin/main..HEAD --oneline", "result": "EXIT=0 — empty (agent committed/pushed nothing; no_commit_or_push satisfied)"},
+    {"command": "git diff --stat -- backend/app/web/sidenav.py backend/app/routers/web.py backend/app/routers/settings.py", "result": "EXIT=0 — empty (sidenav + backend routers untouched)"},
+    {"command": "git diff --stat -- backend/app/web/templates/settings.html", "result": "EXIT=0 — 1 file changed, +38 insertions, 0 deletions (purely additive)"},
+    {"command": "grep -rn '{%\\|{{' backend/app/web/templates/settings.html", "result": "EXIT=1 — no Jinja/template-engine syntax found"},
+    {"command": ".venv/bin/python -m pytest backend/tests/test_rnd251_settings_page.py backend/tests/test_architecture_boundary.py -q", "result": "EXIT=0 — 30 passed"},
+    {"command": "make verify", "result": "EXIT=0 — 2529 passed, 82 skipped, 0 failed (verify: OK)"}
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "RND-251 Settings 页面 DOM 结构（供 T9 对接配置字段表单）：\n\n页面为 .settings-layout flex 容器 = 左侧 sticky 导航 + 右侧 sections。\n\n左导航 <nav class=\"settings-nav stack gap-2\" role=\"tablist\" aria-label=\"设置分组\">，含 6 个按钮，属性统一为 class=\"btn btn-ghost settings-nav-item\" / role=\"tab\" / aria-selected / aria-controls=\"settings-section-<x>\" / data-settings-section=\"<x>\"；general、third-party、storage、wecom、advanced 另带 data-i18n=\"settings.group.*\"；account 无 data-i18n（硬编码\"账号\"），且默认 aria-selected=\"true\"（因其包裹既有密码卡）。\n\n右 <div class=\"settings-sections\"> 含 6 个 .settings-section 面板：\n- id=\"settings-section-general\" (hidden) 占位卡\"配置项加载中…\"\n- id=\"settings-section-account\" (可见) 包裹既有生产密码修改 <section class=\"card\">（RND-251 未改其内部）\n- id=\"settings-section-third-party\" (hidden)\n- id=\"settings-section-storage\" (hidden)\n- id=\"settings-section-wecom\" (hidden)\n- id=\"settings-section-advanced\" (hidden)\n\nsettings.js initSettingsNavigation() 通过 panel.hidden = panel.id !== 'settings-section-' + name 切换可见面板；点击 tab 触发 selectSection；加载时激活 aria-selected=true 的 tab（account）。\n\nT9 对接提示（非本票缺陷，仅交接警示）：导航 data-settings-section 用 kebab 命名（third-party），i18n key 用 camelCase（settings.group.thirdParty），而 RND-247 注册表 group 值为 general/third_party/storage/wecom/advanced（下划线）。三处命名不完全一致——T9 注入配置字段表单时，需以面板 id settings-section-<group> 为准做映射（third-party ↔ third_party ↔ settings.group.thirdParty），避免选错容器。"
+}
