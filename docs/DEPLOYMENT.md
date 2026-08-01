@@ -32,6 +32,7 @@ Not versioned in this repository:
 | Main web service unit (`wecom-archive-365.service`) | Operator-managed |
 | Reverse proxy config (Nginx / equivalent) | Operator-managed |
 | TLS certificates | Operator-managed |
+| `STATIC_SITE_DIR_NAME` env var | Operator-set in `backend/.env`; must match the `root` in the operator-managed Nginx config for the static homepage (see `static_site/company_homepage/README.md`), or step 8 below silently syncs to a directory Nginx never serves |
 
 ---
 
@@ -216,7 +217,7 @@ flowchart TD
     K -->|exhausts retries| ROLLBACK_FULL["Rollback: restore LAST KNOWN-GOOD commit\n(persisted state, not just pre-pull HEAD),\nreinstall deps, restart, re-check health.\nOriginal deploy still exits non-zero."]
     K --> L["7b: public /health\n(retried)"]
     L -->|fails| PROXY_FAIL[["Deploy FAILS —\ninvestigate Nginx/DNS/TLS,\nNOT a code rollback"]]
-    L --> M["8: deploy static homepage,\nrecord this commit as last-known-good"]
+    L --> M["8: deploy static homepage\n(rsync to $STATIC_SITE_DIR_NAME, default 'site'),\nrecord this commit as last-known-good"]
     M -->|persist fails| FAILPERSIST[["Deploy FAILS —\nservice IS healthy, but the\nrollback record could not be written"]]
     M --> N[["Deploy SUCCEEDS"]]
 
@@ -566,5 +567,11 @@ These are documentation truths, not hidden assumptions:
 - destructive migrations still require a manual runbook and operator
   approval — they are not, and must not become, something this script
   drives automatically
+- the static homepage sync (step 8) never fails the deploy if
+  `STATIC_SITE_DIR_NAME` doesn't match the Nginx `root` — the sync
+  itself always reports success, it just writes to a directory nobody
+  serves. There is no automated check that the two are consistent;
+  confirm manually on the host if the live homepage stops matching
+  `main`
 
 Keep this document honest if that boundary changes.

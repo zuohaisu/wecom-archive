@@ -621,20 +621,22 @@ if [ -d "$STATIC_SRC" ]; then
     # Ensure target directories exist
     mkdir -p "$SHARED_DST"
 
-    # Copy to shared (wecomarchive-owned) first
-    cp "$STATIC_SRC/index.html" "$SHARED_DST/index.html"
-    cp "$STATIC_SRC/style.css" "$SHARED_DST/style.css"
+    # Sync the whole source directory (not just index.html/style.css) so
+    # assets referenced by the page — brand/, assets/, site.webmanifest,
+    # etc. — actually reach the served root. A prior version of this step
+    # copied only two files, which silently left every other referenced
+    # asset 404ing in production. README.md is excluded: it documents the
+    # source tree for contributors and has no business being served.
+    rsync -a --exclude=README.md "$STATIC_SRC/" "$SHARED_DST/"
     echo "  → shared OK ($SHARED_DST)"
 
-    # Then copy to nginx root (needs sudo)
+    # Then sync to nginx root (needs sudo)
     if [ -n "$SUDO_BIN" ]; then
         "$SUDO_BIN" mkdir -p "$NGINX_DST"
-        "$SUDO_BIN" cp "$SHARED_DST/index.html" "$NGINX_DST/index.html"
-        "$SUDO_BIN" cp "$SHARED_DST/style.css" "$NGINX_DST/style.css"
+        "$SUDO_BIN" rsync -a --exclude=README.md "$SHARED_DST/" "$NGINX_DST/"
     else
         mkdir -p "$NGINX_DST"
-        cp "$SHARED_DST/index.html" "$NGINX_DST/index.html"
-        cp "$SHARED_DST/style.css" "$NGINX_DST/style.css"
+        rsync -a --exclude=README.md "$SHARED_DST/" "$NGINX_DST/"
     fi
     echo "  → nginx root OK ($NGINX_DST)"
 else

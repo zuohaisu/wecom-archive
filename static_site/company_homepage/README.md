@@ -19,19 +19,29 @@ static_site/company_homepage/
 └── README.md   (this file)
 ```
 
-## Target deployment directory (proposed)
+## Target deployment directory
 
-On the production host, deploy the **entire** contents of
-`static_site/company_homepage/` (including `brand/` and `assets/`, not just
-`index.html` and `style.css`) to a dedicated static directory, e.g.:
+`scripts/deploy_server.sh` (step "[9/9] Deploying company homepage static
+files") syncs the **entire** contents of this directory (excluding
+`README.md`) to a dedicated static directory on the production host:
 
 ```
-/var/www/crowntime-site/
+/var/www/$STATIC_SITE_DIR_NAME/
 ├── index.html
 ├── style.css
 ├── brand/
-└── assets/
+├── assets/
+└── site.webmanifest
 ```
+
+`STATIC_SITE_DIR_NAME` is read from the deploy environment (e.g.
+`backend/.env` on the host); it defaults to `site` if unset. **This value
+must match whatever `root` the production Nginx config for
+`crowntime.cn`/`www.crowntime.cn` actually points at** — if they diverge,
+the pipeline will keep syncing files to a directory Nginx never reads,
+and the live site will silently stop reflecting new commits with no
+error anywhere in the deploy. Confirm the two agree before relying on
+automated deploys of this page.
 
 This directory must be separate from wherever the WeCom archive backend
 app or its static assets live.
@@ -76,15 +86,15 @@ for `crowntime.cn`/`www.crowntime.cn` only. This does not affect the
 
 ## CI/CD
 
-No CI/CD deploy script in this repo currently references a static site
-target. No pipeline changes were made as part of this task. If an
-automated deploy is desired later, propose a minimal, reviewed change
-(e.g. an rsync/copy step to `/var/www/crowntime-site`) rather than wiring
-this into the backend deploy pipeline.
+This directory **is** wired into the automated deploy pipeline:
+`.github/workflows/deploy.yml` → `scripts/deploy_server.sh` step "[9/9]"
+runs on every deploy to `main` (see `STATIC_SITE_DIR_NAME` above for the
+target-directory caveat). There is no separate deploy path for this page
+outside that pipeline step.
 
 ## Content notes
 
 `index.html` contains the company's address, phone, email, and ICP beian
 number. If any of these change (e.g. beian number is reassigned, office
-address changes), update `index.html` directly and redeploy the two
-static files.
+address changes), update `index.html` directly and push to `main` — the
+deploy pipeline will sync the change automatically.
