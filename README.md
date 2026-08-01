@@ -117,3 +117,66 @@ ask the project maintainers for signing instructions through the repository.
 
 Please also read the [security policy](SECURITY.md) before reporting a
 vulnerability.
+
+## Settings configuration center
+
+{{PRODUCT_NAME}} lets a self-hosted administrator manage supported deployment
+settings in the Settings UI. The UI is not a secret store by itself: protect
+its database and the encryption key as deployment secrets.
+
+### Encryption key for saved secrets
+
+`SETTINGS_ENCRYPTION_KEY` is the Fernet key used to encrypt secret-valued
+Settings entries before they are written to the database. Generate it once on
+the host, from the activated Python environment:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Set the resulting value as `SETTINGS_ENCRYPTION_KEY` in the application
+process environment (or in `backend/.env` when the service manager loads that
+file). Keep it private and stable: changing or losing it prevents the service
+from decrypting secrets already saved in Settings. Do not commit it. If the key
+is missing or invalid, the application fails closed and refuses to save
+secret-valued configuration rather than storing it in plaintext.
+
+### Environment variables, database values, and restarts
+
+For every setting managed by the UI, resolution order is **database >
+environment > default**. Existing environment-based deployment remains
+supported: changing `.env` is still effective when that file is loaded into
+the application environment, but a value saved in Settings takes precedence.
+Delete or replace the saved UI value if an environment change appears to have
+no effect.
+
+Some changes need a process restart. The runtime source of truth is
+[`RESTART_REQUIRED_KEYS`](backend/app/config/constants.py), not a copied list
+in this guide; follow the restart-required notice shown by the Settings UI for
+the value you change, then restart the web service and any affected workers.
+
+### First-run setup: from clone to the first message
+
+1. After `git clone`, complete the database and service startup steps in
+   [Local console](#local-console). From `backend/`, run
+   `python scripts/bootstrap_default_tenant.py` after providing its required WeCom
+   values in the loaded environment as described in [`.env.example`](.env.example).
+   For a real archive sync, also configure the WeCom SDK and
+   `WECOM_ARCHIVE_SECRET`; the worker requires both.
+2. With the service running, open
+   `http://127.0.0.1:8035/admin/settings/init` (replace the host and port for
+   your deployment). This public first-run page is available only until setup
+   completes; after that it redirects to the login page.
+3. For the password-mode setup in `.env.example`, create the administrator
+   username and password. Fill in the WeCom three-part connection details:
+   corporate ID, application Agent ID, and OAuth Secret. Select **Save and
+   continue**.
+4. Sign in at the redirected login page and open the conversation console. To
+   bring in the first real archived message, run the configured archive worker
+   (or, from `backend/`, run `python scripts/sync_wecom_archive_once.py`);
+   then refresh the console. The sync command requires the SDK path, corporate
+   ID, archive secret, and an initialized default tenant from step 1.
+
+After first-run setup, use the authenticated Settings page for subsequent
+changes; use the UI restart indication rather than guessing which processes
+must be restarted.
