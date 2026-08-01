@@ -10,11 +10,22 @@
 
 ---
 
-## 开工前必须先核实
+## ⚠️ 2026-08-01 追加：前置检查命令已修正为真实 DOM（回应 dev agent 的 BLOCKED_NEEDS_HUMAN 上报）
+
+T8（<issue>RND-251</issue>）**已 Done 并已上线**，但第一版 dev prompt 里的核实命令用的是我猜测的占位符类名（`settings-groups`/`settings-group`），T8 实际交付的类名不一样，导致 agent 正确地判定"骨架不存在"而停下——这是我的核实命令写错，不是 T8 真的没做完。已重新读取 T8 的真实产出并更新下方全部内容（核实命令、DOM 结构描述、扩展方式），请按本版执行。
+
+**T8 实际交付的真实 DOM 结构**（`backend/app/web/templates/settings.html`）：
+- 导航容器：`<nav class="settings-nav">`，每个分组是一个 `<button class="settings-nav-item" data-settings-section="<group>">`。
+- 内容容器：每个分组对应一个 `<section class="settings-section" id="settings-section-<group>" hidden>`（当前激活的分组没有 `hidden`）。
+- **分组 key 有 6 个，不是 T3 注册表的 5 个**：`general`/`account`/`third-party`/`storage`/`wecom`/`advanced`——**`account` 是 T8 保留给既有"修改密码"卡片的，不对应 `CONFIG_REGISTRY` 任何字段，本票不要往这个分组塞配置项渲染逻辑**，本票只处理 `general`/`third-party`/`storage`/`wecom`/`advanced` 这 5 个（对应 T3 的 `ConfigGroup` 枚举）。
+- 每个待填充分组当前的占位内容：`<section id="settings-section-<group>">` 内是 `<div class="card"><div class="card-hd">...</div><div class="card-bd"><p class="field-help">配置项加载中…</p></div></div>`——**本票要做的就是把这个 `.card-bd` 里的占位文字换成真实渲染的表单字段**。
+- `backend/app/web/static/settings.js` 已存在，是一个**自执行 IIFE**，内部 `initSettingsNavigation()` 是纯 closure，**没有向 `window` 导出任何函数**——本票不能"调用 T8 的某个函数来注册渲染逻辑"，只能**在同一个文件里追加一段独立的初始化代码**（自己的 `DOMContentLoaded` 监听或直接追加到 IIFE 末尾），通过 `document.querySelector('#settings-section-<group> .card-bd')` 这类选择器直接操作 DOM，不依赖 T8 内部变量。
+
+开工前先跑：
 ```bash
-grep -n "settings-groups\|settings-group" backend/app/web/templates/settings.html   # T8 的分组骨架是否存在
+grep -n "settings-nav\|settings-section\|data-settings-section" backend/app/web/templates/settings.html
 ```
-T8（<issue>RND-251</issue>）未落地 → **停止**，`BLOCKED_NEEDS_HUMAN`，不要自己现造一份骨架。
+若这些标记仍然不存在（说明 T8 又被回滚或本地未同步）→ **停止**，`BLOCKED_NEEDS_HUMAN`，先 `git pull` 确认。
 
 ## 任务身份
 - 工单：RND-253「配置中心 T9：敏感字段掩码/显隐/留空不覆盖 + 校验反馈 + 来源标签 + 重启 banner」｜父 Epic RND-244
@@ -37,8 +48,8 @@ T8（<issue>RND-251</issue>）未落地 → **停止**，`BLOCKED_NEEDS_HUMAN`�
 ## 范围边界
 
 **In scope：**
-1. `backend/app/web/static/settings.js`（**扩展 T8 已创建的文件**）：
-   - `fetch('/api/admin/settings')` 拉取数据，动态渲染每个分组的字段（复用 T8 已搭的容器）。
+1. `backend/app/web/static/settings.js`（**扩展 T8 已创建的文件，同一文件内追加，不要新建独立的 JS 文件**）：
+   - `fetch('/api/admin/settings')` 拉取数据，对 `general`/`third-party`/`storage`/`wecom`/`advanced` 五个分组（**不含 `account`**，那是既有密码卡片，不属于本票），把对应 `#settings-section-<group> .card-bd` 里的"配置项加载中…"占位替换成真实渲染的表单字段。
    - `SecretField`（vanilla 函数/模块，非 React 组件）：掩码展示 + 显隐切换按钮 + 复制按钮 + **"未修改则不提交/提交空串"逻辑**（见上方踩坑说明，这是本票核心正确性要求）。
    - `SourceBadge`：根据字段的 `source`（`default`/`env`/`db`）展示对应标签。
    - `RestartBanner`：`PUT` 响应含 `restart_required_keys` 非空时展示提示条。
@@ -63,7 +74,7 @@ T8（<issue>RND-251</issue>）未落地 → **停止**，`BLOCKED_NEEDS_HUMAN`�
 
 ## 验收标准（Acceptance Criteria）
 
-- **AC-1 数据拉取渲染**：页面加载后 `fetch` 拉取配置数据并渲染进对应分组容器。
+- **AC-1 数据拉取渲染**：页面加载后 `fetch` 拉取配置数据，渲染进对应的 `#settings-section-<group> .card-bd`（`general`/`third-party`/`storage`/`wecom`/`advanced` 五个，不含 `account`），替换掉"配置项加载中…"占位文字。
 - **AC-2 密钥字段掩码 + 显隐**：密钥字段默认掩码展示；点击显隐按钮切换（前端切换展示态，**不重新请求明文**——GET 本来就没返回明文，前端没有明文可显示，"显隐"切换的实际含义是切换掩码格式的展示细节，不是真的显示原始密钥，这一点须在 QA Summary 里说明清楚，避免产生"点了显隐就能看到真密钥"的误解性 UI 文案）。
 - **AC-3 留空不覆盖（关键）**：用户未触碰某个密钥字段时，保存请求里该字段**不提交新值**（或提交能让 T5 走"保留原值"分支的空串——与 T5 的约定一致）。须有测试/审阅确认 JS 逻辑不会把展示用的掩码字符串当作待保存的新值发出去。
 - **AC-4 来源标签展示**：`default`/`env`/`db` 三种来源分别有可区分的视觉标签。
@@ -76,7 +87,7 @@ T8（<issue>RND-251</issue>）未落地 → **停止**，`BLOCKED_NEEDS_HUMAN`�
 
 ## 验证方式（Verification — 确定性闸）
 ```bash
-grep -n "settings-groups\|settings-group" backend/app/web/templates/settings.html
+grep -n "settings-nav\|settings-section\|data-settings-section" backend/app/web/templates/settings.html
 make verify
 .venv/bin/python -m pytest backend/tests/test_rnd253_settings_interactions.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
@@ -98,13 +109,13 @@ T8（<issue>RND-251</issue>）**必须先落地**（消费其分组导航骨架�
 
 ## 风险与回滚
 - **风险 1（最高）**：未修改的密钥字段保存时被掩码值覆盖，永久损坏已保存密钥——由 AC-3 防守，这是本票唯一有真实数据破坏风险的地方。
-- 风险 2：DOM 结构假设与 T8 实际交付不符——开工前先跑核实命令确认容器存在。
+- 风险 2：往 `account` 分组塞了配置项渲染逻辑——那个分组是既有密码卡片专属，不属于本票（见上方 DOM 结构说明）。
 - 回滚：`git checkout -- backend/app/web/static/settings.js backend/app/assets/i18n.js` 即可，纯前端改动无数据影响（但 AC-3 若在开发阶段有 bug 并被误用来保存过真实配置，风险发生在使用侧而非代码本身）。
 
 ## 人工点位
 - **Trigger**：Haisu 置 In Progress（建议 T8 落地后派发，T5/T7 最好也已就绪）。
 - **Gate**：建议 Haisu 手动跑一遍"保存一个未修改的密钥字段"场景，确认原值真的没被覆盖，再 approve commit。
-- **Escalation**：T8 未就绪、或 T8 的骨架结构无法支撑本票所需交互 → `BLOCKED_NEEDS_HUMAN`。
+- **Escalation**：若 `git pull` 后仍然找不到 `settings-nav`/`settings-section`/`data-settings-section` 标记（T8 真的没落地或被回滚）→ `BLOCKED_NEEDS_HUMAN`。
 
 ## 开发 agent 执行指引
 1. 先跑「开工前核实」命令。

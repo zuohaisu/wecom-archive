@@ -10,6 +10,10 @@
 
 > 交给**独立验收 agent**。只做验证与判定，**不修改任何文件**。
 
+## ⚠️ 2026-08-01：本版取代旧稿（DOM 结构核实命令修正，见 dev prompt 开头说明）
+
+第一版验收依据的分组容器类名（`settings-groups`/`settings-group`）是猜测值，与 T8 实际交付的真实 DOM（`settings-nav`/`settings-section`/`data-settings-section`，6 个分组：`general`/`account`/`third-party`/`storage`/`wecom`/`advanced`）不符。验收时按本版描述的真实结构核对，`account` 分组是既有密码卡片专属，本票不应往里塞配置项渲染逻辑。
+
 ## 任务身份
 - 工单：RND-253「配置中心 T9：敏感字段交互」｜风险等级 R1
 - **AC-3（留空不覆盖）是唯一有真实数据破坏风险的一条，从严判定。**
@@ -21,7 +25,8 @@
 ## 验收方法（证据优先）
 
 ### AC-1 — 数据拉取渲染
-- 判定：页面加载 fetch 数据并渲染到分组容器 = PASS。
+- 证据：页面加载后 fetch 数据，`general`/`third-party`/`storage`/`wecom`/`advanced` 五个 `#settings-section-<group> .card-bd` 的"配置项加载中…"占位被替换成真实字段；`account` 分组**未被本票触碰**（内容仍是 T8/RND-302 的密码卡片原样）。
+- 判定：符合 = PASS。**若发现本票往 `account` 分组塞了配置项渲染逻辑 → 记 finding（`SCOPE_VIOLATION`, minor）**，那个分组不对应任何 `CONFIG_REGISTRY` 字段。
 
 ### AC-2 — 密钥掩码 + 显隐
 - 判定：默认掩码展示，显隐按钮切换展示态 = PASS；QA Summary 是否说明"显隐不等于看到真实明文"——若 UI 文案暗示能看到真密钥，记 finding（`IMPLEMENTATION_DEFECT`, minor，误导性文案）。
