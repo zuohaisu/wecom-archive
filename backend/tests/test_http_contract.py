@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 76  # RND-304: +2 onboarding status and completion endpoints.
+    assert route_count == 78  # RND-249: +2 Settings GET and PUT endpoints.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -361,6 +361,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/reachability-audit",
             "/api/admin/retention-config",
             "/api/admin/usage",
+            "/api/admin/settings",
             "/api/admin/settings/password",
             "/api/admin/sync-now",
             "/api/admin/sync-status",
@@ -482,6 +483,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/retention-config", frozenset({"GET"}), "RetentionConfigOut", "None"),
         ("/api/admin/retention-config", frozenset({"PUT"}), "RetentionConfigOut", "None"),
         ("/api/admin/usage", frozenset({"GET"}), "UsageAnalyticsOut", "None"),
+        ("/api/admin/settings", frozenset({"GET"}), "SettingsGetOut", "None"),
+        ("/api/admin/settings", frozenset({"PUT"}), "SettingsUpdateOut", "None"),
         (
             "/api/admin/settings/password",
             frozenset({"POST"}),
