@@ -1,4 +1,4 @@
-[Goal check] This work advances 独立验收（QA） by 逐条核对 RND-249 的 10 条 AC（重点验证密钥掩码、PUT 部分失败不落库、空串语义、既有密码端点零回归）并产出带证据的 PASS/FAIL 判定。
+[Goal check] This work advances 独立验收（QA） by 逐条核对 RND-249 的 10 条 AC（重点验证密钥掩码、PUT 部分失败不落库、空串语义、既有密码端点零回归、契约/RBAC 同步）并产出带证据的 PASS/FAIL 判定。
 
 # RND-249 验收提示词（Acceptance / QA Prompt）— 配置中心 T5
 
@@ -53,14 +53,14 @@
 - 证据：`git diff -- backend/app/routers/settings.py` 中 `change_password`/`POST /settings/password` 函数体逐字未变。
 - 判定：符合 = PASS。**任何改动（哪怕看似无害的重构）→ 直接 FAIL（`REGRESSION`, blocker）**——这是生产在用端点。
 
-### AC-10 — 回归
-- 证据：`make verify` exit 0；`test_architecture_boundary.py` 通过；既有覆盖 `POST /settings/password` 的测试全绿。
-- 判定：符合 = PASS。
+### AC-10 — 契约同步 + RBAC 同步 + 回归
+- 判定：`test_http_contract.py`（route_count 当前基线 +2，GET+PUT）与 `test_rnd280_rbac_scaffold.py`（白名单含 `settings.py`）均已同步 = PASS；任一未同步 → FAIL（`REGRESSION`），`recommended_next_state: FIXING`（不是 `BLOCKED_NEEDS_HUMAN`，PM 已明确授权这两个文件属于本票范围）。`make verify` exit 0；`test_architecture_boundary.py` 通过；既有覆盖 `POST /settings/password` 的测试全绿。
 
 ## 本项目专属检查（必查）
 1. **`require_role()` 而非臆造的 `require_settings_admin`**：确认本票用的是既有 `require_role()`（G4 冻结：MVP 已认证=可管理），**没有**提前造一个 `require_settings_admin` 依赖占位——那是 T6 的交付物，本票提前造会与 T6 实际签名对不上。
 2. **未新建重复的 router 变量**：确认新端点加在**已有的** `settings_router` 变量上，不是新建了一个 `APIRouter()` 实例。
-3. **文件所有权**：`git status --porcelain` 中改动应限于 `routers/settings.py`（追加）、`schemas/settings.py`（新）、`tests/test_rnd249_settings_api.py`（新）。
+3. **RBAC 白名单同步范围精确**：`test_rnd280_rbac_scaffold.py` 的改动应**只是新增** `settings.py` 这一条目，不删除/不改动其余既有条目（`retention.py`/`onboarding.py` 等）。
+4. **文件所有权**：`git status --porcelain` 中改动应限于 `routers/settings.py`（追加）、`schemas/settings.py`（新）、`tests/test_rnd249_settings_api.py`（新）、`tests/test_http_contract.py`（契约同步）、`tests/test_rnd280_rbac_scaffold.py`（白名单同步）。
 
 ## 附加检查（Security）
 - 测试中的密钥值为测试专用固定值，非真实凭据。
@@ -70,6 +70,7 @@
 ```bash
 make verify
 .venv/bin/python -m pytest backend/tests/test_rnd249_settings_api.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
 git diff -- backend/app/routers/settings.py    # AC-9：人工核对既有端点逐字未变
 git status --porcelain

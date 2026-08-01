@@ -14,6 +14,10 @@
 
 `backend/app/routers/settings.py` **已经存在**（<issue>RND-302</issue> 交付），内含 `settings_router = APIRouter()` 与 `POST /settings/password`（修改密码），已在 `app/main.py:119` 挂载 `app.include_router(settings_router, prefix="/api/admin")` 且**已在生产使用**。**本票在同一个 `settings_router` 上追加新端点**（`GET/PUT /settings`），**不得**新建一个同名文件或重复挂载一个新的 router 变量——那会导致路由冲突或两套 `/api/admin/settings/*` 并存的混乱局面。
 
+## ⚠️ 2026-08-01 追加：契约测试同步已授权（回应 dev agent 的 BLOCKED_NEEDS_HUMAN 上报）
+
+dev agent 正确指出：新增 `GET`/`PUT /api/admin/settings` 触发 `docs/ticket-autopilot-workflow.md` §3.3 的强制契约同步规则——`backend/tests/test_http_contract.py`（route_count/path 集合/snapshot）与 `backend/tests/test_rnd280_rbac_scaffold.py`（本票用 `Depends(require_role())`，白名单需加 `settings.py`——注意 `settings.py` 此前**没有**因为既有的 `POST /settings/password` 而进入白名单，因为那个端点用的是 `get_current_user`，不是 `require_role`，本票是第一次让这个文件触发该断言）。**这两个文件本就属于本票范围，是我在第一版 dev prompt 里遗漏了，不是需要另开工单或继续 BLOCKED 的情况**——比照本 epic 其余票（如 T1/T11）已经建立的先例处理，见下方文件所有权清单更新。
+
 ## ⚠️ 关键前提 2：开工前必须先核实 T3/T4 已经落地
 
 ```bash
@@ -59,6 +63,8 @@
 - `backend/app/routers/settings.py` —— **仅追加** `GET`/`PUT /settings`；`POST /settings/password` 逐字不变
 - `backend/app/schemas/settings.py`（新）
 - `backend/tests/test_rnd249_settings_api.py`（新）
+- `backend/tests/test_http_contract.py` —— **强制随附**（见 `docs/ticket-autopilot-workflow.md` §3.3）：`route_count` 读当前实际基线 +2（GET+PUT，不要硬编码数字）、expected path 集合追加 `/api/admin/settings`（GET/PUT 各一条）、snapshot 追加对应条目
+- `backend/tests/test_rnd280_rbac_scaffold.py` —— **强制随附**：白名单新增 `settings.py`（本票是它第一次因为 `require_role()` 触发这条断言，既有的 `POST /settings/password` 用的是 `get_current_user`，不受影响，不要动那部分）
 
 **只读、绝不可写：** `app/config/resolver.py`/`repository.py`/`crypto.py`/`schema.py`（T2/T3/T4 拥有，只调用）、其他票拥有的一切文件。
 
@@ -75,13 +81,14 @@
 - **AC-7 失效缓存**：PUT 成功后，紧接着的 GET（或直接调用 `resolve()`）应读到新值，不是 T4 缓存里的旧值（验证 `invalidate()` 被正确调用）。
 - **AC-8 重启提示**：PUT 涉及 `requires_restart=True` 的字段时，响应 `restart_required_keys` 包含该字段；不涉及则不包含。
 - **AC-9 未改既有密码端点**：`POST /settings/password` 的行为、DOM 无关，纯后端——`git diff` 中该函数体逐字未变。
-- **AC-10 回归**：`make verify` 全绿；`test_architecture_boundary.py` 通过；既有测试（含覆盖 `POST /settings/password` 的）全绿。
+- **AC-10 契约同步 + RBAC 同步 + 回归**：`test_http_contract.py`（route_count 当前基线 +2）与 `test_rnd280_rbac_scaffold.py`（白名单加 `settings.py`）均已同步；`make verify` 全绿；`test_architecture_boundary.py` 通过；既有测试（含覆盖 `POST /settings/password` 的）全绿。
 
 ## 验证方式（Verification — 确定性闸）
 ```bash
 .venv/bin/python -c "from app.config.schema import CONFIG_REGISTRY; from app.config.resolver import resolve, get_config_resolver, invalidate; print('OK')"
 make verify
 .venv/bin/python -m pytest backend/tests/test_rnd249_settings_api.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_rnd280_rbac_scaffold.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
 git diff -- backend/app/routers/settings.py    # 人工核对：POST /settings/password 逐字未变，只新增
 git status --porcelain
@@ -92,7 +99,7 @@ git log origin/main..HEAD    # 必须无输出
 T3（<issue>RND-247</issue>）+ T4（<issue>RND-248</issue>）**必须先落地**。本票 **blocks** T6（<issue>RND-250</issue>）、T7（<issue>RND-252</issue>）、T10（<issue>RND-256</issue>）。
 
 ## 完成定义（Definition of Done）
-- [ ] AC-1 ~ AC-10 全满足，每条有测试
+- [ ] AC-1 ~ AC-10 全满足，每条有测试（含 AC-10 的契约/RBAC 同步）
 - [ ] `make verify` 全绿
 - [ ] `git status` 只显示本票拥有的文件
 - [ ] QA Summary 已产出，附 GET/PUT 的确切响应/请求体结构（供 T7/T9/T10 对接）
@@ -115,7 +122,8 @@ T3（<issue>RND-247</issue>）+ T4（<issue>RND-248</issue>）**必须先落地*
 3. 在 `settings.py` 追加 `GET`/`PUT /settings`，不动既有端点。
 4. 写 `schemas/settings.py`。
 5. 写测试覆盖 AC-1~AC-9（**AC-2/AC-4/AC-6 是重点**）。
-6. 跑全部验证命令，输出 QA Summary + `git status`，**不 commit**。
+6. 同步 `test_http_contract.py`（route_count 读当前实际值 +2）与 `test_rnd280_rbac_scaffold.py`（白名单加 `settings.py`）。
+7. 跑全部验证命令，输出 QA Summary + `git status`，**不 commit**。
 
 ## 硬性约束（DEV_AGENT_RULES.md）
 - 不 commit / push / 建分支 / 改 git 历史；不改 CI/CD、`.gitignore`、部署配置。
