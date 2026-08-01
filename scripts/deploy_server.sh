@@ -271,6 +271,24 @@ _ensure_ffmpeg() {
     command -v "$FFMPEG_BIN" >/dev/null 2>&1
 }
 
+# rsync is a hard dependency of step 9's static-homepage sync (see below)
+# but, unlike ffmpeg, isn't part of first-time server setup's package
+# list — a minimal host can reach this step without it ever having been
+# installed. Same self-healing shape as _ensure_ffmpeg above rather than
+# a new pattern.
+_ensure_rsync() {
+    if command -v rsync >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "  → rsync is missing; installing it …"
+    if [ -n "$SUDO_BIN" ]; then
+        "$SUDO_BIN" "$APT_GET_BIN" update -qq && "$SUDO_BIN" "$APT_GET_BIN" install -y rsync
+    else
+        "$APT_GET_BIN" update -qq && "$APT_GET_BIN" install -y rsync
+    fi
+    command -v rsync >/dev/null 2>&1
+}
+
 # _record_known_good <sha> — called only after this script has itself
 # proven <sha> healthy (end-to-end forward success, or a successful
 # rollback's own re-check). Returns non-zero on a persist failure — QA
@@ -618,6 +636,11 @@ SHARED_DST="/srv/apps/wecom-archive-365/shared/www/$STATIC_SITE_DIR_NAME"
 NGINX_DST="/var/www/$STATIC_SITE_DIR_NAME"
 
 if [ -d "$STATIC_SRC" ]; then
+    if ! _ensure_rsync; then
+        echo "ERROR: rsync installation failed — cannot sync the static homepage." >&2
+        exit 1
+    fi
+
     # Ensure target directories exist
     mkdir -p "$SHARED_DST"
 
