@@ -1,23 +1,48 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<title>Archive Messages</title>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>消息记录</title>
 <link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
-<link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
-<link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
-<link rel="stylesheet" href="/web/static/base.css?v=__STATIC_VERSION__">
-</head><body>
-<h1>Archive Messages</h1>
-<form method="get" action="/admin/messages">
-  <label>Sender: <input type="text" name="sender" value="__SENDER_VAL__" placeholder="user ID"></label>
-  <label>Keyword: <input type="text" name="q" value="__Q_VAL__" placeholder="search content"></label>
-  <button type="submit">Filter</button>
-  <a href="/admin/messages">Clear</a>
-</form>
-<table>
-  <thead><tr>
-    <th>msgid</th><th>sender</th><th>room</th><th>type</th>
-    <th>time (UTC+8)</th><th>content</th><th>status</th>
-  </tr></thead>
-  <tbody>__ROW_HTML__</tbody>
-</table>
-</body></html>
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<style>.content-cell{max-width:32em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:900px){.side-nav{display:none}.page{padding:var(--space-4)}.table-wrap{overflow-x:auto}}</style>
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.data">数据</span><span class="sep">/</span><span class="cur" data-i18n="messages.pageTitle">消息记录</span></div></header>
+  <main class="page">
+    <div class="page-hd"><div><h1 data-i18n="messages.pageTitle">消息记录</h1><p data-i18n="messages.description">按发送人或关键词检索归档消息。</p></div></div>
+    <form class="toolbar" method="get" action="/admin/messages">
+      <div class="search-input"><span class="ico">⌕</span><input class="input" type="text" name="sender" value="__SENDER_VAL__" data-i18n-placeholder="messages.senderPlaceholder" placeholder="发送人 UserID"></div>
+      <input class="input" type="text" name="q" value="__Q_VAL__" data-i18n-placeholder="messages.keywordPlaceholder" placeholder="搜索内容">
+      <button class="btn btn-primary" type="submit" data-i18n="messages.applyFilters">筛选</button>
+      <a class="btn btn-ghost" href="/admin/messages" data-i18n="messages.clearFilters">清除</a>
+    </form>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr>
+          <th data-i18n="messages.msgid">msgid</th><th data-i18n="messages.sender">发送人</th><th data-i18n="messages.room">群聊</th><th data-i18n="messages.type">类型</th>
+          <th data-i18n="messages.time">时间 (UTC+8)</th><th data-i18n="messages.content">内容</th><th data-i18n="messages.status">状态</th>
+        </tr></thead>
+        <tbody>__ROW_HTML__</tbody>
+      </table>
+    </div>
+  </main>
+</div></div>
+<script>
+(function(){
+  function t(key){return I18N.t(key);}
+  function translate(){document.documentElement.lang=I18N.getLocale();document.querySelectorAll('[data-i18n]').forEach(function(el){el.textContent=t(el.getAttribute('data-i18n'));});document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el){el.placeholder=t(el.getAttribute('data-i18n-placeholder'));});document.title=t('messages.pageTitle');}
+  function langMenu(){var menu=document.getElementById('lang-menu');if(menu)menu.innerHTML=I18N.availableLocales().map(function(locale){return '<div class="lang-option '+(locale.code===I18N.getLocale()?'active':'')+'" data-locale="'+locale.code+'">'+locale.nativeName+'</div>';}).join('');}
+  window.toggleLangMenu=function(){var menu=document.getElementById('lang-menu');menu.style.display=menu.style.display==='none'?'block':'none';langMenu();};
+  window.doLogout=function(){fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){window.location='/admin/login';});};
+  document.addEventListener('click',function(event){var option=event.target.closest('.lang-option');if(option){I18N.setLocale(option.dataset.locale);document.getElementById('lang-menu').style.display='none';}});
+  I18N.onChange(function(){translate();langMenu();});translate();langMenu();
+}());
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -8,8 +8,10 @@ from app.auth import get_current_user, require_html_session
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.db.session import get_db
 from app.html_helpers import _badge, _e, _fmt_msgtime
+from app.i18n_assets import I18N_SCRIPT_TAG
 from app.schemas.messages import MessageDetailOut, MessageOut, RecipientOut
 from app.web import render_template
+from app.web.sidenav import render_sidenav
 
 router = APIRouter()
 
@@ -18,6 +20,7 @@ _MAX_LIMIT = 100
 
 @router.get("/admin/messages", response_class=HTMLResponse)
 def admin_messages(
+    request: Request,
     sender: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=_MAX_LIMIT),
@@ -44,20 +47,30 @@ def admin_messages(
             snippet += "…"
         row_html += (
             f"<tr>"
-            f"<td><a href='/admin/messages/{_e(msg.msgid)}'>{_e(msg.msgid)}</a></td>"
+            f"<td class='cell-id'><a href='/admin/messages/{_e(msg.msgid)}'>{_e(msg.msgid)}</a></td>"
             f"<td>{_e(msg.sender)}</td>"
             f"<td>{_e(msg.roomid)}</td>"
             f"<td>{_e(msg.msgtype)}</td>"
             f"<td>{_fmt_msgtime(msg.msgtime)}</td>"
-            f"<td>{_e(snippet)}</td>"
+            f"<td class='content-cell'>{_e(snippet)}</td>"
             f"<td>{_badge(msg.decrypt_status)}</td>"
             f"</tr>"
         )
 
     if not row_html:
-        row_html = "<tr><td colspan='7' style='color:#888'>No messages found.</td></tr>"
+        row_html = "<tr><td colspan='7' class='empty' data-i18n='messages.empty'>No messages found.</td></tr>"
 
-    body = render_template("messages", sender_val=sender_val, q_val=q_val, row_html=row_html)
+    body = render_template(
+        "messages",
+        sender_val=sender_val,
+        q_val=q_val,
+        row_html=row_html,
+        i18n_script=I18N_SCRIPT_TAG,
+        sidenav=render_sidenav(
+            "messages",
+            {route.path for route in request.app.routes if hasattr(route, "path")},
+        ),
+    )
     return HTMLResponse(content=body)
 
 

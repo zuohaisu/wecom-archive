@@ -67,9 +67,9 @@ function renderStatusTable(countsByStatus,unreachableTotal){
     var count=countsByStatus[status]||0;
     rows+='<tr><td>'+esc(ReachabilityStatusRegistry.label(status))+'</td><td>'+fmtInt(count)+'</td><td>'+pct(count,unreachableTotal)+'</td></tr>';
   });
-  return '<table><thead><tr><th>'+esc(I18N.t('diagnostics.reasonColumn'))+'</th><th>'+
+  return '<div class="table-wrap"><table class="table"><thead><tr><th>'+esc(I18N.t('diagnostics.reasonColumn'))+'</th><th>'+
     esc(I18N.t('diagnostics.countColumn'))+'</th><th>'+esc(I18N.t('diagnostics.percentColumn'))+'</th></tr></thead>'+
-    '<tbody>'+rows+'</tbody></table>';
+    '<tbody>'+rows+'</tbody></table></div>';
 }
 
 function renderTypeTable(countsByType){
@@ -83,8 +83,8 @@ function renderTypeTable(countsByType){
   types.forEach(function(t){
     rows+='<tr><td>'+esc(t)+'</td><td>'+fmtInt(countsByType[t])+'</td></tr>';
   });
-  return '<table><thead><tr><th>'+esc(I18N.t('diagnostics.typeColumn'))+'</th><th>'+
-    esc(I18N.t('diagnostics.totalColumn'))+'</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  return '<div class="table-wrap"><table class="table"><thead><tr><th>'+esc(I18N.t('diagnostics.typeColumn'))+'</th><th>'+
+    esc(I18N.t('diagnostics.totalColumn'))+'</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
 function renderReport(data){

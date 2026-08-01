@@ -377,6 +377,7 @@
         "audit.system": "系统",
         "audit.results": "{n} 条结果",
         "audit.page": "第 {page} / {pages} 页",
+        "messages.pageTitle": "消息记录", "messages.description": "按发送人或关键词检索归档消息。", "messages.senderPlaceholder": "发送人 UserID", "messages.keywordPlaceholder": "搜索内容", "messages.applyFilters": "筛选", "messages.clearFilters": "清除", "messages.msgid": "消息 ID", "messages.sender": "发送人", "messages.room": "群聊", "messages.type": "类型", "messages.time": "时间 (UTC+8)", "messages.content": "内容", "messages.status": "状态", "messages.empty": "没有匹配的消息",
         /* RND-329 media page keys — insert below */
         "media.pageTitle": "媒体与附件", "media.breadcrumbData": "数据", "media.description": "浏览归档会话中的图片、文件、语音与视频。", "media.searchPlaceholder": "搜索文件名", "media.allTypes": "全部类型", "media.type.image": "图片", "media.type.file": "文件", "media.type.voice": "语音", "media.type.video": "视频", "media.allTime": "全部时间", "media.days7": "近 7 天", "media.days30": "近 30 天", "media.days90": "近 90 天", "media.sortNewest": "最新在前", "media.sortOldest": "最早在前", "media.sortLargest": "体积从大到小", "media.preview": "预览媒体", "media.unnamed": "未命名附件", "media.empty": "没有匹配的媒体", "media.results": "共 {n} 个附件", "media.loadMore": "加载更多", "media.loadFailed": "媒体加载失败，请稍后重试。",
         /* RND-330 contacts page keys — insert below */
@@ -833,6 +834,7 @@
         "audit.system": "系統",
         "audit.results": "{n} 筆結果",
         "audit.page": "第 {page} / {pages} 頁",
+        "messages.pageTitle": "訊息記錄", "messages.description": "依發送人或關鍵字檢索歸檔訊息。", "messages.senderPlaceholder": "發送人 UserID", "messages.keywordPlaceholder": "搜尋內容", "messages.applyFilters": "篩選", "messages.clearFilters": "清除", "messages.msgid": "訊息 ID", "messages.sender": "發送人", "messages.room": "群聊", "messages.type": "類型", "messages.time": "時間 (UTC+8)", "messages.content": "內容", "messages.status": "狀態", "messages.empty": "沒有符合的訊息",
         /* RND-329 media page keys — insert below */
         "media.pageTitle": "媒體與附件", "media.breadcrumbData": "資料", "media.description": "瀏覽歸檔會話中的圖片、檔案、語音與影片。", "media.searchPlaceholder": "搜尋檔案名稱", "media.allTypes": "全部類型", "media.type.image": "圖片", "media.type.file": "檔案", "media.type.voice": "語音", "media.type.video": "影片", "media.allTime": "全部時間", "media.days7": "近 7 天", "media.days30": "近 30 天", "media.days90": "近 90 天", "media.sortNewest": "最新在前", "media.sortOldest": "最早在前", "media.sortLargest": "體積從大到小", "media.preview": "預覽媒體", "media.unnamed": "未命名附件", "media.empty": "沒有符合的媒體", "media.results": "共 {n} 個附件", "media.loadMore": "載入更多", "media.loadFailed": "媒體載入失敗，請稍後再試。",
         /* RND-330 contacts page keys — insert below */
@@ -1289,6 +1291,7 @@
         "audit.system": "System",
         "audit.results": "{n} results",
         "audit.page": "Page {page} of {pages}",
+        "messages.pageTitle": "Messages", "messages.description": "Search archived messages by sender or keyword.", "messages.senderPlaceholder": "Sender UserID", "messages.keywordPlaceholder": "Search content", "messages.applyFilters": "Filter", "messages.clearFilters": "Clear", "messages.msgid": "Message ID", "messages.sender": "Sender", "messages.room": "Room", "messages.type": "Type", "messages.time": "Time (UTC+8)", "messages.content": "Content", "messages.status": "Status", "messages.empty": "No matching messages",
         /* RND-329 media page keys — insert below */
         "media.pageTitle": "Media & Attachments", "media.breadcrumbData": "Data", "media.description": "Browse archived conversation images, files, voice messages, and videos.", "media.searchPlaceholder": "Search file names", "media.allTypes": "All types", "media.type.image": "Image", "media.type.file": "File", "media.type.voice": "Voice", "media.type.video": "Video", "media.allTime": "All time", "media.days7": "Last 7 days", "media.days30": "Last 30 days", "media.days90": "Last 90 days", "media.sortNewest": "Newest first", "media.sortOldest": "Oldest first", "media.sortLargest": "Largest first", "media.preview": "Preview media", "media.unnamed": "Unnamed attachment", "media.empty": "No matching media", "media.results": "{n} attachments", "media.loadMore": "Load more", "media.loadFailed": "Failed to load media. Please try again.",
         /* RND-330 contacts page keys — insert below */

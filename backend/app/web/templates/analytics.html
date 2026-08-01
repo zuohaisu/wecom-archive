@@ -2,14 +2,35 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title></title>
-<link rel="stylesheet" href="/web/static/base.css?v=__STATIC_VERSION__">
+<link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <link rel="stylesheet" href="/web/static/analytics.css?v=__STATIC_VERSION__">
+<style>@media(max-width:900px){.side-nav{display:none}.page{padding:var(--space-4)}}</style>
 </head>
 <body>
 __I18N_SCRIPT__
-<header class="analytics-header"><div><h1 data-i18n="analytics.pageTitle">用量分析</h1><p data-i18n="analytics.description">仅显示租户内汇总数据，不包含消息内容或标识符。</p></div><a href="/admin/conversations" data-i18n="analytics.back">返回审阅控制台</a></header>
-<main id="analytics-root"><div class="analytics-loading" data-i18n="analytics.loading">正在加载用量数据…</div></main>
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.data">数据</span><span class="sep">/</span><span class="cur" data-i18n="analytics.pageTitle">用量分析</span></div></header>
+  <main class="page">
+    <div class="page-hd"><div><h1 data-i18n="analytics.pageTitle">用量分析</h1><p data-i18n="analytics.description">仅显示租户内汇总数据，不包含消息内容或标识符。</p></div></div>
+    <div id="analytics-root"><div class="analytics-loading" data-i18n="analytics.loading">正在加载用量数据…</div></div>
+  </main>
+</div></div>
 <script src="/web/static/analytics.js?v=__STATIC_VERSION__"></script>
+<script>
+(function(){
+  function t(key){return I18N.t(key);}
+  function translate(){document.documentElement.lang=I18N.getLocale();document.querySelectorAll('[data-i18n]').forEach(function(el){el.textContent=t(el.getAttribute('data-i18n'));});}
+  function langMenu(){var menu=document.getElementById('lang-menu');if(menu)menu.innerHTML=I18N.availableLocales().map(function(locale){return '<div class="lang-option '+(locale.code===I18N.getLocale()?'active':'')+'" data-locale="'+locale.code+'">'+locale.nativeName+'</div>';}).join('');}
+  window.toggleLangMenu=function(){var menu=document.getElementById('lang-menu');menu.style.display=menu.style.display==='none'?'block':'none';langMenu();};
+  window.doLogout=function(){fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){window.location='/admin/login';});};
+  document.addEventListener('click',function(event){var option=event.target.closest('.lang-option');if(option){I18N.setLocale(option.dataset.locale);document.getElementById('lang-menu').style.display='none';}});
+  I18N.onChange(function(){translate();langMenu();});translate();langMenu();
+}());
+</script>
 </body>
 </html>
