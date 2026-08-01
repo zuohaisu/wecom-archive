@@ -8,7 +8,7 @@ from typing import Any, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.auth import get_auth_mode, get_current_user, hash_password, require_role, verify_password
@@ -17,6 +17,7 @@ from app.config.guard import is_initialized
 from app.config.crypto import encrypt_value, mask
 from app.config.resolver import get_config_resolver, invalidate
 from app.config.schema import CONFIG_REGISTRY, ConfigItemSpec
+from app.config.validation import check_domain_format, check_qiniu, check_wecom
 from app.db.models import AdminUser, AppConfigStore
 from app.db.session import get_db
 from app.schemas.settings import SettingsErrorItem, SettingsGetOut, SettingsUpdateIn, SettingsUpdateOut
@@ -35,6 +36,16 @@ class _BootstrapBody(BaseModel):
     wecom_corp_id: Optional[str] = None
     wecom_agent_id: Optional[str] = None
     wecom_oauth_secret: Optional[str] = None
+
+
+class _ConnectionTestBody(BaseModel):
+    """Only names a saved configuration target; credentials are never accepted."""
+
+    # Extra fields are rejected in the route with a fixed detail so their
+    # values (which could be credentials) never appear in a validation error.
+    model_config = ConfigDict(extra="allow")
+
+    target: Any
 
 
 @settings_router.post("/settings/password")
@@ -285,3 +296,34 @@ def bootstrap_settings(
     for key, _value in validated:
         invalidate(key)
     return {"ok": True}
+
+
+@settings_router.post("/settings/test-connection")
+def test_connection(
+    payload: _ConnectionTestBody,
+    auth: Tuple[AdminUser, str] = Depends(require_role()),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Test the selected saved integration without returning configuration values."""
+    del auth
+    if payload.model_extra or payload.target not in {"qiniu", "wecom", "domain"}:
+        raise HTTPException(status_code=422, detail="invalid_connection_test_request")
+
+    resolver = get_config_resolver()
+    if payload.target == "qiniu":
+        ok, reason = check_qiniu(
+            resolver.resolve(db, "qiniu_access_key") or "",
+            resolver.resolve(db, "qiniu_secret_key") or "",
+            resolver.resolve(db, "qiniu_bucket") or "",
+            resolver.resolve(db, "qiniu_domain") or "",
+            region=resolver.resolve(db, "qiniu_region") or None,
+        )
+    elif payload.target == "wecom":
+        ok, reason = check_wecom(
+            resolver.resolve(db, "wecom_corp_id") or "",
+            resolver.resolve(db, "wecom_oauth_secret") or "",
+        )
+    else:
+        ok, reason = check_domain_format(resolver.resolve(db, "admin_domain") or "")
+
+    return {"ok": ok, "reason": reason}
