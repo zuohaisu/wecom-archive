@@ -10,6 +10,11 @@
 
 > 交给**独立验收 agent**。只做验证与判定，**不修改任何文件**。
 
+## ⚠️ 2026-08-01：本版取代旧稿（两处修正，见 dev prompt 开头说明）
+
+1. `admin_username`/`admin_password_hash` 的存取方式变了：**不经过** `repository.upsert()`/`resolver.resolve()`（这两个函数要求 key 在 `CONFIG_REGISTRY` 里，这两个 key 不在），改为直接构造 `AppConfigStore` ORM 行写入、用 `repository.get_raw()` 读取。验收时按这个新路径核实，不要再按"应该调用 `repository.upsert()`"的旧假设去卡。
+2. 新增 `test_http_contract.py` 契约同步为强制项（AC-9 已更新）。
+
 ## 任务身份
 - 工单：RND-250「配置中心 T6：权限守卫 + 首次初始化引导」｜风险等级 **R3**（本 epic 单票风险最高——触及全站登录入口）
 - **这是 R2 里程碑验收标准的直接实现路径。AC-3/AC-4/AC-5/AC-6 全部从严判定，任一失败都直接判 FAIL，不接受"大部分对了"。**
@@ -40,8 +45,8 @@
 - 判定：符合 = PASS。**若这个场景登录失败或行为改变 → 直接 FAIL（`REGRESSION`, severity: blocker）**——这会让所有现有自托管部署的用户登不进去，是本票能造成的最严重后果。
 
 ### AC-6 — `password_login` 改动最小化（关键）
-- 证据：`git diff -- backend/app/routers/auth.py` 逐行审阅，确认改动**只限于** `admin_username`/`admin_hash` 赋值那几行（从纯 `auth_settings.xxx` 改成"先查 resolver 再 fallback env"），函数签名、tenant 查询逻辑、session 创建、cookie 设置、错误处理、日志语句**逐字未变**。
-- 判定：diff 范围精确符合描述 = PASS。**diff 涉及上述"逐字未变"的任何一部分 → 直接 FAIL（`SCOPE_VIOLATION`, severity: blocker）**——这是全站登录入口，改动必须能一眼审完。
+- 证据：`git diff -- backend/app/routers/auth.py` 逐行审阅，确认改动**只限于** `admin_username`/`admin_hash` 赋值那几行（从纯 `auth_settings.xxx` 改成"先查 `repository.get_raw()` 再 fallback env"——**不是** `resolver.resolve()`，这两个 key 不在 `CONFIG_REGISTRY` 里，用 resolver 会直接返回 `None`），函数签名、tenant 查询逻辑、session 创建、cookie 设置、错误处理、日志语句**逐字未变**。
+- 判定：diff 范围精确符合描述 = PASS。**diff 涉及上述"逐字未变"的任何一部分 → 直接 FAIL（`SCOPE_VIOLATION`, severity: blocker）**——这是全站登录入口，改动必须能一眼审完。**若发现用的是 `resolver.resolve()` 而不是 `repository.get_raw()` → FAIL（`IMPLEMENTATION_DEFECT`）**，前者对这两个 key 会失效（见上方修正说明）。
 
 ### AC-7 — `GET /admin/settings/init` 路由行为
 - 判定：未初始化 200 渲染引导表单、已初始化重定向 `/admin/login` = PASS。
@@ -50,15 +55,15 @@
 - 证据：`GET /settings`（T5）的响应体中**不包含** `admin_username`/`admin_password_hash` 这两个 key。
 - 判定：不包含 = PASS。**包含 → FAIL（`SECURITY_VIOLATION`, major）**——这两个是身份凭据，不应该混进"可配置项"列表暴露结构信息。
 
-### AC-9 — 回归
-- 证据：`make verify` exit 0；`test_architecture_boundary.py` 通过；**`backend/tests/test_auth.py`（或等价覆盖 `password_login` 的既有测试）全绿**。
-- 判定：全部符合 = PASS。**既有 auth 测试有任何变红 → 直接 FAIL（blocker）**。
+### AC-9 — 契约同步 + 回归
+- 判定：`test_http_contract.py`（route_count 当前基线 +2 或 +3）已同步 = PASS；未同步 → FAIL（`REGRESSION`），`recommended_next_state: FIXING`（不是 `BLOCKED_NEEDS_HUMAN`，PM 已授权）。`make verify` exit 0；`test_architecture_boundary.py` 通过；**`backend/tests/test_auth.py`（或等价覆盖 `password_login` 的既有测试）全绿**。**既有 auth 测试有任何变红 → 直接 FAIL（blocker）**。
 
 ## 本项目专属检查（必查）
 1. **企微三件套写入路径复用 T5**：`POST bootstrap` 里企微三件套的写入应复用 T5 已有的校验/落库逻辑（调用而非重写一遍字段校验）。
-2. **`admin_password_hash` 写入用了正确的哈希函数**：`grep -n "hash_password" backend/app/routers/settings.py`（bootstrap 端点范围内）应有命中，确认调用的是 `app/auth.py` 既有的 `hash_password`，不是自己实现了一套哈希逻辑。
-3. **未新增角色列**：`git diff --stat -- backend/app/db/models.py` 应无输出——G4 冻结设计明确"MVP 不加 `is_admin` 列"。
-4. **文件所有权**：`git status --porcelain` 中改动应限于 `app/config/guard.py`（新）、`routers/settings.py`（追加 bootstrap 两端点）、`routers/web.py`（仅追加 `GET /admin/settings/init`）、`routers/auth.py`（仅 `password_login` 两行）、`web/templates/settings_init.html`（新）、`tests/test_rnd250_bootstrap.py`（新）。
+2. **`admin_username`/`admin_password_hash` 未经过 `repository.upsert()`**：`grep -n "repository.upsert\|repository\.upsert" backend/app/routers/settings.py`（bootstrap 端点范围内）**不应**对这两个 key 调用 `upsert()`——应是直接构造/查询 `AppConfigStore` ORM。若发现调用了 `upsert()` 且没有先修改 `repository.py`（不在本票所有权内），说明实现方式与 `CONFIG_REGISTRY` 校验冲突，需要具体核实是否真的能跑通（大概率会在写入不存在的行时 `KeyError`）。
+3. **`admin_password_hash` 写入用了正确的哈希函数**：`grep -n "hash_password" backend/app/routers/settings.py`（bootstrap 端点范围内）应有命中，确认调用的是 `app/auth.py` 既有的 `hash_password`，不是自己实现了一套哈希逻辑。
+4. **未新增角色列**：`git diff --stat -- backend/app/db/models.py` 应无输出——G4 冻结设计明确"MVP 不加 `is_admin` 列"；且本票只应实例化 `AppConfigStore`，不应修改其类定义。
+5. **文件所有权**：`git status --porcelain` 中改动应限于 `app/config/guard.py`（新）、`routers/settings.py`（追加 bootstrap 两端点）、`routers/web.py`（仅追加 `GET /admin/settings/init`）、`routers/auth.py`（仅 `password_login` 两行）、`web/templates/settings_init.html`（新）、`tests/test_rnd250_bootstrap.py`（新）、`tests/test_http_contract.py`（契约同步）。
 
 ## 附加检查（Security）
 - 测试中的账号密码为固定假凭据。
@@ -70,10 +75,12 @@
 make verify
 .venv/bin/python -m pytest backend/tests/test_rnd250_bootstrap.py -q
 .venv/bin/python -m pytest backend/tests/test_auth.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
-git diff -- backend/app/routers/auth.py    # AC-6：逐行核对，范围必须精确
+git diff -- backend/app/routers/auth.py    # AC-6：逐行核对，范围必须精确；应看到 repository.get_raw()，不是 resolver.resolve()
 git diff --stat -- backend/app/db/models.py    # 应无输出
 grep -n "hash_password" backend/app/routers/settings.py
+grep -n "repository.upsert" backend/app/routers/settings.py    # 不应对 admin_username/admin_password_hash 调用
 git status --porcelain
 git log origin/main..HEAD    # 必须无输出
 ```
