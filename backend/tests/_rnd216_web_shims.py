@@ -128,7 +128,21 @@ def search_page_html() -> str:
 
 
 def diagnostics_html() -> str:
-    return render_template("diagnostics", i18n_script=I18N_SCRIPT_TAG)
+    return render_template(
+        "diagnostics",
+        i18n_script=I18N_SCRIPT_TAG,
+        sidenav=render_sidenav(
+            "diagnostics",
+            {
+                "/admin/conversations",
+                "/admin/search",
+                "/admin/messages",
+                "/admin/diagnostics/reachability",
+                "/admin/settings",
+                "/api/admin/sync-status",
+            },
+        ),
+    )
 
 
 def review_console_js_source() -> str:
