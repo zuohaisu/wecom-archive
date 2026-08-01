@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-253",
+  "run_id": "rnd-253-qa-20260801-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "origin/main (clean, git log origin/main..HEAD 为空)",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "app/web/static/settings.js (M, +375, 扩展交互：SecretField 显隐/复制、SourceBadge 来源标签、RestartBanner 重启提示、TestConnectionButton 连通性测试、collectUpdates 留空不覆盖逻辑、renderGroup 分组表单渲染)、app/assets/i18n.js (M, +69, 三 locale 各 +23 个 RND-253 key)、tests/test_rnd253_settings_interactions.py (new, +96)。未触碰 settings.html / routers/settings.py / config/。"
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "settings.js:loadSettings() fetch('/api/admin/settings') 后 renderSettings 遍历 CONFIG_GROUPS（general/third_party/storage/wecom/advanced，settings.js:43-49）填充 '#settings-section-<group> .card-bd'（settings.js:321），占位'配置项加载中…'被真实字段替换",
+        "settings.js:43-49 CONFIG_GROUPS 不含 'account'，renderGroup 仅对这 5 个分组渲染配置项；test_rnd253_settings_interactions.py::test_settings_script_fetches_and_renders_only_config_registry_groups 断言 `account:` not in source，且 T8 容器 (id=settings-section-general|third-party|storage|wecom|advanced) 仍存在（test_settings_page_serves_t8_containers_and_rnd253_script）",
+        "account 分组内容（T8/RND-302 密码卡片）由 settings.html 静态承载，本票 settings.js 不向其写入任何配置项渲染逻辑"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "settings.js:SecretField 默认 input.type='password'（掩码展示，L111），显隐按钮切换 input.type password<->text（L126-136），默认掩码+显隐切换成立",
+        "无误导性文案：i18n key 为 settings.secret.showDetails='显示掩码详情'（明确'掩码'，非'明文'）；settings.js:128-129 注释明示 'this only reveals the server-provided mask'，GET 永不返回明文。UI 文案不暗示可见真实密钥"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "settings.js:collectUpdates (L243-263)：对 data-secret-field 字段，`if (input.hasAttribute('data-secret-field') && input.dataset.secretDirty !== 'true') return;` —— 未触发用户输入事件的密钥直接跳过、不进入 updates。掩码字符串（如 '****ab12'）绝不会被当作新值提交给 PUT",
+        "secretDirty 仅在 input 事件监听中置 'true'（settings.js:118-120），聚焦/渲染等不会触发；普通字段靠 dataset.dirty 同理（L251）。PUT 仅发送 collected.updates（L360 `JSON.stringify({updates: collected.updates})`）",
+        "test_rnd253_settings_interactions.py::test_untouched_secret_mask_is_never_sent_as_an_update 静态断言 secretDirty 初始'false'、input 置'true'、跳过条件 'data-secret-field' && secretDirty !== 'true'、PUT 仅发 updates。QA 独立审阅 collectUpdates 实现确认：未修改密钥不进 updates，后端 T5 PUT 仅收到被改 key，已存真实密钥不被掩码覆盖（无不可逆数据损坏）"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "settings.js:SourceBadge (L99-106) 按 source 渲染：env→badge-info '环境变量'、db→badge-success '已保存'、default→badge '默认值'，三态可区分标签",
+        "test_rnd253_settings_interactions.py::test_settings_script_wires_source_restart_errors_and_connection_results 断言 'function SourceBadge(source)' 与 'data-settings-source' 存在"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "settings.js:RestartBanner (L265-278) 在 restart_required_keys 非空时于 .settings-sections 顶部插入/显示 banner（role=status），文案 'settings.restartRequired' + keys 列表",
+        "提交成功后触发（settings.js:373-374 `if (result.body.restart_required_keys && result.body.restart_required_keys.length) RestartBanner(...)`）；test 断言 'function RestartBanner(keys)' 与 'restart_required_keys' 存在"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "settings.js:TestConnectionButton (L280-317) 点击调 POST /api/admin/settings/test-connection（body {target}，target 由 CONNECTION_TARGETS 映射 general→domain/storage→qiniu/wecom→wecom），展示 result（badge-success '连接成功' / badge-failed '连接失败: <reason>'）",
+        "test 断言 `fetch('/api/admin/settings/test-connection', {` 与 'data-settings-test-result' 存在；复用 RND-252 端点，零新增后端"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "settings.js:showErrors (L232-241) 按 item.key 定位 [data-settings-error='<key>'] 逐项展示到对应字段并加 has-error 类；renderField 为每个字段生成 data-settings-error 容器（L214-218, role=alert）",
+        "提交 400 + body.errors 时调用 showErrors（settings.js:366-368）；test 断言 'data-settings-error' 与 'result.response.status === 400 && result.body.errors' 存在"
+      ]
+    },
+    {
+      "id": "AC-8",
+      "status": "PASS",
+      "evidence": [
+        "app/assets/i18n.js 三 locale 段（zh-CN L332-353 / en L1240-1261 / zh-TW L786-807）各新增全部 22 个 RND-253 key；grep 每个 key 恰 3 处命中（行号三簇，确认三 locale 齐全）",
+        "test_rnd253_settings_interactions.py::test_rnd253_i18n_keys_are_present_for_all_locales 断言每个 key `count == 3`（注：该 key 子集 11 个为交互核心 key，22 个全量 key 已逐一 grep 确认三 locale 均存在）"
+      ]
+    },
+    {
+      "id": "AC-9",
+      "status": "PASS",
+      "evidence": [
+        "settings.js 为原生 IIFE vanilla JS（'(function () {'，无 React/Vue import），复用 T8 initSettingsNavigation 的 settings-nav/settings-section DOM 结构，D1 冻结（SSR + vanilla）保持",
+        "settings.html 未改动（git diff --stat 空）；test_settings_template_remains_static_template_engine_free 断言模板无 '{%' / '{{'（无 Jinja 语法，符合本项目 render_template 仅做 __TOKEN__ 替换约束）"
+      ]
+    },
+    {
+      "id": "AC-10",
+      "status": "PASS",
+      "evidence": [
+        "make verify: 2570 passed / 82 skipped / 0 failed / verify: OK（较 RND-252 收口 2564 +6，即本票新增测试）",
+        "test_architecture_boundary.py 在目标套件 31 passed 中通过；T8 分组导航切换（initSettingsNavigation + selectSection 设 panel.hidden）未被本票修改，仍由 settings.js 既有逻辑承载"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd253_settings_interactions.py backend/tests/test_architecture_boundary.py -q",
+      "result": "31 passed, EXIT=0"
+    },
+    {
+      "command": "make verify",
+      "result": "2570 passed, 82 skipped, 0 failed, test: OK, verify: OK, EXIT=0"
+    },
+    {
+      "command": "git diff --stat -- backend/app/web/templates/settings.html backend/app/routers/settings.py backend/app/config/",
+      "result": "无输出（T8 DOM、后端 routers、T5 config 均未动）"
+    },
+    {
+      "command": "git status --porcelain",
+      "result": "M assets/i18n.js, M web/static/settings.js, ?? tests/test_rnd253_settings_interactions.py —— 全部属 RND-253 拥有清单 3 文件，无越界"
+    },
+    {
+      "command": "git log origin/main..HEAD --oneline",
+      "result": "无输出（本票改动均未提交，符合 no-commit 约束）"
+    },
+    {
+      "command": "grep per-key occurrence in i18n.js (22 keys x 3 locales)",
+      "result": "每个 key 恰 3 处命中（zh-CN L332-353 / en L1240-1261 / zh-TW L786-807），三 locale 齐全"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "R1 低风险票，10 条 AC 全部证据确凿，0 findings。本票是配置中心交互层的'安全收口'：① AC-3（唯一真实数据损坏风险）防护到位——collectUpdates 用 secretDirty 标记（仅 input 事件置 true）确保未被用户修改的密钥字段绝不进入 PUT 的 updates，掩码字符串 '****ab12' 不会被当成新值覆盖已存真实密钥；QA 已实现级审阅 + 静态测试双证。② 显隐按钮文案明确为'显示掩码详情'（非'显示明文'），无误导。③ 连通性测试按钮直接复用 RND-252 端点，零新增后端。④ account 分组（T8/RND-302 密码卡片）完全未被本票触碰，CONFIG_GROUPS 不含 account。⑤ i18n 三 locale 22 key 齐全（逐个 grep 确认 3 处命中）。⑥ 后端/模板零 diff，纯前端扩展，scope 干净。本票可进入 PASS 收口流程。配置中心 T3/T4/T5/T6/T7/T8/T9（RND-247/248/249/250/252/251/253）现已全部 PASS。\n\n【关于 AC-3 测试形态说明】本 repo 无 JS 测试 runner，AC-3 以'源码静态断言'（读取 settings.js 文本核对关键语句）方式验证，而非 headless 浏览器执行。鉴于 collectUpdates 逻辑路径清晰、意图注释明确，且与 AC-3 直接对应的跳过条件（data-secret-field && secretDirty!=='true'）被显式断言，证据充分；若团队后续引入 jsdom/Playwright 前端测试，可考虑补一条运行时 e2e 强化该路径（非本票必须）。"
+}
