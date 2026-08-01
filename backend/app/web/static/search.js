@@ -37,9 +37,11 @@ function doLogout(){
   fetch('/api/auth/logout',{method:'POST'}).then(function(){window.location.href='/admin/login';}).catch(function(){window.location.href='/admin/login';});
 }
 function doTopSearch(e){e.preventDefault();var v=document.getElementById('topSearch').value.trim();if(v)window.location.href='/admin/search?q='+encodeURIComponent(v);return false;}
-function showError(){document.getElementById('resultsList').innerHTML='';document.getElementById('stateEmpty').style.display='none';document.getElementById('stateError').style.display='block';}
-function showEmpty(hint){document.getElementById('resultsList').innerHTML='';document.getElementById('stateError').style.display='none';document.getElementById('stateEmpty').style.display='block';if(hint)document.getElementById('emptyHint').textContent=hint;}
-function setLoading(){document.getElementById('stateEmpty').style.display='none';document.getElementById('stateError').style.display='none';var sk='';for(var i=0;i<5;i++){sk+='<div class="skeleton"><div class="sk-line mid"></div><div class="sk-line"></div><div class="sk-line short"></div></div>';}document.getElementById('resultsList').innerHTML=sk;}
+function doMidSearch(e){e.preventDefault();var v=document.getElementById('midSearch').value.trim();if(v)window.location.href='/admin/search?q='+encodeURIComponent(v);return false;}
+function showLanding(){document.getElementById('resultsList').innerHTML='';document.getElementById('stateError').style.display='none';document.getElementById('stateEmpty').style.display='none';document.getElementById('stateLanding').style.display='flex';}
+function showError(){document.getElementById('resultsList').innerHTML='';document.getElementById('stateEmpty').style.display='none';document.getElementById('stateLanding').style.display='none';document.getElementById('stateError').style.display='block';}
+function showEmpty(hint){document.getElementById('resultsList').innerHTML='';document.getElementById('stateError').style.display='none';document.getElementById('stateLanding').style.display='none';document.getElementById('stateEmpty').style.display='block';if(hint)document.getElementById('emptyHint').textContent=hint;}
+function setLoading(){document.getElementById('stateEmpty').style.display='none';document.getElementById('stateError').style.display='none';document.getElementById('stateLanding').style.display='none';var sk='';for(var i=0;i<5;i++){sk+='<div class="skeleton"><div class="sk-line mid"></div><div class="sk-line"></div><div class="sk-line short"></div></div>';}document.getElementById('resultsList').innerHTML=sk;}
 var MAX_RESULTS=1000;
 
 // ---- RND-230: filter bar (date / user / staff / msgtype) ----------------
@@ -262,14 +264,14 @@ function runSearchOrShowHint(){
   // filters can both end up empty (e.g. clearing the last active filter
   // with no keyword typed), and doSearch() would then hit the backend's
   // 400 "no q, no filter" guard and land on the error state instead of
-  // recovering to the normal empty-search hint.
+  // recovering to the landing search box.
   if(KEYWORD||hasActiveFilters()){
     doSearch();
   }else{
     ALL=[];
     refreshParticipantCache();
     document.getElementById('resultCount').textContent='';
-    showEmpty('请输入关键词开始搜索');
+    showLanding();
   }
 }
 function applyFilters(){
@@ -320,7 +322,7 @@ function doSearch(){
     render();
   }).catch(function(){showError();});
 }
-function render(){var list=document.getElementById('resultsList');var empty=document.getElementById('stateEmpty');var err=document.getElementById('stateError');empty.style.display='none';err.style.display='none';var rows=ALL.slice();var sort=document.getElementById('sortSel').value;rows=rows.slice().sort(function(a,b){return sort==='time_asc'?(a.msgtime||0)-(b.msgtime||0):(b.msgtime||0)-(a.msgtime||0);});document.getElementById('resultCount').textContent='共 '+rows.length+' 条消息匹配';if(rows.length===0){list.innerHTML='';empty.style.display='block';document.getElementById('emptyHint').textContent=hasActiveFilters()?'试试调整或清除筛选条件':'换个关键词试试';return;}list.innerHTML=rows.map(function(r){var badge=r.conversation_type==='group'?'<span class="rc-badge group">群聊</span>':'<span class="rc-badge direct">单聊</span>';var senderClass=r.entity_type==='staff'?'rc-sender staff':'rc-sender';var params=['focus='+encodeURIComponent(r.msgid),'conv='+encodeURIComponent(r.conversation_id),'convType='+encodeURIComponent(r.conversation_type),'entityId='+encodeURIComponent(r.entity_id||''),'entityType='+encodeURIComponent(r.entity_type||'')].join('&');return '<div class="result-card" data-href="/admin/conversations?'+params+'"><div class="rc-context">'+badge+'<span class="rc-conv" title="'+esc(r.conversation_name)+'">'+esc(r.conversation_name)+'</span><span class="'+senderClass+'">'+esc(r.sender_display_name)+'</span><span class="rc-time">'+esc(fmtTime(r.msgtime))+'</span></div><div class="rc-snippet">'+highlight(r.content_snippet||'')+'</div><div class="rc-foot"><span class="rc-route">员工 <b>'+esc(r.entity_id||'-')+'</b> <span class="arrow">·</span> 客户 <b>'+esc(r.sender||'-')+'</b> <span class="arrow">·</span> '+esc(msgtypeLabel(r.msgtype))+'</span><span class="rc-jump">查看上下文 ↗</span></div></div>';}).join('');Array.prototype.forEach.call(list.querySelectorAll('.result-card'),function(el){el.addEventListener('click',function(){window.location.href=el.getAttribute('data-href');});});}
+function render(){var list=document.getElementById('resultsList');var empty=document.getElementById('stateEmpty');var err=document.getElementById('stateError');var landing=document.getElementById('stateLanding');empty.style.display='none';err.style.display='none';landing.style.display='none';var rows=ALL.slice();var sort=document.getElementById('sortSel').value;rows=rows.slice().sort(function(a,b){return sort==='time_asc'?(a.msgtime||0)-(b.msgtime||0):(b.msgtime||0)-(a.msgtime||0);});document.getElementById('resultCount').textContent='共 '+rows.length+' 条消息匹配';if(rows.length===0){list.innerHTML='';if(!KEYWORD&&!hasActiveFilters()){document.getElementById('resultCount').textContent='';landing.style.display='flex';return;}empty.style.display='block';document.getElementById('emptyHint').textContent=hasActiveFilters()?'试试调整或清除筛选条件':'换个关键词试试';return;}list.innerHTML=rows.map(function(r){var badge=r.conversation_type==='group'?'<span class="rc-badge group">群聊</span>':'<span class="rc-badge direct">单聊</span>';var senderClass=r.entity_type==='staff'?'rc-sender staff':'rc-sender';var params=['focus='+encodeURIComponent(r.msgid),'conv='+encodeURIComponent(r.conversation_id),'convType='+encodeURIComponent(r.conversation_type),'entityId='+encodeURIComponent(r.entity_id||''),'entityType='+encodeURIComponent(r.entity_type||'')].join('&');return '<div class="result-card" data-href="/admin/conversations?'+params+'"><div class="rc-context">'+badge+'<span class="rc-conv" title="'+esc(r.conversation_name)+'">'+esc(r.conversation_name)+'</span><span class="'+senderClass+'">'+esc(r.sender_display_name)+'</span><span class="rc-time">'+esc(fmtTime(r.msgtime))+'</span></div><div class="rc-snippet">'+highlight(r.content_snippet||'')+'</div><div class="rc-foot"><span class="rc-route">员工 <b>'+esc(r.entity_id||'-')+'</b> <span class="arrow">·</span> 客户 <b>'+esc(r.sender||'-')+'</b> <span class="arrow">·</span> '+esc(msgtypeLabel(r.msgtype))+'</span><span class="rc-jump">查看上下文 ↗</span></div></div>';}).join('');Array.prototype.forEach.call(list.querySelectorAll('.result-card'),function(el){el.addEventListener('click',function(){window.location.href=el.getAttribute('data-href');});});}
 function init(){
   applyStaticI18n();
   loadCurrentUser();
@@ -329,6 +331,7 @@ function init(){
   FILTERS.user=parseListParam('user');
   FILTERS.staff=parseListParam('staff');
   FILTERS.msgtype=parseListParam('msgtype');
+  document.getElementById('topSearch').value=KEYWORD;
   var ql=document.getElementById('qLabel');
   if(KEYWORD){ql.innerHTML='“'+esc(KEYWORD)+'”';}else{ql.textContent='筛选结果';}
   updateFilterUI();

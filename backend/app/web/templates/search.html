@@ -10,7 +10,7 @@
 <style>
 :root{
   --primary:#1890ff; --primary-hover:#0958d9; --primary-soft:#e6f4ff;
-  --topbar-bg:#001529; --topbar-fg:#fff; --topbar-muted:#8ca0b3; --topbar-border:#3a4a5a;
+  --topbar-bg:#fff; --topbar-fg:#1f2329; --topbar-muted:#8a8f99; --topbar-border:#e3e7ee;
   --page-bg:#f0f2f5; --col-bg:#fff; --border:#e8e8e8; --header-bg:#fafafa;
   --text:#222; --text-2:#666; --text-3:#888; --text-4:#bbb; --kw:#e00;
   --err:#cf1322; --err-bg:#fff2f0; --err-border:#ffccc7; --radius:6px;
@@ -19,20 +19,20 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif;color:var(--text);background:var(--page-bg);display:flex;flex-direction:column;height:100vh;overflow:hidden}
-.top-bar{height:44px;background:var(--topbar-bg);color:var(--topbar-fg);display:flex;align-items:center;padding:0 1rem;gap:1rem;flex-shrink:0}
+.top-bar{height:44px;background:var(--topbar-bg);color:var(--topbar-fg);border-bottom:1px solid var(--topbar-border);display:flex;align-items:center;padding:0 1rem;gap:1rem;flex-shrink:0}
 .top-bar h1{font-size:.95rem;font-weight:600;white-space:nowrap}
-.top-bar a{color:var(--topbar-muted);font-size:.82rem;text-decoration:none;white-space:nowrap}
-.top-bar a:hover{color:#fff}
+.top-bar a{color:#3d4552;font-size:.82rem;text-decoration:none;white-space:nowrap}
+.top-bar a:hover{color:var(--primary)}
 .top-bar-user{margin-left:auto;font-size:.8rem;color:var(--topbar-muted);display:flex;align-items:center;gap:.75rem}
-.btn-logout{background:transparent;border:1px solid var(--topbar-border);color:var(--topbar-muted);padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem;text-decoration:none}
-.btn-logout:hover{border-color:var(--topbar-muted);color:#fff}
+.btn-logout{background:#fff;border:1px solid var(--topbar-border);color:#3d4552;padding:.2rem .65rem;border-radius:3px;cursor:pointer;font-size:.78rem;text-decoration:none}
+.btn-logout:hover{background:#f6f8fb;border-color:#c9d2de}
 .search-bar{position:relative;flex:0 1 320px;min-width:0}
 .search-bar form{display:flex;align-items:center;position:relative}
-.search-bar input{width:100%;padding:.22rem .6rem .22rem 1.7rem;border:1px solid var(--topbar-border);border-radius:4px;background:#0a1a2e;color:#ddd;font-size:.8rem;outline:none;box-sizing:border-box;padding-right:3.4rem}
-.search-bar input:focus{border-color:var(--primary);background:#0d2137}
-.search-bar input::placeholder{color:#5c7185}
-.search-bar .ico{position:absolute;left:.55rem;color:#5c7185;font-size:.85rem;pointer-events:none}
-.search-bar .enter-hint{position:absolute;right:.5rem;font-size:.66rem;color:#5c7185;border:1px solid var(--topbar-border);border-radius:3px;padding:0 .3rem;pointer-events:none}
+.search-bar input{width:100%;padding:.22rem .6rem .22rem 1.7rem;border:1px solid var(--topbar-border);border-radius:4px;background:#f6f8fb;color:#1f2329;font-size:.8rem;outline:none;box-sizing:border-box;padding-right:3.4rem}
+.search-bar input:focus{border-color:var(--primary);background:#fff}
+.search-bar input::placeholder{color:#a6adb8}
+.search-bar .ico{position:absolute;left:.55rem;color:#a6adb8;font-size:.85rem;pointer-events:none}
+.search-bar .enter-hint{position:absolute;right:.5rem;font-size:.66rem;color:#a6adb8;border:1px solid var(--topbar-border);border-radius:3px;padding:0 .3rem;pointer-events:none}
 .results-page{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .results-header{display:flex;align-items:center;gap:1rem;padding:.7rem 1.25rem;background:var(--col-bg);border-bottom:1px solid var(--border);flex-shrink:0}
 .back-link{display:inline-flex;align-items:center;gap:.3rem;color:var(--primary);font-size:.82rem;text-decoration:none;white-space:nowrap}
@@ -65,6 +65,14 @@ body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Micros
 .state .state-ico{font-size:1.6rem;display:block;margin-bottom:.6rem;opacity:.6}
 .state-empty .hint{margin-top:.4rem;font-size:.8rem;color:var(--text-4)}
 .state-error{color:var(--err);background:var(--err-bg);border:1px solid var(--err-border);border-radius:var(--radius);max-width:420px;margin:2rem auto}
+.state-landing{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:55vh;padding:2rem 1rem}
+.state-landing .landing-title{font-size:1.15rem;font-weight:600;color:var(--text);margin-bottom:1.4rem}
+.state-landing form{display:flex;align-items:center;width:100%;max-width:584px;border:1px solid var(--border);border-radius:24px;padding:.2rem .3rem .2rem 1.1rem;background:#fff;box-shadow:var(--shadow-pop);transition:border-color .15s}
+.state-landing form:focus-within{border-color:var(--primary)}
+.state-landing .ico{color:var(--text-3);font-size:.95rem;margin-right:.6rem;flex-shrink:0}
+.state-landing input{flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:.95rem;padding:.55rem 0;color:var(--text)}
+.state-landing button{border:none;background:var(--primary);color:#fff;padding:.5rem 1.15rem;border-radius:18px;font-size:.85rem;cursor:pointer;margin-left:.5rem;white-space:nowrap}
+.state-landing button:hover{background:var(--primary-hover)}
 .skeleton{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:.7rem .85rem;max-width:920px;margin:0 auto .7rem}
 .sk-line{height:.7rem;border-radius:4px;background:linear-gradient(90deg,#eee 25%,#f5f5f5 37%,#eee 63%);background-size:400% 100%;animation:sk 1.3s ease infinite;margin-bottom:.5rem}
 .sk-line.short{width:40%}
@@ -96,7 +104,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Micros
 </head>
 <body>
 <div class="top-bar">
-  <img src="/web/static/brand/logo-horizontal-reverse.svg?v=__STATIC_VERSION__" alt="康冠时代" style="height:24px;width:auto;flex-shrink:0">
+  <img src="/web/static/brand/logo-horizontal.svg?v=__STATIC_VERSION__" alt="康冠时代" style="height:24px;width:auto;flex-shrink:0">
   <h1>对话审阅控制台</h1>
   <div class="search-bar">
     <form id="searchForm" onsubmit="return doTopSearch(event)">
@@ -148,6 +156,14 @@ body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Micros
     <div class="filter-chips" id="filterChips" style="display:none"></div>
   </div>
   <div class="results-body" id="resultsBody">
+    <div class="state state-landing" id="stateLanding" style="display:none">
+      <div class="landing-title" data-i18n="search.landing.title">搜索聊天记录</div>
+      <form id="midSearchForm" onsubmit="return doMidSearch(event)">
+        <span class="ico">🔍</span>
+        <input type="text" id="midSearch" placeholder="搜索联系人或聊天内容…" autocomplete="off">
+        <button type="submit" data-i18n="search.landing.button">搜索</button>
+      </form>
+    </div>
     <div class="results-list" id="resultsList"></div>
     <div class="state state-empty" id="stateEmpty" style="display:none"><span class="state-ico">🔍</span><div>没有匹配的聊天内容</div><div class="hint" id="emptyHint">换个关键词试试</div></div>
     <div class="state state-error" id="stateError" style="display:none"><div>⚠️ 搜索失败，请稍后重试</div></div>
