@@ -34,17 +34,18 @@
 - 证据：本票改动范围内无 `open(..., 'w')`/文件写入调用。
 - 判定：符合 = PASS。
 
-### AC-5 — 回归
-- 判定：`make verify` exit 0；`test_architecture_boundary.py` 通过 = PASS。
+### AC-5 — 契约同步 + 回归
+- 判定：`test_http_contract.py`（route_count 当前基线 +1）已同步 = PASS；未同步 → FAIL（`REGRESSION`），`recommended_next_state: FIXING`。`make verify` exit 0；`test_architecture_boundary.py` 通过。
 
 ## 本项目专属检查
 1. **未改 T5 既有端点**：`git diff` 中 `GET`/`PUT /settings` 逻辑不变，只新增 `GET /settings/export`。
-2. **文件所有权**：`git status --porcelain` 改动限于 `routers/settings.py`（追加）、`web/static/settings.js`（追加按钮）、`tests/test_rnd256_settings_export.py`（新）。
+2. **文件所有权**：`git status --porcelain` 改动限于 `routers/settings.py`（追加）、`web/static/settings.js`（追加按钮）、`tests/test_rnd256_settings_export.py`（新）、`tests/test_http_contract.py`（契约同步）。
 
 ## 验证命令（只读）
 ```bash
 make verify
 .venv/bin/python -m pytest backend/tests/test_rnd256_settings_export.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
 git status --porcelain
 git log origin/main..HEAD    # 必须无输出

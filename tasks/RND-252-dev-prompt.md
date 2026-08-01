@@ -10,6 +10,10 @@
 
 ---
 
+## ⚠️ 2026-08-01 追加：契约测试同步已授权（回应 dev agent 的 BLOCKED_NEEDS_HUMAN 上报）
+
+新增 `POST /settings/test-connection` 触发 `docs/ticket-autopilot-workflow.md` §3.3 的强制契约同步——`backend/tests/test_http_contract.py`（route_count/path/snapshot）本就属于本票范围，是第一版 dev prompt 的遗漏（这是本 epic 这几天第三次犯这个同一个错，RND-249/RND-250 也补过），不是需要另开工单或继续 BLOCKED 的情况，已在下方文件所有权清单补上。
+
 ## 开工前必须先核实的前置条件
 ```bash
 .venv/bin/python -c "from app.config.resolver import resolve; from app.routers.settings import settings_router; print('OK')"
@@ -54,6 +58,7 @@ T4/T5 未就绪 → **停止**，`BLOCKED_NEEDS_HUMAN`。
 - `backend/app/config/validation.py`（新）
 - `backend/app/routers/settings.py` —— **仅追加** `POST /settings/test-connection`
 - `backend/tests/test_rnd252_connectivity_check.py`（新）
+- `backend/tests/test_http_contract.py` —— **强制随附**（见 `docs/ticket-autopilot-workflow.md` §3.3）：`route_count` 读当前实际基线 +1、expected path 集合与 snapshot 追加 `POST /settings/test-connection`
 
 **只读、绝不可写：** `app/auth.py`（只调用 `get_wecom_token`）、`app/qiniu_storage.py`（只调用 `QiniuStorageProvider`）、`app/config/resolver.py`（只调用）、其他票拥有的一切文件。
 
@@ -67,13 +72,14 @@ T4/T5 未就绪 → **停止**，`BLOCKED_NEEDS_HUMAN`。
 - **AC-4 零泄露**：`reason` 字段脱敏，不含明文密钥或未处理的底层异常信息。
 - **AC-5 从已保存配置读取，不接受临时凭据**：请求体只含 `target`，不含任何密钥字段；validation 函数的入参来自 `resolve()` 读取当前已保存值。
 - **AC-6 测试无真实网络请求**：`get_wecom_token`/`QiniuStorageProvider` 在测试中均被 mock。
-- **AC-7 回归**：`make verify` 全绿；`test_architecture_boundary.py` 通过。
+- **AC-7 契约同步 + 回归**：`test_http_contract.py`（route_count 当前基线 +1）已同步；`make verify` 全绿；`test_architecture_boundary.py` 通过。
 
 ## 验证方式（Verification — 确定性闸）
 ```bash
 .venv/bin/python -c "from app.config.resolver import resolve; from app.routers.settings import settings_router; print('OK')"
 make verify
 .venv/bin/python -m pytest backend/tests/test_rnd252_connectivity_check.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
 grep -n "get_wecom_token\|QiniuStorageProvider" backend/app/config/validation.py
 git status --porcelain
@@ -105,7 +111,8 @@ T4（<issue>RND-248</issue>）+ T5（<issue>RND-249</issue>）**必须先落地*
 3. 写 `validation.py` 三个 check 函数。
 4. 追加端点。
 5. 写测试（**mock 两个外部依赖**）。
-6. 跑验证命令，输出 QA Summary + `git status`，**不 commit**。
+6. 同步 `test_http_contract.py`（route_count 读当前实际值 +1）。
+7. 跑验证命令，输出 QA Summary + `git status`，**不 commit**。
 
 ## 硬性约束
 - 不 commit / push；不碰生产数据密钥；测试必须 mock 外部调用；复用优先；证据优先。

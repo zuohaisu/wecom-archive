@@ -41,17 +41,18 @@
 - 证据：审阅测试文件，确认 `get_wecom_token`/`QiniuStorageProvider` 均被 mock。
 - 判定：全部 mock = PASS；发现真实网络调用 → 记 major finding。
 
-### AC-7 — 回归
-- 判定：`make verify` exit 0；`test_architecture_boundary.py` 通过 = PASS。
+### AC-7 — 契约同步 + 回归
+- 判定：`test_http_contract.py`（route_count 当前基线 +1）已同步 = PASS；未同步 → FAIL（`REGRESSION`），`recommended_next_state: FIXING`（不是 `BLOCKED_NEEDS_HUMAN`，PM 已授权）。`make verify` exit 0；`test_architecture_boundary.py` 通过。
 
 ## 本项目专属检查
 1. **未改 `get_wecom_token`/`QiniuStorageProvider`**：`git diff --stat -- backend/app/auth.py backend/app/qiniu_storage.py` 应无输出。
-2. **文件所有权**：`git status --porcelain` 改动应限于 `config/validation.py`（新）、`routers/settings.py`（追加）、`tests/test_rnd252_connectivity_check.py`（新）。
+2. **文件所有权**：`git status --porcelain` 改动应限于 `config/validation.py`（新）、`routers/settings.py`（追加）、`tests/test_rnd252_connectivity_check.py`（新）、`tests/test_http_contract.py`（契约同步）。
 
 ## 验证命令（只读）
 ```bash
 make verify
 .venv/bin/python -m pytest backend/tests/test_rnd252_connectivity_check.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
 grep -n "get_wecom_token\|QiniuStorageProvider" backend/app/config/validation.py
 git diff --stat -- backend/app/auth.py backend/app/qiniu_storage.py

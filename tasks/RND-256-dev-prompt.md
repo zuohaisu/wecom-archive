@@ -10,6 +10,10 @@
 
 ---
 
+## ⚠️ 2026-08-01 追加：契约测试同步已预先授权
+
+本 epic 里 T5/T6/T7（<issue>RND-249</issue>/<issue>RND-250</issue>/<issue>RND-252</issue>）都因为遗漏 `test_http_contract.py` 的契约同步而触发过 `BLOCKED_NEEDS_HUMAN`——本票同样新增了 `GET /settings/export`，会踩到一样的规则（`docs/ticket-autopilot-workflow.md` §3.3），已提前把这个文件加进下方文件所有权清单，不要再触发同一个 escalation。
+
 ## 开工前必须先核实
 ```bash
 .venv/bin/python -c "from app.config.resolver import resolve; from app.config.schema import CONFIG_REGISTRY; from app.routers.settings import settings_router; print('OK')"
@@ -48,6 +52,7 @@ T5（<issue>RND-249</issue>）未就绪 → **停止**，`BLOCKED_NEEDS_HUMAN`�
 - `backend/app/routers/settings.py` —— **仅追加** `GET /settings/export`
 - `backend/app/web/static/settings.js` —— **仅追加**"复制为 .env"按钮相关逻辑
 - `backend/tests/test_rnd256_settings_export.py`（新）
+- `backend/tests/test_http_contract.py` —— **强制随附**（见 `docs/ticket-autopilot-workflow.md` §3.3）：`route_count` 读当前实际基线 +1、expected path 集合与 snapshot 追加 `GET /settings/export`
 
 **只读、绝不可写：** `app/config/resolver.py`/`schema.py`（只调用）、其他票拥有的一切文件。
 
@@ -59,13 +64,14 @@ T5（<issue>RND-249</issue>）未就绪 → **停止**，`BLOCKED_NEEDS_HUMAN`�
 - **AC-2 密钥占位（关键）**：密钥字段值固定为 `***`，**绝不输出明文或 T2 的部分掩码格式**。须有测试断言导出文本中不含任何测试写入的真实密钥值片段。
 - **AC-3 未做导入**：`grep -rn "import.*env\|parse.*env" backend/app/routers/settings.py`（限定本票改动范围）应无命中"解析上传的 .env 文件并写回配置"这类逻辑。
 - **AC-4 不落盘**：响应直接返回文本，`grep -n "open(.*'w'\|write_text" backend/app/routers/settings.py`（本票改动范围内）应无命中——不写服务器本地文件。
-- **AC-5 回归**：`make verify` 全绿；`test_architecture_boundary.py` 通过。
+- **AC-5 契约同步 + 回归**：`test_http_contract.py`（route_count 当前基线 +1）已同步；`make verify` 全绿；`test_architecture_boundary.py` 通过。
 
 ## 验证方式（Verification — 确定性闸）
 ```bash
 .venv/bin/python -c "from app.config.resolver import resolve; from app.config.schema import CONFIG_REGISTRY; from app.routers.settings import settings_router; print('OK')"
 make verify
 .venv/bin/python -m pytest backend/tests/test_rnd256_settings_export.py -q
+.venv/bin/python -m pytest backend/tests/test_http_contract.py -q
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
 git status --porcelain
 git log origin/main..HEAD    # 必须无输出
@@ -96,7 +102,8 @@ T5（<issue>RND-249</issue>）**必须先落地**。
 3. 追加导出端点，snake_case → SCREAMING_SNAKE_CASE 转换，密钥 `***` 占位。
 4. 前端加"复制为 .env"按钮。
 5. 写测试覆盖 AC-1~AC-4。
-6. 跑验证命令，输出 QA Summary + `git status`，**不 commit**。
+6. 同步 `test_http_contract.py`（route_count 读当前实际值 +1）。
+7. 跑验证命令，输出 QA Summary + `git status`，**不 commit**。
 
 ## 硬性约束
 - 不 commit / push；不做导入；不落盘；复用优先；证据优先。
