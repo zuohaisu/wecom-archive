@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import require_html_session
+from app.config.guard import is_initialized
+from app.db.session import get_db
 from app.i18n_assets import I18N_JS_SOURCE, I18N_SCRIPT_TAG
 from app.message_type_registry import build_filterable_type_options, build_frontend_registry_entries
 from app.web import render_template
@@ -70,6 +72,14 @@ def admin_settings_page(
     if tenant_id is None:
         return RedirectResponse("/admin/login", status_code=302)
     return HTMLResponse(content=render_template("settings", i18n_script=I18N_SCRIPT_TAG))
+
+
+@router.get("/admin/settings/init", response_class=HTMLResponse)
+def admin_settings_init(db=Depends(get_db)):
+    """Render the public first-run bootstrap shell until setup is complete."""
+    if is_initialized(db):
+        return RedirectResponse("/admin/login", status_code=302)
+    return HTMLResponse(content=render_template("settings_init"))
 
 
 @router.get("/admin/search", response_class=HTMLResponse)

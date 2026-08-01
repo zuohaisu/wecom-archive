@@ -324,7 +324,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 78  # RND-249: +2 Settings GET and PUT endpoints.
+    assert route_count == 81  # RND-250: +2 bootstrap endpoints and init page.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -348,6 +348,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/reset-password",
             "/admin/search",
             "/admin/settings",
+            "/admin/settings/init",
             "/admin/users",
             "/api/admin/audit-logs",
             "/api/admin/dashboard",
@@ -362,6 +363,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/retention-config",
             "/api/admin/usage",
             "/api/admin/settings",
+            "/api/admin/settings/bootstrap",
+            "/api/admin/settings/bootstrap-status",
             "/api/admin/settings/password",
             "/api/admin/sync-now",
             "/api/admin/sync-status",
@@ -449,6 +452,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/reset-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/search", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/settings", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/settings/init", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         ("/api/admin/dashboard", frozenset({"GET"}), "DashboardOut", "None"),
@@ -485,6 +489,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/usage", frozenset({"GET"}), "UsageAnalyticsOut", "None"),
         ("/api/admin/settings", frozenset({"GET"}), "SettingsGetOut", "None"),
         ("/api/admin/settings", frozenset({"PUT"}), "SettingsUpdateOut", "None"),
+        ("/api/admin/settings/bootstrap", frozenset({"POST"}), "dict", "None"),
+        ("/api/admin/settings/bootstrap-status", frozenset({"GET"}), "dict", "None"),
         (
             "/api/admin/settings/password",
             frozenset({"POST"}),

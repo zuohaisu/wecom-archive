@@ -585,8 +585,8 @@ def password_login(
     logger.info("password_login: attempt received")
 
     auth_settings = get_auth_settings()
-    admin_username = auth_settings.admin_username.strip()
-    admin_hash = auth_settings.admin_password_hash.strip()
+    admin_username = __import__("app.config.guard", fromlist=["get_bootstrap_config_value"]).get_bootstrap_config_value(db, "admin_username", auth_settings.admin_username).strip()
+    admin_hash = __import__("app.config.guard", fromlist=["get_bootstrap_config_value"]).get_bootstrap_config_value(db, "admin_password_hash", auth_settings.admin_password_hash).strip()
 
     if not admin_username or not admin_hash:
         logger.error("password_login: ADMIN_USERNAME or ADMIN_PASSWORD_HASH not configured")

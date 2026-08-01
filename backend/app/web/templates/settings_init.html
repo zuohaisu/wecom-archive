@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>初始化设置</title>
+<link rel="stylesheet" href="/web/static/styles.css?v=__STATIC_VERSION__">
+</head>
+<body>
+<main class="page page-narrow">
+  <div class="page-hd">
+    <div>
+      <h1>初始化设置</h1>
+      <p>设置管理员账号，并按需补充企业微信连接信息。</p>
+    </div>
+  </div>
+  <section class="card">
+    <div class="card-hd"><h2>管理员账号</h2></div>
+    <form id="bootstrap-form" class="stack gap-3" method="post" novalidate>
+      <div class="field">
+        <label class="field-label" for="admin-username">管理员账号</label>
+        <input class="input" id="admin-username" name="admin_username" autocomplete="username">
+      </div>
+      <div class="field">
+        <label class="field-label" for="admin-password">管理员密码</label>
+        <input class="input" id="admin-password" name="admin_password" type="password" autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label class="field-label" for="wecom-corp-id">企业 ID</label>
+        <input class="input" id="wecom-corp-id" name="wecom_corp_id">
+      </div>
+      <div class="field">
+        <label class="field-label" for="wecom-agent-id">应用 Agent ID</label>
+        <input class="input" id="wecom-agent-id" name="wecom_agent_id">
+      </div>
+      <div class="field">
+        <label class="field-label" for="wecom-oauth-secret">OAuth Secret</label>
+        <input class="input" id="wecom-oauth-secret" name="wecom_oauth_secret" type="password">
+      </div>
+      <button class="btn btn-primary" type="submit">保存并继续</button>
+    </form>
+  </section>
+</main>
+<script>
+(function () {
+  var form = document.getElementById('bootstrap-form');
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var payload = {};
+    Array.prototype.forEach.call(form.elements, function (field) {
+      if (field.name && field.value) payload[field.name] = field.value;
+    });
+    fetch('/api/admin/settings/bootstrap', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      if (response.ok) window.location.assign('/admin/login');
+    });
+  });
+}());
+</script>
+</body>
+</html>

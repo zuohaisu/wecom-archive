@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Tuple
+from typing import Any, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, hash_password, require_role, verify_password
+from app.auth import get_auth_mode, get_current_user, hash_password, require_role, verify_password
 from app.config import repository
+from app.config.guard import is_initialized
 from app.config.crypto import encrypt_value, mask
 from app.config.resolver import get_config_resolver, invalidate
 from app.config.schema import CONFIG_REGISTRY, ConfigItemSpec
-from app.db.models import AdminUser
+from app.db.models import AdminUser, AppConfigStore
 from app.db.session import get_db
 from app.schemas.settings import SettingsErrorItem, SettingsGetOut, SettingsUpdateIn, SettingsUpdateOut
 
@@ -26,6 +27,14 @@ settings_router = APIRouter()
 class _ChangePasswordBody(BaseModel):
     old_password: str
     new_password: str
+
+
+class _BootstrapBody(BaseModel):
+    admin_username: Optional[str] = None
+    admin_password: Optional[str] = None
+    wecom_corp_id: Optional[str] = None
+    wecom_agent_id: Optional[str] = None
+    wecom_oauth_secret: Optional[str] = None
 
 
 @settings_router.post("/settings/password")
@@ -194,3 +203,85 @@ def put_settings(
             key for key in payload.updates if CONFIG_REGISTRY[key].restart_required
         ],
     )
+
+
+def _upsert_bootstrap_credential(db: Session, key: str, value: str) -> None:
+    """Persist a bootstrap-only credential outside the editable config registry."""
+    stored = db.get(AppConfigStore, key)
+    if stored is None:
+        db.add(
+            AppConfigStore(
+                key=key,
+                group="advanced",
+                value_type="string",
+                value=value,
+                is_secret=False,
+                requires_restart=False,
+                updated_by=None,
+            )
+        )
+    else:
+        stored.value = value
+
+
+@settings_router.get("/settings/bootstrap-status")
+def bootstrap_status(db: Session = Depends(get_db)) -> dict[str, bool]:
+    """Publicly report whether first-run bootstrap is still required."""
+    return {"initialized": is_initialized(db)}
+
+
+@settings_router.post("/settings/bootstrap")
+def bootstrap_settings(
+    payload: _BootstrapBody,
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    """Perform the one-time, public initialization before any session exists."""
+    if is_initialized(db):
+        raise HTTPException(status_code=403, detail="Already initialized")
+
+    validated: list[tuple[str, str | None]] = []
+    errors: list[SettingsErrorItem] = []
+    for key, value in (
+        ("wecom_corp_id", payload.wecom_corp_id),
+        ("wecom_agent_id", payload.wecom_agent_id),
+        ("wecom_oauth_secret", payload.wecom_oauth_secret),
+    ):
+        if value is None:
+            continue
+        normalised, error = _normalise_value(CONFIG_REGISTRY[key], value)
+        if error is not None:
+            errors.append(error)
+        else:
+            validated.append((key, normalised))
+
+    if errors:
+        return JSONResponse(
+            status_code=400,
+            content={"errors": [error.model_dump() for error in errors]},
+        )
+
+    if get_auth_mode() == "password":
+        admin_username = (payload.admin_username or "").strip()
+        admin_password = payload.admin_password or ""
+        if not admin_username or not admin_password:
+            raise HTTPException(status_code=400, detail="Administrator credentials are required")
+        _upsert_bootstrap_credential(db, "admin_username", admin_username)
+        _upsert_bootstrap_credential(db, "admin_password_hash", hash_password(admin_password))
+
+    for key, value in validated:
+        if value is None:
+            continue
+        spec = CONFIG_REGISTRY[key]
+        repository.upsert(
+            db,
+            key,
+            encrypt_value(value) if spec.is_secret else value,
+            is_secret=spec.is_secret,
+            requires_restart=spec.restart_required,
+            updated_by=None,
+        )
+
+    db.commit()
+    for key, _value in validated:
+        invalidate(key)
+    return {"ok": True}
