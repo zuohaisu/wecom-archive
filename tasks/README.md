@@ -10,6 +10,7 @@
 ```
 tasks/
 ├── README.md                 # 本文件
+├── WAVE-ownership.md         # 跨票文件所有权与并发矩阵（所有权的权威来源）
 ├── _templates/               # 模板（dev / qa prompt + verdict schema）
 ├── RND-<n>-dev-prompt.md     # 未完成工单：留在根目录
 ├── RND-<n>-qa-prompt.md
@@ -26,6 +27,7 @@ tasks/
 | 验收提示词 | `RND-<n>-qa-prompt.md` |
 | QA 判定（机器可读） | `RND-<n>-qa-verdict.json`（schema 见 `_templates/`） |
 | QA 报告（叙述性） | `RND-<n>-qa-report.md` |
+| 波次所有权表 | `WAVE-ownership.md`（全局唯一，不带工单号，不归档） |
 
 - 前缀一律大写 `RND-`。
 - 同一工单多份开发提示词时用后缀区分：`RND-229-dev-prompt-search-pagination-flake.md`。

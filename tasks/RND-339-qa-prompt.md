@@ -33,58 +33,102 @@
 - `tasks/RND-337-qa-verdict.json` 与最终 run/status/service 契约。
 - 本票 diff：finding model/migration、automation service/CLI、archive worker hook、findings API/main、systemd units、runbooks、tests/HTTP contract。
 
-## 共享工作树归因（先做）
+## Preflight（先做，全部做完再进 AC-1）
 
-提示词撰写前产品代码 clean；六个 RND prompt 为 PM artifacts。验收开始重记 status/diff/log/Alembic heads，并按 dev prompt 文件清单归因。
+### P-1 现场采集，不要相信任何文档里的快照
 
-- RND-338 UI、classifier、旧 audit router、RND-337 schema/router/CLI、核心 worker unit、CI/deploy scripts 不属于本票。
+本提示词**不记录**工作树状态与 Alembic head。自己采集，并与开发 agent 报告的
+开工 baseline 对照：
+
+```bash
+git status --short --branch
+git diff --name-only
+git log origin/main..HEAD
+(cd backend && .venv/bin/python -m alembic heads)
+```
+
+- `tasks/` 下的提示词文件是 PM 产物，任何时候都不归因于开发实现。
+- RND-338 UI、classifier、旧 audit router、RND-337 schema/router/CLI、核心 worker unit、
+  CI/deploy scripts 不属于本票（所有权见 `tasks/WAVE-ownership.md`）。
+- RND-338 可能与本票并发进行；`backend/app/web/`、`i18n.js`、`routers/web.py` 有 diff
+  是预期的，**不得**记在 RND-339 账上。
 - 他票/用户既有 diff 不得修改或误归因；本票新 commit/push/branch 仍 FAIL。
+- AC-1b 的判据是「`down_revision` 指向**你采集到的**前一 head」，不是任何写死的 revision 号。
+
+### P-2 依赖闸
+
+```bash
+cat tasks/RND-337-qa-verdict.json
+```
+
+缺失或 `verdict != "PASS"` → `verdict: BLOCKED`，不必往下走 AC。
+
+### P-3 一次性数据库（决定 AC-1d 怎么判）
+
+```bash
+echo "DATABASE_URL=[${DATABASE_URL}]"
+```
+
+- **为空，或无法证明是一次性 local/test 库** → **禁止**执行任何 `alembic upgrade/downgrade`。
+  AC-1d 记为未验证：notes 写 `HUMAN_MIGRATION_REVIEW_PENDING`，按 R2 风险判 `BLOCKED`。
+  不依赖真库的 AC-1c/AC-1e 静态断言照常判定。**不得**把「没跑」当作 PASS，
+  也**不得**因环境缺口给开发判 FAIL。
+- **非空且确认是一次性库** → 执行往返，正常判 AC-1d。
+
+### P-4 你自己也不许碰生产
+
+不执行 `systemctl`、`sudo`、真实 `run_archive_worker_once.py`、真实 SDK、
+共享或生产 DB 的写操作。subprocess 行为一律由隔离测试证明。
 
 ## 验收方法（证据优先）
 
-### AC-1 — 依赖与迁移
-- 证据：RND-337 verdict PASS；新 migration 从其实际唯一 head 线性延伸；model/migration 字段、tenant composite FK、unique/check/index 对齐；disposable DB upgrade→downgrade→upgrade。
-- 判定：只新增本票 finding schema、往返无分叉 = PASS；依赖漂移、内部 reference 无同租户完整性、生产写入 = blocker FAIL。
+**判定单位是子 AC，不是大项。** `tasks/RND-339-dev-prompt.md` 的「验收标准」已把
+11 个大项拆成 AC-1a ~ AC-11h 的原子断言。**本节不重述断言内容**（重述必然与 dev
+prompt 漂移）——去读 dev prompt 的原文，本节只规定**每类断言需要什么形态的证据**
+和**怎么判**。
 
-### AC-2 — finding 幂等
-- 证据：同 tenant/message/reason/version 连续观察仍一条 active，occurrence 和 last_seen/last_run 合法更新；不同租户相同内部 message id 各自独立；reason/algorithm version 行为有测试。
-- 判定：事务幂等且 DB 不含 content/identity/error 字段 = PASS；重复记录爆炸或跨租户碰撞 = FAIL。
+evidence 里每一条子 AC 独立成行：`AC-5a | test_reachability_automation.py::test_empty_incremental_does_not_override_snapshot | PASS`。
 
-### AC-3 — incremental 与 watermark
-- 证据：首次、无新数据、多批次、partial page、exception、retry fixtures；watermark 来源为最后一次 complete incremental frozen max，只有 complete 提交；失败重跑覆盖原范围且 finding 不重复。
-- 判定：新候选不漏、失败不跳过 = PASS；用最新 started run 或失败 max 推进 = blocker FAIL。
+### 通用证据形态
 
-### AC-4 — daily 完整复核与人类快照单调性
-- 证据：7 天内候选、7 天外 active finding、late decrypt/backfill 都被 reconcile；完整覆盖 active set 的证明可见；partial/error/count mismatch 不 resolve 任何“缺席” finding。连续零问题 incremental 后 latest 仍是最近完整 manual/reconcile 快照；incremental 新发现问题后旧 healthy 立即失效为非健康，直到完整复核才可恢复。
-- 判定：完整复核覆盖最近窗口 + 全部 active references，且局部正面证据不提升整体、局部负面证据不被旧 healthy 掩盖 = PASS；只扫 7 天、零数据覆盖完整快照或新问题后仍显示 healthy = blocker FAIL。
+| 断言形态 | 可接受的证据 | 不可接受 |
+|---|---|---|
+| 「只有一条 active finding」 | 实际 DB 行数与字段值 | mock 断言 upsert 被调用 |
+| 「watermark 不推进」 | 失败前后 watermark 的实际持久化值 | 代码阅读 |
+| 「reconcile 覆盖 X」 | 被重新判断的候选 ID 集合断言 | 「调用了 reconcile」 |
+| 「不 resolve 任何 finding」 | partial run 前后 active 集合完全相同 | 抽查一条 |
+| 「快照不被覆盖」 | 连续 incremental 后 `GET latest` 的实际响应 | service 层单测 |
+| 「worker exit matrix」 | 真实 subprocess return code（隔离环境） | 读注释、读 docstring |
+| 「timer 错峰」 | 断言具体的 `OnCalendar` 字符串 | 「看起来错开了」 |
+| 「cursor 无重复漏项」 | 多页遍历后的 ID 集合与全量集合比对 | 单页 200 |
+| 「递归不含 X」 | `docs/agent-data-minimization.md` §5 的递归遍历断言 | 只查顶层 key |
+| 「tenant scoped」 | A/B 双租户 seed 后的实际读写隔离 | 只看 router 出口过滤 |
+| 「route +1」 | 采集到的当前真实 `route_count` 与改后值之差 | 写死数字 |
 
-### AC-5 — 生命周期
-- 证据：problem persists、recovers、reason changes、reappears、repeat reconcile 参数化 tests；resolved_at 只在完整证明后写，active/resolved counts 和 first/last timestamps 单调一致。
-- 判定：状态转换确定且幂等 = PASS；incremental 未见即 resolve、partial 批量 resolve = blocker FAIL。
+### 逐大项的判定重点
 
-### AC-6 — 核心 worker 隔离
-- 证据：子进程顺序/exit matrix 至少覆盖 sync fail、decrypt fail、all success+diagnostic success、diagnostic fail、lock-held no-op；sync/decrypt fail 不调用诊断，diagnostic fail 时核心 worker仍成功，安全状态/日志可追踪。
-- 判定：归档真相不被诊断附属任务推翻 = PASS；诊断异常导致 worker exit 1 或 sync/decrypt fail 后仍扫 = blocker FAIL。
-
-### AC-7 — systemd 与互斥
-- 证据：静态解析新 service/timer：Type=oneshot、正确 User/WorkingDirectory/EnvironmentFile/ExecStart/hardening、Persistent=true、daily 且错峰；shared lock 在 incremental/reconcile/manual 并发 test 中只运行一次；git diff 无 enable/start side effect。
-- 判定：与现有 pattern 一致、资源有界、未自动部署 = PASS。
-
-### AC-8 — findings API
-- 证据：默认 active、status/reason/time/limit filters、最大 limit、稳定 opaque cursor、多页插入/并列时间、非法/篡改 cursor；递归检查 JSON keys/values 只有 allowlist public id/reason/status/times/count/version/remediation/aggregate。
-- 判定：无重复漏项、未知输入确定 4xx、无内部 id/内容/identity/path/error = PASS；base64 明文 tenant/internal id cursor 或通用模型 dump = blocker FAIL。
-
-### AC-9 — 认证与租户隔离
-- 证据：未登录 401/redirect 按 API 现有约定；A/B seed 后 list/filter/cursor/service upsert/resolve 均隔离；A 的 cursor/public id 对 B fail closed，不泄露存在性。
-- 判定：每个 ORM read/update/delete 都带 tenant 边界 = PASS；只在 router response filter = blocker FAIL。
-
-### AC-10 — 运维、架构与兼容
-- 证据：runbook/DEPLOYMENT/ARCHITECTURE 与实际 unit/script 一致，包含 install/observe/manual/failure/rollback 且不含真实 secret；main 只 import/include；route count 恰好 +1；RND-337 POST/latest 与旧 audit API tests 通过。
-- 判定：运维可执行、架构硬闸全绿、无契约破坏 = PASS。
-
-### AC-11 — 回归与范围
-- 证据：聚焦测试、worker/systemd/migration/HTTP/architecture、`make verify` exit 0；本票归因 diff 仅拥有文件；RND-338 UI/core worker units/CI/deploy scripts 无改动。
-- 判定：全部成立 = PASS；越界或归因回归 = FAIL。
+- **AC-1**：AC-1b 用**你采集到的** head 判。AC-1c 若内部 archive message reference
+  缺少同租户完整性约束 = blocker FAIL。AC-1d 按 Preflight P-3 处理。
+- **AC-2**：AC-2c 跨租户相同内部 message id 碰撞 = FAIL。
+- **AC-3**：AC-3d 若用「最近一次 started run」或「失败 run 的 max」推进 watermark
+  = **blocker FAIL**（会造成永久漏扫）。AC-3f 必须有失败后重跑的实际 fixture。
+- **AC-4**：AC-4b（7 天窗口**之外**的 active finding 也要复核）是最容易漏的一条——
+  只扫 7 天 = **blocker FAIL**。AC-4e 若 partial run 批量 resolve = **blocker FAIL**。
+  另查 AC-4d 的实现：resolution 必须由完整 reconciliation 的**冻结候选集**驱动，
+  不能是「本次 upsert 之后把其余 active 全关掉」。
+- **AC-5**：本票最容易出错的一项，两个方向都要有测试。
+  零数据 incremental 覆盖了完整快照 = **blocker FAIL**；
+  incremental 发现新问题后仍显示 healthy = **blocker FAIL**。
+- **AC-6**：AC-6c「incremental 未见即 resolve」= **blocker FAIL**。
+- **AC-7**：AC-7f 必须验证真实 return-code matrix，**不只读注释**。
+  诊断异常导致 worker exit 1 = blocker FAIL；sync/decrypt 失败后仍触发诊断 = blocker FAIL。
+- **AC-8**：AC-8f 若 cursor 是 base64 明文的 tenant/internal id，或响应是通用模型 dump
+  = **blocker FAIL**。
+- **AC-9**：AC-9d 只在 router response 层过滤 = **blocker FAIL**。
+- **AC-10**：AC-10a/10b 必须**解析实际 unit 文件**，不得以 runbook 文案代替。
+- **AC-11**：AC-11d 若删除或弱化 `test_http_contract.py` 既有 expected 条目 = FAIL；
+  只允许追加本票这一条。AC-11h 复制 classifier = FAIL。
+  共享工作树里他票的失败先按 P-1 隔离归因再写 notes。
 
 ## 本项目专属检查（必查）
 1. 搜索 automation service 中的 reachability reason/status 分支；必须调用现有 classifier/RND-337 service，不得复制分类。
@@ -92,7 +136,10 @@
 3. `test_http_contract.py` 只应因一个 findings GET route增加 count/snapshot/auth/shape，不得删旧 expected/降低断言。
 4. `run_archive_worker_once.py` 的 sync/decrypt原有 fail-fast 保持；只有新增诊断 hook best-effort。验证真实 return-code matrix，不只读注释。
 5. systemd test 必须解析实际 unit，不以 runbook 文案代替；timer 不与已知 backup 03:17 和频繁 worker 明显同点。
-6. API/DB/log/CLI 使用 content/payload/sender/recipient/room/msgid/archive_message_id/run_id/tenant_id/path/secret/traceback 哨兵，递归断言公开面缺失。
+6. API / DB / log / CLI 四个受管面适用 `docs/agent-data-minimization.md` §2，
+   用该文件 §5 的哨兵组递归断言缺失。本票唯一授权的例外是 public finding id 与
+   public run id；内部 `archive_message_id` 只允许留在 DB 内部引用列，
+   出现在 API、日志或 cursor 中即 blocker。
 7. resolution 查询必须由 complete reconciliation 的冻结 candidate set 驱动，不能用“本次 upsert 后其余 active 全关闭”。
 
 ## 附加检查（Scope / Security）
@@ -115,7 +162,7 @@ git status --short --branch
 git log origin/main..HEAD
 ```
 
-只在明确 disposable DB 下执行 migration upgrade/downgrade/upgrade。**不要执行** systemctl/sudo 或真实 `run_archive_worker_once.py`；subprocess 行为必须由隔离测试证明。
+只在 Preflight P-3 确认为一次性 DB 时执行 migration upgrade/downgrade/upgrade。**不要执行** systemctl/sudo 或真实 `run_archive_worker_once.py`；subprocess 行为必须由隔离测试证明。
 
 ## 运维人工 review 点位
 - 核对实际 timer calendar、Persistent、资源错峰、shared lock 和 service hardening。
@@ -125,10 +172,11 @@ git log origin/main..HEAD
 ## 产出
 写入 `tasks/RND-339-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
 
-- AC 全 PASS、无 blocker/major、R2 migration/deployment review 有证据 → `verdict: PASS`，`recommended_next_state: PASS`。
-- 任一 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`，只列最小 findings。
+- **全部子 AC** PASS、无 blocker/major、R2 migration/deployment review 有证据 → `verdict: PASS`，`recommended_next_state: PASS`。
+- 任一子 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；findings **按子 AC 编号定位**（如 `AC-4b`），只列最小修复。
+- Preflight P-3 未满足（AC-1d 无法验证）→ `verdict: BLOCKED`，notes 写 `HUMAN_MIGRATION_REVIEW_PENDING`；其余子 AC 判定照常写进 evidence。
 - RND-337 契约漂移、resolution/timer/权限需产品决策或两轮仍失败 → `verdict: BLOCKED`，`recommended_next_state: BLOCKED_NEEDS_HUMAN`。
-- evidence 必须列出 watermark 前后值、finding lifecycle rows、worker exit matrix、API safe keys、route count、Alembic head、unit schedule 和命令 exit code。
+- evidence 必须逐子 AC 成行，并列出 watermark 前后值、finding lifecycle rows、worker exit matrix、API safe keys、route count 前后值、采集到的 Alembic head、unit schedule 和命令 exit code。不得用「AC-4 全部通过」这类聚合表述。
 
 ## 禁止事项
 - 除 verdict JSON 外不修改任何文件，不补实现/测试/migration/runbook。

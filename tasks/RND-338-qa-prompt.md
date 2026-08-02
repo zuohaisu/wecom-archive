@@ -33,18 +33,58 @@
 - `tasks/RND-337-qa-verdict.json` 和实际 reachability-checks schema/OpenAPI/tests。
 - 本票归因 diff：diagnostics template/JS/CSS、i18n、web route docstring、page/render/sidenav/聚焦 tests。
 
-## 共享工作树归因（先做）
+## Preflight（先做）
 
-提示词撰写前产品代码 clean；六个 RND-337/338/339 prompt 是 PM artifacts，不归因于开发实现。验收时重记 status/diff/log，并按 dev prompt 拥有清单隔离其他变化。
+### P-1 现场采集，不要相信任何文档里的快照
 
-- 修改 RND-337 backend、RND-339 automation、main/HTTP contract/shared styles/nav structure 即本票 scope violation。
+本提示词**不记录**工作树状态。自己采集，并与开发 agent 报告的开工 baseline 对照：
+
+```bash
+git status --short --branch
+git diff --name-only
+git log origin/main..HEAD
+```
+
+- `tasks/` 下的提示词文件是 PM 产物，任何时候都不归因于开发实现。
+- 按 dev prompt 拥有清单与 `tasks/WAVE-ownership.md` 隔离其他变化。
+- 修改 RND-337 backend、RND-339 automation、main/HTTP contract/shared styles/nav structure
+  即本票 `SCOPE_VIOLATION`。
 - 用户/他票既有 diff 不得修改，也不能仅因存在而让本票自动 FAIL；必须说明归因。
+
+### P-2 依赖闸与串行闸（两个都查）
+
+```bash
+cat tasks/RND-337-qa-verdict.json
+cat tasks/RND-336-qa-verdict.json
+```
+
+- RND-337 缺失或非 PASS → `verdict: BLOCKED`（功能契约依赖）。
+- RND-336 缺失或非 PASS → `verdict: BLOCKED`（`tasks/WAVE-ownership.md` §3 串行化裁决：
+  两票共享 `i18n.js` 与 `test_sidenav.py`）。若 RND-338 在 RND-336 未 Done 的情况下
+  已经改了这两个文件 → 记 `SCOPE_VIOLATION`，这会给 RND-336 制造冲突。
+
+### P-3 共享文件的越界判据（RND-338 特有）
+
+RND-336 拥有 `i18n.js` 的 audit/security-activity 区、`test_sidenav.py` 的
+audit-log 移除断言、以及 `sidenav.py` 的 `NAV` 结构。因此对 RND-338 判：
+
+- 只增加 diagnostics/archive-health 相关 i18n key = 正当。
+- 触碰 audit/security-activity 区的 key = `SCOPE_VIOLATION`。
+- 修改或删除 RND-336 写的 audit-log 断言 = `SCOPE_VIOLATION`。
+- 对 `sidenav.py` 有任何 diff = `SCOPE_VIOLATION`（label 应由 i18n 提供）。
+- 反过来：`NAV` 中没有 `audit-log` 是 RND-336 的交付物，**不是** RND-338 的回归，
+  不得据此判 FAIL。
 
 ## 验收方法（证据优先）
 
-### AC-1 — 依赖闸
+### AC-1a — 依赖闸（RND-337）
 - 证据：RND-337 verdict 为 PASS；实际 POST/latest schema、六态与 safe error contract 可读；UI field access 与实际 response 一致。
 - 判定：依赖完整且无前端猜测 = PASS；缺 verdict、API drift、mock 自造不存在字段 = BLOCKED/FAIL。
+
+### AC-1b — 串行闸（RND-336）
+- 证据：`tasks/RND-336-qa-verdict.json` 为 PASS；本票对 `i18n.js` 的改动只在
+  diagnostics/archive-health 区，对 `test_sidenav.py` 只有新增断言，`sidenav.py` 零 diff。
+- 判定：见 Preflight P-3。RND-336 未 PASS 却已改共享文件 = `SCOPE_VIOLATION` + BLOCKED。
 
 ### AC-2 — 命名与 URL
 - 证据：三 locale nav/title/breadcrumb/description 为 Archive health 对应文案；`/admin/diagnostics/reachability` 未登录保持 auth gate、登录后 200；route count/path 不变。
@@ -88,9 +128,12 @@
 
 ## 附加检查（Scope / Security）
 - 新 dashboard/Settings/route、自动修复/补拉、通知/告警/export、逐条 message sample → `SCOPE_VIOLATION`。
-- content/payload/raw sender/recipient/room/message id/path/traceback 在 DOM/log/storage → `SECURITY_VIOLATION`。
+- `docs/agent-data-minimization.md` §2 的任何字段族出现在 DOM / `console` /
+  `localStorage` / `sessionStorage` → `SECURITY_VIOLATION`。用该文件 §5 的哨兵组
+  构造 fixture 来证明，不接受人工目测。
 - API data 写 localStorage/sessionStorage 或注入 innerHTML → blocker `SECURITY_VIOLATION`。
-- agent commit/push/建分支/改历史 → FAIL，先与 baseline 区分。
+- 触碰 RND-336 拥有的 i18n audit 区 / `test_sidenav.py` audit 断言 / `sidenav.py` → `SCOPE_VIOLATION`。
+- agent commit/push/建分支/改历史 → FAIL，先与 P-1 baseline 区分。
 
 ## 验证命令（只读，可运行）
 ```bash
@@ -119,7 +162,7 @@ git log origin/main..HEAD
 - 全部 AC PASS、无 blocker/major 且视觉证据完成 → `verdict: PASS`，`recommended_next_state: PASS`。
 - 自动化通过但视觉 gate 未完成：notes 明确 `HUMAN_VISUAL_REVIEW_PENDING`，不得宣称最终交付完成。
 - 任一 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；只列最小 findings。
-- RND-337 漂移或需产品文案/状态决策 → `verdict: BLOCKED`，`recommended_next_state: BLOCKED_NEEDS_HUMAN`。
+- RND-337 漂移、RND-336 串行闸未满足，或需产品文案/状态决策 → `verdict: BLOCKED`，`recommended_next_state: BLOCKED_NEEDS_HUMAN`。
 
 ## 禁止事项
 - 除 verdict JSON 外不修改任何文件，不替开发补实现/测试。

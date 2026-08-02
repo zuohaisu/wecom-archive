@@ -6,7 +6,54 @@
 
 ## ⚡ 立即执行，不要询问意图
 
-你现在收到的是已经批准、待立即执行的任务指令。你就是 RND-336 开发 agent。先执行依赖检查；若 RND-335 尚未 PASS，输出 `BLOCKED_NEEDS_HUMAN` 和缺失契约，不改代码。依赖满足后直接实现，不要先输出计划等待确认。
+你现在收到的是已经批准、待立即执行的任务指令。你就是 RND-336 开发 agent。先执行 Preflight；不满足则输出 `BLOCKED_NEEDS_HUMAN` 和缺失契约，不改代码。满足后直接实现，不要先输出计划等待确认。
+
+---
+
+## Preflight（开工第一步，先做完再碰代码）
+
+### P-1 现场采集工作树基线 —— 不要相信任何文档里的快照
+
+本提示词**不记录**工作树状态：提示词是静态的，工作树是易变的。你自己采集：
+
+```bash
+git status --short --branch
+git diff --name-only
+git log origin/main..HEAD
+```
+
+归因规则：
+
+1. 不在下方「本工单拥有的文件」清单里的一切改动 → 标为「非本票」，写进 QA Summary
+   的 notes，**不修改、不回滚、不覆盖、不算作本票交付**。
+2. 采集**之后**新增的 commit / push / branch 才归因于你（你不该产生任何一个）。
+3. `backend/app/main.py`、`backend/app/db/models.py`、`backend/tests/test_http_contract.py`
+   可能同时被 RND-337/339 修改（见 `tasks/WAVE-ownership.md` §5）。看到它们有 diff
+   是预期的，不是你的越界。
+
+### P-2 依赖闸：RND-335 必须 QA PASS
+
+```bash
+cat tasks/RND-335-qa-verdict.json
+```
+
+- 文件不存在，或 `verdict != "PASS"` → 输出 `BLOCKED_NEEDS_HUMAN` 与缺失契约，
+  **零产品代码改动**。
+- PASS → 读**实际落地的** `backend/app/audit.py` 目录与 `backend/app/routers/audit.py`
+  的真实签名，以代码为准，不以本提示词的描述为准。
+
+### P-3 你持有本波次的共享前端文件 —— RND-338 在等你
+
+`tasks/WAVE-ownership.md` §3 的裁决：`backend/app/assets/i18n.js`、
+`backend/tests/test_sidenav.py`、`backend/app/web/sidenav.py` 三个文件在
+RND-336 ∥ RND-338 的冲突中**归你**，RND-338 必须等你 Done 才能开工。
+
+因此：
+
+- 这三个文件里**只做本票需要的改动**，不要顺手重构、不要重排 `NAV`、
+  不要改与 audit 无关的 i18n key——你多改一行，RND-338 就多一份冲突。
+- 你从 `NAV` 移除 `audit-log` 项后，`diagnostics` 项的行号会前移。这是预期的，
+  RND-338 会在你之后适配。
 
 ---
 
@@ -32,7 +79,8 @@
 - `backend/app/assets/i18n.js` 三 locale 各有 `audit.*`/`nav.auditLog` 和 RND-328 锚点。
 - RND-335 应交付 item.category、category/include_system filters、权威 action 目录和 worker 降噪。前端不得自造另一套 category。
 
-**共享工作树基线：**提示词撰写时 `backend/app/web/static/styles.css`、`scripts/deploy_server.sh`、`scripts/tests/deploy_server.bats` 有用户改动，`main` ahead 1。开始时重记 baseline；不得修改/revert `styles.css`。复用设计系统 class，必要的小样式放 `audit_log.html` 现有 `<style>`。
+**共享工作树基线：**见 Preflight P-1。基线由你现场采集，本节不做任何快照断言。
+样式纪律（与工作树状态无关）：`styles.css` 是共享文件，本票不得修改；复用设计系统 class，必要的小样式放 `audit_log.html` 现有 `<style>`。
 
 **本项目已知的高频踩坑点：**
 - ❗ **没有模板引擎。** `render_template()` 只做 `__TOKEN__` 单遍替换，禁止 Jinja `{% include %}` / `{% for %}` / `{{ }}`；动态 feed 用原生 JS 和安全 DOM API。
@@ -52,6 +100,13 @@
 2. **小微友好命名。** title/description/read-only 提示、Settings card、breadcrumb、三语言从 Audit Log/审计日志/稽核日志更新为 Security & activity/安全与活动/安全與活動。保留只读追加语义，不暗示防篡改或合规认证。
 3. **人类可读 feed。** 为 RND-335 每个已知 action 提供 code → i18n message 映射。主层级显示本地化 actor/action/target/context/time；raw action code、audit ID、object type/id 只放可展开 `<details>`。未知 action 用本地化通用 fallback，raw code 仍只在技术详情，页面不崩。
 4. **默认信号与 filters。** 默认 **90 天**（小微低频避免常态空白），提供 30/90/all；category 提供 all/security/account/configuration/data_access；operator 用现有 `/api/admin/users?per_page=100` 加载 1–5 坐席下拉，value 发送 `operator=<admin_user_id>`，失败时保留“全部操作人”且不拖垮 feed；Show system 默认关闭并发送 `include_system=false`，开启发送 true。filter/total/has_more/pagination 以服务端为准。
+   ⚠️ **不要用 `operator=system` 实现「显示系统活动」。** 该参数在
+   `backend/app/routers/audit.py:56-57,78-79` 已存在，含义是
+   `admin_user_id IS NULL`（无人类 actor），**不等于** `category=system`——
+   RND-335 AC-5c 让平台人工动作也满足 `admin_user_id IS NULL` 但归类 `security`。
+   本页的 system 开关**只能**用 `include_system`。operator 下拉里也不要塞
+   「系统」这个伪选项；`backend/app/web/templates/audit_log.html:27` 现有 datalist
+   与生产动作不一致，本票会重做该控件，顺手把它清掉。
 5. **安全详情。** 按 action 明确 allowlist 渲染 export format/count、安全 reason、changed_keys、old/new account/retention status、worker aggregate。禁止通用遍历展示任意 detail；禁止 innerHTML 拼接 API 值，统一 `textContent`/createElement。
 6. **状态与可访问性。** loading、empty、network error、401/403、unknown action、operator fallback、pagination 都有三语言状态。filter 有 label；details/select/checkbox/button 可键盘操作；动态状态有 role/status/aria-live。页面只读，无 create/update/delete/export/alert 控件。
 7. **兼容性。** 保留旧 URL 鉴权/bookmark；不改 RND-335 API、DB 或 routes；不记录页面浏览、搜索文本、缩略图/preview/signed URL 请求。
@@ -62,7 +117,9 @@
 - 不改 audit API/action/category；发现缺口应 BLOCK，不在前端补后端逻辑。
 - 不做 chart/dashboard/report/audit export/alert/notification/SIEM/tamper-evidence。
 - 不做 Agent activity/delegation/run UI。
-- 不记录普通浏览、搜索词、缩略图、signed URL、media preview。
+- 不记录普通浏览、缩略图、media preview 请求。
+- 不在 DOM / `console` / `localStorage` / `sessionStorage` 中出现
+  `docs/agent-data-minimization.md` §2 的任何字段族（前端面的检查方式见该文件 §5 末段）。
 - 不引入 React/Vue、第三方表格/日期库、bundler。
 - 不重构 Settings，不改密码表单或动态配置表单。
 
@@ -78,12 +135,17 @@
 - `backend/tests/test_rnd336_security_activity_page.py`（可新建；不用则不建空文件）
 
 **本工单只读、绝不可写的文件：**
-- `backend/app/audit.py`、`backend/app/routers/audit.py`、`backend/tests/test_rnd335_security_activity.py`、`backend/tests/test_rnd295_audit_list.py` — RND-335 契约
+- `backend/app/audit.py`、`backend/app/routers/audit.py`、`backend/tests/test_rnd335_security_activity.py`、`backend/tests/test_rnd295_audit_list.py` — **所有者 RND-335**（契约）
 - `backend/app/web/static/settings.js` — 账号 card 无需改 tab JS
-- `backend/app/web/static/styles.css` — 共享且已有用户改动
-- `backend/app/main.py`、`backend/tests/test_http_contract.py`、`backend/tests/test_rnd280_rbac_scaffold.py` — 无新 route
-- `backend/app/db/models.py`、`backend/alembic/versions/` — 无数据变化
-- `scripts/deploy_server.sh`、`scripts/tests/deploy_server.bats` — 用户既有改动
+- `backend/app/web/static/styles.css` — 共享样式，本票必要的小样式放 `audit_log.html` 现有 `<style>`
+- `backend/app/main.py`、`backend/tests/test_http_contract.py`、`backend/app/db/models.py`、`backend/alembic/versions/` — 无新 route / 无数据变化；**所有者 RND-337 → RND-339**
+- `backend/tests/test_rnd280_rbac_scaffold.py` — 本票不新增 router，不触发闭世界白名单
+- `backend/app/web/templates/diagnostics.html`、`backend/app/web/static/diagnostics.js`、`backend/app/web/static/diagnostics.css`、`backend/app/routers/web.py` — **所有者 RND-338**
+- `scripts/deploy_server.sh`、`scripts/tests/deploy_server.bats` — 部署文件，本票无论如何都不得改
+
+> 跨票所有权与并发矩阵的权威来源是 `tasks/WAVE-ownership.md`；本清单与它冲突时以它为准。
+> 特别注意：`i18n.js`、`test_sidenav.py`、`sidenav.py` 在 RND-336 ∥ RND-338 的冲突中**归你**（见 §3），
+> 但只做本票需要的改动。
 
 若 RND-335 最终契约与本 prompt 不一致，以 PASS verdict 和实际代码为准；若影响 AC 或需后端改动，停止 `BLOCKED_NEEDS_HUMAN`，不得隐式扩票。
 
@@ -143,7 +205,7 @@
 - **Escalation**：2 轮仍 FAIL 或文案需产品决策时，附最小选项，不猜。
 
 ## 开发 agent 执行指引（步骤）
-1. 核对 `tasks/RND-335-qa-verdict.json` PASS，读实际 backend 契约；记录 HEAD/dirty baseline。
+1. 跑 Preflight P-1 / P-2 / P-3 并记录结论；读实际 backend 契约。
 2. 先扩 tests：nav、Settings link、旧 route/Settings active、默认 query、action key 集合、unknown、安全 detail、三 locale。
 3. 最小修改 sidenav/page router/settings card；不碰 route/main/settings.js/styles.css。
 4. audit template 用原生 DOM 构建 feed/filter/details；API data 走 textContent，detail allowlist；默认 90 天/include_system=false。
@@ -154,6 +216,7 @@
 - 不 commit/push/建分支/改历史；不改 CI/CD、部署、`.gitignore` 或生产数据。
 - 不改 RND-335 backend、DB、route contracts、settings.js 或 shared styles。
 - 不用 Jinja/React/Vue/bundler；SSR + 原生 JS。
-- 不用 innerHTML 插入 API 值，不通用展示 detail，不渲染敏感字段。
+- 不用 innerHTML 插入 API 值，不通用展示 detail；敏感字段以 `docs/agent-data-minimization.md` 为准。
+- 不用 `operator=system` 表达「系统活动」；system 开关只走 `include_system`。
 - 不扩大为 dashboard/export/alert/SIEM/Agent activity。
 - 证据优先：以 server query、DOM 安全 tests、三 locale、视觉 gate 和 exit 0 为证。

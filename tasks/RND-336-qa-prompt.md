@@ -34,13 +34,43 @@
 - `tasks/RND-335-qa-verdict.json` 与实际 action/category/API 契约。
 - 本票 diff：audit template/page router、sidenav、settings template、i18n、tests。
 
-## 共享工作树归因（先做）
+## Preflight（先做）
 
-提示词撰写时已有用户改动：`backend/app/web/static/styles.css`、`scripts/deploy_server.sh`、`scripts/tests/deploy_server.bats`，`main` ahead 1。
+### P-1 现场采集，不要相信任何文档里的快照
 
-- 既有改动不归因于 RND-336，不得修改或据此误判。
-- 若 RND-336 在既有 `styles.css`/部署 diff 上继续编辑，仍是越权叠加，判 `SCOPE_VIOLATION`。
-- 只把开发期间新增 commit 归因给 agent；既有 ahead commit 写 notes，不自动 FAIL。
+本提示词**不记录**工作树状态。自己采集，并与开发 agent 报告的开工 baseline 对照：
+
+```bash
+git status --short --branch
+git diff --name-only
+git log origin/main..HEAD
+```
+
+- 不在 dev prompt 拥有清单里的改动 → 写进 verdict notes，**不因此 FAIL**，不得修改/回滚。
+- 若 RND-336 在 `styles.css` / 部署脚本上有**归因**改动，仍是越权，判 `SCOPE_VIOLATION`。
+- 只把开发期间新增 commit 归因给 agent；采集前就存在的 ahead commit 写 notes，不自动 FAIL。
+- `backend/app/main.py`、`backend/app/db/models.py`、`backend/tests/test_http_contract.py`
+  的所有者是 RND-337 → RND-339（`tasks/WAVE-ownership.md` §5）。它们有 diff 是预期的，
+  **不得**记在 RND-336 账上。
+
+### P-2 依赖闸
+
+```bash
+cat tasks/RND-335-qa-verdict.json
+```
+
+缺失或 `verdict != "PASS"` → 直接 `verdict: BLOCKED`，不必往下走 AC。
+
+### P-3 RND-336 持有共享前端文件
+
+`tasks/WAVE-ownership.md` §3 裁决：`i18n.js`、`test_sidenav.py`、`sidenav.py` 在
+RND-336 ∥ RND-338 冲突中归 RND-336。所以：
+
+- RND-336 改这三个文件是**正当**的，不是越界。
+- 但只应有本票需要的改动。若发现顺手重构、重排 `NAV`、改与 audit 无关的 i18n key
+  → 写进 findings（会给 RND-338 制造冲突），按 major 处理。
+- 若此时 RND-338 已经开工并改了这三个文件，那是 **RND-338 违反了串行化裁决**，
+  写进 notes 并上报，不要判在 RND-336 头上。
 
 ## 验收方法（证据优先）
 
@@ -59,6 +89,10 @@
 ### AC-4 — 默认信号与服务端过滤
 - 证据：首个 fetch query 含 90 天 from 与 `include_system=false`；30/90/all、category、operator、system toggle 更新 URLSearchParams 并重置 offset；operator value 为 admin_user_id；pagination/total 用服务端响应。
 - 判定：过滤由服务器执行且计数一致 = PASS；只过滤当前 DOM、默认含 system、all 仍发日期或 operator 发显示名 = FAIL。
+- ⚠️ 额外必查：system 开关**必须**发 `include_system`。若实现改用
+  `operator=system` 表达「显示系统活动」= FAIL——该参数含义是 `admin_user_id IS NULL`
+  （`backend/app/routers/audit.py:56-57,78-79`），而 RND-335 AC-5c 让平台人工动作
+  也满足它但归类 `security`，两者不等价，用错会把平台管理员访问记录当成系统噪音。
 
 ### AC-5 — 安全详情
 - 证据：读取按 action/key allowlist；用含 `<img onerror>`、message_body、token、secret、signed_url、storage_key、search_text、path 的 fixture，断言不执行、不显示禁止值；允许的 format/count/changed_keys/status 可见且走 textContent。
@@ -90,8 +124,10 @@
 
 ## 附加检查（Scope / Security）
 - 新增 audit export、alert/SIEM/dashboard/Agent activity、普通浏览日志 → `SCOPE_VIOLATION`。
-- 展示/存储 message body、token、secret、signed URL、storage key、search text、path → `SECURITY_VIOLATION`。
-- agent 新 commit/push/建分支/改历史 → `SECURITY_VIOLATION`，先与 baseline 区分。
+- 在 DOM / `console` / `localStorage` / `sessionStorage` 中出现
+  `docs/agent-data-minimization.md` §2 的任何字段族 → `SECURITY_VIOLATION`。
+  用该文件 §5 的哨兵组构造恶意 detail fixture 来证明，不接受人工目测。
+- agent 新 commit/push/建分支/改历史 → `SECURITY_VIOLATION`，先与 P-1 baseline 区分。
 
 ## 验证命令（只读，可运行）
 ```bash

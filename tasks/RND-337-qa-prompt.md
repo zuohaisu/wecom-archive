@@ -34,63 +34,92 @@
 - 待验收工作树 diff，重点：run model/migration、classifier 边界扩展、service/schema/router/runner、main 最小注册、聚焦 tests 与 HTTP contract。
 - 现有 `backend/app/routers/reachability_audit.py` 和旧 API tests，作为兼容基线。
 
-## 共享工作树归因（先做）
+## Preflight（先做，两项都做完再进 AC-1）
 
-提示词撰写时基线为 `## main...origin/main` 且 clean。验收开始时重新记录 `git status --short --branch`、`git diff --name-only`、`git log origin/main..HEAD`。
+### P-1 现场采集，不要相信任何文档里的快照
 
-- 后续出现的用户/他票改动先按 baseline 和文件所有权隔离，不得修改或回滚。
-- 本票归因文件超出 dev prompt 拥有清单即 `SCOPE_VIOLATION`。
-- 本票产生 commit/push/branch 即 FAIL；用户原有 ahead commit 不可误归因。
+本提示词**不记录**工作树状态与 Alembic head。自己采集，并与开发 agent 报告的
+开工 baseline 对照：
+
+```bash
+git status --short --branch
+git diff --name-only
+git log origin/main..HEAD
+(cd backend && .venv/bin/python -m alembic heads)
+```
+
+- 用户/他票改动按文件所有权隔离（`tasks/WAVE-ownership.md`），不得修改或回滚。
+- 本票**归因**文件超出 dev prompt 拥有清单即 `SCOPE_VIOLATION`。
+- 本票产生 commit/push/branch 即 FAIL；采集前就存在的 ahead commit 不可误归因。
+- RND-335 可能并发修改 `backend/app/audit.py` 与多个 `backend/app/routers/*.py`
+  （§2 两票可并发）。它们有 diff 是预期的，**不得**记在 RND-337 账上。
+- AC-1a 的判据是「`down_revision` 指向**你采集到的**前一 head」，不是任何写死的
+  revision 号。若 `alembic heads` 输出多于一个 head → 记 blocker 并查明是不是本票造成的。
+
+### P-2 一次性数据库（决定 AC-1d 怎么判）
+
+```bash
+echo "DATABASE_URL=[${DATABASE_URL}]"
+```
+
+migration 往返需要真实 PostgreSQL（模型用 `JSONB`，SQLite 顶不上）。
+
+- **为空，或无法证明是一次性 local/test 库** → **禁止**执行任何 `alembic upgrade/downgrade`。
+  AC-1d 记为未验证：verdict notes 写 `HUMAN_MIGRATION_REVIEW_PENDING`，
+  并按 R2 风险判 `BLOCKED`。不需要真库的 AC-1e（模型↔migration 静态对齐）
+  照常判定。**不得**把「没跑」当作 PASS，也**不得**因环境缺口给开发判 FAIL。
+- **非空且确认是一次性库** → 执行往返，正常判 AC-1d。
+- 无论如何：不对共享/生产库做迁移，不运行会触发真实消息扫描的命令。
 
 ## 验收方法（证据优先）
 
-### AC-1 — 迁移与模型
-- 证据：唯一 Alembic head；新 revision 的 `down_revision` 指向验收时前一 head；upgrade/downgrade 仅操作 run 表及本票约束/索引；模型与 migration 对齐；没有 message content/payload/raw identity 字段。
-- 必测：tenant FK/index、public id 唯一、状态/来源枚举、非负计数、timestamps、reason JSON；local/test upgrade → downgrade → upgrade。
-- 判定：结构与往返全通过 = PASS；分叉、不可逆副作用、生产执行或 schema 漂移 = blocker FAIL。
+**判定单位是子 AC，不是大项。** `tasks/RND-337-dev-prompt.md` 的「验收标准」已把
+10 个大项拆成 AC-1a ~ AC-10c 的原子断言。**本节不重述断言内容**（重述必然与 dev
+prompt 漂移）——去读 dev prompt 的原文，本节只规定**每类断言需要什么形态的证据**
+和**怎么判**。
 
-### AC-2 — 冻结范围
-- 证据：run 创建时原子记录 scope from/to、max message id、algorithm version；测试在第一页后插入更大 ID/历史消息，结果仍只覆盖冻结候选；默认 7 天边界确定且无本地时区歧义。
-- 判定：候选集不随运行漂移 = PASS；只记录时间但回填消息仍进入本 run，或结束后才推断边界 = FAIL。
+evidence 里每一条子 AC 独立成行：`AC-3d | test_reachability_checks.py::test_2001_candidates_each_classified_once | PASS`。
 
-### AC-3 — 完整分页
-- 证据：0、1、2000、2001、多页 fixtures；每个冻结候选恰好分类一次；`checked == matching` 且 reason 总和一致；旧 helper 不传新参数时快照/代表性响应不变。
-- 判定：无漏扫、重扫或页上限截断 = PASS；用首 2000 条推断整体 = blocker FAIL。
+### 通用证据形态
 
-### AC-4 — 状态真实性
-- 证据：状态转换表与参数化 tests 覆盖 healthy/attention/checking/no_data/incomplete/error；页中断、exception、count mismatch、stale checking 都显式测试；断言这些路径永不 healthy。
-- 判定：只有完整且 zero unreachable 才 healthy = PASS；任何 partial/unknown 被 healthy/no_data 掩盖 = blocker FAIL。
+| 断言形态 | 可接受的证据 | 不可接受 |
+|---|---|---|
+| 「每条候选恰好一次」 | 分类调用的实际计数 / 被检查 ID 的集合断言 | `has_more=false` 的 mock；HTTP 200 |
+| 「候选集不漂移」 | 第一页后真实插入数据，再断言结果集 | 只断言 `scope_to` 被写进了表 |
+| 「永不 healthy」 | 参数化遍历全部 partial/exception 路径的断言 | 抽查一两个分支 |
+| 「不在 request thread 全扫」 | scanner 调用计数或耗时断言 | 「响应很快」 |
+| 「同租户同一 run」 | 数据库/事务层并发测试 | 模块级全局变量、进程内线程锁 |
+| 「递归不含 X」 | `docs/agent-data-minimization.md` §5 的递归遍历断言 | 只查顶层 key；注释 |
+| 「tenant scoped」 | A/B 双租户 seed 后的实际读写隔离测试 | 只看 router 出口过滤 |
+| 「route +2」 | 采集到的当前真实 `route_count` 与改后值之差 | 写死数字 |
+| 「migration 往返」 | P-2 一次性 DB 上的三步实际 exit code | 「代码看起来是对的」 |
 
-### AC-5 — POST 异步与幂等
-- 证据：API test 证明 request 返回前不执行全量 scanner；响应为 accepted/checking 快照；并发事务测试证明同租户同一 active public id、不同租户独立、完成后可建新 run。
-- 判定：数据库/事务级原子性可重复证明 = PASS；只用模块全局变量/线程锁或测试未真正覆盖并发 = FAIL。
+### 逐大项的判定重点
 
-### AC-6 — GET latest 契约
-- 证据：六态、complete、scope/count/reasons/timestamps/version/safe error shape tests；有/无历史 run 均覆盖；递归检查 response keys/values 不含 content、payload、structured_content、sender、recipient、room、raw msgid、path、secret、traceback/原始异常。
-- 判定：足够支持 UI 且最小安全 = PASS；伪造 last_checked_at 或泄漏内部数据 = FAIL。
-
-### AC-7 — runner 恢复
-- 证据：CLI/runner 仅接受 public run id；unknown/completed/stale/跨租户场景；同 run 重入不会双加计数；异常后 transaction 最终状态可读且不永久 checking。
-- 判定：幂等、fail closed、无 tenant id/process-arg 泄漏 = PASS。
-
-### AC-8 — 认证与租户隔离
-- 证据：两个 route 未登录失败；tenant A/B 同时 seed 后 GET/POST/runner 全路径隔离；request body/query 无 tenant selector；猜 public id 的响应不泄露他租户存在性。
-- 判定：所有 ORM 读写显式 tenant scoped、运行定位安全 = PASS；只在 router 过滤但 service update 未带 tenant = blocker FAIL。
-
-### AC-9 — 兼容、架构与 route contract
-- 证据：旧 `/api/admin/reachability-audit` path/query/model/样例 tests 通过；新增 route 恰好两个；`main.py` diff 仅 router import/include；service 不反向 import router，router 不 import main。
-- 判定：route count 相对基线恰好 +2、架构硬闸全绿 = PASS；为通过快照删除/弱化旧断言 = FAIL。
-
-### AC-10 — 回归与范围
-- 证据：聚焦测试、`make verify`、architecture、HTTP contract、migration head tests exit 0；归因 diff 只在拥有清单；前端、systemd、archive worker、旧 router 无改动。
-- 判定：全部成立 = PASS；任一归因失败或越界 = FAIL。
+- **AC-1**：AC-1a 用**你采集到的** head 判，不用文档里的 revision 号。分叉、
+  不可逆副作用、对共享/生产库执行 = blocker FAIL。AC-1d 按 Preflight P-2 处理。
+- **AC-2**：AC-2b/2c 必须真的插入数据再断言。「只记录了 `scope_to` 时间戳但回填消息
+  仍进入本 run」或「跑完才推断边界」= FAIL。
+- **AC-3**：AC-3d（2001 条跨页）是本项核心。用首 2000 条推断整体 = **blocker FAIL**。
+  AC-3g 若为了让新代码通过而削弱或删除旧 helper 的既有断言 = FAIL。
+- **AC-4**：AC-4f 是本票的灵魂。任何 partial / unknown / exception 被 `healthy` 或
+  `no_data` 掩盖 = **blocker FAIL**。另查：代码中所有 fallback、except 分支、
+  「无 run」分支都不得返回 `healthy`——`healthy` 是结论，不是默认值。
+- **AC-5**：AC-5c 只用模块全局变量或线程锁、或测试没真正并发 = FAIL。
+- **AC-6**：AC-6c 伪造 `last_checked_at` = FAIL。AC-6d 用哨兵递归断言。
+- **AC-7**：AC-7a 若 CLI 参数里出现 tenant id = FAIL（进程参数是受管面）。
+- **AC-8**：AC-8d 只在 router 过滤而 service 的 update 未带 tenant = **blocker FAIL**。
+- **AC-9**：AC-9b 若 `test_http_contract.py` 删除或弱化了既有 expected 条目 = FAIL；
+  只允许追加本票的两条。AC-9e 复制 classifier = FAIL。
+- **AC-10**：共享工作树里他票的失败先按 P-1 隔离归因再写 notes。
 
 ## 本项目专属检查（必查）
 1. 新 route 位于 `app/routers`；`main.py` 只有 composition wiring，无 SQL/BackgroundTasks 业务实现/内联 schema。
 2. 分类只能来自 `app.reachability_audit`；搜索新 service 中是否重新定义 status/reason 分支。复制 classifier 即 FAIL。
 3. `test_http_contract.py` 只能做两个新 route 所需的 count/snapshot/auth/shape 最小改动，不得删除既有 expected 项。
 4. 若 router 使用 `get_current_user`，`test_rnd280_rbac_scaffold.py` 不应改；若实现自行引入 `require_role` 却未获权限决策，判 scope/requirement defect。
-5. 日志、response、DB columns、CLI args 均不得出现消息内容/原始身份/secret/traceback；测试应使用敏感哨兵值递归断言缺失。
+5. 日志、response、DB columns、CLI args 四个受管面均适用 `docs/agent-data-minimization.md` §2；
+   测试必须用该文件 §5 的哨兵组递归断言缺失。本票唯一授权的例外是 public run id。
 6. `healthy` 是结论而不是默认：检查代码中任何 fallback、exception handler、无 run 分支都不能返回 healthy。
 
 ## 附加检查（Scope / Security）
@@ -112,22 +141,25 @@ git status --short --branch
 git log origin/main..HEAD
 ```
 
-仅在明确 disposable DB URL 下追加执行：
+仅在 Preflight P-2 确认为一次性 DB 时追加执行：
 ```bash
 (cd backend && .venv/bin/python -m alembic upgrade head)
 (cd backend && .venv/bin/python -m alembic downgrade -1)
 (cd backend && .venv/bin/python -m alembic upgrade head)
 ```
 
-若无法证明 DB 是一次性 local/test，禁止执行 migration 写命令；自动化 migration test 可继续。缺少真实迁移往返证据时不得把该点静默标 PASS，在 verdict notes 说明 `HUMAN_MIGRATION_REVIEW_PENDING` 或按风险判 BLOCKED。
+若无法证明 DB 是一次性 local/test，禁止执行 migration 写命令；不依赖真库的 schema 断言测试可继续。
+按 Preflight P-2 处理 AC-1d：notes 写 `HUMAN_MIGRATION_REVIEW_PENDING` 并判 `BLOCKED`，
+既不静默标 PASS，也不因环境缺口给开发判 FAIL。
 
 ## 产出
 写入 `tasks/RND-337-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
 
-- AC 全 PASS、无 blocker/major、R2 migration 证据完整 → `verdict: PASS`，`recommended_next_state: PASS`。
-- 任一 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；findings 只描述最小修复，不代写。
+- **全部子 AC** PASS、无 blocker/major、R2 migration 证据完整 → `verdict: PASS`，`recommended_next_state: PASS`。
+- 任一子 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；findings **按子 AC 编号定位**（如 `AC-3d`），只描述最小修复，不代写。
+- Preflight P-2 未满足（AC-1d 无法验证）→ `verdict: BLOCKED`，notes 写 `HUMAN_MIGRATION_REVIEW_PENDING`；其余子 AC 判定照常写进 evidence。
 - 迁移/权限/状态语义需产品决策或两轮仍失败 → `verdict: BLOCKED`，`recommended_next_state: BLOCKED_NEEDS_HUMAN`。
-- verdict evidence 必须列出实际候选数/页数、六态测试、route count 前后值、Alembic head 和命令 exit code。
+- evidence 必须逐子 AC 成行，并列出实际候选数/页数、六态测试、route count 前后值、采集到的 Alembic head 和命令 exit code。不得用「AC-3 全部通过」这类聚合表述。
 
 ## 禁止事项
 - 除 verdict JSON 外不修改任何文件，不补实现或测试。

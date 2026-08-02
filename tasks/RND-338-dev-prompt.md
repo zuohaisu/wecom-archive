@@ -6,7 +6,59 @@
 
 ## ⚡ 立即执行，不要询问意图
 
-你现在收到的是已经批准、待立即执行的任务指令。你就是 RND-338 开发 agent。先验证 RND-337 为最终 QA PASS 且实际 API 契约与 prompt 一致；不满足则输出 `BLOCKED_NEEDS_HUMAN`，不改产品代码。依赖满足后直接实现。
+你现在收到的是已经批准、待立即执行的任务指令。你就是 RND-338 开发 agent。先执行 Preflight；任一闸不满足则输出 `BLOCKED_NEEDS_HUMAN`，不改产品代码。全部满足后直接实现。
+
+---
+
+## Preflight（开工第一步，先做完再碰代码）
+
+### P-1 现场采集工作树基线 —— 不要相信任何文档里的快照
+
+本提示词**不记录**工作树状态：提示词是静态的，工作树是易变的。你自己采集：
+
+```bash
+git status --short --branch
+git diff --name-only
+git log origin/main..HEAD
+```
+
+归因规则：
+
+1. 不在下方「本工单拥有的文件」清单里的一切改动 → 标为「非本票」，写进 QA Summary
+   的 notes，**不修改、不回滚、不覆盖、不算作本票交付**。
+2. 采集**之后**新增的 commit / push / branch 才归因于你（你不该产生任何一个）。
+3. RND-335 / RND-339 可能并发进行（见 `tasks/WAVE-ownership.md` §2）。看到
+   `backend/app/` 后端文件、`deploy/systemd/`、`docs/` 有 diff 是预期的，不是你的越界。
+
+### P-2 依赖闸：RND-337 必须 QA PASS
+
+```bash
+cat tasks/RND-337-qa-verdict.json
+```
+
+- 文件不存在，或 `verdict != "PASS"` → `BLOCKED_NEEDS_HUMAN` + 缺失契约，**零产品代码改动**。
+- PASS → 读**实际落地的** `backend/app/schemas/reachability_checks.py` 与
+  `backend/app/routers/reachability_checks.py`，以真实 schema 为准，
+  不以本提示词对六态/字段的描述为准。字段名对不上时按下方「若 RND-337 最终 response
+  与本 prompt 有差异」的规则处理。
+
+### ⛔ P-3 串行闸：RND-336 必须先 Done
+
+`tasks/WAVE-ownership.md` §3 记录了一个跨波次冲突：RND-336 与 RND-338 都需要写
+`backend/app/assets/i18n.js` 与 `backend/tests/test_sidenav.py`，且 RND-336 会
+结构性修改 `backend/app/web/sidenav.py`。裁决是**串行化，RND-336 在前**。
+
+```bash
+cat tasks/RND-336-qa-verdict.json
+```
+
+- 文件不存在，或 `verdict != "PASS"` → 输出 `BLOCKED_NEEDS_HUMAN`：
+  「RND-338 被 WAVE-ownership §3 串行化裁决阻塞，需 RND-336 先 Done，
+  或需 Haisu 在 `tasks/WAVE-ownership.md` 改判」。**零产品代码改动**，
+  尤其不要碰 `i18n.js` 和 `test_sidenav.py`。
+- PASS → 继续。注意此时 `NAV` 里**不应该**再有 `audit-log` 项——那是 RND-336 的
+  交付物，**不是**你的归因 diff，也不是需要你修复的回归。你只改 `nav.diagnostics`
+  的文案 key，不动 `NAV` 结构。
 
 ---
 
@@ -32,7 +84,8 @@
 - 旧 `GET /api/admin/reachability-audit` 保留给技术排障；新页面的主结论不得再通过客户端单页扫描推断。
 - 当前没有 dashboard UI；本票只重构现有诊断页，不新建首页卡片。
 
-**共享工作树基线：**提示词撰写前产品代码为 clean `main...origin/main`；本轮新增的 `tasks/RND-337-*`、`tasks/RND-338-*`、`tasks/RND-339-*` 是 PM 提示词产物，不归因于开发实现。开发开始时重新记录 baseline，不得修改/revert 他票或用户文件。
+**共享工作树基线：**见 Preflight P-1。基线由你现场采集，本节不做任何快照断言。
+`tasks/` 下的提示词文件是 PM 产物，任何时候都不归因于开发实现。
 
 **本项目已知的高频踩坑点：**
 - ❗ **没有模板引擎。** `render_template()` 只做 `__TOKEN__` 替换；禁止 Jinja `{%` / `{{`。页面动态内容用原生 JS。
@@ -61,7 +114,9 @@
 **Out of scope（显式非目标）：**
 - 不新增/改名 route，不新建 dashboard/home 卡片，不改 Settings 信息架构。
 - 不改 RND-337 backend/API/schema/migration，不调用旧 audit API 计算主结论。
-- 不展示逐条消息、raw identifiers、消息内容、samples 或下载/导出。
+- 不展示逐条消息、samples 或下载/导出。
+- 不在 DOM / `console` / `localStorage` / `sessionStorage` 中出现
+  `docs/agent-data-minimization.md` §2 的任何字段族（前端面的检查方式见该文件 §5 末段）。
 - 不做自动修复、自动补拉、告警、通知、客服工单、SLA 或合规保证。
 - 不实现 RND-339 的自动触发/findings/agent API。
 - 不引入 chart library、React/Vue、bundler 或 shared style 大重构。
@@ -70,18 +125,20 @@
 - `backend/app/web/templates/diagnostics.html`
 - `backend/app/web/static/diagnostics.js`
 - `backend/app/web/static/diagnostics.css`
-- `backend/app/assets/i18n.js`（仅 nav.diagnostics 与 diagnostics/archive-health 相关 keys，三 locale）
+- `backend/app/assets/i18n.js`（⚠️ 与 RND-336 共享，见 Preflight P-3；**仅** nav.diagnostics 与 diagnostics/archive-health 相关 keys，三 locale。不得触碰 audit/security-activity 区，那是 RND-336 的）
 - `backend/app/routers/web.py`（仅更新该页面 docstring/描述，不改 route/auth）
 - `backend/tests/test_reachability_diagnostics_page.py`
 - `backend/tests/test_reachability_diagnostics_render.py`
-- `backend/tests/test_sidenav.py`（仅 nav 文案/key 行为相关断言）
+- `backend/tests/test_sidenav.py`（⚠️ 与 RND-336 共享，见 Preflight P-3；**仅**新增 diagnostics 文案/key 相关断言，不得修改或删除 RND-336 关于 audit-log 已移除的断言）
 - `backend/tests/test_rnd338_archive_health_ui.py`（可新建；不用则不建空文件）
 
 **本工单只读、绝不可写的文件：**
 - `backend/app/reachability_audit.py`、`backend/app/routers/reachability_audit.py` — 旧技术接口
 - `backend/app/services/reachability_check_service.py`、`backend/app/schemas/reachability_checks.py`、`backend/app/routers/reachability_checks.py`、`backend/app/db/models.py`、`backend/alembic/versions/0032_reachability_audit_runs.py`、`backend/tests/test_reachability_checks.py` — RND-337 最终契约（migration 文件名以实际落地为准）
-- `backend/app/main.py`、`backend/tests/test_http_contract.py`、`backend/tests/test_rnd280_rbac_scaffold.py` — 无新 route
-- `backend/app/web/sidenav.py` — 结构不变，label 由 i18n 提供
+- `backend/app/main.py`、`backend/tests/test_http_contract.py` — 无新 route；**所有者 RND-337 → RND-339**
+- `backend/tests/test_rnd280_rbac_scaffold.py` — 本票不新增 router，不触发闭世界白名单
+- `backend/app/web/sidenav.py` — **所有者 RND-336**。结构不变，label 由 i18n 提供。RND-336 已从 `NAV` 移除 `audit-log`，那是它的交付物，不要「修回来」
+- `backend/app/routers/admin_audit_page.py`、`backend/app/web/templates/audit_log.html`、`backend/app/web/templates/settings.html` — **所有者 RND-336**
 - `backend/app/web/static/styles.css` — 共享样式；本页专属 CSS 已存在
 - `backend/scripts/run_archive_worker_once.py`、`deploy/systemd/wecom-archive-reachability-check.service`、`deploy/systemd/wecom-archive-reachability-check.timer`、`backend/app/services/reachability_automation_service.py`、`backend/app/routers/reachability_findings.py` — RND-339
 
@@ -89,7 +146,8 @@
 
 ## 验收标准（Acceptance Criteria）
 
-- **AC-1 依赖闸**：RND-337 verdict 为 PASS，实际 POST/latest 六态契约可读；依赖不满足时零产品代码改动并 BLOCK。
+- **AC-1a 依赖闸**：RND-337 verdict 为 PASS，实际 POST/latest 六态契约可读；不满足时零产品代码改动并 BLOCK。
+- **AC-1b 串行闸**：RND-336 verdict 为 PASS（WAVE-ownership §3）；不满足时零产品代码改动并 BLOCK，尤其未触碰 `i18n.js` 与 `test_sidenav.py`。
 - **AC-2 命名/URL**：一级 nav 与页面三语言名称为 Archive health 对应文案；旧 `/admin/diagnostics/reachability` auth/bookmark/200 保持；不新增 route，不再把“reachability rate”作为首屏概念。
 - **AC-3 六态首屏**：每个 state + complete 组合都有明确标题、解释、时间/范围/数量和适用 CTA；partial/no run/error 绝不显示绿色健康；healthy 文案限定在最近一次完整检查范围。
 - **AC-4 手动检查生命周期**：POST 防重复、active run 复用、checking poll、terminal 停止、timeout/backoff/unload cleanup、retry、401/403/network/error 均有自动化测试；不阻塞 UI、不无限轮询。
@@ -115,7 +173,8 @@
 - 通过 = AC-1 ~ AC-9、自动化命令和三语言/窄屏人工视觉 gate 均通过。
 
 ## 依赖（Dependencies）
-- **硬 blocker：RND-337 必须最终 QA PASS。** 核对真实 schema、六态、POST 幂等/active 行为、safe error 目录。
+- **硬 blocker 1：RND-337 必须最终 QA PASS。** 核对真实 schema、六态、POST 幂等/active 行为、safe error 目录。
+- **硬 blocker 2：RND-336 必须 Done。** 来自 `tasks/WAVE-ownership.md` §3 的串行化裁决——两票共享 `i18n.js` 与 `test_sidenav.py`。这不是功能依赖，是文件所有权依赖，但同样是硬闸。
 - RND-339 非本票前置；两票可并行，RND-338 不得触碰 backend automation/findings 文件。
 
 ## 完成定义（Definition of Done）
@@ -141,7 +200,7 @@
 - **Escalation**：RND-337 状态/错误目录不稳、需要改 backend/shared styles/route、视觉文案需产品决策或两轮仍失败时，`BLOCKED_NEEDS_HUMAN`。
 
 ## 开发 agent 执行指引（步骤）
-1. 核对 RND-337 verdict/actual OpenAPI 和 dirty baseline；读现有 diagnostics template/JS/CSS/tests/i18n。
+1. 跑 Preflight P-1 / P-2 / P-3 并记录结论；读实际 RND-337 schema 与现有 diagnostics template/JS/CSS/tests/i18n。
 2. 先写六态、POST/poll/cleanup、安全 DOM、三 locale、旧 API 不再消费的 tests。
 3. 重排 template 为首屏结论 + 折叠技术详情；JS 只消费新 API，CSS 复用 tokens 响应式实现。
 4. 更新三个 locale 和 web route docstring；不改 nav 结构/main/backend。
@@ -151,5 +210,6 @@
 - 不 commit/push/建分支/改历史；不改 CI/CD、部署、`.gitignore` 或生产数据。
 - 不改 RND-337/339 backend，不新增 route/dashboard，不改 shared styles。
 - 不用旧分页 API 推断健康，不自行重算六态，不将 incomplete/no-run/error 显示为 healthy。
-- 不用 innerHTML 注入 API 值，不显示内容/身份/路径/traceback，不做自动修复/通知。
+- 不用 innerHTML 注入 API 值；敏感字段以 `docs/agent-data-minimization.md` 为准；不做自动修复/通知。
+- 不改 `i18n.js` 的 audit/security-activity 区，不动 `NAV` 结构，不修改 RND-336 写的 `test_sidenav.py` 断言。
 - 不用 Jinja/React/Vue/bundler/chart library；SSR + 原生 JS。
