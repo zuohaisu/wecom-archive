@@ -44,8 +44,15 @@
 git status --short --branch
 git diff --name-only
 git log origin/main..HEAD
-(cd backend && .venv/bin/python -m alembic heads)
+(cd backend && ../.venv/bin/python -m alembic heads)
 ```
+
+> **关于这条命令（照做，不要自行判断）**：`alembic.ini` 在 `backend/`，所以必须
+> `cd backend`；但 venv 在**仓库根**（`Makefile:31` 的 `BACKEND_PY ?= $(CURDIR)/.venv/bin/python`），
+> 所以进了 `backend/` 之后要用 `../.venv/`。
+> **`alembic heads` 只读 `backend/alembic/versions/`，不连接数据库**——`DATABASE_URL`
+> 为空**不影响**它。采集不到 head 时先排查 venv 路径，**不要**把它和 P-2 的
+> 数据库缺口混为一谈，也**不要**因此 BLOCK。
 
 - `tasks/` 下的提示词文件是 PM 产物，任何时候都不归因于开发实现。
 - RND-338 UI、classifier、旧 audit router、RND-337 schema/router/CLI、核心 worker unit、
@@ -69,11 +76,16 @@ cat tasks/RND-337-qa-verdict.json
 echo "DATABASE_URL=[${DATABASE_URL}]"
 ```
 
-- **为空，或无法证明是一次性 local/test 库** → **禁止**执行任何 `alembic upgrade/downgrade`。
-  AC-1d 记为未验证：notes 写 `HUMAN_MIGRATION_REVIEW_PENDING`，按 R2 风险判 `BLOCKED`。
-  不依赖真库的 AC-1c/AC-1e 静态断言照常判定。**不得**把「没跑」当作 PASS，
-  也**不得**因环境缺口给开发判 FAIL。
-- **非空且确认是一次性库** → 执行往返，正常判 AC-1d。
+**按 `docs/agent-test-database.md` 执行。** 你和开发 agent 一样，**可以自建**
+一次性测试库来验证 AC-1d，不要因为 `DATABASE_URL` 为空就直接判 BLOCKED。
+
+- 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库；§5 是绝对禁止清单。
+- 按 §3 自建空库并 `export DATABASE_URL`，跑往返，正常判 AC-1d。
+- 只有本机根本没有可用 PG 实例时，AC-1d 才记为未验证：notes 写
+  `HUMAN_MIGRATION_REVIEW_PENDING`，按 R2 风险判 `BLOCKED`；不依赖真库的
+  AC-1c/AC-1e 照常判定。**不得**把「没跑」当作 PASS，也**不得**因环境缺口判 FAIL。
+- 另需核对开发 agent 是否遵守了同一套规则：若它对开发库/共享库执行过迁移
+  → blocker `SECURITY_VIOLATION`。
 
 ### P-4 你自己也不许碰生产
 
@@ -155,7 +167,7 @@ make verify
 test ! -f backend/tests/test_reachability_automation_cli.py || .venv/bin/python -m pytest backend/tests/test_reachability_automation_cli.py -q
 .venv/bin/python -m pytest backend/tests/test_reachability_systemd_units.py backend/tests/test_archive_worker_reachability_hook.py -q
 .venv/bin/python -m pytest backend/tests/test_reachability_checks.py backend/tests/test_http_contract.py backend/tests/test_architecture_boundary.py backend/tests/test_verify_alembic_head.py -q
-(cd backend && .venv/bin/python -m alembic heads)
+(cd backend && ../.venv/bin/python -m alembic heads)
 git diff --check
 git diff --name-only
 git status --short --branch
@@ -174,7 +186,7 @@ git log origin/main..HEAD
 
 - **全部子 AC** PASS、无 blocker/major、R2 migration/deployment review 有证据 → `verdict: PASS`，`recommended_next_state: PASS`。
 - 任一子 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；findings **按子 AC 编号定位**（如 `AC-4b`），只列最小修复。
-- Preflight P-3 未满足（AC-1d 无法验证）→ `verdict: BLOCKED`，notes 写 `HUMAN_MIGRATION_REVIEW_PENDING`；其余子 AC 判定照常写进 evidence。
+- Preflight P-3 无法满足（**本机根本没有 PG 实例**，不是「`DATABASE_URL` 恰好为空」）→ `verdict: BLOCKED`，notes 写 `HUMAN_MIGRATION_REVIEW_PENDING`；其余子 AC 判定照常写进 evidence。
 - RND-337 契约漂移、resolution/timer/权限需产品决策或两轮仍失败 → `verdict: BLOCKED`，`recommended_next_state: BLOCKED_NEEDS_HUMAN`。
 - evidence 必须逐子 AC 成行，并列出 watermark 前后值、finding lifecycle rows、worker exit matrix、API safe keys、route count 前后值、采集到的 Alembic head、unit schedule 和命令 exit code。不得用「AC-4 全部通过」这类聚合表述。
 

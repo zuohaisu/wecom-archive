@@ -21,7 +21,6 @@
 git status --short --branch
 git diff --name-only
 git log origin/main..HEAD
-(cd backend && .venv/bin/python -m alembic heads)
 ```
 
 归因规则（稳定，可信）：
@@ -47,13 +46,15 @@ AC-5f 要求证明平台审计行能穿过**真实外键**落库。本仓唯一�
 echo "DATABASE_URL=[${DATABASE_URL}]"
 ```
 
-- **为空** → 本仓没有 docker-compose，你无法自备 PG。立即输出
-  `BLOCKED_NEEDS_HUMAN`：「AC-5f/AC-7a~7c 需要一次性 PostgreSQL 的 `DATABASE_URL`，
-  请 Haisu 提供」。**不要**改 `conftest`/CI/测试基础设施来绕过，**不要**用 SQLite
-  冒充（`AuditLog.detail` 是 `JSONB`，SQLite 无此类型且默认不强制外键）。
-  其余 AC 可继续实现，但 AC-5f/AC-7a~7c 保持未完成并在 QA Summary 中明确标注。
-- **非空** → 记录其主机名与库名（不要记录密码），确认是一次性 local/test 库
-  再继续。指向共享或生产库时禁止运行，按上一条上报。
+**按 `docs/agent-test-database.md` 执行**——你**可以也应该自建**一次性测试库，
+不要因为 `DATABASE_URL` 为空就整票 BLOCK。
+
+- 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库。
+- 按 §3 自建空库并在本次会话内 `export DATABASE_URL`；§5 是绝对禁止清单
+  （含：不改 `conftest`/CI 绕过、不用 SQLite 冒充）。
+- 只有本机根本没有可用 PG 实例才 `BLOCKED_NEEDS_HUMAN`；此时其余 AC 照常实现，
+  AC-5f/AC-7a~7c 标注为待 PG 环境。
+- 按 §6 记录库名/host（不写密码）、是否自建、是否已清理。
 
 ---
 
@@ -275,11 +276,9 @@ echo "DATABASE_URL=[${DATABASE_URL}]"
   .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
   git diff --check
   ```
-- **AC-5f / AC-7a~7c 依赖 Preflight P-2 的 `DATABASE_URL`。** 若 P-2 未满足，这些用例会按
-  全仓既有的 `skipif(not _DB_AVAILABLE)` 约定自动 skip——这**不是**实现缺陷，也**不是**
-  你可以自行绕过的东西。按 P-2 规则输出 `BLOCKED_NEEDS_HUMAN` 并在 QA Summary 里
-  写明「AC-5f/AC-7a~7c 待 PG 环境」。**禁止**为了让它们不 skip 而修改 `conftest`、
-  测试基础设施、CI 配置，或用 SQLite 替代。
+- **AC-5f / AC-7a~7c 需要 `DATABASE_URL` 指向真实 PG。** 按 Preflight P-2 自建一次性
+  测试库后 `export`，这些用例即不再 skip。只有本机根本没有 PG 实例时才 BLOCK。
+  **禁止**为了让它们不 skip 而修改 `conftest`、测试基础设施、CI 配置，或用 SQLite 替代。
 - 通过 = 全部子 AC 满足且所有适用命令 exit 0；失败进入最多 2 轮有界修复。
 
 ## 依赖（Dependencies）

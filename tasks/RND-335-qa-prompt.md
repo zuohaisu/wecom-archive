@@ -65,13 +65,17 @@ echo "DATABASE_URL=[${DATABASE_URL}]"
 `DATABASE_URL` 非空，见 `backend/tests/test_rnd293_audit_log.py:31,58`，
 32 个测试文件同此模式）。`make test` 不设它，CI 的 PG job 才设。
 
-- **`DATABASE_URL` 为空** → AC-5f、AC-7a~7c 的用例会 skip。这是**环境缺口，不是实现缺陷**：
-  → `verdict: BLOCKED`，`recommended_next_state: BLOCKED_NEEDS_HUMAN`，
-  notes 写 `PG_ENV_MISSING: AC-5f/AC-7a~7c 未验证，需 Haisu 提供一次性 PG 的 DATABASE_URL`。
-  其余子 AC 照常逐条判定并写进 evidence——**不要**因为这一项就放弃整份验收。
-  **不得**把 skip 当作 PASS，也**不得**判 FAIL（开发 agent 无法在自己的拥有文件内修复它）。
-- **`DATABASE_URL` 非空且指向一次性 local/test 库** → 正常跑，正常判。
-- 无法确认是一次性库 → 禁止运行，按上面第一条处理。
+**按 `docs/agent-test-database.md` 执行。** 你和开发 agent 一样，**可以自建**
+一次性测试库来验证 AC-5f / AC-7a~7c，不要因为 `DATABASE_URL` 为空就直接判 BLOCKED。
+
+- 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库；§5 是绝对禁止清单。
+- 按 §3 自建空库并 `export DATABASE_URL`，正常跑、正常判。
+- 只有本机根本没有可用 PG 实例时，才 → `verdict: BLOCKED`，notes 写
+  `PG_ENV_MISSING: AC-5f/AC-7a~7c 未验证`。其余子 AC 照常逐条判定并写进
+  evidence——**不要**因为这一项就放弃整份验收。**不得**把 skip 当作 PASS，
+  也**不得**判 FAIL（那是环境缺口，不是实现缺陷）。
+- 另需核对开发 agent 是否遵守了同一套规则：若它对开发库/共享库执行过写入
+  → blocker `SECURITY_VIOLATION`。
 
 ## 验收方法（证据优先）
 
@@ -156,8 +160,8 @@ git log origin/main..HEAD
 
 - **全部子 AC** PASS 且无 blocker/major → `verdict: PASS`，`recommended_next_state: PASS`；notes 明确「RND-336 blocker 可解除」。
 - 任一子 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；findings **按子 AC 编号定位**（如 `AC-3f`），只描述最小修复。
-- Preflight P-2 未满足（`DATABASE_URL` 为空）→ `verdict: BLOCKED`，
-  notes 写 `PG_ENV_MISSING`，其余子 AC 的判定照常写进 evidence。
+- Preflight P-2 无法满足（**本机根本没有 PG 实例**，不是「`DATABASE_URL` 恰好为空」）
+  → `verdict: BLOCKED`，notes 写 `PG_ENV_MISSING`，其余子 AC 判定照常写进 evidence。
 - 需求歧义、需 migration/鉴权决策、已 2 轮仍 FAIL → `verdict: BLOCKED`，`recommended_next_state: BLOCKED_NEEDS_HUMAN`。
 
 evidence 必须逐子 AC 成行，不得用「AC-3 全部通过」这类聚合表述。
@@ -165,6 +169,7 @@ evidence 必须逐子 AC 成行，不得用「AC-3 全部通过」这类聚合�
 ## 禁止事项
 - 除规定 verdict 外不修改文件；不替开发补实现，不放松 AC。
 - 不用同 Session 可见性替代持久性。
-- **不要**因为 AC-5f/AC-7a~7c 在无 PG 环境下 skip 就判 FAIL——那是环境缺口，
-  开发 agent 无法在自己的拥有文件内修复。按 P-2 判 BLOCKED。
-- 反过来，**也不要**把 skip 记成 PASS。
+- **不要**因为 `DATABASE_URL` 恰好为空就判 BLOCKED——先按 `docs/agent-test-database.md`
+  §3 自建测试库再跑。只有本机确实没有 PG 实例才 BLOCKED。
+- **也不要**把 skip 记成 PASS。
+- **更不要**为了跑通而对开发库执行写入——那是 blocker `SECURITY_VIOLATION`。

@@ -45,9 +45,14 @@ RND-335 与 RND-337 均无前置，**两个波次同时开工**。因此下面�
 **裁决（2026-08-02）：串行化，RND-336 在前。**
 
 - `i18n.js`、`test_sidenav.py`、`sidenav.py` 三个文件在本波次中**归 RND-336**。
-- **RND-338 不得在 RND-336 进入 Done 之前开工。** RND-338 dev agent 的 Preflight
-  必须检查 `tasks/RND-336-qa-verdict.json` 存在且 `verdict == "PASS"`；不满足则
-  输出 `BLOCKED_NEEDS_HUMAN`，零产品代码改动。
+- **RND-338 不得在 RND-336 的共享文件落定之前开工。** RND-338 dev agent 的 Preflight
+  必须检查 `tasks/RND-336-qa-verdict.json`。这道闸的目的是**文件所有权交接**，不是
+  功能依赖，所以判据是「代码是否已落定」而非 verdict 字面值：
+  - `PASS` → 通过。
+  - `BLOCKED` 但全部 AC 为 `PASS`、无 scope/security finding、阻塞原因仅
+    `HUMAN_VISUAL_REVIEW_PENDING` → **通过**（视觉 gate 是 Haisu 的人工动作，
+    RND-336 不会再回头改共享文件）。
+  - 文件缺失，或存在未过的 AC / finding → `BLOCKED_NEEDS_HUMAN`，零产品代码改动。
 - 理由：RND-336 改的是导航**结构**（少一个 item），会使 RND-338 关于 NAV 的假设
   失效；RND-338 只改**文案**，可以无痛适配一个少了一项的 NAV。反向顺序则需要
   RND-336 重做 RND-338 已经写好的 nav 断言。

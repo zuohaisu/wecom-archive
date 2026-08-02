@@ -21,9 +21,16 @@
 git status --short --branch
 git diff --name-only
 git log origin/main..HEAD
-(cd backend && .venv/bin/python -m alembic heads)
+(cd backend && ../.venv/bin/python -m alembic heads)
 ls backend/alembic/versions/ | sort | tail -5
 ```
+
+> **关于这条命令（照做，不要自行判断）**：`alembic.ini` 在 `backend/`，所以必须
+> `cd backend`；但 venv 在**仓库根**（`Makefile:31` 的 `BACKEND_PY ?= $(CURDIR)/.venv/bin/python`），
+> 所以进了 `backend/` 之后要用 `../.venv/`。
+> **`alembic heads` 只读 `backend/alembic/versions/`，不连接数据库**——`DATABASE_URL`
+> 为空**不影响**它。采集不到 head 时先排查 venv 路径，**不要**把它和 P-2 的
+> 数据库缺口混为一谈，也**不要**因此 BLOCK。
 
 归因规则：
 
@@ -46,19 +53,25 @@ AC-1 要求 `upgrade → downgrade → upgrade` 往返。这需要一个**真实
 echo "DATABASE_URL=[${DATABASE_URL}]"
 ```
 
-- **为空** → 本仓没有 docker-compose，你无法自备 PG。输出 `BLOCKED_NEEDS_HUMAN`：
-  「AC-1 的 migration 往返需要一次性 PostgreSQL 的 `DATABASE_URL`，请 Haisu 提供」。
-  模型/schema 的静态断言测试可以继续写（那部分不需要真库），但**不得**声称往返已验证。
-- **非空** → 先确认它是一次性 local/test 库：记录主机名与库名（不要记录密码）。
-  只要无法证明它是一次性的（例如指向共享开发库、生产库、或你无法判断），
-  **禁止**执行任何 `alembic upgrade/downgrade`，按上一条上报。
-- 三条铁律：不对共享/生产库执行迁移；不为了让往返跑通而改 CI 配置；
-  不用 SQLite 冒充生产形状。
+**按 `docs/agent-test-database.md` 执行**——你**可以也应该自建**一次性测试库，
+不要因为 `DATABASE_URL` 为空就整票 BLOCK。
+
+- 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库（尤其 `.env` 里指向开发库的
+  `DATABASE_URL`，对它跑 `upgrade head` 是破坏性操作）。
+- 按 §3 自建 `wecom_archive_test` 之类的空库并在**本次会话内** `export DATABASE_URL`。
+- 只有本机**根本没有可用的 PG 实例**（无 `createdb`、无监听端口、无容器运行时）
+  才输出 `BLOCKED_NEEDS_HUMAN`，并说明缺的是实例还是权限。
+- 按 §6 在 QA Summary 里记录实际库名与 host（不写密码）、是否自建、是否已清理。
 
 ### P-3 R2 人工闸
 
-Haisu 必须已经确认 run schema、后台执行方式与迁移方案。未确认 → `BLOCKED_NEEDS_HUMAN`，
-零产品代码改动。
+```bash
+cat tasks/RND-337-r2-gate.md
+```
+
+- 文件存在且记录了 Haisu 对 run schema / 后台执行方式 / migration 方案的批准 → 通过。
+- 文件不存在 → `BLOCKED_NEEDS_HUMAN`，零产品代码改动。**不要**把「提示词写得很详细」
+  当作已批准。
 
 ---
 
@@ -232,17 +245,18 @@ Haisu 必须已经确认 run schema、后台执行方式与迁移方案。未确
   .venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_architecture_boundary.py backend/tests/test_verify_alembic_head.py -q
   (
     cd backend
-    .venv/bin/python -m alembic heads
-    .venv/bin/python -m alembic upgrade head
-    .venv/bin/python -m alembic downgrade -1
-    .venv/bin/python -m alembic upgrade head
+    ../.venv/bin/python -m alembic heads
+    ../.venv/bin/python -m alembic upgrade head
+    ../.venv/bin/python -m alembic downgrade -1
+    ../.venv/bin/python -m alembic upgrade head
   )
   git diff --check
   git status --short --branch
   ```
-- **上面的 `alembic` 往返块依赖 Preflight P-2。** `DATABASE_URL` 为空或无法证明是一次性库时，
-  **不要运行它**——按 P-2 输出 `BLOCKED_NEEDS_HUMAN`，AC-1d 保持未完成。不需要真库的
-  静态 schema 断言（AC-1e）照常写照常跑。**禁止**为了让往返跑通而改 CI 配置或改用 SQLite。
+- **上面的 `alembic` 往返块只能对 Preflight P-2 自建的一次性测试库执行。**
+  跑之前再确认一次 `DATABASE_URL` 指向的是那个库，不是开发库。
+  只有本机根本没有 PG 实例时才 BLOCK，AC-1d 保持未完成、AC-1e 照常。
+  **禁止**为了让往返跑通而改 CI 配置或改用 SQLite。
 - 通过 = 全部子 AC 满足、唯一 Alembic head、所有适用命令 exit 0。
 
 ## 依赖（Dependencies）

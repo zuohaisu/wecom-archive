@@ -59,9 +59,15 @@ cat tasks/RND-336-qa-verdict.json
 ```
 
 - RND-337 缺失或非 PASS → `verdict: BLOCKED`（功能契约依赖）。
-- RND-336 缺失或非 PASS → `verdict: BLOCKED`（`tasks/WAVE-ownership.md` §3 串行化裁决：
-  两票共享 `i18n.js` 与 `test_sidenav.py`）。若 RND-338 在 RND-336 未 Done 的情况下
-  已经改了这两个文件 → 记 `SCOPE_VIOLATION`，这会给 RND-336 制造冲突。
+- RND-336 的串行闸是**文件所有权交接**，不是功能依赖，判据同 dev prompt P-3：
+  - 文件缺失 → `BLOCKED`。
+  - `PASS` → 通过。
+  - `BLOCKED` 但全部 AC 为 `PASS`、无 scope/security finding、阻塞原因仅
+    `HUMAN_VISUAL_REVIEW_PENDING` → **通过**（视觉 gate 是 Haisu 的人工动作，
+    与共享文件是否落定无关）。notes 记一行即可，不判 RND-338 FAIL。
+  - 其它 `BLOCKED` / `FAIL` → `BLOCKED`。
+- 若 RND-338 在串行闸未通过的情况下已改了 `i18n.js` / `test_sidenav.py`
+  → 记 `SCOPE_VIOLATION`，这会给 RND-336 制造冲突。
 
 ### P-3 共享文件的越界判据（RND-338 特有）
 

@@ -52,13 +52,23 @@ cat tasks/RND-337-qa-verdict.json
 cat tasks/RND-336-qa-verdict.json
 ```
 
-- 文件不存在，或 `verdict != "PASS"` → 输出 `BLOCKED_NEEDS_HUMAN`：
-  「RND-338 被 WAVE-ownership §3 串行化裁决阻塞，需 RND-336 先 Done，
-  或需 Haisu 在 `tasks/WAVE-ownership.md` 改判」。**零产品代码改动**，
-  尤其不要碰 `i18n.js` 和 `test_sidenav.py`。
-- PASS → 继续。注意此时 `NAV` 里**不应该**再有 `audit-log` 项——那是 RND-336 的
-  交付物，**不是**你的归因 diff，也不是需要你修复的回归。你只改 `nav.diagnostics`
-  的文案 key，不动 `NAV` 结构。
+**这道闸的目的是文件所有权交接，不是功能依赖**——只要 RND-336 已经写完那几个共享
+文件、不会再回头改，你就可以开工。所以判据是「代码是否已落定」，不是 verdict 字面值：
+
+- **文件不存在** → `BLOCKED_NEEDS_HUMAN`：「RND-338 被 WAVE-ownership §3 串行化裁决
+  阻塞，需 RND-336 先完成，或需 Haisu 改判」。**零产品代码改动**，尤其不碰
+  `i18n.js` 和 `test_sidenav.py`。
+- **`verdict == "PASS"`** → 通过。
+- **`verdict == "BLOCKED"` 但全部 AC 均为 `PASS`、且无 scope/security finding、
+  阻塞原因仅为 `HUMAN_VISUAL_REVIEW_PENDING`** → **同样通过**。视觉 gate 是 Haisu
+  的人工动作，与文件所有权无关；RND-336 的代码已经落定，共享文件已交接给你。
+  在 QA Summary 里记一行「RND-336 视觉 gate 待人工，不阻塞本票」。
+- **其它任何 `BLOCKED` / `FAIL`（有 AC 未过、有 finding）** → `BLOCKED_NEEDS_HUMAN`，
+  零产品代码改动——RND-336 可能还要回头改那几个共享文件。
+
+通过之后注意：`NAV` 里**不应该**再有 `audit-log` 项——那是 RND-336 的交付物，
+**不是**你的归因 diff，也不是需要你修复的回归。你只改 `nav.diagnostics` 的文案 key，
+不动 `NAV` 结构。
 
 ---
 

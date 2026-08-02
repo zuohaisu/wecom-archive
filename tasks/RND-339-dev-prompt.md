@@ -20,9 +20,16 @@
 git status --short --branch
 git diff --name-only
 git log origin/main..HEAD
-(cd backend && .venv/bin/python -m alembic heads)
+(cd backend && ../.venv/bin/python -m alembic heads)
 ls backend/alembic/versions/ | sort | tail -5
 ```
+
+> **关于这条命令（照做，不要自行判断）**：`alembic.ini` 在 `backend/`，所以必须
+> `cd backend`；但 venv 在**仓库根**（`Makefile:31` 的 `BACKEND_PY ?= $(CURDIR)/.venv/bin/python`），
+> 所以进了 `backend/` 之后要用 `../.venv/`。
+> **`alembic heads` 只读 `backend/alembic/versions/`，不连接数据库**——`DATABASE_URL`
+> 为空**不影响**它。采集不到 head 时先排查 venv 路径，**不要**把它和 P-2 的
+> 数据库缺口混为一谈，也**不要**因此 BLOCK。
 
 归因规则：
 
@@ -52,11 +59,13 @@ cat tasks/RND-337-qa-verdict.json
 echo "DATABASE_URL=[${DATABASE_URL}]"
 ```
 
-- **为空，或无法证明是一次性 local/test 库** → **禁止**执行任何
-  `alembic upgrade/downgrade`。输出 `BLOCKED_NEEDS_HUMAN`：
-  「AC-1d 的 migration 往返需要一次性 PostgreSQL 的 `DATABASE_URL`」。
-  不依赖真库的模型/schema 静态断言照常写照常跑，但不得声称往返已验证。
-- 三条铁律：不对共享/生产库执行迁移；不为了跑通而改 CI 配置；不用 SQLite 冒充。
+**按 `docs/agent-test-database.md` 执行**——你**可以也应该自建**一次性测试库，
+不要因为 `DATABASE_URL` 为空就整票 BLOCK。
+
+- 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库。
+- 按 §3 自建空库并在本次会话内 `export DATABASE_URL`；§5 是绝对禁止清单。
+- 只有本机根本没有可用 PG 实例才 `BLOCKED_NEEDS_HUMAN`。
+- 按 §6 记录库名/host（不写密码）、是否自建、是否已清理。
 
 ### P-4 R2 人工闸
 
@@ -263,13 +272,14 @@ timer/runbook。未确认 → `BLOCKED_NEEDS_HUMAN`，零产品代码改动。
   test ! -f backend/tests/test_reachability_automation_cli.py || .venv/bin/python -m pytest backend/tests/test_reachability_automation_cli.py -q
   .venv/bin/python -m pytest backend/tests/test_reachability_systemd_units.py backend/tests/test_archive_worker_reachability_hook.py -q
   .venv/bin/python -m pytest backend/tests/test_reachability_checks.py backend/tests/test_http_contract.py backend/tests/test_architecture_boundary.py backend/tests/test_verify_alembic_head.py -q
-  (cd backend && .venv/bin/python -m alembic heads)
+  (cd backend && ../.venv/bin/python -m alembic heads)
   git diff --check
   git status --short --branch
   ```
-- **migration 往返依赖 Preflight P-3。** `DATABASE_URL` 为空或无法证明是一次性库时，
-  不要运行它——按 P-3 输出 `BLOCKED_NEEDS_HUMAN`，AC-1d 保持未完成。不依赖真库的静态
-  schema 断言照常。**禁止** `systemctl`、`sudo`、真实 worker/SDK、生产 DB。
+- **migration 往返只能对 Preflight P-3 自建的一次性测试库执行。** 跑之前再确认一次
+  `DATABASE_URL` 指向的是那个库，不是开发库。只有本机根本没有 PG 实例时才 BLOCK，
+  AC-1d 保持未完成、静态 schema 断言照常。
+  **禁止** `systemctl`、`sudo`、真实 worker/SDK、生产 DB。
 - 通过 = 全部子 AC 满足、唯一 Alembic head、全部适用命令 exit 0、R2 migration/unit/runbook 人工 review 完成。
 
 ## 依赖（Dependencies）
