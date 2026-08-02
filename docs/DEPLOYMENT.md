@@ -569,9 +569,54 @@ These are documentation truths, not hidden assumptions:
   drives automatically
 - the static homepage sync (step 8) never fails the deploy if
   `STATIC_SITE_DIR_NAME` doesn't match the Nginx `root` — the sync
-  itself always reports success, it just writes to a directory nobody
-  serves. There is no automated check that the two are consistent;
-  confirm manually on the host if the live homepage stops matching
-  `main`
+  reports a WARN (never a hard fail) when the webroot copy cannot be
+  performed, and the deploy still succeeds with the homepage staged at
+  `shared/www/$STATIC_SITE_DIR_NAME`. There is no automated check that
+  the two are consistent; confirm manually on the host if the live
+  homepage stops matching `main`
 
 Keep this document honest if that boundary changes.
+
+---
+
+## 9. Static Homepage Webroot — One-Time Fix (runbook)
+
+**Symptom:** every deploy logs `WARN: could not publish the homepage to
+/var/www/crowntime`, and the live homepage stays on old content even
+though `shared/www/crowntime/` is fresh.
+
+**Why:** the runtime user `wecomarchive` has no plain write access to
+`/var/www/crowntime` (root-owned), and the sudoers whitelist
+(`/etc/sudoers.d/wecomarchive`) matches `cp` only as an exactly-two-
+argument form — `sudo -n cp -a src/. dst/` does not match, so the
+webroot copy degrades to the WARN path by design.
+
+**One-time fix (as root, on the ECS host):**
+
+```bash
+# 1. Back up the current (old) webroot — it may contain hand-placed
+#    verification files that must be preserved (see step 3).
+mv /var/www/crowntime /var/www/crowntime.bak.$(date +%Y%m%d)
+
+# 2. Point the webroot at the deploy-managed tree. The deploy's step 9
+#    Tier-1 check then sees a writable directory and publishes directly,
+#    with no sudo involved.
+ln -s /srv/apps/wecom-archive-365/shared/www/crowntime /var/www/crowntime
+
+# 3. Re-home any files that lived ONLY in the old webroot (e.g. Tencent
+#    domain-verification tokens like WW_verify_*.txt).
+cp -a /var/www/crowntime.bak.*/WW_verify_*.txt \
+      /srv/apps/wecom-archive-365/shared/www/crowntime/ 2>/dev/null || true
+
+# 4. Verify nginx can serve through the symlink (SELinux/nginx user must
+#    be able to traverse /srv/apps — usually fine since the archive app
+#    is already served from there; if not, adjust the nginx user or ACL).
+curl -sI https://crowntime.cn/ | head -3
+```
+
+**After the fix:** the next deploy's step 9 logs `nginx root OK` instead
+of the WARN, and the live homepage matches `main` again. The symlink
+survives deploys (step 9 writes *through* it; nothing removes it).
+
+**If you ever need to undo:** remove the symlink and restore the backup
+(`mv /var/www/crowntime.bak.* /var/www/crowntime`).

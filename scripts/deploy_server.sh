@@ -28,16 +28,23 @@
 #       ─────────────────────────────
 #       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service, /usr/bin/apt-get
 #
-#   VERIFIED-ON-PRODUCTION CAVEAT: as of 2026-08-02 the live host's
-#   sudoers grants the systemctl line only — an actual deploy proved it
-#   by having `sudo apt-get` fall through to sudo's password lecture and
-#   abort the run. Treat the apt-get grant above as the DESIRED state,
-#   not the current one, and do not add any new `sudo <binary>` call to
-#   this script assuming a broader grant exists: _ensure_ffmpeg below
-#   would fail exactly the same way if ffmpeg ever went missing (today
-#   it is pre-installed, so its sudo path never runs). Prefer solutions
-#   that need no new binary and no new sudo grant — see step 9's
-#   static-homepage copy for the worked example.
+#   VERIFIED-ON-PRODUCTION CAVEAT (as of 2026-08-02, re-verified 2026-08-02):
+#   /etc/sudoers.d/wecom-archive-365 grants ONLY systemctl restart/status.
+#   /etc/sudoers.d/wecomarchive (created 2026-07-28) additionally grants
+#   `/usr/bin/mkdir -p /var/www/*`, `/usr/bin/cp <src> <dst>` (EXACTLY two
+#   arguments — no flags, and both sides must match the two-glob shape),
+#   `/usr/bin/dnf`, and `/usr/bin/apt-get`.
+#
+#   The cp grant looks broader than it is: `sudo cp -a src/. dst/` does NOT
+#   match it (three arguments including -a, and `dst/` is a single segment
+#   while the glob expects two). Production proved this twice — 2026-08-02
+#   `sudo cp -a` fell through to the password lecture and killed the deploy.
+#   Treat sudoers matching as EXACT: changing a flag, the trailing slash, or
+#   the argument count silently changes whether the whitelist applies. Prefer
+#   solutions that need no new binary and no new sudo grant — see step 9's
+#   static-homepage copy for the worked example (`sudo -n` probing + graceful
+#   WARN degradation, never a bare `sudo` that can block on a TTY-less SSH
+#   session).
 #
 # ── First-Time Server Setup ────────────────────────────────────────────────
 #   1. Install git, python3, python3-venv, pip, curl, and ffmpeg
@@ -708,7 +715,7 @@ if [ -d "$STATIC_SRC" ]; then
     if _publish_static_dir "$SHARED_DST" "$NGINX_DST"; then
         echo "  → nginx root OK ($NGINX_DST)"
     else
-        echo "  WARN: could not publish the homepage to $NGINX_DST — no write access there, and no passwordless sudo for mkdir/cp on this host." >&2
+        echo "  WARN: could not publish the homepage to $NGINX_DST — no plain write access there, and the sudoers whitelist does not cover this exact cp/mkdir invocation (see the VERIFIED-ON-PRODUCTION CAVEAT at the top of this script)." >&2
         echo "  WARN: the backend deploy is UNAFFECTED and this deploy still counts as successful; the current homepage is staged at $SHARED_DST." >&2
         echo "  WARN: one-time operator fix (pick one, needs root):" >&2
         echo "  WARN:   a) point the Nginx 'root' for this site at $SHARED_DST, or" >&2
