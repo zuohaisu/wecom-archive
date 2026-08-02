@@ -126,6 +126,31 @@ def test_patch_status_toggles_user_and_disabled_user_cannot_password_login(
     }
 
 
+def test_status_transition_audits_actor_target_and_skips_noop(
+    client: TestClient, db: Session, admin: AdminUser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+    import app.routers.users as users_module
+
+    target = _add_user(db)
+    audit_writer = MagicMock()
+    monkeypatch.setattr(users_module, "write_audit", audit_writer)
+
+    assert client.patch(f"/api/admin/users/{target.id}", json={"status": "disabled"}).status_code == 200
+    call = audit_writer.call_args.kwargs
+    assert call["action"] == "user.disabled"
+    assert call["tenant_id"] == admin.tenant_id
+    assert call["admin_user_id"] == admin.id
+    assert call["object_id"] == target.id
+
+    audit_writer.reset_mock()
+    assert client.patch(f"/api/admin/users/{target.id}", json={"status": "disabled"}).status_code == 200
+    audit_writer.assert_not_called()
+
+    assert client.patch(f"/api/admin/users/{target.id}", json={"status": "active"}).status_code == 200
+    assert audit_writer.call_args.kwargs["action"] == "user.enabled"
+
+
 def test_patch_rejects_invalid_status_cross_tenant_missing_and_self_disable(
     client: TestClient, db: Session, admin: AdminUser
 ) -> None:

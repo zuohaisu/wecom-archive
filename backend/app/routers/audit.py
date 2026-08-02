@@ -10,11 +10,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.audit import AUDIT_CATEGORIES, AuditCategory, audit_category, audit_category_expression
 from app.auth import require_role
 from app.db.models import AdminUser, AuditLog
 from app.db.session import get_db
@@ -27,6 +28,7 @@ class AuditLogOut(BaseModel):
     admin_user_id: Optional[str] = None
     actor_name: Optional[str] = None
     action: str
+    category: str
     object_type: str
     object_id: Optional[str] = None
     detail: Optional[dict] = None
@@ -52,6 +54,8 @@ def _parse_ts(value: str) -> datetime:
 @router.get("/audit-logs", response_model=AuditLogListOut)
 def list_audit_logs(
     action: Optional[str] = Query(None, description="Exact match; comma-separated supports many values"),
+    category: Optional[str] = Query(None, description="Comma-separated audit categories"),
+    include_system: Optional[bool] = Query(None, description="Set false to exclude system activity"),
     object_type: Optional[str] = Query(None),
     operator: Optional[str] = Query(
         None, description="Exact admin_user_id; 'system' means admin_user_id IS NULL"
@@ -73,6 +77,15 @@ def list_audit_logs(
         actions = [value.strip() for value in action.split(",") if value.strip()]
         if actions:
             qry = qry.filter(AuditLog.action.in_(actions))
+    category_expression = audit_category_expression()
+    if category:
+        categories = {value.strip() for value in category.split(",") if value.strip()}
+        invalid_categories = categories - AUDIT_CATEGORIES
+        if not categories or invalid_categories:
+            raise HTTPException(status_code=422, detail="invalid_audit_category")
+        qry = qry.filter(category_expression.in_(categories))
+    if include_system is False:
+        qry = qry.filter(category_expression != AuditCategory.SYSTEM)
     if object_type:
         qry = qry.filter(AuditLog.object_type == object_type)
     if operator == "system":
@@ -111,6 +124,7 @@ def list_audit_logs(
             admin_user_id=row.admin_user_id,
             actor_name=name_map.get(row.admin_user_id),
             action=row.action,
+            category=audit_category(row.action),
             object_type=row.object_type,
             object_id=row.object_id,
             detail=row.detail,

@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-335",
+  "linear_url": "https://linear.app/xyzhs1897/issue/RND-335/backend-small-business-security-activity-policy-and-audit-signal",
+  "run_id": "rnd-335-qa-20260802-5",
+  "qa_attempt": 3,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "d71f520 (main == origin/main)",
+    "head": "working tree (uncommitted)",
+    "diff_scope": "Fifth human-requested QA execution. qa_attempt remains 3 because the verdict schema permits only 1..3. Haisu explicitly authorized the narrow backend/tests/test_rnd309_content_access_request.py expectation update. No DB model, Alembic, main.py, route-contract/RBAC, frontend/i18n, deployment, or CI/CD product diff exists."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "backend/app/audit.py:19-126 defines ACTION_CATALOG, five categories, SQL/API lookup, and unknown-history system fallback",
+        "backend/tests/test_rnd335_security_activity.py:43-65 verifies all required actions and categories",
+        "AST scan of production write_audit/record_export_audit calls found no bare action string argument; protected schema/migration diff is empty"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd335_security_activity.py:425-467 persists password success, known-account wrong-password, unknown-account failure, logout, and no-tenant zero rows using fresh SQLite sessions",
+        "The same test asserts both failure responses are identical 401 Invalid credentials and failure rows have null actor/object/detail",
+        "backend/tests/test_rnd335_security_activity.py:471-513 persists the WeCom login and excludes the authorization-code decoy"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd335_security_activity.py:262-421 drives invite/reinvite, acceptance, enable/disable, admin reset, reset completion, and self password change against a real FK-backed audit table",
+        "Lines 376-397 assert exactly-once action counts plus tenant/actor/target for every required account/password action",
+        "Lines 357-374 prove same-value/blank-secret/locked retention, cross-tenant, and self-disable negative paths leave AuditLog count unchanged"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "backend/app/routers/settings.py:226-258 persists explicit values while emitting config.changed only for changed_keys",
+        "backend/tests/test_rnd335_security_activity.py:349-374 proves blank secret, identical effective secret, and retention 423 write no additional audit row",
+        "Lines 398-421 prove config/retention action counts and recursively inspect persisted detail/API output; test_rnd249_settings_api.py:219-240 covers env-default persistence without activity"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd335_security_activity.py:68-125 enables audit foreign keys, closes the writer Session, and reads access/activation/deactivation rows in a new Session",
+        "It asserts null admin_user_id, minimized platform_admin_id detail, and same-state no-op; platform/export/media focused suite EXIT=0 (38 passed, 1 DATABASE_URL skip)"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd335_security_activity.py:519-588 measures persisted AuditLog counts for strict empty, repair, reconciliation, malformed failure, and successful scanned batches",
+        "The test proves empty expected_pubkey_ver polling is +0 and each effective batch adds one decrypt.completed row; test_rnd319_retention_lock.py focused suite preserves empty retention-lock behavior"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd335_security_activity.py:94-125 uses a fresh session after platform access, deactivation, and activation under an FK-enabled audit shape",
+        "backend/app/auth.py:250-269 commits platform access before dependency return; backend/app/routers/platform.py:154-175 commits the mutation and audit in one transition"
+      ]
+    },
+    {
+      "id": "AC-8",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd335_security_activity.py:170-259 covers legacy no-parameter behavior, tenant isolation, category single/multi, include_system false/true, invalid category, filtered pagination, total, and has_more",
+        "backend/app/routers/audit.py:76-140 performs server-side filtering before count/pagination and serializes category from the catalog"
+      ]
+    },
+    {
+      "id": "AC-9",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd335_security_activity.py:286-290 supplies password, invite/reset token, secret, signed-URL, storage-key, search-text, message-text, and path decoys",
+        "Lines 399-421 recursively inspect every persisted AuditLog object_id/detail and the real audit API serializer, asserting all decoys are absent",
+        "Code review of detail writers shows explicit allowlists only: settings.py:251, retention.py:90, auth.py:259, platform.py:167-171, decrypt_worker.py:616, apply_retention_lock_once.py:83"
+      ]
+    },
+    {
+      "id": "AC-10",
+      "status": "PASS",
+      "evidence": [
+        "make verify: EXIT=0; 2588 passed, 82 skipped",
+        "Focused suites: RND-335/audit EXIT=0 (13 passed, 3 DATABASE_URL skips); auth/account EXIT=0 (70 passed); settings/retention/worker EXIT=0 (30 passed); platform/export/media/lock EXIT=0 (38 passed, 1 DATABASE_URL skip)",
+        "architecture boundary EXIT=0 (25 passed); git diff --check EXIT=0"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": "make verify",
+      "result": "EXIT=0; 2588 passed, 82 skipped"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd335_security_activity.py backend/tests/test_rnd294_audit_hook.py backend/tests/test_rnd295_audit_list.py -q -rs",
+      "result": "EXIT=0; 13 passed, 3 skipped (DATABASE_URL not set)"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_password_auth.py backend/tests/test_rnd278_password_reset.py backend/tests/test_rnd285_invite_flow.py backend/tests/test_rnd286_user_admin.py backend/tests/test_rnd302_change_password.py -q -rs",
+      "result": "EXIT=0; 70 passed"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd249_settings_api.py backend/tests/test_rnd318_retention_config.py backend/tests/test_decrypt_worker_service.py -q -rs",
+      "result": "EXIT=0; 30 passed"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_platform_auth_scope.py backend/tests/test_rnd310_tenant_activation.py backend/tests/test_rnd316_export_approval.py backend/tests/test_rnd317_export_audit.py backend/tests/test_media_download_audit.py backend/tests/test_rnd319_retention_lock.py backend/tests/test_rnd309_content_access_request.py -q -rs",
+      "result": "EXIT=0; 38 passed, 1 skipped (DATABASE_URL not set)"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q && git diff --check",
+      "result": "EXIT=0; 25 passed; clean diff"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": false,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "Fifth QA PASS. The prior gaps are resolved by real SQLite-backed persistence tests: all specified human actions now have exactly-once tenant/actor/target evidence, required negative paths have zero-row evidence, failed-login anti-enumeration is compared directly, worker scanned/repair/reconciliation/failure density is persisted, and all required sensitive decoys are recursively checked in actual AuditLog rows and API output. RND-336 blocker can be released. Haisu's authorization for test_rnd309_content_access_request.py is honored. file_ownership_respected is false only because pre-existing .workbuddy/memory/2026-08-02.md is outside the ticket-owned list; it is not attributed as an RND-335 scope violation."
+}

@@ -290,6 +290,14 @@ def password_forgot(body: _ForgotBody, db: Session = Depends(get_db)):
     )
     if user is not None and user.email:
         raw_token = create_password_reset_token(db, user, _password_reset_ttl_hours())
+        write_audit(
+            db,
+            tenant_id=user.tenant_id,
+            admin_user_id=user.id,
+            action=AuditAction.PASSWORD_RESET_REQUESTED,
+            object_type=AuditObjectType.USER,
+            object_id=user.id,
+        )
         email_settings = get_email_settings()
         base_url = (
             email_settings.reset_base_url or get_wecom_oauth_settings().admin_domain
@@ -315,6 +323,14 @@ def password_reset(body: _ResetBody, db: Session = Depends(get_db)):
     user, token_row = result
     user.password_hash = hash_password(body.password)
     token_row.used = True
+    write_audit(
+        db,
+        tenant_id=user.tenant_id,
+        admin_user_id=user.id,
+        action=AuditAction.PASSWORD_RESET_COMPLETED,
+        object_type=AuditObjectType.USER,
+        object_id=user.id,
+    )
     db.commit()
     return JSONResponse({"ok": True})
 
@@ -350,22 +366,30 @@ def _create_pending_invite(
     )
     if existing is not None:
         raw_token = existing.invite_token
+        target = existing
     else:
         raw_token = secrets.token_urlsafe(32)
-        db.add(
-            AdminUser(
-                id=str(uuid.uuid4()),
-                tenant_id=tenant_id,
-                wecom_user_id=resolved_wecom_user_id,
-                email=(email or "").strip() or None,
-                name=name,
-                role=role,
-                status="disabled",
-                invite_status="pending",
-                invite_token=raw_token,
-                invited_by=admin_user_id,
-            )
+        target = AdminUser(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            wecom_user_id=resolved_wecom_user_id,
+            email=(email or "").strip() or None,
+            name=name,
+            role=role,
+            status="disabled",
+            invite_status="pending",
+            invite_token=raw_token,
+            invited_by=admin_user_id,
         )
+        db.add(target)
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=admin_user_id,
+        action=AuditAction.USER_INVITED,
+        object_type=AuditObjectType.USER,
+        object_id=target.id,
+    )
     db.commit()
 
     from app.email import send_invite_email
@@ -449,6 +473,14 @@ def accept_invite(body: _AcceptBody, db: Session = Depends(get_db)):
     user.invite_status = "accepted"
     if body.name:
         user.name = body.name
+    write_audit(
+        db,
+        tenant_id=user.tenant_id,
+        admin_user_id=user.id,
+        action=AuditAction.USER_INVITE_ACCEPTED,
+        object_type=AuditObjectType.USER,
+        object_id=user.id,
+    )
     db.commit()
     return JSONResponse({"ok": True})
 
@@ -642,6 +674,19 @@ def password_login(
 
     if not password_ok or resolved_user is None:
         logger.warning("password_login: failed (credentials not logged)")
+        # The default tenant was safely resolved above. Do not retain any
+        # submitted account identifier, credential, IP, or object id.
+        write_audit(
+            db,
+            tenant_id=tenant.id,
+            action=AuditAction.LOGIN_FAILED,
+            object_type=AuditObjectType.SESSION,
+        )
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.error("password_login: failed-login audit commit failed")
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     resolved_user.last_login_at = now
@@ -1103,7 +1148,6 @@ def auth_logout(
                 admin_user_id=session.admin_user_id,
                 action=AuditAction.LOGOUT,
                 object_type=AuditObjectType.SESSION,
-                object_id=session_id,
             )
             db.commit()
             logger.info("wecom_logout: session revoked")

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
+from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import get_auth_mode, get_current_user, hash_password, require_role, verify_password
 from app.config import repository
 from app.config.guard import is_initialized
@@ -65,6 +66,14 @@ def change_password(
     if body.new_password == body.old_password:
         raise HTTPException(status_code=400, detail="same_as_old")
     user.password_hash = hash_password(body.new_password)
+    write_audit(
+        db,
+        tenant_id=_tenant_id,
+        admin_user_id=user.id,
+        action=AuditAction.PASSWORD_CHANGED,
+        object_type=AuditObjectType.USER,
+        object_id=user.id,
+    )
     db.commit()
     return JSONResponse({"ok": True})
 
@@ -204,12 +213,22 @@ def put_settings(
             content={"errors": [error.model_dump() for error in errors]},
         )
 
-    user, _tenant_id = auth
+    user, tenant_id = auth
+    resolver = get_config_resolver()
+    changed_keys: list[str] = []
+    persisted_keys: list[str] = []
     for key, value in validated:
         # Blank secrets intentionally do not create, clear, or overwrite a row.
         if value is None:
             continue
         spec = CONFIG_REGISTRY[key]
+        # Compare the canonical requested value to the effective value before
+        # writing. This avoids both no-op config rows and misleading activity;
+        # plaintext is never copied into audit detail.
+        effective_value = resolver.resolve(db, key)
+        # Persist a valid explicit setting even if it currently equals an
+        # environment/default value. It is an intentional configuration
+        # source choice; only the audit event is suppressed for that no-op.
         repository.upsert(
             db,
             key,
@@ -218,9 +237,21 @@ def put_settings(
             requires_restart=spec.restart_required,
             updated_by=getattr(user, "id", None),
         )
+        persisted_keys.append(key)
+        if effective_value != value:
+            changed_keys.append(key)
 
+    if changed_keys:
+        write_audit(
+            db,
+            tenant_id=tenant_id,
+            admin_user_id=getattr(user, "id", None),
+            action=AuditAction.CONFIG_CHANGED,
+            object_type=AuditObjectType.TENANT_CONFIG,
+            detail={"changed_keys": sorted(changed_keys)},
+        )
     db.commit()
-    for key, _value in validated:
+    for key in persisted_keys:
         invalidate(key)
 
     return SettingsUpdateOut(

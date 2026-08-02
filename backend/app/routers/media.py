@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from app.audit import write_audit
+from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import get_current_user
 from app.db.models import AdminUser, ArchiveMessage, MediaFile
 from app.db.session import get_db
@@ -96,8 +96,8 @@ def download_media_library_file(
         db,
         tenant_id=tenant_id,
         admin_user_id=admin_user.id,
-        action="media.download",
-        object_type="media_file",
+        action=AuditAction.MEDIA_DOWNLOAD,
+        object_type=AuditObjectType.MEDIA_FILE,
         object_id=str(media_file.id),
         detail={"source": "media_library"},
     )

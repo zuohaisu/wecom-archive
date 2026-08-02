@@ -352,15 +352,24 @@ def test_password_login_invalid_credentials_returns_401(client) -> None:
 
     app.dependency_overrides[get_db] = _mock_db_for_password_login()
     try:
-        with patch.dict(os.environ, env):
+        with patch("app.routers.auth.write_audit") as audit_writer, patch.dict(os.environ, env):
             resp = client.post(
                 "/api/auth/password/login",
-                json={"username": "admin", "password": "wrong-password"},
+                json={"username": "submitted-user", "password": "wrong-password"},
             )
+            audit_detail = audit_writer.call_args.kwargs
     finally:
         app.dependency_overrides[get_db] = _mock_db_no_session
 
     assert resp.status_code == 401
+    # The resolved default tenant is safe context, but submitted credentials
+    # and account identifiers must not enter the audit event.
+    assert audit_detail["action"] == "auth.login_failed"
+    assert audit_detail["tenant_id"] == "00000000-0000-0000-0000-000000000001"
+    assert audit_detail.get("object_id") is None
+    assert audit_detail.get("detail") is None
+    assert "wrong-password" not in repr(audit_detail)
+    assert "submitted-user" not in repr(audit_detail)
     # Must not include any password hint in the response.
     assert "password" not in resp.text.lower() or "credentials" in resp.text.lower()
 

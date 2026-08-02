@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import require_role
 from app.db.models import AdminUser, RetentionConfig
 from app.db.session import get_db
@@ -47,7 +48,7 @@ def put_retention_config(
     db: Session = Depends(get_db),
 ) -> RetentionConfigOut:
     """Create or update the policy unless this tenant has permanently locked it."""
-    _, tenant_id = auth
+    actor, tenant_id = auth
     config = (
         db.query(RetentionConfig)
         .filter(RetentionConfig.tenant_id == tenant_id)
@@ -56,18 +57,38 @@ def put_retention_config(
     if config is not None and config.is_locked:
         raise HTTPException(status_code=423, detail="Retention configuration is locked")
 
+    old_state = None if config is None else {
+        "retention_days": config.retention_days,
+        "is_locked": config.is_locked,
+    }
+    new_state = {"retention_days": payload.retention_days, "is_locked": payload.lock}
+    if old_state == new_state:
+        return RetentionConfigOut(configured=True, retention_days=config.retention_days, is_locked=config.is_locked)
+
     if config is None:
         config = RetentionConfig(
-            id=str(uuid4()),
-            tenant_id=tenant_id,
-            retention_days=payload.retention_days,
-            is_locked=payload.lock,
+            id=str(uuid4()), tenant_id=tenant_id,
+            retention_days=payload.retention_days, is_locked=payload.lock,
         )
         db.add(config)
     else:
         config.retention_days = payload.retention_days
         config.is_locked = payload.lock
 
+    action = (
+        AuditAction.RETENTION_CONFIG_LOCKED
+        if payload.lock and (old_state is None or not old_state["is_locked"])
+        else AuditAction.RETENTION_CONFIG_CHANGED
+    )
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=getattr(actor, "id", None),
+        action=action,
+        object_type=AuditObjectType.RETENTION_CONFIG,
+        object_id=config.id,
+        detail={"old": old_state, "new": new_state},
+    )
     db.commit()
     return RetentionConfigOut(
         configured=True,

@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.audit import write_audit  # noqa: E402
+from app.audit import AuditAction, AuditObjectType, write_audit  # noqa: E402
 from app.db.models import ArchiveMessage, RetentionConfig, RetentionLock  # noqa: E402
 
 
@@ -78,8 +78,8 @@ def run_retention_lock_once(
             write_audit(
                 db,
                 tenant_id=config.tenant_id,
-                action="retention.messages_locked",
-                object_type="tenant",
+                action=AuditAction.RETENTION_MESSAGES_LOCKED,
+                object_type=AuditObjectType.TENANT,
                 detail={"locked_count": locked_count, "cutoff": cutoff.isoformat()},
             )
 

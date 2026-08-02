@@ -7,8 +7,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import get_wecom_token, require_platform_admin
-from app.audit import write_audit
 from app.db.models import DuplicateCorpIdError, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.routers.auth import _create_pending_invite
@@ -137,7 +137,7 @@ def update_tenant_status(
 
     - **404**: Target tenant does not exist.
     - **401**: Missing or invalid platform admin credentials.
-    - Always writes an audit log via `write_audit`.
+    - Writes an audit log only for a real state transition.
     """
     # Find the target tenant
     tenant = (
@@ -151,28 +151,28 @@ def update_tenant_status(
 
     old_status = tenant.is_active
     new_status = payload.is_active
-
-    # Update and persist
-    tenant.is_active = new_status
-    db.commit()
-    db.refresh(tenant)
-
-    # Write audit log with appropriate action based on status change
-    action = (
-        "platform.tenant_deactivated" if not new_status else "platform.tenant_activated"
-    )
-    write_audit(
-        db,
-        tenant_id=tenant_id,
-        action=action,
-        object_type="tenant_config",
-        admin_user_id=admin_user.id,
-        object_id=tenant_id,
-        detail={
-            "is_active": new_status,
-            "previous_is_active": old_status,
-        },
-    )
+    if old_status != new_status:
+        tenant.is_active = new_status
+        write_audit(
+            db,
+            tenant_id=tenant_id,
+            action=(
+                AuditAction.PLATFORM_TENANT_DEACTIVATED
+                if not new_status else AuditAction.PLATFORM_TENANT_ACTIVATED
+            ),
+            object_type=AuditObjectType.TENANT,
+            # PlatformAdmin is tenant-less and cannot satisfy this FK.
+            admin_user_id=None,
+            object_id=tenant_id,
+            detail={
+                "platform_admin_id": admin_user.id,
+                "previous_is_active": old_status,
+                "is_active": new_status,
+            },
+        )
+        # Persist the state transition and its audit row together.
+        db.commit()
+        db.refresh(tenant)
 
     return TenantStatusUpdateOut(
         tenant_id=tenant.id,

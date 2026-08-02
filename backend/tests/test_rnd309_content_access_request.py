@@ -106,10 +106,7 @@ def test_content_access_request_records_exactly_one_audit_row_and_returns_no_con
     assert len(rows) == 1
     assert rows[0].action == PLATFORM_TENANT_ACCESS_ACTION
     assert rows[0].object_id == "tenant-rnd309"
-    assert rows[0].detail == {
-        "platform_admin_id": "platform-admin-rnd309",
-        "platform_admin_email": "platform@example.test",
-    }
+    assert rows[0].detail == {"platform_admin_id": "platform-admin-rnd309"}
 
 
 @pytest.mark.parametrize(

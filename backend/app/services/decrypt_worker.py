@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from sqlalchemy.orm import Session
 
-from app.audit import write_audit
+from app.audit import AuditAction, AuditObjectType, write_audit
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.message_type_registry import ParserStrategy, get_parser_strategy
 from app.revoke_reconciliation import (
@@ -589,17 +589,32 @@ def run_decrypt_once(
     # this function.
     summary.revocations_reconciled = reconcile_pending_revocations(session, tenant_id)
 
-    # One batch-level event is sufficient evidence of each private-key access
-    # while avoiding an audit row (and sensitive operational metadata) per
-    # message. write_audit itself is fail-safe and participates in this commit.
-    write_audit(
-        session,
-        tenant_id=tenant_id,
-        action="decrypt.completed",
-        object_type="key_version",
-        object_id=str(expected_pubkey_ver),
-        detail={"publickey_ver": expected_pubkey_ver, "scanned": summary.scanned},
-    )
+    # A strict empty poll has no operator value. Keep one system event for a
+    # non-empty batch, repair/reconciliation work, or any anomalous outcome.
+    activity_counts = {
+        "scanned": summary.scanned,
+        "success": summary.success,
+        "failed": summary.failed,
+        "unsupported": summary.unsupported,
+        "recipients_repaired": summary.recipients_repaired,
+        "recipient_upsert_failed": summary.recipient_upsert_failed,
+        "revocations_reconciled": summary.revocations_reconciled,
+        "revoke_reconcile_failed": summary.revoke_reconcile_failed,
+        "key_mismatch": summary.key_mismatch,
+        "rsa_failed": summary.rsa_failed,
+        "sigsegv": summary.sigsegv,
+        "isolation_other": summary.isolation_other,
+        "malformed_input": summary.malformed_input,
+    }
+    if any(activity_counts.values()):
+        write_audit(
+            session,
+            tenant_id=tenant_id,
+            action=AuditAction.DECRYPT_COMPLETED,
+            object_type=AuditObjectType.KEY_VERSION,
+            object_id=str(expected_pubkey_ver),
+            detail={"publickey_ver": expected_pubkey_ver, **activity_counts},
+        )
 
     # --- Commit all changes ---
     try:

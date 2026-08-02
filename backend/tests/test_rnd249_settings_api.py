@@ -180,6 +180,62 @@ def test_put_encrypts_secrets_and_blank_secret_preserves_existing_value(
     assert db.get(AppConfigStore, "smtp_password").value == encrypted_value
 
 
+def test_secret_setting_activity_detail_recursively_excludes_submitted_value(
+    settings_client: tuple[TestClient, Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit identifies a changed key without retaining secret plaintext/ciphertext."""
+    from unittest.mock import MagicMock
+    import app.routers.settings as settings_router
+
+    client, db = settings_client
+    submitted_secret = "rnd335-actual-secret-value"
+    audit_writer = MagicMock()
+    monkeypatch.setattr(settings_router, "write_audit", audit_writer)
+
+    assert client.put(
+        "/api/admin/settings", json={"updates": {"smtp_password": submitted_secret}}
+    ).status_code == 200
+    stored_ciphertext = db.get(AppConfigStore, "smtp_password").value
+    detail = audit_writer.call_args.kwargs["detail"]
+
+    def assert_value_safe(value: object) -> None:
+        if isinstance(value, dict):
+            for item in value.values():
+                assert_value_safe(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                assert_value_safe(item)
+        elif isinstance(value, str):
+            assert submitted_secret not in value
+            assert stored_ciphertext not in value
+            assert "****" not in value
+
+    assert detail == {"changed_keys": ["smtp_password"]}
+    assert_value_safe(detail)
+
+
+def test_put_persists_effective_noop_without_security_activity(
+    settings_client: tuple[TestClient, Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit config source is persisted even when its value is unchanged."""
+    client, db = settings_client
+    from unittest.mock import MagicMock
+    import app.routers.settings as settings_router
+
+    monkeypatch.setenv("SMTP_HOST", "same.smtp.rnd335.test")
+    resolver.invalidate("smtp_host")
+    audit_writer = MagicMock()
+    monkeypatch.setattr(settings_router, "write_audit", audit_writer)
+
+    response = client.put(
+        "/api/admin/settings", json={"updates": {"smtp_host": "same.smtp.rnd335.test"}}
+    )
+
+    assert response.status_code == 200
+    assert db.get(AppConfigStore, "smtp_host").value == "same.smtp.rnd335.test"
+    audit_writer.assert_not_called()
+
+
 def test_put_blank_nonsecret_clears_value(
     settings_client: tuple[TestClient, Session],
 ) -> None:

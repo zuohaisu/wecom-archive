@@ -114,11 +114,10 @@ def test_platform_tenant_scope_uses_explicit_tenant_and_writes_audit(
         action=PLATFORM_TENANT_ACCESS_ACTION,
         object_type=PLATFORM_TENANT_OBJECT_TYPE,
         object_id="target-tenant-9",
-        detail={
-            "platform_admin_id": admin.id,
-            "platform_admin_email": admin.email,
-        },
+        admin_user_id=None,
+        detail={"platform_admin_id": admin.id},
     )
+    db.commit.assert_called_once()
 
 
 @pytest.mark.skipif(not _DB_AVAILABLE, reason="DATABASE_URL not set")
@@ -147,10 +146,7 @@ def test_platform_tenant_scope_persists_auditlog_with_platform_identity() -> Non
             assert row.object_type == PLATFORM_TENANT_OBJECT_TYPE
             assert row.object_id == tenant_id
             assert row.admin_user_id is None
-            assert row.detail == {
-                "platform_admin_id": admin_id,
-                "platform_admin_email": admin.email,
-            }
+            assert row.detail == {"platform_admin_id": admin_id}
         finally:
             db.rollback()
             db.query(AuditLog).filter(AuditLog.tenant_id == tenant_id).delete()

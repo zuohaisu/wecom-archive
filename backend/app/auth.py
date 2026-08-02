@@ -38,7 +38,7 @@ from fastapi import Cookie, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
-from app.audit import write_audit
+from app.audit import AuditAction, AuditObjectType, write_audit
 from app.db.models import AdminSession, AdminUser, PasswordResetToken, PlatformAdmin
 from app.db.session import get_db
 from app.session_lifecycle import touch_last_active
@@ -223,8 +223,8 @@ def require_platform_admin(
     return admin
 
 
-PLATFORM_TENANT_ACCESS_ACTION = "platform.tenant_accessed"
-PLATFORM_TENANT_OBJECT_TYPE = "tenant"
+PLATFORM_TENANT_ACCESS_ACTION = AuditAction.PLATFORM_TENANT_ACCESSED
+PLATFORM_TENANT_OBJECT_TYPE = AuditObjectType.TENANT
 
 
 @dataclass(frozen=True)
@@ -253,13 +253,19 @@ def require_platform_tenant_scope(
         action=PLATFORM_TENANT_ACCESS_ACTION,
         object_type=PLATFORM_TENANT_OBJECT_TYPE,
         object_id=tenant_id,
-        # AuditLog.admin_user_id references tenant-scoped admin_users, so the
-        # isolated PlatformAdmin identity is stored as structured detail.
-        detail={
-            "platform_admin_id": platform_admin.id,
-            "platform_admin_email": platform_admin.email,
-        },
+        # AuditLog.admin_user_id references tenant-scoped admin_users; never
+        # put the tenant-less PlatformAdmin id in that foreign-key column.
+        admin_user_id=None,
+        detail={"platform_admin_id": platform_admin.id},
     )
+    # This dependency can be the only write in a read-only platform request.
+    # Commit before returning scope so its required access evidence survives
+    # request teardown even when no route body performs a later commit.
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.error("require_platform_tenant_scope: audit commit failed")
     return PlatformAdminTenantScope(platform_admin=platform_admin, tenant_id=tenant_id)
 
 

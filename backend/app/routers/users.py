@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import create_password_reset_token, get_current_user, require_role
 from app.db.models import AdminSession, AdminUser, ArchiveMessage
 from app.db.session import get_db
@@ -146,6 +147,9 @@ def update_user_status(
     if target.id == current_user.id and body.status == "disabled":
         raise HTTPException(status_code=400, detail="cannot_disable_self")
 
+    if target.status == body.status:
+        return _user_dto(target)
+
     target.status = body.status
     if body.status == "disabled":
         now = datetime.now(timezone.utc)
@@ -154,6 +158,14 @@ def update_user_status(
             AdminSession.is_revoked.is_(False),
             AdminSession.expires_at > now,
         ).update({AdminSession.is_revoked: True})
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=current_user.id,
+        action=AuditAction.USER_DISABLED if body.status == "disabled" else AuditAction.USER_ENABLED,
+        object_type=AuditObjectType.USER,
+        object_id=target.id,
+    )
     db.commit()
     return _user_dto(target)
 
@@ -183,5 +195,14 @@ def admin_reset_password(
     if not send_password_reset_email(target.email, reset_link):
         db.rollback()
         raise HTTPException(status_code=500, detail="email_delivery_failed")
+    actor, _ = auth
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=actor.id,
+        action=AuditAction.USER_PASSWORD_RESET_INITIATED,
+        object_type=AuditObjectType.USER,
+        object_id=target.id,
+    )
     db.commit()
     return {"ok": True}

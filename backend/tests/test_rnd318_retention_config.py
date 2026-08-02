@@ -123,6 +123,38 @@ def test_retention_days_must_be_within_supported_range(
     assert db.query(RetentionConfig).count() == 0
 
 
+def test_retention_activity_audits_real_change_and_skips_noop(
+    retention_client: tuple[TestClient, Session, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+    import app.routers.retention as retention_router
+
+    client, _db, _auth = retention_client
+    audit_writer = MagicMock()
+    monkeypatch.setattr(retention_router, "write_audit", audit_writer)
+
+    assert client.put(
+        "/api/admin/retention-config", json={"retention_days": 365, "lock": False}
+    ).status_code == 200
+    first = audit_writer.call_args.kwargs
+    assert first["action"] == "retention.config_changed"
+    assert first["detail"] == {
+        "old": None,
+        "new": {"retention_days": 365, "is_locked": False},
+    }
+
+    audit_writer.reset_mock()
+    assert client.put(
+        "/api/admin/retention-config", json={"retention_days": 365, "lock": False}
+    ).status_code == 200
+    audit_writer.assert_not_called()
+
+    assert client.put(
+        "/api/admin/retention-config", json={"retention_days": 365, "lock": True}
+    ).status_code == 200
+    assert audit_writer.call_args.kwargs["action"] == "retention.config_locked"
+
+
 def test_locked_policy_cannot_be_changed_and_original_value_is_persisted(
     retention_client: tuple[TestClient, Session, dict[str, str]],
 ) -> None:
