@@ -511,3 +511,44 @@ line_of() {
 	assert_output_contains "nginx root OK"
 	[ -f "$NGINX_DST/assets/app.js" ]
 }
+
+@test "step 9: symlinked webroot (DEPLOYMENT.md §9) publishes as success — cp identical is not an error" {
+	# Regression for the §9 one-time fix: once /var/www/<site> is a symlink
+	# into shared/www/<site>, source and destination are the SAME directory,
+	# and `cp -a src/. dst/` exits 1 with "are identical (not copied)".
+	# Before Tier 0 existed, that cp failure was swallowed by the
+	# unconditional `return 0` in tier 1, so every deploy after the symlink
+	# fix logged a cp error while still claiming "nginx root OK". The
+	# symlinked state is now a first-class supported state: publish reports
+	# success and the copy is simply not attempted (nothing to copy — the
+	# webroot IS the shared tree).
+	mkdir -p "$SHARED_DST"
+	ln -s "$SHARED_DST" "$NGINX_DST"
+	seed_static_site
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "nginx root OK"
+	# The cp identical error must never surface in the deploy log.
+	assert_output_not_contains "are identical"
+	# Content is served straight out of the shared tree through the symlink.
+	[ -f "$NGINX_DST/index.html" ]
+	[ -f "$NGINX_DST/assets/app.js" ]
+}
+
+@test "step 9: a real copy failure in a writable webroot is reported as WARN, not nginx root OK" {
+	# Regression for tiers 1/2 returning 0 unconditionally: a genuine cp
+	# failure (here: a read-only file blocking an overwrite) must propagate
+	# as the WARN path, never as a false "nginx root OK". The destination
+	# directory itself is writable, so the old tier-1 `cp; return 0` would
+	# have swallowed this exact failure.
+	mkdir -p "$NGINX_DST"
+	printf 'locked\n' >"$NGINX_DST/index.html"
+	chmod 000 "$NGINX_DST/index.html"
+	seed_static_site
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "could not publish the homepage"
+	assert_output_not_contains "nginx root OK"
+}

@@ -4,9 +4,8 @@ from __future__ import annotations
 from html import escape
 from typing import Iterable
 
-# One navigation configuration for every admin page.  ``path`` determines
-# whether an item is available; ``href`` lets the sync-status item keep its
-# in-page target while using its API route for availability detection.
+# One navigation configuration for every admin page. ``path`` determines
+# whether an item is available.
 NAV = (
     {
         "group_key": "nav.group.review",
@@ -37,7 +36,6 @@ NAV = (
         "group_key": "nav.group.system",
         "items": (
             {"id": "diagnostics", "key": "nav.diagnostics", "path": "/admin/diagnostics/reachability"},
-            {"id": "sync", "key": "nav.syncTasks", "path": "/api/admin/sync-status", "href": "#sync-status"},
             {"id": "settings", "key": "nav.settings", "path": "/admin/settings"},
         ),
     },

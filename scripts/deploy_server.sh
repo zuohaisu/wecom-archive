@@ -311,26 +311,47 @@ _publish_static_dir() {
     _psd_src="$1"
     _psd_dst="$2"
 
+    # Tier 0 — source and destination are already the same directory
+    # (the operator symlinked the webroot into shared/, per
+    # DEPLOYMENT.md §9). `cp -a src/. dst/` would exit 1 with
+    # "are identical (not copied)" — not a failure, the content is
+    # already in place. Treat the symlinked state as the first-class
+    # supported state it is, not an error.
+    if [ -e "$_psd_src" ] && [ -e "$_psd_dst" ] && [ "$_psd_src" -ef "$_psd_dst" ]; then
+        return 0
+    fi
+
     # Tier 1 — the destination is already ours (operator chowned the
     # webroot, or symlinked it into shared/). No privilege needed.
+    # The cp exit status is propagated: a real copy failure must NOT be
+    # reported as "nginx root OK".
     if [ -d "$_psd_dst" ] && [ -w "$_psd_dst" ]; then
-        cp -a "$_psd_src/." "$_psd_dst/"
+        cp -a "$_psd_src/." "$_psd_dst/" || return 1
         return 0
     fi
 
     # Tier 2 — destination absent but its parent is ours: create it.
     if [ ! -e "$_psd_dst" ] && [ -w "$(dirname "$_psd_dst")" ]; then
-        mkdir -p "$_psd_dst" && cp -a "$_psd_src/." "$_psd_dst/"
+        if ! mkdir -p "$_psd_dst" || ! cp -a "$_psd_src/." "$_psd_dst/"; then
+            return 1
+        fi
         return 0
     fi
 
     # Tier 3 — needs root. Probe with the real command rather than a
     # `sudo -n true` canary: a whitelist can grant cp/mkdir without
     # granting `true`, and the canary would produce a false negative.
-    if [ -n "$SUDO_BIN" ] \
-        && "$SUDO_BIN" -n mkdir -p "$_psd_dst" 2>/dev/null \
-        && "$SUDO_BIN" -n cp -a "$_psd_src/." "$_psd_dst/" 2>/dev/null; then
-        return 0
+    # mkdir is only attempted when the destination is actually absent —
+    # a failed publish must not leave a new root-owned empty webroot
+    # behind (the granted mkdir would otherwise succeed even though the
+    # ungranted cp fails, mutating production state on a failed step).
+    if [ -n "$SUDO_BIN" ]; then
+        if [ ! -e "$_psd_dst" ]; then
+            "$SUDO_BIN" -n mkdir -p "$_psd_dst" 2>/dev/null || return 1
+        fi
+        if "$SUDO_BIN" -n cp -a "$_psd_src/." "$_psd_dst/" 2>/dev/null; then
+            return 0
+        fi
     fi
 
     return 1
@@ -717,9 +738,9 @@ if [ -d "$STATIC_SRC" ]; then
     else
         echo "  WARN: could not publish the homepage to $NGINX_DST — no plain write access there, and the sudoers whitelist does not cover this exact cp/mkdir invocation (see the VERIFIED-ON-PRODUCTION CAVEAT at the top of this script)." >&2
         echo "  WARN: the backend deploy is UNAFFECTED and this deploy still counts as successful; the current homepage is staged at $SHARED_DST." >&2
-        echo "  WARN: one-time operator fix (pick one, needs root):" >&2
+        echo "  WARN: one-time operator fix (pick one, needs root; see docs/DEPLOYMENT.md §9 for the full runbook):" >&2
         echo "  WARN:   a) point the Nginx 'root' for this site at $SHARED_DST, or" >&2
-        echo "  WARN:   b) ln -sfn $SHARED_DST $NGINX_DST, or" >&2
+        echo "  WARN:   b) mv $NGINX_DST $NGINX_DST.bak.$(date +%Y%m%d) && ln -s $SHARED_DST $NGINX_DST, or" >&2
         echo "  WARN:   c) chown -R $(id -un): $NGINX_DST" >&2
     fi
 else

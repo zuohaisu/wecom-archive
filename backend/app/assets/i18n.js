@@ -320,7 +320,6 @@
         "nav.exportRecords": "导出记录",
         "nav.staffSeats": "员工与坐席",
         "nav.externalContacts": "外部联系人",
-        "nav.syncTasks": "同步与任务",
         "nav.auditLog": "审计日志",
         "nav.comingSoon": "即将推出",
 
@@ -777,7 +776,6 @@
         "nav.exportRecords": "匯出記錄",
         "nav.staffSeats": "員工與坐席",
         "nav.externalContacts": "外部聯絡人",
-        "nav.syncTasks": "同步與任務",
         "nav.auditLog": "稽核日誌",
         "nav.comingSoon": "即將推出",
 
@@ -1234,7 +1232,6 @@
         "nav.exportRecords": "Export Records",
         "nav.staffSeats": "Staff & Seats",
         "nav.externalContacts": "External Contacts",
-        "nav.syncTasks": "Sync & Tasks",
         "nav.auditLog": "Audit Log",
         "nav.comingSoon": "Coming soon",
 

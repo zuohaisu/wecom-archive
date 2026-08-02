@@ -599,8 +599,11 @@ webroot copy degrades to the WARN path by design.
 mv /var/www/crowntime /var/www/crowntime.bak.$(date +%Y%m%d)
 
 # 2. Point the webroot at the deploy-managed tree. The deploy's step 9
-#    Tier-1 check then sees a writable directory and publishes directly,
-#    with no sudo involved.
+#    then sees source and destination as the same directory (Tier-0
+#    same-path check) and treats it as already-published — no sudo, and
+#    no `cp` error. (Before Tier-0 existed, `cp -a src/. dst/` on an
+#    identical pair exited 1 with "are identical (not copied)", and the
+#    old code swallowed that as a false "nginx root OK".)
 ln -s /srv/apps/wecom-archive-365/shared/www/crowntime /var/www/crowntime
 
 # 3. Re-home any files that lived ONLY in the old webroot (e.g. Tencent
@@ -616,7 +619,8 @@ curl -sI https://crowntime.cn/ | head -3
 
 **After the fix:** the next deploy's step 9 logs `nginx root OK` instead
 of the WARN, and the live homepage matches `main` again. The symlink
-survives deploys (step 9 writes *through* it; nothing removes it).
+survives deploys (step 9's Tier-0 same-path check short-circuits and
+writes nothing — it cannot remove the symlink, and nothing else does).
 
 **If you ever need to undo:** remove the symlink and restore the backup
 (`mv /var/www/crowntime.bak.* /var/www/crowntime`).
