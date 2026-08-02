@@ -21,14 +21,13 @@ def test_design_system_is_a_new_copy_of_the_design_source() -> None:
     assert _DESIGN_TARGET.read_bytes() == _DESIGN_SOURCE.read_bytes()
 
 
-def test_navigation_has_one_configuration_with_twelve_items_and_analytics() -> None:
+def test_navigation_has_no_top_level_audit_log_and_keeps_other_items() -> None:
     items = [item for group in NAV for item in group["items"]]
-    assert len(items) == 12
+    assert len(items) == 11
     assert {item["id"] for item in items} == {
         "review",
         "search",
         "review-tasks",
-        "audit-log",
         "messages",
         "analytics",
         "media",
@@ -38,8 +37,8 @@ def test_navigation_has_one_configuration_with_twelve_items_and_analytics() -> N
         "diagnostics",
         "settings",
     }
-    audit_log = next(item for item in items if item["id"] == "audit-log")
-    assert audit_log["path"] == "/admin/audit-logs"
+    assert "audit-log" not in {item["id"] for item in items}
+    assert "/admin/audit-logs" not in {item["path"] for item in items}
     analytics = next(item for item in items if item["id"] == "analytics")
     assert analytics["path"] == "/admin/analytics"
     assert "sync" not in {item["id"] for item in items}
@@ -54,9 +53,10 @@ def test_registered_path_changes_users_from_disabled_to_link_without_config_chan
     assert 'data-nav-id="users"' not in enabled
 
 
-def test_active_registered_item_has_current_page_marker() -> None:
-    html = render_sidenav("audit-log", {"/admin/audit-logs"})
-    assert 'href="/admin/audit-logs" data-i18n="nav.auditLog" aria-current="page"' in html
+def test_settings_can_be_the_active_navigation_item_for_security_activity() -> None:
+    html = render_sidenav("settings", {"/admin/settings", "/admin/audit-logs"})
+    assert 'href="/admin/settings" data-i18n="nav.settings" aria-current="page"' in html
+    assert "/admin/audit-logs" not in html
 
 
 def test_production_conversations_route_renders_the_sidenav_without_tokens() -> None:

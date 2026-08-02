@@ -13,7 +13,6 @@ NAV = (
             {"id": "review", "key": "nav.conversationsReview", "path": "/admin/conversations"},
             {"id": "search", "key": "nav.globalSearch", "path": "/admin/search"},
             {"id": "review-tasks", "key": "nav.reviewTasks", "path": "/admin/review-tasks"},
-            {"id": "audit-log", "key": "nav.auditLog", "path": "/admin/audit-logs"},
         ),
     },
     {

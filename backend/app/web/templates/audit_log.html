@@ -2,11 +2,12 @@
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
-<title>Audit Log</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Security &amp; activity</title>
 <link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <style>
-.log-time{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-3);white-space:nowrap}.actor{display:flex;align-items:center;gap:8px;min-width:0}.object{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-3);overflow-wrap:anywhere}.action{font-family:var(--font-mono);font-size:var(--text-xs)}.status{min-height:1.5em}.table-wrap{overflow:auto}.table{min-width:720px}.table td{overflow-wrap:anywhere}.mb-5{margin-bottom:var(--space-5)}
+.audit-filter{min-width:130px}.audit-feed{max-width:880px}.activity-item{border-bottom:1px solid var(--color-border);padding:var(--space-4) 0}.activity-item:last-child{border-bottom:0}.activity-main{font-weight:var(--weight-medium);margin:0 0 var(--space-1)}.activity-meta{color:var(--color-text-4);font-size:var(--text-sm);margin:0}.activity-details{margin-top:var(--space-3);font-size:var(--text-sm)}.activity-details summary{cursor:pointer;color:var(--color-primary-hover)}.activity-details .kv{margin-top:var(--space-3)}.status{min-height:1.5em}.mb-5{margin-bottom:var(--space-5)}
 </style>
 </head>
 <body>
@@ -14,46 +15,70 @@ __I18N_SCRIPT__
 <div class="shell">
 __SIDENAV__
 <main class="main">
-  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.review">Review</span><span class="sep">/</span><span class="cur" data-i18n="audit.title">Audit Log</span></div></header>
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.settings">Settings</span><span class="sep">/</span><span class="cur" data-i18n="audit.title">Security &amp; activity</span></div></header>
   <div class="page">
-    <div class="page-hd"><div><h1 data-i18n="audit.title">Audit Log</h1><p data-i18n="audit.description">Read-only record of administrative events.</p></div></div>
-    <div class="alert alert-neutral mb-5"><span class="alert-ico">ℹ</span><span data-i18n="audit.readOnly">Audit records are append-only and cannot be edited or deleted.</span></div>
+    <div class="page-hd"><div><h1 data-i18n="audit.title">Security &amp; activity</h1><p data-i18n="audit.description">Review important account and security activity for your organization.</p></div></div>
+    <div class="alert alert-neutral mb-5"><span class="alert-ico">ℹ</span><span data-i18n="audit.readOnly">This activity history is read-only. New events are added as they happen.</span></div>
     <form class="toolbar" id="audit-filters">
-      <div class="search-input"><span class="ico">⌕</span><input class="input" id="operator-filter" type="search" data-i18n-placeholder="audit.operatorPlaceholder" placeholder="Filter by operator" autocomplete="off"></div>
-      <input class="input" id="from-filter" type="date" data-i18n-title="audit.from" title="From">
-      <span class="muted" data-i18n="audit.to">To</span>
-      <input class="input" id="to-filter" type="date" data-i18n-title="audit.to" title="To">
-      <input class="input" id="action-filter" type="search" list="audit-actions" data-i18n-placeholder="audit.actionPlaceholder" placeholder="Action type" autocomplete="off">
-      <datalist id="audit-actions"><option value="login"></option><option value="search"></option><option value="export"></option><option value="config.changed"></option></datalist>
+      <label class="field-label" for="range-filter" data-i18n="audit.range">Time range</label>
+      <select class="select audit-filter" id="range-filter"><option value="30" data-i18n="audit.range30">Last 30 days</option><option value="90" selected data-i18n="audit.range90">Last 90 days</option><option value="all" data-i18n="audit.rangeAll">All time</option></select>
+      <label class="field-label" for="category-filter" data-i18n="audit.category">Category</label>
+      <select class="select audit-filter" id="category-filter"><option value="" data-i18n="audit.categoryAll">All categories</option><option value="security" data-i18n="audit.categorySecurity">Security</option><option value="account" data-i18n="audit.categoryAccount">Account</option><option value="configuration" data-i18n="audit.categoryConfiguration">Configuration</option><option value="data_access" data-i18n="audit.categoryDataAccess">Data access</option></select>
+      <label class="field-label" for="operator-filter" data-i18n="audit.operator">Operator</label>
+      <select class="select audit-filter" id="operator-filter"><option value="" data-i18n="audit.operatorAll">All operators</option></select>
+      <label class="row gap-2" for="include-system"><input id="include-system" type="checkbox"><span data-i18n="audit.includeSystem">Show system activity</span></label>
       <button class="btn" type="submit" data-i18n="audit.applyFilters">Apply filters</button>
-      <button class="btn btn-ghost" type="button" id="clear-filters" data-i18n="audit.clearFilters">Clear</button>
-      <div class="right"><span class="muted" id="result-count"></span></div>
+      <button class="btn btn-ghost" type="button" id="clear-filters" data-i18n="audit.clearFilters">Reset</button>
+      <div class="right"><span class="muted" id="result-count" aria-live="polite"></span></div>
     </form>
-    <div class="table-wrap">
-      <table class="table table-fixed"><thead><tr><th data-i18n="audit.time">Time</th><th data-i18n="audit.operator">Operator</th><th data-i18n="audit.action">Action</th><th data-i18n="audit.event">Event</th><th data-i18n="audit.auditId">Audit ID</th></tr></thead><tbody id="audit-rows"><tr><td colspan="5" class="loading" data-i18n="audit.loading">Loading audit logs…</td></tr></tbody></table>
-      <div class="card-ft"><div class="pagination"><span id="pagination-summary"></span><div class="pages"><button class="page-btn" id="previous-page" type="button">‹</button><span class="page-btn active" id="page-number">1</span><button class="page-btn" id="next-page" type="button">›</button></div></div></div>
-    </div>
-    <p class="status muted" id="audit-status" role="status"></p>
+    <p class="status muted" id="audit-status" role="status" aria-live="polite"></p>
+    <section id="activity-feed" class="audit-feed timeline-rail" role="list" aria-live="polite" aria-busy="true"></section>
+    <div class="card-ft"><div class="pagination"><span id="pagination-summary"></span><div class="pages"><button class="page-btn" id="previous-page" type="button" data-i18n-title="audit.previousPage" title="Previous page">‹</button><span class="page-btn active" id="page-number">1</span><button class="page-btn" id="next-page" type="button" data-i18n-title="audit.nextPage" title="Next page">›</button></div></div></div>
   </div>
 </main>
 </div>
 <script>
 (function(){
   'use strict';
-  var limit=50,offset=0,total=0;
-  var filters=document.getElementById('audit-filters'), rows=document.getElementById('audit-rows');
+  var limit=25, offset=0, total=0, hasMore=false, currentItems=[], statusKey=null;
+  var filters=document.getElementById('audit-filters'), feed=document.getElementById('activity-feed'), status=document.getElementById('audit-status');
+  var actionKeys={
+    'auth.login':'audit.action.auth.login','auth.login_failed':'audit.action.auth.login_failed','auth.logout':'audit.action.auth.logout','auth.password_reset_requested':'audit.action.auth.password_reset_requested','auth.password_reset_completed':'audit.action.auth.password_reset_completed','auth.password_changed':'audit.action.auth.password_changed',
+    'user.invited':'audit.action.user.invited','user.invite_accepted':'audit.action.user.invite_accepted','user.enabled':'audit.action.user.enabled','user.disabled':'audit.action.user.disabled','user.password_reset_initiated':'audit.action.user.password_reset_initiated',
+    'config.changed':'audit.action.config.changed','retention.config_changed':'audit.action.retention.config_changed','retention.config_locked':'audit.action.retention.config_locked',
+    'export.approval_granted':'audit.action.export.approval_granted','export.approval_denied':'audit.action.export.approval_denied','export.approval_consumed':'audit.action.export.approval_consumed','export.executed':'audit.action.export.executed','media.download':'audit.action.media.download',
+    'platform.tenant_accessed':'audit.action.platform.tenant_accessed','platform.tenant_activated':'audit.action.platform.tenant_activated','platform.tenant_deactivated':'audit.action.platform.tenant_deactivated','decrypt.completed':'audit.action.decrypt.completed','retention.messages_locked':'audit.action.retention.messages_locked'
+  };
+  var workerKeys=['scanned','success','failed','unsupported','recipients_repaired','recipient_upsert_failed','revocations_reconciled','revoke_reconcile_failed','key_mismatch','rsa_failed','sigsegv','isolation_other','malformed_input'];
   function text(key){return I18N.t(key);}
-  function applyI18n(){document.documentElement.lang=I18N.getLocale();document.querySelectorAll('[data-i18n]').forEach(function(el){el.textContent=text(el.getAttribute('data-i18n'));});document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el){el.placeholder=text(el.getAttribute('data-i18n-placeholder'));});document.querySelectorAll('[data-i18n-title]').forEach(function(el){el.title=text(el.getAttribute('data-i18n-title'));});document.title=text('audit.title');}
-  function formatTime(value){var date=new Date(value);return isNaN(date.getTime())?value:date.toLocaleString(I18N.getLocale());}
-  function addCell(row, value, className){var cell=document.createElement('td');if(className)cell.className=className;cell.textContent=value || '—';row.appendChild(cell);}
-  function render(items){rows.textContent='';if(!items.length){var row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=5;cell.className='empty';cell.textContent=text('audit.empty');row.appendChild(cell);rows.appendChild(row);return;}items.forEach(function(item){var row=document.createElement('tr');addCell(row,formatTime(item.created_at),'log-time');addCell(row,item.actor_name || (item.admin_user_id ? item.admin_user_id : text('audit.system')),'');addCell(row,item.action,'action');addCell(row,item.object_type+(item.object_id ? ' · '+item.object_id : ''),'object');addCell(row,item.id,'cell-id');rows.appendChild(row);});}
-  function params(){var p=new URLSearchParams({limit:String(limit),offset:String(offset)}),operator=document.getElementById('operator-filter').value.trim(),action=document.getElementById('action-filter').value.trim(),from=document.getElementById('from-filter').value,to=document.getElementById('to-filter').value;if(operator)p.set('q',operator);if(action)p.set('action',action);if(from)p.set('from',from+'T00:00:00');if(to)p.set('to',to+'T23:59:59.999');return p;}
-  function updatePagination(){var page=Math.floor(offset/limit)+1,pages=Math.max(1,Math.ceil(total/limit));document.getElementById('result-count').textContent=text('audit.results').replace('{n}',total);document.getElementById('pagination-summary').textContent=text('audit.page').replace('{page}',page).replace('{pages}',pages);document.getElementById('page-number').textContent=page;document.getElementById('previous-page').disabled=offset===0;document.getElementById('next-page').disabled=offset+limit>=total;}
-  function load(){rows.innerHTML='<tr><td colspan="5" class="loading">'+text('audit.loading')+'</td></tr>';document.getElementById('audit-status').textContent='';fetch('/api/admin/audit-logs?'+params().toString()).then(function(response){if(!response.ok)throw new Error(String(response.status));return response.json();}).then(function(data){total=data.total;limit=data.limit;offset=data.offset;render(data.items);updatePagination();}).catch(function(){rows.innerHTML='<tr><td colspan="5" class="empty">'+text('audit.failedToLoad')+'</td></tr>';document.getElementById('audit-status').textContent=text('audit.failedToLoad');});}
-  filters.addEventListener('submit',function(event){event.preventDefault();offset=0;load();});document.getElementById('clear-filters').addEventListener('click',function(){filters.reset();offset=0;load();});document.getElementById('previous-page').addEventListener('click',function(){if(offset){offset=Math.max(0,offset-limit);load();}});document.getElementById('next-page').addEventListener('click',function(){if(offset+limit<total){offset+=limit;load();}});
-  function renderLangMenu(){var menu=document.getElementById('lang-menu');if(!menu)return;menu.textContent='';I18N.availableLocales().forEach(function(locale){var option=document.createElement('div');option.className='lang-option'+(locale.code===I18N.getLocale()?' active':'');option.textContent=locale.nativeName;option.onclick=function(){I18N.setLocale(locale.code);menu.style.display='none';applyI18n();load();};menu.appendChild(option);});}
+  function interpolate(key, values){var value=text(key);Object.keys(values||{}).forEach(function(name){value=value.replace('{'+name+'}',String(values[name]));});return value;}
+  function applyI18n(){document.documentElement.lang=I18N.getLocale();document.querySelectorAll('[data-i18n]').forEach(function(el){el.textContent=text(el.getAttribute('data-i18n'));});document.querySelectorAll('[data-i18n-title]').forEach(function(el){el.title=text(el.getAttribute('data-i18n-title'));});document.title=text('audit.title');}
+  function formatTime(value){var date=new Date(value);return isNaN(date.getTime())?text('audit.timeUnavailable'):date.toLocaleString(I18N.getLocale());}
+  function appendText(parent, tag, value, className){var element=document.createElement(tag);if(className)element.className=className;element.textContent=value;parent.appendChild(element);return element;}
+  function actorFor(item){return item.actor_name || text('audit.system');}
+  function safeCount(value){return typeof value==='number' && isFinite(value) && value>=0 ? String(value) : null;}
+  function safeKey(value){return typeof value==='string' && /^[a-z][a-z0-9_.-]{0,64}$/.test(value) ? value : null;}
+  function addDetailRow(list, label, value){if(value===null || value===undefined || value==='')return;appendText(list,'dt',label);appendText(list,'dd',value);}
+  function appendAllowedDetail(details, item){var detail=item.detail || {}, list=document.createElement('dl');list.className='kv kv-audit';var used=false;
+    function row(label, value){if(value===null || value===undefined || value==='')return;addDetailRow(list,label,value);used=true;}
+    if(item.action.indexOf('export.')===0){var format=typeof detail.format==='string' && /^(csv|json|xlsx)$/i.test(detail.format) ? detail.format.toUpperCase() : null;row(text('audit.detail.format'),format);row(text('audit.detail.count'),safeCount(detail.record_count));}
+    if(item.action==='export.approval_denied' && detail.reason==='bad_password')row(text('audit.detail.reason'),text('audit.reason.bad_password'));
+    if(item.action==='config.changed' && Array.isArray(detail.changed_keys)){var keys=detail.changed_keys.map(safeKey).filter(Boolean);if(keys.length)row(text('audit.detail.changedKeys'),keys.join(', '));}
+    if(item.action.indexOf('retention.config_')===0){['old','new'].forEach(function(name){var state=detail[name];if(!state || typeof state!=='object')return;var days=safeCount(state.retention_days),locked=typeof state.is_locked==='boolean' ? text(state.is_locked?'audit.status.locked':'audit.status.unlocked') : null;if(days!==null || locked!==null)row(text('audit.detail.'+name),[days!==null?interpolate('audit.detail.days',{n:days}):null,locked].filter(Boolean).join(' · '));});}
+    if(item.action==='decrypt.completed' || item.action==='retention.messages_locked'){workerKeys.forEach(function(name){var count=safeCount(detail[name]);if(count!==null)row(text('audit.detail.'+name),count);});var locked=safeCount(detail.locked_count);if(locked!==null)row(text('audit.detail.locked_count'),locked);}
+    if(used)details.appendChild(list);
+  }
+  function appendTechnicalDetail(details, item){var list=document.createElement('dl');list.className='kv kv-audit';addDetailRow(list,text('audit.technical.action'),item.action || text('audit.unknownCode'));addDetailRow(list,text('audit.technical.auditId'),item.id || text('audit.unknownCode'));addDetailRow(list,text('audit.technical.objectType'),item.object_type || text('audit.unknownCode'));addDetailRow(list,text('audit.technical.objectId'),item.object_id || text('audit.unknownCode'));details.appendChild(list);}
+  function render(items){currentItems=items || [];feed.textContent='';feed.setAttribute('aria-busy','false');if(!currentItems.length){appendText(feed,'p',text('audit.empty'),'empty');return;}currentItems.forEach(function(item){var entry=document.createElement('article');entry.className='timeline-item';entry.setAttribute('role','listitem');var actionKey=actionKeys[item.action], unknown=!actionKey;appendText(entry,'p',interpolate(actionKey || 'audit.action.unknown',{actor:actorFor(item)}),'activity-main');var meta=interpolate('audit.meta',{time:formatTime(item.created_at),category:text('audit.category.'+(item.category || 'unknown'))});appendText(entry,'p',meta,'activity-meta');var details=document.createElement('details');details.className='activity-details';appendText(details,'summary',text('audit.details'));appendAllowedDetail(details,item);appendTechnicalDetail(details,item);entry.appendChild(details);if(unknown)entry.classList.add('is-muted');feed.appendChild(entry);});}
+  function params(){var p=new URLSearchParams({limit:String(limit),offset:String(offset)}),range=document.getElementById('range-filter').value,category=document.getElementById('category-filter').value,operator=document.getElementById('operator-filter').value,system=document.getElementById('include-system').checked;if(range!=='all'){var from=new Date(Date.now()-Number(range)*86400000);p.set('from',from.toISOString());}if(category)p.set('category',category);if(operator)p.set('operator',operator);p.set('include_system',system?'true':'false');return p;}
+  function updatePagination(){var page=Math.floor(offset/limit)+1,pages=Math.max(1,Math.ceil(total/limit));document.getElementById('result-count').textContent=interpolate('audit.results',{n:total});document.getElementById('pagination-summary').textContent=interpolate('audit.page',{page:page,pages:pages});document.getElementById('page-number').textContent=String(page);document.getElementById('previous-page').disabled=offset===0;document.getElementById('next-page').disabled=!hasMore;}
+  function setStatus(message, key){statusKey=key || null;status.textContent=message;}
+  function load(){feed.textContent='';feed.setAttribute('aria-busy','true');appendText(feed,'p',text('audit.loading'),'loading');setStatus('');fetch('/api/admin/audit-logs?'+params().toString(),{credentials:'include'}).then(function(response){if(!response.ok){var error=new Error('audit_load_failed');error.status=response.status;throw error;}return response.json();}).then(function(data){total=data.total;limit=data.limit;offset=data.offset;hasMore=data.has_more;render(data.items);updatePagination();}).catch(function(error){feed.textContent='';feed.setAttribute('aria-busy','false');appendText(feed,'p',text('audit.failedToLoad'),'empty');var key=error.status===401?'audit.unauthorized':error.status===403?'audit.forbidden':'audit.failedToLoad';setStatus(text(key),key);});}
+  function loadOperators(){fetch('/api/admin/users?per_page=100',{credentials:'include'}).then(function(response){if(!response.ok)throw new Error('operator_load_failed');return response.json();}).then(function(data){var select=document.getElementById('operator-filter');data.items.forEach(function(user){if(!user || !user.id)return;var option=document.createElement('option');option.value=user.id;option.textContent=user.name || text('audit.unnamedOperator');select.appendChild(option);});}).catch(function(){setStatus(text('audit.operatorFallback'),'audit.operatorFallback');});}
+  filters.addEventListener('submit',function(event){event.preventDefault();offset=0;load();});document.getElementById('clear-filters').addEventListener('click',function(){filters.reset();document.getElementById('range-filter').value='90';offset=0;load();});document.getElementById('previous-page').addEventListener('click',function(){if(offset){offset=Math.max(0,offset-limit);load();}});document.getElementById('next-page').addEventListener('click',function(){if(hasMore){offset+=limit;load();}});
+  function renderLangMenu(){var menu=document.getElementById('lang-menu');if(!menu)return;menu.textContent='';I18N.availableLocales().forEach(function(locale){var option=document.createElement('div');option.className='lang-option'+(locale.code===I18N.getLocale()?' active':'');option.textContent=locale.nativeName;option.onclick=function(){I18N.setLocale(locale.code);menu.style.display='none';};menu.appendChild(option);});}
   window.toggleLangMenu=function(){var menu=document.getElementById('lang-menu');if(!menu)return;renderLangMenu();menu.style.display=menu.style.display==='block'?'none':'block';};window.doLogout=function(){fetch('/api/auth/logout',{method:'POST'}).finally(function(){window.location.href='/admin/login';});};
-  applyI18n();load();
+  applyI18n();I18N.onChange(function(){applyI18n();render(currentItems);updatePagination();if(statusKey)setStatus(text(statusKey),statusKey);});loadOperators();load();
 }());
 </script>
 </body>

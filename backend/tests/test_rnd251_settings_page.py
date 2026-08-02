@@ -36,6 +36,19 @@ def test_settings_page_requires_session_and_renders_group_navigation() -> None:
         assert f'id="settings-section-{section}"' in response.text
 
 
+def test_settings_account_section_links_to_read_only_security_activity() -> None:
+    source = _TEMPLATE.read_text(encoding="utf-8")
+
+    assert 'href="/admin/audit-logs"' in source
+    for key in (
+        "settings.securityActivity.title",
+        "settings.securityActivity.description",
+        "settings.securityActivity.open",
+        "settings.securityActivity.readOnly",
+    ):
+        assert f'data-i18n="{key}"' in source
+
+
 def test_settings_page_keeps_the_existing_change_password_form() -> None:
     source = _TEMPLATE.read_text(encoding="utf-8")
 
@@ -67,6 +80,13 @@ def test_settings_group_i18n_keys_exist_in_each_locale() -> None:
 
     for group in _GROUPS:
         assert source.count(f'"settings.group.{group}"') == 3
+    for key in (
+        "settings.securityActivity.title",
+        "settings.securityActivity.description",
+        "settings.securityActivity.open",
+        "settings.securityActivity.readOnly",
+    ):
+        assert source.count(f'"{key}"') == 3
 
 
 def test_settings_template_has_no_template_engine_syntax() -> None:

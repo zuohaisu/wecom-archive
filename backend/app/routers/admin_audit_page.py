@@ -25,7 +25,7 @@ def admin_audit_logs_page(
             "audit_log",
             i18n_script=I18N_SCRIPT_TAG,
             sidenav=render_sidenav(
-                "audit-log",
+                "settings",
                 {route.path for route in request.app.routes if hasattr(route, "path")},
             ),
         )
