@@ -102,6 +102,36 @@ _BACKEND_DIR = os.path.dirname(_SCRIPTS_DIR)
 
 _SYNC_SCRIPT = os.path.join(_SCRIPTS_DIR, "sync_wecom_archive_once.py")
 _DECRYPT_SCRIPT = os.path.join(_SCRIPTS_DIR, "decrypt_wecom_messages_once.py")
+_REACHABILITY_AUTOMATION_SCRIPT = os.path.join(
+    _SCRIPTS_DIR, "run_reachability_automation_once.py"
+)
+
+
+def _run_best_effort_reachability_automation() -> None:
+    """Run incremental diagnosis without changing archive-worker truth."""
+    try:
+        proc = subprocess.run(
+            [sys.executable, _REACHABILITY_AUTOMATION_SCRIPT, "incremental"],
+            cwd=_BACKEND_DIR,
+            capture_output=False,
+        )
+        if proc.returncode:
+            print(
+                "[WARN] archive_worker reachability mode=incremental status=failed count=0",
+                flush=True,
+            )
+        else:
+            print(
+                "[INFO] archive_worker reachability mode=incremental status=finished count=0",
+                flush=True,
+            )
+    except Exception:
+        # No traceback or child exception is safe to expose from this
+        # best-effort ancillary task.
+        print(
+            "[WARN] archive_worker reachability mode=incremental status=error count=0",
+            flush=True,
+        )
 
 
 def _run_script(script_path: str, label: str) -> None:
@@ -143,6 +173,7 @@ def main() -> None:
     try:
         _run_script(_SYNC_SCRIPT, "sync_wecom_archive_once.py")
         _run_script(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py")
+        _run_best_effort_reachability_automation()
     finally:
         _release_lock(lock_fd)
 

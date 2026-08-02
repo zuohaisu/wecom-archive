@@ -1,0 +1,12 @@
+[Unit]
+Description=WeCom Archive Reachability Reconciliation Timer — daily
+
+[Timer]
+# Haisu-approved RND-339 schedule: 73 minutes after the 03:17 backup,
+# and not aligned with the five-minute archive-worker high-water marks.
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+Unit=wecom-archive-reachability-check.service
+
+[Install]
+WantedBy=timers.target

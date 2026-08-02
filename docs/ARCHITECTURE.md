@@ -273,6 +273,8 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 |------|------|----------|---------|
 | `wecom-archive-worker.service` | oneshot | `OnCalendar=*:0/5` | Sync + decrypt archive messages |
 | `wecom-archive-worker.timer` | timer | — | Activates above |
+| `wecom-archive-reachability-check.service` | oneshot | `OnCalendar=*-*-* 04:30:00` | Full reachability reconciliation |
+| `wecom-archive-reachability-check.timer` | timer | — | Activates above |
 | `wecom-archive-media-download.service` | oneshot | `OnUnitActiveSec=5min` | Download recent image media |
 | `wecom-archive-media-download.timer` | timer | — | Activates above |
 
@@ -332,6 +334,18 @@ service function preserves its worker's original commit pattern exactly):
 | Sync | Per-run: inserted records commit once, then the seq cursor advances and commits once more. No records fetched → no commit at all. |
 | Decrypt | Per-run, single commit: every row mutation, the recipient-repair scan, and the revoke-reconciliation scan happen in memory/via `flush()`, then one `session.commit()` at the end. A commit failure raises `DecryptCommitError`, which the shell translates to `[FAIL] Database commit failed: …` + exit 1. |
 | Media | Per-candidate: each download outcome is persisted and committed individually, with rollback + best-effort orphan-object cleanup on a confirmed DB commit failure for that one candidate — one bad candidate never blocks the rest of the run. |
+
+**Reachability automation (RND-339).** After a successful sync and decrypt,
+`run_archive_worker_once.py` best-effort invokes the incremental reachability
+one-shot. It freezes new successful-message IDs after the last complete
+incremental watermark, persists only aggregate runs and internal finding
+references, and never resolves findings. The separate daily reconciliation
+unit shares the process/tenant-active-run exclusion, scans the last seven days
+plus messages behind active findings, and may resolve only after complete
+coverage. Its failure, exception, or held lock never changes archive worker
+success. `GET /api/admin/reachability-findings` projects an authenticated
+tenant's findings through an allowlisted, opaque-cursor contract; it contains
+no tenant, archive-message, run, identity, content, path, or error identifier.
 
 **Exit code semantics** are unchanged by this extraction: `0` on success
 (including "nothing to do"), `1` on any fatal failure (missing/invalid

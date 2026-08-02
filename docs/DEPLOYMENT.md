@@ -21,6 +21,8 @@ Versioned in this repository:
 | Deploy integration tests | `scripts/tests/deploy_server.bats` | Mocked end-to-end coverage of the deploy script's ordering and rollback behavior |
 | Worker unit | `deploy/systemd/wecom-archive-worker.service` | One-shot sync + decrypt |
 | Worker timer | `deploy/systemd/wecom-archive-worker.timer` | Runs worker every 5 minutes |
+| Reachability reconciliation unit | `deploy/systemd/wecom-archive-reachability-check.service` | One-shot daily full visibility reconciliation |
+| Reachability reconciliation timer | `deploy/systemd/wecom-archive-reachability-check.timer` | Runs reconciliation daily at 04:30 local time |
 | Media unit | `deploy/systemd/wecom-archive-media-download.service` | One-shot image download |
 | Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Runs media download every 5 minutes |
 | GitHub Actions workflow | `.github/workflows/deploy.yml` | CI tests + migration + schema-drift gate, then triggers deploy script on `main` push (see §7) |
@@ -135,6 +137,21 @@ sudo cp deploy/systemd/wecom-archive-worker.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now wecom-archive-worker.timer
 ```
+
+Reachability reconciliation (RND-339; operator action only):
+
+```bash
+sudo cp deploy/systemd/wecom-archive-reachability-check.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-archive-reachability-check.timer
+sudo systemctl status wecom-archive-reachability-check.timer --no-pager
+```
+
+It is a best-effort diagnostic: its failure never changes a successful archive
+worker's outcome. See [reachability_automation_runbook.md](reachability_automation_runbook.md)
+for manual invocation, journal inspection, lock behavior, and rollback. To
+roll back, an operator disables this timer before reverting the corresponding
+code and reviewed migration.
 
 Media download worker:
 

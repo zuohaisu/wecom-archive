@@ -486,7 +486,7 @@ class ReachabilityAuditRun(Base):
             name="ck_reachability_audit_runs_status_valid",
         ),
         CheckConstraint(
-            "source IN ('manual')",
+            "source IN ('manual', 'incremental', 'reconcile')",
             name="ck_reachability_audit_runs_source_valid",
         ),
         CheckConstraint(
@@ -526,6 +526,60 @@ class ReachabilityAuditRun(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ReachabilityFinding(Base):
+    """Internal-only lifecycle record for one classified visibility issue."""
+
+    __tablename__ = "reachability_findings"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_reachability_findings_public_id"),
+        UniqueConstraint(
+            "tenant_id", "archive_message_id", "reason_code", "algorithm_version",
+            name="uq_reachability_findings_identity",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "archive_message_id"],
+            ["archive_messages.tenant_id", "archive_messages.id"],
+            name="fk_reachability_findings_tenant_message",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'resolved')",
+            name="ck_reachability_findings_status_valid",
+        ),
+        CheckConstraint(
+            "occurrence_count >= 0",
+            name="ck_reachability_findings_occurrences_nonnegative",
+        ),
+        Index(
+            "ix_reachability_findings_tenant_status_last_seen",
+            "tenant_id", "status", "last_seen", "id",
+        ),
+        Index(
+            "ix_reachability_findings_tenant_message_active",
+            "tenant_id", "archive_message_id", "status",
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    public_id = Column(String(36), nullable=False)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    # This is the deliberately internal-only message reference. It must never
+    # be serialized, logged, used in a cursor, or accepted from a request.
+    archive_message_id = Column(BigInteger, nullable=False)
+    reason_code = Column(String(96), nullable=False)
+    status = Column(String(16), nullable=False, default="active")
+    first_seen = Column(DateTime(timezone=True), nullable=False)
+    last_seen = Column(DateTime(timezone=True), nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    occurrence_count = Column(Integer, nullable=False, default=0)
+    first_run_id = Column(BigInteger, ForeignKey("reachability_audit_runs.id"), nullable=False)
+    last_run_id = Column(BigInteger, ForeignKey("reachability_audit_runs.id"), nullable=False)
+    algorithm_version = Column(String(32), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 

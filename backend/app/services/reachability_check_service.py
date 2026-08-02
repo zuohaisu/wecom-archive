@@ -17,6 +17,11 @@ ALGORITHM_VERSION = "reachability-v1"
 DEFAULT_SCOPE_DAYS = 7
 STALE_AFTER = timedelta(minutes=15)
 ACTIVE_STATUS = "checking"
+RUN_SOURCES = frozenset({"manual", "incremental", "reconcile"})
+FULL_SNAPSHOT_SOURCES = frozenset({"manual", "reconcile"})
+SAFE_ERROR_CODES = frozenset({
+    "process_start_failed", "scan_failed", "scope_mismatch", "page_incomplete", "stale_checking",
+})
 
 
 def utc_now() -> datetime:
@@ -60,50 +65,50 @@ def _mark_stale_runs(db: Session, tenant_id: str, now: datetime) -> int:
 
 
 def create_or_reuse_run(
-    db: Session, tenant_id: str, *, now: Optional[datetime] = None
+    db: Session,
+    tenant_id: str,
+    *,
+    now: Optional[datetime] = None,
+    source: str = "manual",
+    scope_from: Optional[datetime] = None,
+    scope_to: Optional[datetime] = None,
+    scope_max_message_id: Optional[int] = None,
+    matching_count: Optional[int] = None,
 ) -> tuple[ReachabilityAuditRun, bool]:
-    """Atomically create one frozen active run, or return the tenant's active run."""
+    """Atomically create one tenant-active frozen run, or reuse it.
+
+    RND-339 supplies its already frozen candidate boundary/count for
+    incremental and reconcile work. The RND-337 manual behaviour remains the
+    default and therefore remains backwards compatible.
+    """
+    if source not in RUN_SOURCES:
+        raise ValueError("invalid reachability run source")
     now = _as_utc(now or utc_now())
     _mark_stale_runs(db, tenant_id, now)
     active = (
         db.query(ReachabilityAuditRun)
-        .filter(
-            ReachabilityAuditRun.tenant_id == tenant_id,
-            ReachabilityAuditRun.status == ACTIVE_STATUS,
-        )
-        .order_by(ReachabilityAuditRun.created_at.desc())
-        .first()
+        .filter(ReachabilityAuditRun.tenant_id == tenant_id, ReachabilityAuditRun.status == ACTIVE_STATUS)
+        .order_by(ReachabilityAuditRun.created_at.desc()).first()
     )
     if active is not None:
         if db.dirty:
             db.commit()
         return active, False
 
-    scope_to = now
-    scope_from = now - timedelta(days=DEFAULT_SCOPE_DAYS)
-    candidates = _candidate_query(db, tenant_id, scope_from, scope_to)
-    # Get the watermark first; any later insert has a greater DB id and is
-    # deliberately excluded from this run even if its msgtime is backfilled.
-    max_message_id = candidates.with_entities(func.max(ArchiveMessage.id)).scalar() or 0
-    matching_count = 0
-    if max_message_id:
-        matching_count = candidates.filter(ArchiveMessage.id <= max_message_id).count()
+    scope_to = _as_utc(scope_to or now)
+    scope_from = _as_utc(scope_from or (scope_to - timedelta(days=DEFAULT_SCOPE_DAYS)))
+    if scope_max_message_id is None or matching_count is None:
+        candidates = _candidate_query(db, tenant_id, scope_from, scope_to)
+        # A later insert has a greater DB id and is deliberately excluded.
+        scope_max_message_id = candidates.with_entities(func.max(ArchiveMessage.id)).scalar() or 0
+        matching_count = candidates.filter(ArchiveMessage.id <= scope_max_message_id).count() if scope_max_message_id else 0
 
     run = ReachabilityAuditRun(
-        public_id=str(uuid4()),
-        tenant_id=tenant_id,
-        status=ACTIVE_STATUS,
-        source="manual",
-        algorithm_version=ALGORITHM_VERSION,
-        scope_from=scope_from,
-        scope_to=scope_to,
-        scope_max_message_id=max_message_id,
-        matching_count=matching_count,
-        checked_count=0,
-        reachable_count=0,
-        unreachable_count=0,
-        reason_counts={},
-        started_at=now,
+        public_id=str(uuid4()), tenant_id=tenant_id, status=ACTIVE_STATUS,
+        source=source, algorithm_version=ALGORITHM_VERSION,
+        scope_from=scope_from, scope_to=scope_to,
+        scope_max_message_id=scope_max_message_id, matching_count=matching_count,
+        checked_count=0, reachable_count=0, unreachable_count=0, reason_counts={}, started_at=now,
     )
     db.add(run)
     try:
@@ -115,12 +120,8 @@ def create_or_reuse_run(
         db.rollback()
         active = (
             db.query(ReachabilityAuditRun)
-            .filter(
-                ReachabilityAuditRun.tenant_id == tenant_id,
-                ReachabilityAuditRun.status == ACTIVE_STATUS,
-            )
-            .order_by(ReachabilityAuditRun.created_at.desc())
-            .first()
+            .filter(ReachabilityAuditRun.tenant_id == tenant_id, ReachabilityAuditRun.status == ACTIVE_STATUS)
+            .order_by(ReachabilityAuditRun.created_at.desc()).first()
         )
         if active is None:
             raise
@@ -185,14 +186,35 @@ def latest_snapshot(
     now = _as_utc(now or utc_now())
     if _mark_stale_runs(db, tenant_id, now):
         db.commit()
+    # Incremental checks are intentionally local evidence: a clean slice
+    # cannot promote whole-archive health. Human/manual and full reconcile
+    # snapshots are the only sources that may provide the normal latest view.
     run = (
         db.query(ReachabilityAuditRun)
-        .filter(ReachabilityAuditRun.tenant_id == tenant_id)
-        .order_by(ReachabilityAuditRun.created_at.desc())
-        .first()
+        .filter(
+            ReachabilityAuditRun.tenant_id == tenant_id,
+            ReachabilityAuditRun.source.in_(FULL_SNAPSHOT_SOURCES),
+        )
+        .order_by(ReachabilityAuditRun.created_at.desc()).first()
     )
     if run is not None:
-        return snapshot_for_run(run)
+        snapshot = snapshot_for_run(run)
+        # A local negative observation immediately invalidates a previously
+        # healthy full snapshot; only another complete full run can restore it.
+        if snapshot["state"] == "healthy":
+            from app.db.models import ReachabilityFinding
+            has_active_finding = (
+                db.query(ReachabilityFinding.id)
+                .filter(
+                    ReachabilityFinding.tenant_id == tenant_id,
+                    ReachabilityFinding.status == "active",
+                ).first() is not None
+            )
+            if has_active_finding:
+                snapshot["state"] = "attention"
+                snapshot["complete"] = False
+                snapshot["last_checked_at"] = None
+        return snapshot
 
     scope_to = now
     scope_from = now - timedelta(days=DEFAULT_SCOPE_DAYS)
@@ -215,6 +237,7 @@ def latest_snapshot(
 
 def mark_run_error(db: Session, tenant_id: str, public_id: str, code: str) -> None:
     """Persist an allowlisted failure code without exposing raw exception text."""
+    code = code if code in SAFE_ERROR_CODES else "scan_failed"
     run = (
         db.query(ReachabilityAuditRun)
         .filter(
