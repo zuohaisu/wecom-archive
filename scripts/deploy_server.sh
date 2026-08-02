@@ -28,6 +28,17 @@
 #       ─────────────────────────────
 #       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service, /usr/bin/apt-get
 #
+#   VERIFIED-ON-PRODUCTION CAVEAT: as of 2026-08-02 the live host's
+#   sudoers grants the systemctl line only — an actual deploy proved it
+#   by having `sudo apt-get` fall through to sudo's password lecture and
+#   abort the run. Treat the apt-get grant above as the DESIRED state,
+#   not the current one, and do not add any new `sudo <binary>` call to
+#   this script assuming a broader grant exists: _ensure_ffmpeg below
+#   would fail exactly the same way if ffmpeg ever went missing (today
+#   it is pre-installed, so its sudo path never runs). Prefer solutions
+#   that need no new binary and no new sudo grant — see step 9's
+#   static-homepage copy for the worked example.
+#
 # ── First-Time Server Setup ────────────────────────────────────────────────
 #   1. Install git, python3, python3-venv, pip, curl, and ffmpeg
 #      (`sudo apt-get install -y ffmpeg`).
@@ -269,24 +280,6 @@ _ensure_ffmpeg() {
         "$APT_GET_BIN" update -qq && "$APT_GET_BIN" install -y ffmpeg
     fi
     command -v "$FFMPEG_BIN" >/dev/null 2>&1
-}
-
-# rsync is a hard dependency of step 9's static-homepage sync (see below)
-# but, unlike ffmpeg, isn't part of first-time server setup's package
-# list — a minimal host can reach this step without it ever having been
-# installed. Same self-healing shape as _ensure_ffmpeg above rather than
-# a new pattern.
-_ensure_rsync() {
-    if command -v rsync >/dev/null 2>&1; then
-        return 0
-    fi
-    echo "  → rsync is missing; installing it …"
-    if [ -n "$SUDO_BIN" ]; then
-        "$SUDO_BIN" "$APT_GET_BIN" update -qq && "$SUDO_BIN" "$APT_GET_BIN" install -y rsync
-    else
-        "$APT_GET_BIN" update -qq && "$APT_GET_BIN" install -y rsync
-    fi
-    command -v rsync >/dev/null 2>&1
 }
 
 # _record_known_good <sha> — called only after this script has itself
@@ -636,30 +629,43 @@ SHARED_DST="/srv/apps/wecom-archive-365/shared/www/$STATIC_SITE_DIR_NAME"
 NGINX_DST="/var/www/$STATIC_SITE_DIR_NAME"
 
 if [ -d "$STATIC_SRC" ]; then
-    if ! _ensure_rsync; then
-        echo "ERROR: rsync installation failed — cannot sync the static homepage." >&2
-        exit 1
-    fi
-
     # Ensure target directories exist
     mkdir -p "$SHARED_DST"
 
-    # Sync the whole source directory (not just index.html/style.css) so
+    # Copy the whole source directory (not just index.html/style.css) so
     # assets referenced by the page — brand/, assets/, site.webmanifest,
     # etc. — actually reach the served root. A prior version of this step
     # copied only two files, which silently left every other referenced
-    # asset 404ing in production. README.md is excluded: it documents the
-    # source tree for contributors and has no business being served.
-    rsync -a --exclude=README.md "$STATIC_SRC/" "$SHARED_DST/"
+    # asset 404ing in production.
+    #
+    # Deliberately `cp -a src/. dst/` rather than `rsync -a src/ dst/`
+    # (which is what a previous version used, and what broke deploys):
+    # rsync is NOT part of first-time server setup's package list, so it
+    # simply isn't on the host — and it cannot be installed on demand
+    # either, because the runtime user's sudoers whitelist covers only
+    # `systemctl restart <service>` (see the sudo prerequisites at the
+    # top of this file), so `sudo apt-get install rsync` just hits a
+    # password prompt and fails. `sudo rsync` to the Nginx root would
+    # hit that same wall for the same reason, since the whitelist was
+    # written for the `cp`/`mkdir` this step originally used. cp -a is
+    # the portable equivalent here and needs no new binary and no new
+    # sudo grant. Like rsync without --delete, it does not remove files
+    # that disappeared from the source — same behaviour as before.
+    cp -a "$STATIC_SRC/." "$SHARED_DST/"
+    # README.md documents the source tree for contributors and has no
+    # business being served. cp has no --exclude, so it is dropped after
+    # the copy — and dropped HERE, before the Nginx copy below, so that
+    # copy needs no exclusion (and therefore no `sudo rm`) of its own.
+    rm -f "$SHARED_DST/README.md"
     echo "  → shared OK ($SHARED_DST)"
 
-    # Then sync to nginx root (needs sudo)
+    # Then copy to nginx root (needs sudo)
     if [ -n "$SUDO_BIN" ]; then
         "$SUDO_BIN" mkdir -p "$NGINX_DST"
-        "$SUDO_BIN" rsync -a --exclude=README.md "$SHARED_DST/" "$NGINX_DST/"
+        "$SUDO_BIN" cp -a "$SHARED_DST/." "$NGINX_DST/"
     else
         mkdir -p "$NGINX_DST"
-        rsync -a --exclude=README.md "$SHARED_DST/" "$NGINX_DST/"
+        cp -a "$SHARED_DST/." "$NGINX_DST/"
     fi
     echo "  → nginx root OK ($NGINX_DST)"
 else

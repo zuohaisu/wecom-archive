@@ -217,7 +217,7 @@ flowchart TD
     K -->|exhausts retries| ROLLBACK_FULL["Rollback: restore LAST KNOWN-GOOD commit\n(persisted state, not just pre-pull HEAD),\nreinstall deps, restart, re-check health.\nOriginal deploy still exits non-zero."]
     K --> L["7b: public /health\n(retried)"]
     L -->|fails| PROXY_FAIL[["Deploy FAILS —\ninvestigate Nginx/DNS/TLS,\nNOT a code rollback"]]
-    L --> M["8: deploy static homepage\n(rsync to $STATIC_SITE_DIR_NAME, default 'site'),\nrecord this commit as last-known-good"]
+    L --> M["8: deploy static homepage\n(cp -a to $STATIC_SITE_DIR_NAME, default 'site'),\nrecord this commit as last-known-good"]
     M -->|persist fails| FAILPERSIST[["Deploy FAILS —\nservice IS healthy, but the\nrollback record could not be written"]]
     M --> N[["Deploy SUCCEEDS"]]
 
