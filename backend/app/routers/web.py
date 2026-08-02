@@ -123,14 +123,7 @@ def admin_diagnostics_reachability(
     request: Request,
     tenant_id: Optional[str] = Depends(require_html_session),
 ):
-    """
-    Message Reachability diagnostics page (RND-180). Requires valid session.
-
-    Thin UI over GET /api/admin/reachability-audit (RND-178) — this route
-    only renders the page shell; all reachability classification and
-    aggregation happens server-side in app.reachability_audit and is
-    fetched client-side from that endpoint, never recomputed here.
-    """
+    """Archive health page backed by persistent reachability-check snapshots."""
     if tenant_id is None:
         return RedirectResponse("/admin/login", status_code=302)
     return HTMLResponse(

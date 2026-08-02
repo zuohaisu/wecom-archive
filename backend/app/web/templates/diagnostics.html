@@ -16,19 +16,18 @@ __I18N_SCRIPT__
 <div class="shell">
 __SIDENAV__
 <div class="main">
-  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.system">系统</span><span class="sep">/</span><span class="cur" data-i18n="diagnostics.pageTitle">消息可达性诊断</span></div></header>
-  <main class="page">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.system">系统</span><span class="sep">/</span><span class="cur" data-i18n="diagnostics.pageTitle">归档健康</span></div></header>
+  <main class="page page-narrow">
     <div class="page-hd">
-      <div><h1 data-i18n="diagnostics.pageTitle">消息可达性诊断</h1><p data-i18n="diagnostics.pageDescription">本页仅展示消息可达性审计的聚合统计数据，不包含消息内容或原始标识符。</p></div>
-      <div class="page-hd-actions"><button class="btn" id="btn-diag-refresh" type="button" data-i18n="diagnostics.refresh">刷新</button></div>
+      <div><h1 data-i18n="diagnostics.pageTitle">归档健康</h1><p data-i18n="diagnostics.pageDescription">查看最近一次归档健康检查的结论和下一步。</p></div>
     </div>
-    <div id="diag-root"><div class="diag-loading" data-i18n="diagnostics.loading">正在加载诊断数据…</div></div>
+    <section id="diag-root" aria-live="polite" aria-atomic="true" aria-busy="true"><p class="diag-loading" data-i18n="diagnostics.loading">正在加载归档健康…</p></section>
   </main>
 </div></div>
 <script src="/web/static/diagnostics.js?v=__STATIC_VERSION__"></script>
 <script>
 (function(){
-  function langMenu(){var menu=document.getElementById('lang-menu');if(menu)menu.innerHTML=I18N.availableLocales().map(function(locale){return '<div class="lang-option '+(locale.code===I18N.getLocale()?'active':'')+'" data-locale="'+locale.code+'">'+locale.nativeName+'</div>';}).join('');}
+  function langMenu(){var menu=document.getElementById('lang-menu');if(!menu)return;menu.textContent='';I18N.availableLocales().forEach(function(locale){var option=document.createElement('div');option.className='lang-option'+(locale.code===I18N.getLocale()?' active':'');option.dataset.locale=locale.code;option.textContent=locale.nativeName;menu.appendChild(option);});}
   window.toggleLangMenu=function(){var menu=document.getElementById('lang-menu');menu.style.display=menu.style.display==='none'?'block':'none';langMenu();};
   window.doLogout=function(){fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){window.location='/admin/login';});};
   document.addEventListener('click',function(event){var option=event.target.closest('.lang-option');if(option){I18N.setLocale(option.dataset.locale);document.getElementById('lang-menu').style.display='none';}});

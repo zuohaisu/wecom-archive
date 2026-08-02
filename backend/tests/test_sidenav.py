@@ -44,6 +44,15 @@ def test_navigation_omits_unimplemented_review_tasks_and_export_records() -> Non
     assert "sync" not in {item["id"] for item in items}
 
 
+def test_diagnostics_navigation_uses_the_archive_health_localization_key() -> None:
+    diagnostics = next(item for group in NAV for item in group["items"] if item["id"] == "diagnostics")
+    assert diagnostics == {
+        "id": "diagnostics",
+        "key": "nav.diagnostics",
+        "path": "/admin/diagnostics/reachability",
+    }
+
+
 def test_registered_path_changes_users_from_disabled_to_link_without_config_change() -> None:
     disabled = render_sidenav("review", {"/admin/conversations"})
     enabled = render_sidenav("review", {"/admin/conversations", "/admin/users"})
