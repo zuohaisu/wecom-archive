@@ -23,6 +23,13 @@ TENANT_B = "tenant-b"
 NOW = datetime(2026, 8, 2, 12, tzinfo=timezone.utc)
 _LIVE_TEST_DATABASE_URL = os.environ.get("RND337_TEST_DATABASE_URL", "")
 _LIVE_TEST_DATABASE_NAME = urlparse(_LIVE_TEST_DATABASE_URL).path.lstrip("/")
+# Anchored to this file, not the CWD: CI runs pytest from backend/, local
+# runs sometimes from the repo root (same convention as the other
+# migration tests, e.g. test_voice_playback_migration.py).
+_MIGRATION_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "alembic/versions/0032_reachability_audit_runs.py"
+)
 
 _RUNS_SCHEMA = """
 CREATE TABLE reachability_audit_runs (
@@ -89,7 +96,7 @@ def test_model_and_migration_are_field_aligned_and_data_minimized() -> None:
     }
     forbidden = {"content", "payload", "sender", "recipient", "room", "msgid", "archive_message_id"}
     assert not any(any(token in column for token in forbidden) for column in columns)
-    migration = Path("backend/alembic/versions/0032_reachability_audit_runs.py").read_text()
+    migration = _MIGRATION_PATH.read_text()
     assert 'down_revision: Union[str, None] = "0031"' in migration
     for column in columns - {"id"}:
         assert f'"{column}"' in migration
