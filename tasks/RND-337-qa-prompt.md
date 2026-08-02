@@ -75,6 +75,9 @@ migration 往返需要真实 PostgreSQL（模型用 `JSONB`，SQLite 顶不上�
 一次性测试库来验证 AC-1d，不要因为 `DATABASE_URL` 为空就直接判 BLOCKED。
 
 - 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库；§5 是绝对禁止清单。
+- 凭据在 **`.env` 文件**里，不在环境变量里（§3.1）；**没有 `psql`/`createdb`
+  不是 BLOCK 理由**，用 §3.2 的 psycopg2 脚本建库（已实测）。先走完 §3.3 的
+  排除表再决定要不要 BLOCK。
 - 按 §3 自建空库并在本次会话内 `export DATABASE_URL`，跑往返，正常判 AC-1d。
 - 只有本机根本没有可用 PG 实例时，AC-1d 才记为未验证：notes 写
   `HUMAN_MIGRATION_REVIEW_PENDING`，按 R2 风险判 `BLOCKED`；不需要真库的 AC-1e

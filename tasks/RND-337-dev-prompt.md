@@ -59,8 +59,9 @@ echo "DATABASE_URL=[${DATABASE_URL}]"
 - 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库（尤其 `.env` 里指向开发库的
   `DATABASE_URL`，对它跑 `upgrade head` 是破坏性操作）。
 - 按 §3 自建 `wecom_archive_test` 之类的空库并在**本次会话内** `export DATABASE_URL`。
-- 只有本机**根本没有可用的 PG 实例**（无 `createdb`、无监听端口、无容器运行时）
-  才输出 `BLOCKED_NEEDS_HUMAN`，并说明缺的是实例还是权限。
+- 凭据在 **`.env` 文件**里，不在环境变量里（§3.1）；**没有 `psql`/`createdb` 不是
+  BLOCK 理由**，用 §3.2 的 psycopg2 脚本建库（已实测）。
+- 先走完 §3.3 的排除表再决定要不要 BLOCK，并写明卡在哪一步。
 - 按 §6 在 QA Summary 里记录实际库名与 host（不写密码）、是否自建、是否已清理。
 
 ### P-3 R2 人工闸

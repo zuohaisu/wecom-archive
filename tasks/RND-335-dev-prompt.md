@@ -50,6 +50,9 @@ echo "DATABASE_URL=[${DATABASE_URL}]"
 不要因为 `DATABASE_URL` 为空就整票 BLOCK。
 
 - 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库。
+- 凭据在 **`.env` 文件**里，不在环境变量里（§3.1）；**没有 `psql`/`createdb`
+  不是 BLOCK 理由**，用 §3.2 的 psycopg2 脚本建库（已实测）。先走完 §3.3 的
+  排除表再决定要不要 BLOCK。
 - 按 §3 自建空库并在本次会话内 `export DATABASE_URL`；§5 是绝对禁止清单
   （含：不改 `conftest`/CI 绕过、不用 SQLite 冒充）。
 - 只有本机根本没有可用 PG 实例才 `BLOCKED_NEEDS_HUMAN`；此时其余 AC 照常实现，

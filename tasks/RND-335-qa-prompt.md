@@ -69,6 +69,9 @@ echo "DATABASE_URL=[${DATABASE_URL}]"
 一次性测试库来验证 AC-5f / AC-7a~7c，不要因为 `DATABASE_URL` 为空就直接判 BLOCKED。
 
 - 该文件 §2 的三条硬性否决命中任意一条 → 不许用那个库；§5 是绝对禁止清单。
+- 凭据在 **`.env` 文件**里，不在环境变量里（§3.1）；**没有 `psql`/`createdb`
+  不是 BLOCK 理由**，用 §3.2 的 psycopg2 脚本建库（已实测）。先走完 §3.3 的
+  排除表再决定要不要 BLOCK。
 - 按 §3 自建空库并 `export DATABASE_URL`，正常跑、正常判。
 - 只有本机根本没有可用 PG 实例时，才 → `verdict: BLOCKED`，notes 写
   `PG_ENV_MISSING: AC-5f/AC-7a~7c 未验证`。其余子 AC 照常逐条判定并写进
