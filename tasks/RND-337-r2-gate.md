@@ -23,16 +23,17 @@ dev agent 读到本文件即视为 R2 闸已满足，可以开始改产品代码
 3. **migration 方案** — 从实际唯一 Alembic head 线性新增**一个** migration。
    `downgrade` 只删除本票新增的表。
 
-## 仍然未解除的闸
+## P-2（一次性 PostgreSQL）：由 dev agent 自行准备
 
-- **P-2（一次性 PostgreSQL）尚未满足。** 本机 `.env` 的
-  `DATABASE_URL` 指向 `wecom_archive`——那是**有数据的本地开发库**
-  （1 tenant / 27 archive_messages），且其 `alembic_version` 为 `0005`，
-  远落后于当前 head `0031`。对它执行 `alembic upgrade head` 会一次性套用 26 个
-  migration，**禁止**。
-- 因此 **AC-1d（migration upgrade→downgrade→upgrade 往返）暂不可验证**。
-  其余子 AC 照常实现，AC-1d 在 QA Summary 中明确标注为待 PG 环境。
-- 若 Haisu 后续提供一次性测试库，在此追加一行并注明库名（不写密码）。
+- Haisu 明确指示：**不由人工代建，交给执行本票的 dev agent 在其所在开发机上自建。**
+- 操作规程见 `docs/agent-test-database.md`：借 `DATABASE_URL` 的 user/host/port，
+  只换库名，`createdb` 一个带 `test` 标记的空库，本次会话内 `export`。
+- **⚠️ 已知陷阱（写提示词的机器上实测）**：`.env` 里的 `DATABASE_URL` 可能指向
+  **有数据的开发库**（该机上是 `wecom_archive`：1 tenant / 27 archive_messages，
+  且 `alembic_version = 0005`，落后当前 head `0031` 整整 26 个版本）。
+  对它执行 `alembic upgrade head` 属破坏性操作，**绝对禁止**。
+  这正是 `docs/agent-test-database.md` §2 三条硬性否决要拦的情况。
+- 只有当所在机器**根本没有可用的 PG 实例**时，才就 P-2 上报 `BLOCKED_NEEDS_HUMAN`。
 
 ## 部署闸（另一件事）
 
