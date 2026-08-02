@@ -1,0 +1,167 @@
+[Goal check] This work advances 开发（Development） by 将一次性技术分页审计升级为租户级、可持久化、可复用的消息可见性检查快照，并以完整性证据阻止部分扫描被误报为健康。
+
+# RND-337 开发提示词（Developer Prompt）
+
+> 开始前必须读 `DEV_AGENT_RULES.md`、`docs/ticket-autopilot-workflow.md`、`backend/app/reachability_audit.py` 和现有 reachability tests。RND-337 涉及数据库迁移与后台执行，风险等级 R2；未获得 Haisu 对迁移/执行方案的人工确认前不得改产品代码。
+
+## ⚡ 立即执行，不要询问意图
+
+你现在收到的是已经批准、待执行的任务指令。你就是 RND-337 开发 agent。先执行 R2 人工闸与工作树基线检查；闸未满足时输出 `BLOCKED_NEEDS_HUMAN` 和所缺确认，不改产品代码。闸满足后直接实现，不要先输出计划等待确认。
+
+---
+
+## 任务身份
+- 项目：Crowntime WeCom Archive / 365 企微会话存档（Linear team `Builder`，project `365企微会话存档`）
+- 工单：RND-337「持久化消息可见性检查快照与归档健康 API」
+- Linear URL：https://linear.app/xyzhs1897/issue/RND-337/持久化消息可见性检查快照与归档健康-api
+- 优先级：High｜风险等级：**R2**
+- 所属波次：消息可见性闭环 · 持久化诊断基座
+- 当前关系：blocks RND-338、RND-339。
+
+## [Goal check]
+本工作推进「开发实现」阶段，证据 = 10 条 AC 覆盖冻结扫描范围、完整分页、持久化状态、租户隔离、并发幂等、安全错误和两个新 API，且旧技术接口保持兼容。
+
+## 背景与项目现状（先对齐，避免重复造轮子 / 跑偏）
+
+目标客户只有 1–5 个坐席。他们需要的是“消息是否完整可见”的可信结论，而不是每次打开页面临时扫一页技术日志。
+
+- `backend/app/reachability_audit.py:78-80,182-271` 是现有唯一分类事实源：只审计 `decrypt_status == "success"` 的消息，区分 direct/group 可达与 missing recipient/room/sender/membership/other。
+- `backend/app/reachability_audit.py:182-216,382-390` 的 `build_message_reachability_report()` 当前默认 500、最大 2000，返回 `scanned_count`、`matching_total`、`has_more`、reason counts 和可选 samples。它是分页报告，不是持久化全量快照。
+- `backend/app/routers/reachability_audit.py:65-85` 暴露现有 `GET /api/admin/reachability-audit`；必须保持路径、参数、响应兼容，继续服务技术排障。
+- `backend/app/web/templates/diagnostics.html` 与 `diagnostics.js` 目前直接消费旧接口并在浏览器计算比例；UI 重构属于 RND-338，本票不改前端。
+- `backend/app/main.py:111-136` 仅允许作为 composition root 注册 router；新业务路由必须放 `backend/app/routers/`。
+- `backend/tests/test_http_contract.py:326-327,336-419,443-634` 对 route count、路径、方法、response model 有硬编码快照。新增两个 route 必须只做对应的最小更新。
+- `backend/alembic/versions/0031_app_config_store.py:1-15` 是提示词撰写时的 Alembic head；本票新 migration 应从实现时实际 head 继续，不得制造分叉。迁移只在 local/test DB 验证，禁止触碰生产数据。
+
+**共享工作树基线：**提示词撰写时 `git status --short --branch` 为 `## main...origin/main`。开始和结束都重新记录；用户后续产生的 dirty diff 不归因于本票，不得修改、覆盖或回滚。
+
+**本项目已知的高频踩坑点：**
+- ❗ **没有模板引擎。** `render_template()` 只做 `__TOKEN__` 单遍替换；本票不需要修改 HTML。
+- ❗ **i18n 有 3 个 locale**：本票无用户界面文案，不得顺手改 i18n。
+- ❗ **架构边界是硬闸**：router 不 import `app.main`；service 不 import `app.routers.*`；`app/main.py` 只做 import + `include_router()`，不得放 SQL、执行逻辑或业务 route。
+- ❗ **架构冻结 D1**：SSR + 原生 JS；本票不引入前端框架、任务队列平台或新基础设施。
+
+## 目标（Goal）
+
+在不复制 reachability 分类逻辑的前提下，建立租户级持久化检查运行记录与稳定 API，使 UI/agent 能读取“最近一次检查”的可靠快照，并且只有冻结范围内所有候选消息都完成审计时才可能得到 `healthy`。
+
+## 范围边界
+
+**In scope（交付物）：**
+
+1. **持久化 run。** 新增 `reachability_audit_runs` 模型与 migration。至少保存：不可猜测 public run id、tenant id、状态、触发来源、algorithm version、scope from/to、冻结的最大 message id、matching/checked/reachable/unreachable counts、reason-count JSON、started/completed/created timestamps、受控 `safe_error_code`。约束合法枚举、非负计数和 tenant 查询索引。
+2. **冻结且完整的扫描。** 创建 run 时冻结 `scope_to` 与候选 `max_message_id`；默认检查最近 7 天。后台 runner 按现有 helper 的上限逐页迭代到 `has_more=false`，累计结果并验证 `checked_count == matching_count`。允许对 `reachability_audit.py` 做向后兼容的最小筛选扩展，以支持冻结上界；旧调用结果不变。
+3. **可信状态机。** 外部状态仅为 `healthy`、`attention`、`checking`、`no_data`、`incomplete`、`error`。`healthy` 只允许 completed + zero unreachable + complete；zero candidates 的完整 run 为 `no_data`；部分页、中断、冻结范围不一致或计数不等必须为 `incomplete`；受控执行失败为 `error`。禁止把异常/partial 当健康。
+4. **异步触发。** `POST /api/admin/reachability-checks` 创建/复用本租户 active run 后立即返回 202 风格响应；完整审计不得在请求生命周期内同步执行。复用仓库 one-shot script/subprocess 模式或等价的最小本地机制，不引入 Celery/Redis/外部 queue。后台进程只接收 public run id，再从 DB 解析 tenant/scope，避免命令行暴露 tenant 标识。
+5. **最新快照。** `GET /api/admin/reachability-checks/latest` 返回当前租户最新快照，包含状态、完整性、计数、reason counts、scope、last checked time、algorithm version 和安全错误码；不得返回 message content、payload、raw identifiers、paths、secrets、traceback。没有历史 run 时仍使用既定六态表达：零候选可返回 `no_data`，存在候选但尚无完整检查返回 `incomplete`，同时 `last_checked_at=null`，不得伪造已检查时间。
+6. **并发/恢复。** 同租户并发 POST 只产生一个 active run，并返回同一 run；不同租户互不阻塞。runner 可重试同一 run 而不重复累计。超时/遗留 `checking` 必须以明确规则转为 `incomplete`，不能永久显示正在检查。
+7. **认证与租户隔离。** 两个 API 复用当前 admin session tenant context；请求体不接受 tenant id。任意读写都显式 tenant scoped；猜测其他租户 public id 不能读取、启动或影响其 run。
+8. **契约和测试。** 新增 schema/router/service/runner 聚焦测试，覆盖 0、1、>2000、跨页、partial、exception、并发、retry、stale、跨租户、auth、安全字段。更新 route snapshot 仅增加这两个新 API。
+
+**Out of scope（显式非目标）：**
+- 不改诊断页面、导航、CSS、JS 或 i18n；这些由 RND-338 负责。
+- 不新增 findings 表、增量触发、daily timer、agent findings API、通知或自动修复；这些由 RND-339 负责。
+- 不替换/重写 reachability classifier，不改变旧 `/api/admin/reachability-audit` 契约和默认分页语义。
+- 不扫描 `pending`/`failed` 解密内容，不将“解密失败”混入 reachability reason。
+- 不引入消息正文、structured content、sender/recipient/room/raw message id 的快照或 API samples。
+- 不引入 Redis/Celery/Kafka、新部署服务、云任务或生产迁移。
+
+**本工单拥有的文件（只许写这些）：**
+- `backend/app/db/models.py`（仅新增 reachability run 模型/约束）
+- `backend/alembic/versions/0032_reachability_audit_runs.py`（可按实际线性 head 调整文件名/revision；只能新增一个线性 migration）
+- `backend/app/reachability_audit.py`（仅为冻结范围增加向后兼容的可选上界/分页支持；不得改分类）
+- `backend/app/services/reachability_check_service.py`（新建）
+- `backend/app/schemas/reachability_checks.py`（新建）
+- `backend/app/routers/reachability_checks.py`（新建）
+- `backend/scripts/run_reachability_check_once.py`（新建 one-shot runner）
+- `backend/app/main.py`（仅 import + include 新 router）
+- `backend/tests/test_reachability_audit.py`（仅新增冻结边界/旧契约兼容用例）
+- `backend/tests/test_reachability_checks.py`（新建）
+- `backend/tests/test_reachability_check_cli.py`（可新建；不用则不建空文件）
+- `backend/tests/test_http_contract.py`（仅两个新 route 的 schema、count、auth/shape 基线）
+
+**本工单只读、绝不可写的文件：**
+- `backend/app/routers/reachability_audit.py` — 旧技术 API 契约必须保持；若确需改动，先 BLOCK
+- `backend/app/web/templates/diagnostics.html`、`backend/app/web/static/diagnostics.js`、`backend/app/web/static/diagnostics.css`、`backend/app/assets/i18n.js`、`backend/app/web/sidenav.py` — RND-338
+- `deploy/systemd/`、`backend/scripts/run_archive_worker_once.py` — RND-339 自动化
+- `backend/tests/test_rnd280_rbac_scaffold.py` — 新 router 使用现有 `get_current_user`；不得为通过测试改 RBAC 白名单。若产品要求改为 `require_role`，先 BLOCK 确认权限模型
+- CI/CD、部署脚本、`.env`、生产数据库、密钥文件
+
+若实现所需文件不在拥有清单，停止并以 `BLOCKED_NEEDS_HUMAN` 说明最小缺口；不得顺手扩票。
+
+## 验收标准（Acceptance Criteria）
+
+- **AC-1 迁移与模型**：从实际唯一 Alembic head 线性新增 migration；upgrade 建立 tenant-scoped runs、约束/索引完整，downgrade 只删除本表；SQLite test schema 与 PostgreSQL migration 语义均有测试，不含消息内容字段。
+- **AC-2 冻结范围**：创建 run 原子记录 `scope_from/scope_to/scope_max_message_id/algorithm_version`；运行中新增或回填的更大 ID 不改变该 run 候选集；默认 scope 为过去 7 天且边界时区明确。
+- **AC-3 完整分页**：0、1、2000、2001 和多页 fixture 均检查每条冻结候选恰好一次；最终 `checked_count == matching_count`，各 reason 总和等于 checked count，旧分页 helper 默认行为不变。
+- **AC-4 状态真实性**：完整零异常为 healthy；完整且存在不可达为 attention；完整零候选为 no_data；运行中为 checking；中断/页错误/计数不等/stale 为 incomplete 或受控 error，任何 partial/exception 路径均不可能 healthy。
+- **AC-5 POST 异步/幂等**：鉴权 POST 快速返回而不在 request thread 跑全扫描；同租户并发调用返回同一 active public run id，不同租户可各有 active run；完成后可创建下一 run。
+- **AC-6 GET latest 契约**：返回六态之一、`complete`、scope/count/reasons/timestamps/version/safe error；无 run 时不伪造检查时间，不返回 raw exception 或消息/成员标识。
+- **AC-7 runner 恢复**：one-shot runner 只以 run public id 定位任务；重复执行不会重复累计；未知/他租户不可用 run fail closed；进程异常后 run 可按确定规则离开 checking。
+- **AC-8 认证/租户隔离**：未登录两个 API 都失败；tenant A 的 GET/POST/runner 不读取或更新 tenant B，request/query 不允许调用者指定 tenant；枚举 public id 不泄露存在性。
+- **AC-9 兼容/架构/契约**：旧 `/api/admin/reachability-audit` 的路径、参数、response model 和代表性结果保持；新路由在 router，逻辑在 service，main 只有注册；HTTP route count 恰好 +2。
+- **AC-10 回归**：聚焦测试、migration tests、`test_http_contract.py`、`test_architecture_boundary.py` 与 `make verify` 全绿；本票归因 diff 仅限拥有文件。
+
+## 验证方式（Verification — 确定性闸）
+- 类型：**automated + R2 migration review**
+- 命令：
+  ```bash
+  make verify
+  .venv/bin/python -m pytest backend/tests/test_reachability_audit.py backend/tests/test_reachability_checks.py -q
+  test ! -f backend/tests/test_reachability_check_cli.py || .venv/bin/python -m pytest backend/tests/test_reachability_check_cli.py -q
+  .venv/bin/python -m pytest backend/tests/test_http_contract.py backend/tests/test_architecture_boundary.py backend/tests/test_verify_alembic_head.py -q
+  (
+    cd backend
+    .venv/bin/python -m alembic heads
+    .venv/bin/python -m alembic upgrade head
+    .venv/bin/python -m alembic downgrade -1
+    .venv/bin/python -m alembic upgrade head
+  )
+  git diff --check
+  git status --short --branch
+  ```
+- migration 往返只能对一次性 local/test 数据库执行；若命令配置会指向共享/生产 DB，禁止运行并上报。
+- 通过 = AC-1 ~ AC-10 全部满足、唯一 Alembic head、所有适用命令 exit 0。
+
+## 依赖（Dependencies）
+- 无前置工单；必须基于现有 reachability classifier 和当前 Alembic head。
+- **R2 人工闸**：Haisu 确认 run schema、后台执行方式和迁移方案后才能开始产品改动。
+- 本票 QA PASS 后才允许 RND-338、RND-339 开始；不得在本票内提前实现后继功能。
+
+## 完成定义（Definition of Done）
+- [ ] AC-1 ~ AC-10 均有自动化证据
+- [ ] frozen scope、2001+ 分页、partial/exception/concurrency/tenant tests 完整
+- [ ] 两个新 API 与旧技术 API 契约均验证
+- [ ] migration upgrade/downgrade/upgrade 在 local/test DB 通过且 Alembic 唯一 head
+- [ ] API/日志/进程参数无消息内容、raw identifiers、tenant id 或 traceback 泄露
+- [ ] `make verify` 全绿，架构硬闸通过
+- [ ] 本票归因 diff 只在拥有文件，结束 `git status` 已记录
+- [ ] QA Summary 包含 route count、页数/检查数、状态表和迁移证据
+- [ ] 未 commit、未 push、未建分支
+
+## 风险与回滚（Risk & rollback）
+- 风险：分页期间候选集漂移导致漏扫；用创建时 scope + max message id 冻结。
+- 风险：进程崩溃留下永久 checking；用 started_at/stale 规则降级为 incomplete。
+- 风险：同租户并发产生多个 active run；在数据库/事务层建立可测试的唯一性或等价原子保护，不能只靠进程内锁。
+- 风险：raw exception/标识泄露；只持久化 allowlisted safe error code，详细异常仅安全日志且不得含 payload。
+- 回滚：停止新调用、回退 router/service/model 代码，再执行本 migration downgrade；旧技术 API 始终可用。禁止对生产自行执行回滚。
+
+## 人工点位（Human touchpoints）
+- **Trigger / R2 Gate**：Haisu 审阅并确认 migration、状态机、后台 runner 方案后将 RND-337 置 In Progress。
+- **Gate**：Haisu 审阅 QA Summary 和 migration diff 后批准 commit；agent 不得自行 commit。
+- **Escalation**：现有 helper 无法在允许文件内冻结候选、需新队列/部署变更、需 `require_role`、迁移 head 已变化或两轮修复仍失败时，`BLOCKED_NEEDS_HUMAN`。
+
+## 开发 agent 执行指引（步骤）
+1. 读规则、classifier/router/tests、migration 和 one-shot worker pattern；记录 HEAD、Alembic head、dirty baseline。
+2. 先写模型/migration 与状态转换/冻结边界/多页/并发/tenant/security contract tests；提交人工 review，等待 R2 gate。
+3. 最小扩展 classifier 的冻结筛选，不复制 status 判定；实现 service 与幂等 runner。
+4. 新 router 只解析 auth/input/output；main 仅 include；更新 HTTP contract 恰好 +2。
+5. 在 local/test DB 跑 migration 往返与全闸；输出 QA Summary + 归因 status；不要 commit。
+
+## 硬性约束（来自 DEV_AGENT_RULES.md）
+- 不 commit/push/建分支/改历史；不改 CI/CD、部署、`.gitignore` 或生产数据。
+- 不复制 reachability 分类，不改旧 API，不触碰 RND-338/339 文件。
+- 不在 request lifecycle 同步全扫，不引入外部 queue/infrastructure。
+- 不存储/返回消息正文、payload、raw sender/recipient/room/message id、path、secret、traceback。
+- `healthy` 必须由完整冻结扫描证明；任何不确定性 fail closed 为 incomplete/error。
+- 证据优先：以 DB 约束、并发测试、2001+ 分页、migration 往返和 exit 0 为证。
