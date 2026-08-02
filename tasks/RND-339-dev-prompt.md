@@ -10,6 +10,23 @@
 
 ---
 
+## ⚠️ 2026-08-03 追加：P-4 已确认，可解除阻塞
+
+Haisu 已审阅并确认下列四项，P-4 视为满足，直接继续实现，不要再次为此 `BLOCKED_NEEDS_HUMAN`：
+
+1. **finding schema**：确认「范围边界」第 1 项与 AC-1c/AC-1e 描述的字段集合（public id、tenant id、内部 archive message reference、reason code、active/resolved status、first/last seen、resolved time、occurrence count、first/last run reference、algorithm version、created/updated）与禁止字段清单，按提示词原文实现，不再变更。
+2. **resolution 规则**：确认第 2/4/6 项与 AC-4d/AC-4e/AC-5/AC-6 描述的语义——只有**完整** reconcile 覆盖全部 active 候选后才能 resolve；incremental 永不 resolve；reason 变化时旧 finding 只在完整复核证明消失后才 resolved。按原文实现。
+3. **worker best-effort 语义**：确认第 5 项与 AC-7 描述的语义——诊断在 decrypt 成功后触发；诊断失败/异常/锁占用均不改变核心 worker 的 exit 0；sync 或 decrypt 失败不触发诊断；`run_archive_worker_once.py` 原有 fail-fast 语义不变。按原文实现。
+4. **daily timer 排期（AC-10c 需要的具体 `OnCalendar` 值，提示词原文未给出，现在补上）**：
+   - 现有定时器占用：`wecom-archive-worker.timer` = `*:0/5`，`wecom-archive-media-download.timer` = `*:2/5`，`wecom-disk-usage-check.timer` = `*:9/15`，`wecom-backup.timer` = 每日 `03:17:00`（见 `deploy/systemd/wecom-backup.timer`、`docs/operations/2c2g-runbook.md`）。
+   - **新 reconciliation timer 固定使用 `OnCalendar=*-*-* 04:30:00`**（CST，与 `wecom-backup.timer` 同一 `OnCalendar` 语法风格）：与 03:17 备份错开约 73 分钟缓冲，避开凌晨低峰之外任何已知定时任务的整点/整 5 分钟撞点。
+   - `Persistent=true`。
+   - AC-10c 的测试对这个具体值做静态断言（`*-*-* 04:30:00`），不要写成"看起来错开了"这类模糊断言。
+
+P-3 记录的一次性测试库（`wecom_archive_rnd339_20260803_001444_test`，host `/tmp`，self-created）继续使用；完成后按 `docs/agent-test-database.md` §5/§6 收尾清理，并在 QA Summary 里记录清理结果。
+
+---
+
 ## Preflight（开工第一步，先做完再碰代码）
 
 ### P-1 现场采集工作树与 Alembic 基线 —— 不要相信任何文档里的快照
