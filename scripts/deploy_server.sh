@@ -282,6 +282,53 @@ _ensure_ffmpeg() {
     command -v "$FFMPEG_BIN" >/dev/null 2>&1
 }
 
+# _publish_static_dir <src_dir> <dst_dir> — mirror <src_dir>'s contents
+# into <dst_dir>, trying the least-privileged route that works and
+# returning non-zero (silently) if none does. Used by step 9 to push the
+# company homepage into Nginx's webroot.
+#
+# Why the tiered probing instead of just `sudo cp`: this host's runtime
+# user has NO passwordless sudo beyond `systemctl restart <service>`.
+# Production proved that twice — `sudo apt-get` (2026-08-01) and then
+# `sudo mkdir` (2026-08-02) both fell through to sudo's password lecture
+# and killed the deploy. So sudo is attempted only with `-n`
+# (non-interactive), which fails instantly on a TTY-less SSH session
+# instead of blocking on a prompt, and its stderr is suppressed because
+# the lecture is noise, not a diagnostic.
+#
+# `cp -a src/. dst/` (not rsync): rsync is not in first-time setup's
+# package list, is absent on this host, and cannot be installed without
+# the sudo grant that does not exist. Like rsync without --delete, this
+# does not remove files that disappeared from the source.
+_publish_static_dir() {
+    _psd_src="$1"
+    _psd_dst="$2"
+
+    # Tier 1 — the destination is already ours (operator chowned the
+    # webroot, or symlinked it into shared/). No privilege needed.
+    if [ -d "$_psd_dst" ] && [ -w "$_psd_dst" ]; then
+        cp -a "$_psd_src/." "$_psd_dst/"
+        return 0
+    fi
+
+    # Tier 2 — destination absent but its parent is ours: create it.
+    if [ ! -e "$_psd_dst" ] && [ -w "$(dirname "$_psd_dst")" ]; then
+        mkdir -p "$_psd_dst" && cp -a "$_psd_src/." "$_psd_dst/"
+        return 0
+    fi
+
+    # Tier 3 — needs root. Probe with the real command rather than a
+    # `sudo -n true` canary: a whitelist can grant cp/mkdir without
+    # granting `true`, and the canary would produce a false negative.
+    if [ -n "$SUDO_BIN" ] \
+        && "$SUDO_BIN" -n mkdir -p "$_psd_dst" 2>/dev/null \
+        && "$SUDO_BIN" -n cp -a "$_psd_src/." "$_psd_dst/" 2>/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
 # _record_known_good <sha> — called only after this script has itself
 # proven <sha> healthy (end-to-end forward success, or a successful
 # rollback's own re-check). Returns non-zero on a persist failure — QA
@@ -625,8 +672,12 @@ STATIC_SRC="$DEPLOY_DIR/static_site/company_homepage"
 # webroot) this deployment's static homepage is copied to. Set the real
 # value via backend/.env or the calling shell's environment.
 STATIC_SITE_DIR_NAME="${STATIC_SITE_DIR_NAME:-site}"
-SHARED_DST="/srv/apps/wecom-archive-365/shared/www/$STATIC_SITE_DIR_NAME"
-NGINX_DST="/var/www/$STATIC_SITE_DIR_NAME"
+# Both overridable so the bats suite can point them at a temp tree — this
+# step ran untested for a month (the fixture never created $STATIC_SRC, so
+# every test silently took the "source not found" branch below) and shipped
+# three separate production breakages in a row as a result.
+SHARED_DST="${SHARED_DST:-/srv/apps/wecom-archive-365/shared/www/$STATIC_SITE_DIR_NAME}"
+NGINX_DST="${NGINX_DST:-/var/www/$STATIC_SITE_DIR_NAME}"
 
 if [ -d "$STATIC_SRC" ]; then
     # Ensure target directories exist
@@ -636,38 +687,34 @@ if [ -d "$STATIC_SRC" ]; then
     # assets referenced by the page — brand/, assets/, site.webmanifest,
     # etc. — actually reach the served root. A prior version of this step
     # copied only two files, which silently left every other referenced
-    # asset 404ing in production.
-    #
-    # Deliberately `cp -a src/. dst/` rather than `rsync -a src/ dst/`
-    # (which is what a previous version used, and what broke deploys):
-    # rsync is NOT part of first-time server setup's package list, so it
-    # simply isn't on the host — and it cannot be installed on demand
-    # either, because the runtime user's sudoers whitelist covers only
-    # `systemctl restart <service>` (see the sudo prerequisites at the
-    # top of this file), so `sudo apt-get install rsync` just hits a
-    # password prompt and fails. `sudo rsync` to the Nginx root would
-    # hit that same wall for the same reason, since the whitelist was
-    # written for the `cp`/`mkdir` this step originally used. cp -a is
-    # the portable equivalent here and needs no new binary and no new
-    # sudo grant. Like rsync without --delete, it does not remove files
-    # that disappeared from the source — same behaviour as before.
+    # asset 404ing in production. See _publish_static_dir's header for
+    # why this is `cp -a` and not `rsync`.
     cp -a "$STATIC_SRC/." "$SHARED_DST/"
     # README.md documents the source tree for contributors and has no
     # business being served. cp has no --exclude, so it is dropped after
-    # the copy — and dropped HERE, before the Nginx copy below, so that
+    # the copy — and dropped HERE, before the webroot copy below, so that
     # copy needs no exclusion (and therefore no `sudo rm`) of its own.
     rm -f "$SHARED_DST/README.md"
     echo "  → shared OK ($SHARED_DST)"
 
-    # Then copy to nginx root (needs sudo)
-    if [ -n "$SUDO_BIN" ]; then
-        "$SUDO_BIN" mkdir -p "$NGINX_DST"
-        "$SUDO_BIN" cp -a "$SHARED_DST/." "$NGINX_DST/"
+    # Then publish to the Nginx webroot. Deliberately NOT fatal: by this
+    # point the backend has already been restarted, health-gated and
+    # confirmed serving, so exiting here would report a failed deploy for
+    # code that is live — and would also skip _record_known_good below,
+    # leaving the NEXT deploy with no rollback target. A stale homepage is
+    # cosmetic and separately fixable; a missing rollback record is not.
+    # The warning is loud and names the one-time operator fix precisely,
+    # so this cannot decay into the silent no-op the docs warn about.
+    if _publish_static_dir "$SHARED_DST" "$NGINX_DST"; then
+        echo "  → nginx root OK ($NGINX_DST)"
     else
-        mkdir -p "$NGINX_DST"
-        cp -a "$SHARED_DST/." "$NGINX_DST/"
+        echo "  WARN: could not publish the homepage to $NGINX_DST — no write access there, and no passwordless sudo for mkdir/cp on this host." >&2
+        echo "  WARN: the backend deploy is UNAFFECTED and this deploy still counts as successful; the current homepage is staged at $SHARED_DST." >&2
+        echo "  WARN: one-time operator fix (pick one, needs root):" >&2
+        echo "  WARN:   a) point the Nginx 'root' for this site at $SHARED_DST, or" >&2
+        echo "  WARN:   b) ln -sfn $SHARED_DST $NGINX_DST, or" >&2
+        echo "  WARN:   c) chown -R $(id -un): $NGINX_DST" >&2
     fi
-    echo "  → nginx root OK ($NGINX_DST)"
 else
     echo "  WARN: static site source not found at $STATIC_SRC — skipping"
 fi

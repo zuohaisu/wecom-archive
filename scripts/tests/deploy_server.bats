@@ -435,3 +435,79 @@ line_of() {
 	run grep -c "^flock " "$CMD_LOG"
 	[ "$status" -eq 0 ] # flock WAS invoked (and correctly denied) this time
 }
+
+# ---------------------------------------------------------------------
+# Step 9 — static homepage publication
+#
+# This step had ZERO coverage until now: the fixture never created
+# $STATIC_SRC, so every test above silently exercised its "static site
+# source not found — skipping" branch. Three production breakages shipped
+# through this blind spot in a row (rsync introduced but absent from the
+# host; a self-healing `sudo apt-get install rsync` that the host's
+# sudoers forbids; then `sudo mkdir` failing for that same reason).
+# ---------------------------------------------------------------------
+
+@test "step 9: publishes the whole homepage tree, including nested assets, and never serves README.md" {
+	seed_static_site
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "shared OK"
+	assert_output_contains "nginx root OK"
+
+	# Every asset reaches BOTH destinations -- not just index.html/style.css.
+	for f in index.html style.css site.webmanifest brand/icon.svg assets/app.js; do
+		[ -f "$SHARED_DST/$f" ]
+		[ -f "$NGINX_DST/$f" ]
+	done
+
+	# Contributor docs must never be published to a served directory.
+	[ ! -e "$SHARED_DST/README.md" ]
+	[ ! -e "$NGINX_DST/README.md" ]
+}
+
+@test "step 9: an unreachable Nginx webroot warns loudly but does NOT fail the deploy or skip the last-known-good record" {
+	# Regression test for the CD failures of 2026-08-01/02: the runtime user
+	# has no passwordless sudo beyond `systemctl restart`, so the webroot copy
+	# cannot succeed. That must not fail a deploy whose backend is already
+	# restarted, health-gated and live -- and must not skip _record_known_good,
+	# which would leave the NEXT deploy without a rollback target.
+	[ "$(id -u)" -ne 0 ] || skip "running as root: a permission-denied webroot is not reproducible"
+
+	local locked="$TEST_TMPDIR/locked"
+	mkdir -p "$locked"
+	chmod 000 "$locked"
+	export NGINX_DST="$locked/site"     # unwritable parent, and SUDO_BIN="" in this fixture
+
+	seed_static_site
+	run run_deploy
+
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "could not publish the homepage"
+	assert_output_contains "backend deploy is UNAFFECTED"
+	assert_output_not_contains "nginx root OK"
+
+	# The shared staging copy still happened ...
+	[ -f "$SHARED_DST/index.html" ]
+	# ... and the rollback record was still written.
+	[ "$(known_good)" = "$NEW_SHA" ]
+}
+
+@test "step 9: publishes into an already-writable webroot without needing any privilege escalation" {
+	# Tier 1 of _publish_static_dir: an operator who chowned the webroot (or
+	# symlinked it into shared/) needs no privilege escalation whatsoever.
+	# SUDO_BIN is "" throughout this fixture, so tier 3 is unavailable and a
+	# pre-existing destination rules out tier 2 -- success here can only mean
+	# the plain-cp path handled it.
+	#
+	# (SUDO_BIN deliberately NOT sabotaged to prove that: it is global, so
+	# pointing it at a bogus binary would break step 7's service restart and
+	# fail this test for an unrelated reason.)
+	mkdir -p "$NGINX_DST"
+	seed_static_site
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "nginx root OK"
+	[ -f "$NGINX_DST/assets/app.js" ]
+}

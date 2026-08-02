@@ -96,6 +96,15 @@ EOF
 	export PYTHON_BIN="python"
 	export FLOCK_BIN="flock"          # resolved via mocked PATH
 	export FFMPEG_BIN="true"           # avoid host package management in deploy tests
+
+	# Step 9 (static homepage) targets. deploy_server.sh defaults these to
+	# /srv/apps/... and /var/www/... — real production paths this suite must
+	# never touch — so they are redirected into the per-test temp tree.
+	# Until these existed, step 9 was completely untested: the fixture never
+	# created $STATIC_SRC, so every test took its "source not found" branch
+	# and three consecutive production breakages shipped through a green suite.
+	export SHARED_DST="$TEST_TMPDIR/shared_www"
+	export NGINX_DST="$TEST_TMPDIR/nginx_root"
 	export INTERNAL_HEALTH="http://mock-host/internal-health"
 	export PUBLIC_HEALTH="http://mock-host/public-health"
 	export HEALTH_RETRIES=3
@@ -121,7 +130,27 @@ EOF
 
 deploy_common_teardown() {
 	PATH="$ORIGINAL_PATH"
+	# The unreachable-webroot test deliberately chmod 000's a directory to
+	# simulate a root-owned Nginx root; without restoring permissions first,
+	# rm -rf cannot descend into it and the temp tree would leak.
+	[ -n "${TEST_TMPDIR:-}" ] && chmod -R u+rwX "$TEST_TMPDIR" 2>/dev/null
 	[ -n "${TEST_TMPDIR:-}" ] && rm -rf "$TEST_TMPDIR"
+}
+
+# seed_static_site — create a realistic static_site/company_homepage tree
+# under $DEPLOY_DIR so step 9 actually runs. Includes a nested asset dir
+# (the whole point of the cp -a rewrite: an earlier version copied only
+# index.html + style.css and left every other asset 404ing) and a README.md
+# (which must never reach a served directory).
+seed_static_site() {
+	local src="$DEPLOY_DIR/static_site/company_homepage"
+	mkdir -p "$src/brand" "$src/assets"
+	printf '<html>home</html>\n' >"$src/index.html"
+	printf 'body{}\n' >"$src/style.css"
+	printf 'contributor docs\n' >"$src/README.md"
+	printf '<svg/>\n' >"$src/brand/icon.svg"
+	printf 'console.log(1)\n' >"$src/assets/app.js"
+	printf '{}\n' >"$src/site.webmanifest"
 }
 
 # run_deploy — invokes the real deploy_server.sh with all mocks/overrides
