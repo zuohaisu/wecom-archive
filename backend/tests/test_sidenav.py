@@ -21,17 +21,15 @@ def test_design_system_is_a_new_copy_of_the_design_source() -> None:
     assert _DESIGN_TARGET.read_bytes() == _DESIGN_SOURCE.read_bytes()
 
 
-def test_navigation_has_no_top_level_audit_log_and_keeps_other_items() -> None:
+def test_navigation_omits_unimplemented_review_tasks_and_export_records() -> None:
     items = [item for group in NAV for item in group["items"]]
-    assert len(items) == 11
+    assert len(items) == 9
     assert {item["id"] for item in items} == {
         "review",
         "search",
-        "review-tasks",
         "messages",
         "analytics",
         "media",
-        "exports",
         "users",
         "contacts",
         "diagnostics",
@@ -39,6 +37,8 @@ def test_navigation_has_no_top_level_audit_log_and_keeps_other_items() -> None:
     }
     assert "audit-log" not in {item["id"] for item in items}
     assert "/admin/audit-logs" not in {item["path"] for item in items}
+    assert "review-tasks" not in {item["id"] for item in items}
+    assert "exports" not in {item["id"] for item in items}
     analytics = next(item for item in items if item["id"] == "analytics")
     assert analytics["path"] == "/admin/analytics"
     assert "sync" not in {item["id"] for item in items}

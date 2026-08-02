@@ -12,7 +12,6 @@ NAV = (
         "items": (
             {"id": "review", "key": "nav.conversationsReview", "path": "/admin/conversations"},
             {"id": "search", "key": "nav.globalSearch", "path": "/admin/search"},
-            {"id": "review-tasks", "key": "nav.reviewTasks", "path": "/admin/review-tasks"},
         ),
     },
     {
@@ -21,7 +20,6 @@ NAV = (
             {"id": "messages", "key": "nav.messages", "path": "/admin/messages"},
             {"id": "analytics", "key": "nav.usageAnalytics", "path": "/admin/analytics"},
             {"id": "media", "key": "nav.mediaAttachments", "path": "/admin/media"},
-            {"id": "exports", "key": "nav.exportRecords", "path": "/admin/exports"},
         ),
     },
     {
