@@ -187,10 +187,12 @@ def build_message_reachability_report(
     message_type: Optional[str] = None,
     msgtime_from: Optional[int] = None,
     msgtime_to: Optional[int] = None,
+    scope_max_message_id: Optional[int] = None,
     limit: int = DEFAULT_SCAN_LIMIT,
     offset: int = 0,
     include_samples: bool = False,
     sample_limit: int = DEFAULT_SAMPLE_LIMIT,
+    include_reason_counts: bool = False,
 ) -> dict:
     """
     Audit every successfully-archived message in `tenant_id` (optionally
@@ -253,6 +255,10 @@ def build_message_reachability_report(
         query = query.filter(ArchiveMessage.msgtime >= msgtime_from)
     if msgtime_to is not None:
         query = query.filter(ArchiveMessage.msgtime <= msgtime_to)
+    # A persistent check freezes this internal watermark at creation.  It is
+    # optional so the legacy diagnostic API retains its exact old behaviour.
+    if scope_max_message_id is not None:
+        query = query.filter(ArchiveMessage.id <= scope_max_message_id)
 
     if conversation_id:
         query = _apply_conversation_candidate_filter(query, conversation_id, tenant_id)
@@ -281,6 +287,7 @@ def build_message_reachability_report(
         return _is_staff(uid)
 
     counts_by_status = _empty_status_counts()
+    counts_by_reason: Dict[str, int] = {}
     counts_by_message_type: Dict[str, int] = {}
     counts_by_conversation_type: Dict[str, int] = {}
     samples: List[MessageReachabilitySample] = []
@@ -347,6 +354,7 @@ def build_message_reachability_report(
             reason_code = "conversation_membership_lookup_errored"
 
         counts_by_status[status.value] += 1
+        counts_by_reason[reason_code] = counts_by_reason.get(reason_code, 0) + 1
         mtype_key = message.msgtype or "unknown"
         counts_by_message_type[mtype_key] = counts_by_message_type.get(mtype_key, 0) + 1
         ctype_key = conv_type_hint or "unknown"
@@ -396,6 +404,8 @@ def build_message_reachability_report(
     }
     if include_samples:
         report["samples"] = [s.__dict__ for s in samples]
+    if include_reason_counts:
+        report["counts_by_reason"] = counts_by_reason
     return report
 
 

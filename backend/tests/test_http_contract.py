@@ -100,6 +100,18 @@ CREATE TABLE admin_sessions (
     wecom_user_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TEXT NOT NULL, is_revoked INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE reachability_audit_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, public_id TEXT NOT NULL UNIQUE,
+    tenant_id TEXT NOT NULL, status TEXT NOT NULL, source TEXT NOT NULL,
+    algorithm_version TEXT NOT NULL, scope_from DATETIME NOT NULL, scope_to DATETIME NOT NULL,
+    scope_max_message_id INTEGER NOT NULL, matching_count INTEGER NOT NULL DEFAULT 0,
+    checked_count INTEGER NOT NULL DEFAULT 0, reachable_count INTEGER NOT NULL DEFAULT 0,
+    unreachable_count INTEGER NOT NULL DEFAULT 0, reason_counts JSON NOT NULL DEFAULT '{}',
+    safe_error_code TEXT, started_at DATETIME, completed_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uq_reachability_audit_runs_tenant_checking
+ON reachability_audit_runs(tenant_id) WHERE status = 'checking';
 """
 
 
@@ -324,7 +336,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 83  # RND-256: +1 read-only .env settings export endpoint.
+    assert route_count == 85  # RND-337: +2 persistent reachability-check endpoints.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -360,6 +372,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/media",
             "/api/admin/media/{media_id}/download",
             "/api/admin/reachability-audit",
+            "/api/admin/reachability-checks",
+            "/api/admin/reachability-checks/latest",
             "/api/admin/retention-config",
             "/api/admin/usage",
             "/api/admin/settings",
@@ -484,6 +498,18 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/admin/reachability-audit",
             frozenset({"GET"}),
             "ReachabilityAuditOut",
+            "None",
+        ),
+        (
+            "/api/admin/reachability-checks",
+            frozenset({"POST"}),
+            "ReachabilityCheckSnapshotOut",
+            "None",
+        ),
+        (
+            "/api/admin/reachability-checks/latest",
+            frozenset({"GET"}),
+            "ReachabilityCheckSnapshotOut",
             "None",
         ),
         ("/api/admin/retention-config", frozenset({"GET"}), "RetentionConfigOut", "None"),
@@ -710,6 +736,7 @@ class TestAuthGates:
             "/api/messages/any",
             "/api/messages/any-id",
             "/api/admin/reachability-audit",
+            "/api/admin/reachability-checks/latest",
             "/api/admin/sync-status",
             "/api/admin/users",
         ],

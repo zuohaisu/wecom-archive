@@ -1162,3 +1162,19 @@ def test_insert_message_respects_an_explicit_msgid(db) -> None:
     # existing tests rely on choosing their own deterministic ids.
     msg = _insert_message(db, msgid="custom-explicit-id", sender="staff_a")
     assert msg.msgid == "custom-explicit-id"
+
+
+def test_optional_frozen_max_message_id_excludes_later_rows_without_changing_old_calls(db) -> None:
+    from app.reachability_audit import build_message_reachability_report
+
+    first = _insert_message(db, sender=None, msgtime=6000)
+    _insert_message(db, sender=None, msgtime=6000)
+
+    legacy = build_message_reachability_report(db, _TENANT_A)
+    frozen = build_message_reachability_report(
+        db, _TENANT_A, scope_max_message_id=first.id, include_reason_counts=True
+    )
+    assert legacy["scanned_count"] == 2
+    assert "counts_by_reason" not in legacy
+    assert frozen["scanned_count"] == frozen["matching_total"] == 1
+    assert frozen["counts_by_reason"] == {"sender_null_or_unresolvable": 1}

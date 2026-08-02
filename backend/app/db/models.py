@@ -475,6 +475,60 @@ class SyncState(Base):
     )
 
 
+class ReachabilityAuditRun(Base):
+    """Tenant-scoped, aggregate-only reachability-check snapshot (RND-337)."""
+
+    __tablename__ = "reachability_audit_runs"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_reachability_audit_runs_public_id"),
+        CheckConstraint(
+            "status IN ('checking', 'completed', 'incomplete', 'error')",
+            name="ck_reachability_audit_runs_status_valid",
+        ),
+        CheckConstraint(
+            "source IN ('manual')",
+            name="ck_reachability_audit_runs_source_valid",
+        ),
+        CheckConstraint(
+            "matching_count >= 0 AND checked_count >= 0 AND reachable_count >= 0 "
+            "AND unreachable_count >= 0",
+            name="ck_reachability_audit_runs_counts_nonnegative",
+        ),
+        Index("ix_reachability_audit_runs_tenant_created", "tenant_id", "created_at"),
+        # The database, rather than a process-local lock, makes a tenant's
+        # active run idempotent across concurrent web processes.
+        Index(
+            "uq_reachability_audit_runs_tenant_checking",
+            "tenant_id",
+            unique=True,
+            postgresql_where=text("status = 'checking'"),
+            sqlite_where=text("status = 'checking'"),
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    public_id = Column(String(36), nullable=False)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    status = Column(String(16), nullable=False, default="checking")
+    source = Column(String(16), nullable=False, default="manual")
+    algorithm_version = Column(String(32), nullable=False)
+    scope_from = Column(DateTime(timezone=True), nullable=False)
+    scope_to = Column(DateTime(timezone=True), nullable=False)
+    # Internal-only candidate watermark. It is never exposed by API/CLI/logs.
+    scope_max_message_id = Column(BigInteger, nullable=False, default=0)
+    matching_count = Column(Integer, nullable=False, default=0)
+    checked_count = Column(Integer, nullable=False, default=0)
+    reachable_count = Column(Integer, nullable=False, default=0)
+    unreachable_count = Column(Integer, nullable=False, default=0)
+    reason_counts = Column(JSONB, nullable=False, default=dict)
+    safe_error_code = Column(String(48), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class ArchiveMessage(Base):
     """
     Stores one WeCom archive message per row.
