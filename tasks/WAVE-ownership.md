@@ -46,7 +46,7 @@ RND-335 与 RND-337 均无前置，**两个波次同时开工**。因此下面�
 
 - `i18n.js`、`test_sidenav.py`、`sidenav.py` 三个文件在本波次中**归 RND-336**。
 - **RND-338 不得在 RND-336 的共享文件落定之前开工。** RND-338 dev agent 的 Preflight
-  必须检查 `tasks/RND-336-qa-verdict.json`。这道闸的目的是**文件所有权交接**，不是
+  必须检查 `tasks/archive/RND-336-qa-verdict.json`。这道闸的目的是**文件所有权交接**，不是
   功能依赖，所以判据是「代码是否已落定」而非 verdict 字面值：
   - `PASS` → 通过。
   - `BLOCKED` 但全部 AC 为 `PASS`、无 scope/security finding、阻塞原因仅

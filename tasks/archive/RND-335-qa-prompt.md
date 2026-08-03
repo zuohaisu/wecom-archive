@@ -29,7 +29,7 @@
 - 缺实现或缺测试必须 FAIL，不替开发补做。
 
 ## 输入
-- `tasks/RND-335-dev-prompt.md` 的「验收标准」全部子 AC。
+- `tasks/archive/RND-335-dev-prompt.md` 的「验收标准」全部子 AC。
 - 开发 agent 的 QA Summary、Preflight 记录与当前 diff。
 - 重点：`audit.py`、audit API、认证/用户/设置/保留/平台/worker writers 与本票测试。
 
@@ -82,7 +82,7 @@ echo "DATABASE_URL=[${DATABASE_URL}]"
 
 ## 验收方法（证据优先）
 
-**判定单位是子 AC，不是大项。** `tasks/RND-335-dev-prompt.md` 的「验收标准」已把
+**判定单位是子 AC，不是大项。** `tasks/archive/RND-335-dev-prompt.md` 的「验收标准」已把
 10 个大项拆成 AC-1a ~ AC-10d 的原子断言。**本节不重述断言内容**（重述必然与 dev
 prompt 漂移）——去读 dev prompt 的原文，本节只规定**每类断言需要什么形态的证据**
 和**怎么判**。
@@ -159,7 +159,7 @@ git log origin/main..HEAD
 ```
 
 ## 产出
-写入 `tasks/RND-335-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-335-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
 
 - **全部子 AC** PASS 且无 blocker/major → `verdict: PASS`，`recommended_next_state: PASS`；notes 明确「RND-336 blocker 可解除」。
 - 任一子 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；findings **按子 AC 编号定位**（如 `AC-3f`），只描述最小修复。

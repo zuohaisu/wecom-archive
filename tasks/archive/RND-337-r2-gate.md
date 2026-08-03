@@ -1,6 +1,6 @@
 # RND-337 · R2 人工闸凭据
 
-本文件是 `tasks/RND-337-dev-prompt.md` Preflight **P-4**（原 P-3）所要求的人工确认记录。
+本文件是 `tasks/archive/RND-337-dev-prompt.md` Preflight **P-4**（原 P-3）所要求的人工确认记录。
 dev agent 读到本文件即视为 R2 闸已满足，可以开始改产品代码。
 
 ## 批准

@@ -86,7 +86,7 @@ git log origin/main..HEAD    # 必须无输出
 ```
 
 ## 产出
-写入 `tasks/RND-250-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-250-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
 `notes` 中完整记录端到端 bootstrap→login 链路的验证过程（这是给 Haisu 做最终人工审阅的关键材料）。
 
 ## 禁止事项

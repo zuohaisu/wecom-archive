@@ -73,7 +73,7 @@ git log origin/main..HEAD    # 必须无输出
 ```
 
 ## 产出
-写入 `tasks/RND-245-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-245-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
 `notes` 中记录：`mask()` 的确切输出格式示例。
 
 ## 禁止事项

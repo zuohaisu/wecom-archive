@@ -34,7 +34,7 @@ git log origin/main..HEAD
 ### P-2 依赖闸：RND-335 必须 QA PASS
 
 ```bash
-cat tasks/RND-335-qa-verdict.json
+cat tasks/archive/RND-335-qa-verdict.json
 ```
 
 - 文件不存在，或 `verdict != "PASS"` → 输出 `BLOCKED_NEEDS_HUMAN` 与缺失契约，

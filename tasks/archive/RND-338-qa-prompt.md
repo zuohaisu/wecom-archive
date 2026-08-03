@@ -26,11 +26,11 @@
 ## 你的角色与权限
 - 只读验证 RND-338，不替开发修代码/测试/文案。
 - 可以读取文件、运行 tests、启动本地服务并做只读浏览器/DOM/网络检查。
-- 不修改实现、测试、工单，不 commit/push/建分支；唯一允许写入 `tasks/RND-338-qa-verdict.json`。
+- 不修改实现、测试、工单，不 commit/push/建分支；唯一允许写入 `tasks/archive/RND-338-qa-verdict.json`。
 
 ## 输入
-- `tasks/RND-338-dev-prompt.md` 的 AC-1 ~ AC-9。
-- `tasks/RND-337-qa-verdict.json` 和实际 reachability-checks schema/OpenAPI/tests。
+- `tasks/archive/RND-338-dev-prompt.md` 的 AC-1 ~ AC-9。
+- `tasks/archive/RND-337-qa-verdict.json` 和实际 reachability-checks schema/OpenAPI/tests。
 - 本票归因 diff：diagnostics template/JS/CSS、i18n、web route docstring、page/render/sidenav/聚焦 tests。
 
 ## Preflight（先做）
@@ -54,8 +54,8 @@ git log origin/main..HEAD
 ### P-2 依赖闸与串行闸（两个都查）
 
 ```bash
-cat tasks/RND-337-qa-verdict.json
-cat tasks/RND-336-qa-verdict.json
+cat tasks/archive/RND-337-qa-verdict.json
+cat tasks/archive/RND-336-qa-verdict.json
 ```
 
 - RND-337 缺失或非 PASS → `verdict: BLOCKED`（功能契约依赖）。
@@ -88,7 +88,7 @@ audit-log 移除断言、以及 `sidenav.py` 的 `NAV` 结构。因此对 RND-33
 - 判定：依赖完整且无前端猜测 = PASS；缺 verdict、API drift、mock 自造不存在字段 = BLOCKED/FAIL。
 
 ### AC-1b — 串行闸（RND-336）
-- 证据：`tasks/RND-336-qa-verdict.json` 为 PASS；本票对 `i18n.js` 的改动只在
+- 证据：`tasks/archive/RND-336-qa-verdict.json` 为 PASS；本票对 `i18n.js` 的改动只在
   diagnostics/archive-health 区，对 `test_sidenav.py` 只有新增断言，`sidenav.py` 零 diff。
 - 判定：见 Preflight P-3。RND-336 未 PASS 却已改共享文件 = `SCOPE_VIOLATION` + BLOCKED。
 
@@ -163,7 +163,7 @@ git log origin/main..HEAD
 - 三语言、桌面/320px、键盘 focus/展开；检查长英文/大数字/未知 reason 不溢出。
 
 ## 产出
-写入 `tasks/RND-338-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-338-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
 
 - 全部 AC PASS、无 blocker/major 且视觉证据完成 → `verdict: PASS`，`recommended_next_state: PASS`。
 - 自动化通过但视觉 gate 未完成：notes 明确 `HUMAN_VISUAL_REVIEW_PENDING`，不得宣称最终交付完成。

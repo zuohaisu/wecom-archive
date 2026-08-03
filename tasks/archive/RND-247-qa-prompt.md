@@ -68,7 +68,7 @@ git log origin/main..HEAD    # 必须无输出
 ```
 
 ## 产出
-写入 `tasks/RND-247-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-247-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
 `notes` 中完整转录 `CONFIG_REGISTRY` 的字段清单（供 T4/T5/T8 验收时直接对照）。
 
 ## 禁止事项

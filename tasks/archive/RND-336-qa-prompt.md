@@ -30,8 +30,8 @@
 - 若视觉环境不可用，自动化可继续，但需人眼证明的布局不得凭想象 PASS；在 verdict notes 明确 `HUMAN_VISUAL_REVIEW_PENDING`。
 
 ## 输入
-- `tasks/RND-336-dev-prompt.md` 的 AC-1 ~ AC-9。
-- `tasks/RND-335-qa-verdict.json` 与实际 action/category/API 契约。
+- `tasks/archive/RND-336-dev-prompt.md` 的 AC-1 ~ AC-9。
+- `tasks/archive/RND-335-qa-verdict.json` 与实际 action/category/API 契约。
 - 本票 diff：audit template/page router、sidenav、settings template、i18n、tests。
 
 ## Preflight（先做）
@@ -56,7 +56,7 @@ git log origin/main..HEAD
 ### P-2 依赖闸
 
 ```bash
-cat tasks/RND-335-qa-verdict.json
+cat tasks/archive/RND-335-qa-verdict.json
 ```
 
 缺失或 `verdict != "PASS"` → 直接 `verdict: BLOCKED`，不必往下走 AC。
@@ -152,7 +152,7 @@ git log origin/main..HEAD
 - 无浏览器/fixture 时，notes 明确未验证点，不能以静态源码冒充视觉 PASS。
 
 ## 产出
-写入 `tasks/RND-336-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-336-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
 
 - 全 AC PASS、无 blocker/major 且有视觉证据 → `verdict: PASS`，`recommended_next_state: PASS`。
 - 代码通过但视觉 review 未完成：notes 明确 `HUMAN_VISUAL_REVIEW_PENDING`，不得声称最终交付完成。

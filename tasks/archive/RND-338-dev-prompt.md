@@ -33,7 +33,7 @@ git log origin/main..HEAD
 ### P-2 依赖闸：RND-337 必须 QA PASS
 
 ```bash
-cat tasks/RND-337-qa-verdict.json
+cat tasks/archive/RND-337-qa-verdict.json
 ```
 
 - 文件不存在，或 `verdict != "PASS"` → `BLOCKED_NEEDS_HUMAN` + 缺失契约，**零产品代码改动**。
@@ -49,7 +49,7 @@ cat tasks/RND-337-qa-verdict.json
 结构性修改 `backend/app/web/sidenav.py`。裁决是**串行化，RND-336 在前**。
 
 ```bash
-cat tasks/RND-336-qa-verdict.json
+cat tasks/archive/RND-336-qa-verdict.json
 ```
 
 **这道闸的目的是文件所有权交接，不是功能依赖**——只要 RND-336 已经写完那几个共享

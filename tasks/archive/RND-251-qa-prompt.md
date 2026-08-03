@@ -71,7 +71,7 @@ git log origin/main..HEAD    # 必须无输出
 ```
 
 ## 产出
-写入 `tasks/RND-251-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-251-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
 `notes` 中记录分组导航的 DOM 结构说明（供 T9 对接）。
 
 ## 禁止事项

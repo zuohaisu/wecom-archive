@@ -53,7 +53,7 @@ git log origin/main..HEAD    # 必须无输出
 ```
 
 ## 产出
-写入 `tasks/RND-254-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-254-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
 
 ## 禁止事项
 - 不改任何文件、不放松 AC。

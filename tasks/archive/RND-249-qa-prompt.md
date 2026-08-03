@@ -78,7 +78,7 @@ git log origin/main..HEAD    # 必须无输出
 ```
 
 ## 产出
-写入 `tasks/RND-249-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-249-qa-verdict.json`，遵循 `tasks/_templates/qa-verdict.schema.json`。
 `notes` 中记录 GET/PUT 的确切请求/响应结构。
 
 ## 禁止事项

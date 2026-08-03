@@ -63,7 +63,7 @@ ls backend/alembic/versions/ | sort | tail -5
 ### P-2 依赖闸：RND-337 必须 QA PASS
 
 ```bash
-cat tasks/RND-337-qa-verdict.json
+cat tasks/archive/RND-337-qa-verdict.json
 ```
 
 - 缺失或 `verdict != "PASS"` → `BLOCKED_NEEDS_HUMAN`，零产品代码改动。
@@ -201,7 +201,7 @@ timer/runbook。未确认 → `BLOCKED_NEEDS_HUMAN`，零产品代码改动。
 > 也按子 AC 编号定位。
 
 ### AC-1 依赖与迁移
-- **AC-1a**：`tasks/RND-337-qa-verdict.json` 为 PASS。
+- **AC-1a**：`tasks/archive/RND-337-qa-verdict.json` 为 PASS。
 - **AC-1b**：新 revision 的 `down_revision` 指向 Preflight P-1 采集到的**实际唯一** head；之后仍只有一个 head。
 - **AC-1c**：finding 模型与 migration 逐字段对齐；含 tenant composite 完整性约束（内部 archive message reference 必须与 finding 同租户）、public id 唯一、状态枚举、非负计数、查询索引。
 - **AC-1d**：Given P-3 的一次性 PG，When `upgrade → downgrade → upgrade`，Then 三步都成功且只影响本票新增的表。**P-3 未满足时本条不得标记通过。**

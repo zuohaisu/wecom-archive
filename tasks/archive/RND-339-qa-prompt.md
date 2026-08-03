@@ -14,7 +14,7 @@
 
 ## ⚠️ 2026-08-03 追加：P-4 timer 排期的权威值
 
-`tasks/RND-339-dev-prompt.md` 的 2026-08-03 追加已把 AC-10c 需要的具体 `OnCalendar`
+`tasks/archive/RND-339-dev-prompt.md` 的 2026-08-03 追加已把 AC-10c 需要的具体 `OnCalendar`
 值定为 **`*-*-* 04:30:00`**。AC-10c 判定时以这个值为准：dev 实现里若断言的是这个字符串
 → PASS；若断言了别的值、或只有模糊断言（"看起来错开了"）→ 分别按值不符/证据形态不
 合格处理，不要因为提示词原文没写具体值而当作本票设计未定。
@@ -35,11 +35,11 @@
 - 只读验证 RND-339，不替开发补实现、测试、migration 或文档。
 - 可以读仓库、运行测试/静态解析、在 disposable DB 做 migration 往返。
 - 不修改任何实现/测试/工单，不 commit/push/建分支，不执行 systemctl/sudo/真实 worker/生产访问。
-- 唯一允许写入 `tasks/RND-339-qa-verdict.json`。
+- 唯一允许写入 `tasks/archive/RND-339-qa-verdict.json`。
 
 ## 输入
-- `tasks/RND-339-dev-prompt.md` 的 AC-1 ~ AC-11。
-- `tasks/RND-337-qa-verdict.json` 与最终 run/status/service 契约。
+- `tasks/archive/RND-339-dev-prompt.md` 的 AC-1 ~ AC-11。
+- `tasks/archive/RND-337-qa-verdict.json` 与最终 run/status/service 契约。
 - 本票 diff：finding model/migration、automation service/CLI、archive worker hook、findings API/main、systemd units、runbooks、tests/HTTP contract。
 
 ## Preflight（先做，全部做完再进 AC-1）
@@ -74,7 +74,7 @@ git log origin/main..HEAD
 ### P-2 依赖闸
 
 ```bash
-cat tasks/RND-337-qa-verdict.json
+cat tasks/archive/RND-337-qa-verdict.json
 ```
 
 缺失或 `verdict != "PASS"` → `verdict: BLOCKED`，不必往下走 AC。
@@ -106,7 +106,7 @@ echo "DATABASE_URL=[${DATABASE_URL}]"
 
 ## 验收方法（证据优先）
 
-**判定单位是子 AC，不是大项。** `tasks/RND-339-dev-prompt.md` 的「验收标准」已把
+**判定单位是子 AC，不是大项。** `tasks/archive/RND-339-dev-prompt.md` 的「验收标准」已把
 11 个大项拆成 AC-1a ~ AC-11h 的原子断言。**本节不重述断言内容**（重述必然与 dev
 prompt 漂移）——去读 dev prompt 的原文，本节只规定**每类断言需要什么形态的证据**
 和**怎么判**。
@@ -194,7 +194,7 @@ git log origin/main..HEAD
 - 若未完成 R2 migration/unit/runbook 人工 review，notes 标 `HUMAN_DEPLOYMENT_REVIEW_PENDING`，不得声称已部署或完全交付。
 
 ## 产出
-写入 `tasks/RND-339-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-339-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
 
 - **全部子 AC** PASS、无 blocker/major、R2 migration/deployment review 有证据 → `verdict: PASS`，`recommended_next_state: PASS`。
 - 任一子 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；findings **按子 AC 编号定位**（如 `AC-4b`），只列最小修复。

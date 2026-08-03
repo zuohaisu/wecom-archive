@@ -67,7 +67,7 @@ echo "DATABASE_URL=[${DATABASE_URL}]"
 ### P-3 R2 人工闸
 
 ```bash
-cat tasks/RND-337-r2-gate.md
+cat tasks/archive/RND-337-r2-gate.md
 ```
 
 - 文件存在且记录了 Haisu 对 run schema / 后台执行方式 / migration 方案的批准 → 通过。

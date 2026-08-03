@@ -27,10 +27,10 @@
 - 你是独立验收 agent，只判断 RND-337，不补实现。
 - 可以读仓库、运行只读测试/静态检查；仅可在明确一次性 local/test DB 做 migration upgrade/downgrade。
 - 不修改代码、测试、文档、工单，不 commit/push/建分支，不对生产/共享数据库执行任何写操作。
-- 唯一允许写入的是规定的 `tasks/RND-337-qa-verdict.json`。
+- 唯一允许写入的是规定的 `tasks/archive/RND-337-qa-verdict.json`。
 
 ## 输入
-- `tasks/RND-337-dev-prompt.md` 的 AC-1 ~ AC-10。
+- `tasks/archive/RND-337-dev-prompt.md` 的 AC-1 ~ AC-10。
 - 待验收工作树 diff，重点：run model/migration、classifier 边界扩展、service/schema/router/runner、main 最小注册、聚焦 tests 与 HTTP contract。
 - 现有 `backend/app/routers/reachability_audit.py` 和旧 API tests，作为兼容基线。
 
@@ -88,7 +88,7 @@ migration 往返需要真实 PostgreSQL（模型用 `JSONB`，SQLite 顶不上�
 
 ## 验收方法（证据优先）
 
-**判定单位是子 AC，不是大项。** `tasks/RND-337-dev-prompt.md` 的「验收标准」已把
+**判定单位是子 AC，不是大项。** `tasks/archive/RND-337-dev-prompt.md` 的「验收标准」已把
 10 个大项拆成 AC-1a ~ AC-10c 的原子断言。**本节不重述断言内容**（重述必然与 dev
 prompt 漂移）——去读 dev prompt 的原文，本节只规定**每类断言需要什么形态的证据**
 和**怎么判**。
@@ -168,7 +168,7 @@ git log origin/main..HEAD
 既不静默标 PASS，也不因环境缺口给开发判 FAIL。
 
 ## 产出
-写入 `tasks/RND-337-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
+写入 `tasks/archive/RND-337-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
 
 - **全部子 AC** PASS、无 blocker/major、R2 migration 证据完整 → `verdict: PASS`，`recommended_next_state: PASS`。
 - 任一子 AC FAIL → `verdict: FAIL`，`recommended_next_state: FIXING`；findings **按子 AC 编号定位**（如 `AC-3d`），只描述最小修复，不代写。
