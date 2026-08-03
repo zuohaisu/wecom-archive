@@ -6,6 +6,7 @@ import base64
 import hashlib
 import logging
 import struct
+from threading import Event
 
 import pytest
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -13,12 +14,42 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers import wecom_events
+from app.services import archive_worker_trigger
 
 _TOKEN = "callback-token-sentinel"
 _CORP_ID = "corp-sentinel"
 _KEY = bytes(range(32))
 _AES_KEY = base64.b64encode(_KEY).decode("ascii").rstrip("=")
 _PATH = "/api/wecom/archive/events"
+_SENTINELS = (
+    "SENTINEL_MESSAGE_BODY",
+    "SENTINEL_STRUCTURED_CONTENT",
+    "SENTINEL_PASSWORD",
+    "SENTINEL_PASSWORD_HASH",
+    "SENTINEL_TOKEN",
+    "SENTINEL_SECRET",
+    "SENTINEL_SIGNED_URL",
+    "SENTINEL_STORAGE_KEY",
+    "/sentinel/fs/path",
+    "SENTINEL_SEARCH_TEXT",
+    "SENTINEL_TRACEBACK",
+    "SENTINEL_SENDER",
+    "SENTINEL_RECIPIENT",
+    "SENTINEL_ROOM",
+    "SENTINEL_RAW_MSGID",
+)
+
+
+def _assert_no_sentinels(value: object) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _assert_no_sentinels(key)
+            _assert_no_sentinels(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _assert_no_sentinels(item)
+    else:
+        assert not any(sentinel in str(value) for sentinel in _SENTINELS)
 
 
 def _signature(timestamp: str, nonce: str, payload: str) -> str:
@@ -48,6 +79,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("WECOM_CALLBACK_TOKEN", _TOKEN)
     monkeypatch.setenv("WECOM_CALLBACK_ENCODING_AES_KEY", _AES_KEY)
     monkeypatch.setenv("WECOM_CORP_ID", _CORP_ID)
+    monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: "tenant-sentinel")
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+    )
     app = FastAPI()
     app.include_router(wecom_events.router)
     with TestClient(app, raise_server_exceptions=False) as value:
@@ -180,15 +217,21 @@ def _post(client: TestClient, body: bytes, payload: str, *, signature: str | Non
     )
 
 
-def test_post_valid_signature_acknowledges_and_only_uses_best_effort_dispatch(
+def test_post_valid_signature_acknowledges_and_dispatches_worker_and_media(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dispatched: list[tuple[str, str]] = []
+    worker_dispatches: list[object] = []
     monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: "tenant-sentinel")
     monkeypatch.setattr(
         wecom_events,
         "trigger_recent_image_download",
         lambda tenant_id, triggered_by: dispatched.append((tenant_id, triggered_by)),
+    )
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
     payload = "post-encrypt-sentinel"
     response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
@@ -196,6 +239,7 @@ def test_post_valid_signature_acknowledges_and_only_uses_best_effort_dispatch(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
     assert response.content == b"ok"
+    assert worker_dispatches == [1]
     assert dispatched == [("tenant-sentinel", "callback")]
 
 
@@ -218,12 +262,35 @@ def test_post_malformed_or_unsigned_input_never_dispatches(
     signature: str | None,
 ) -> None:
     dispatched: list[object] = []
+    worker_dispatches: list[object] = []
     monkeypatch.setattr(wecom_events, "trigger_recent_image_download", lambda *_args, **_kwargs: dispatched.append(1))
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+    )
     response = _post(client, body, payload, signature=signature)
 
     assert response.status_code in {400, 403}
     assert response.status_code != 500
     assert dispatched == []
+    assert worker_dispatches == []
+
+
+def test_post_missing_required_query_parameters_never_dispatches(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worker_dispatches: list[object] = []
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+    )
+
+    response = client.post(_PATH, content=b"<xml><Encrypt><![CDATA[ignored]]></Encrypt></xml>")
+
+    assert response.status_code == 422
+    assert worker_dispatches == []
 
 
 def test_callback_business_logs_are_fixed_info_events_without_request_data(
@@ -288,3 +355,91 @@ def test_access_log_filter_redacts_wecom_event_queries_and_preserves_other_paths
     assert "oauth-code" not in oauth_text
     assert "csrf-state" not in oauth_text
     assert "/api/conversations?sender=person" in ordinary_text
+
+
+def test_post_returns_before_the_shared_worker_finishes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = Event()
+    release = Event()
+    finished = Event()
+
+    def _blocking_worker() -> bool:
+        started.set()
+        assert release.wait(timeout=1)
+        finished.set()
+        return True
+
+    monkeypatch.setattr(archive_worker_trigger, "run_archive_worker_once", _blocking_worker)
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        archive_worker_trigger.dispatch_archive_worker,
+    )
+    payload = "post-encrypt-sentinel"
+    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+
+    try:
+        assert response.status_code == 200
+        assert started.wait(timeout=1)
+        assert not finished.is_set()
+    finally:
+        release.set()
+    assert finished.wait(timeout=1)
+
+
+def test_post_dispatch_failure_is_not_acknowledged(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    media_dispatches: list[object] = []
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: wecom_events.ArchiveWorkerDispatch.FAILED,
+    )
+    monkeypatch.setattr(
+        wecom_events,
+        "trigger_recent_image_download",
+        lambda *_args, **_kwargs: media_dispatches.append(1),
+    )
+    payload = "post-encrypt-sentinel"
+    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Callback worker unavailable"}
+    assert media_dispatches == []
+
+
+def test_dispatch_failure_does_not_leak_request_data(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: wecom_events.ArchiveWorkerDispatch.FAILED,
+    )
+    payload = "SENTINEL_SECRET"
+    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+
+    assert response.status_code == 503
+    _assert_no_sentinels(response.json())
+    _assert_no_sentinels([record.getMessage() for record in caplog.records])
+
+
+def test_post_does_not_dispatch_without_an_active_callback_tenant(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worker_dispatches: list[object] = []
+    monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: None)
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+    )
+    payload = "post-encrypt-sentinel"
+    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Callback worker unavailable"}
+    assert worker_dispatches == []

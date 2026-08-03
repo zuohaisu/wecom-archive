@@ -1,0 +1,184 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-107",
+  "linear_url": "https://linear.app/xyzhs1897/issue/RND-107/将企微事件回调接入归档-worker",
+  "run_id": "rnd-107-qa-20260804-01",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "c9258f6 (HEAD == origin/main)",
+    "head": "working tree (uncommitted) on branch zuohaisu/rnd-107-将企微事件回调接入归档-worker",
+    "diff_scope": "M backend/app/routers/sync.py (+12/-26), M backend/app/routers/wecom_events.py (+34/-14), M backend/tests/test_sync_api.py (+14), M backend/tests/test_wecom_events.py (+157), untracked + backend/app/services/archive_worker_trigger.py (new, 81 lines), untracked + backend/tests/test_archive_worker_trigger.py (new, 94 lines). No route-count change, no DB/migration/CI/systemd/template/i18n change. origin/main..HEAD is empty (zero commits)."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_wecom_events.py::test_post_valid_signature_acknowledges_and_dispatches_worker_and_media (line 220): valid signature + <Encrypt> -> 200 'ok', worker dispatch recorded exactly once.",
+        "backend/tests/test_wecom_events.py::test_post_malformed_or_unsigned_input_never_dispatches (line 257, 5 cases missing_encrypt/malformed_cdata/malformed_xml/non_utf8_encrypt/invalid_signature): 400/403, worker_dispatches == [] and media dispatched == [].",
+        "backend/tests/test_wecom_events.py::test_post_missing_required_query_parameters_never_dispatches (line 280): 422, no dispatch. backend/tests/test_wecom_events.py::test_post_does_not_dispatch_without_an_active_callback_tenant (line 430): 503, no dispatch.",
+        "POST handler backend/app/routers/wecom_events.py:260-271 extracts <Encrypt> (structure) then verifies SHA1 signature (line 269-271) BEFORE tenant resolution/dispatch; dispatch at :281-283; every failure path raises before dispatch. POST never consumes/decrypts the event body (RND-105 merged contract: signature over raw encrypted content; the worker fetches data itself). The decrypt-failure surface (GET echostr) is unchanged and regression-covered by test_get_malformed_request_data_is_always_safe_400 (9 cases) and test_get_accepts_wecom_padding_larger_than_an_aes_block (16 cases).",
+        "Failed requests obtain no worker lock and produce no archive side effect: dispatch_archive_worker is only reachable after structure+signature+tenant checks; lock acquire happens inside dispatch (backend/app/services/archive_worker_trigger.py:62-66)."
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_wecom_events.py::test_post_returns_before_the_shared_worker_finishes (line 360): blocking worker double with threading.Event barriers; asserts response.status_code == 200 and started.is_set() while not finished.is_set(), then releases; proves handler returned while worker still incomplete (barrier, not just HTTP 200).",
+        "Runtime smoke B (real machinery): dispatch_archive_worker returned ACCEPTED in ~2ms while the real subprocess worker (2s sleep) was still running; worker runs observed == 1 under a 20-call burst; lock free after completion. Full output: 'SMOKE B PASS' EXIT=0.",
+        "No BackgroundTasks dependency on the callback path: dispatch starts a daemon thread (backend/app/services/archive_worker_trigger.py:55-78) so the ack is independent of worker completion."
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "Callback dispatch chain: wecom_events.py:281 -> dispatch_archive_worker -> run_archive_worker_once (archive_worker_trigger.py:35-52) -> subprocess [sys.executable, backend/scripts/run_archive_worker_once.py] cwd=backend (archive_worker_trigger.py:38-42, _WORKER_SCRIPT :23).",
+        "Manual path now uses the same seam: backend/app/routers/sync.py:91-94 _run_archive_worker delegates to run_archive_worker_once; sync subprocess/Path/sys imports removed (diff -3 lines). backend/tests/test_sync_api.py::test_manual_worker_uses_the_shared_archive_worker_seam (line 178) and backend/tests/test_archive_worker_trigger.py::test_manual_and_callback_paths_share_the_worker_entrypoint (line 12) pin the identical argv/cwd/check=False invocation.",
+        "Timer path unchanged: deploy/systemd/wecom-archive-worker.service:11 ExecStart runs the same backend/scripts/run_archive_worker_once.py. Sync -> decrypt/normalization order preserved inside the shared script (run_archive_worker_once.py:174-176); no subprocess/SQL/business-step copy in the callback layer."
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "Same actual filesystem lock: callback/manual/timer all run backend/scripts/run_archive_worker_once.py, which owns the fcntl.flock on WORKER_LOCK_PATH or the shared default /srv/apps/wecom-archive-365/shared/run/wecom-archive-worker.lock (run_archive_worker_once.py:54-81, :160-171); systemd service uses the same script and env (wecom-archive-worker.service:10-11).",
+        "Runtime smoke A: with the real flock held, the real worker script printed 'archive_worker lock already held; exiting' and exited 0 (safe no-op) - WORKER_UNDER_LOCK EXIT=0; no overlapping worker cycle can start.",
+        "callback/callback concurrency: process-local coalescing lock (archive_worker_trigger.py:24, :62-78) plus cross-process flock; backend/tests/test_archive_worker_trigger.py::test_burst_is_coalesced_and_dispatch_returns_before_worker_finishes (line 46): 20 dispatches -> exactly 1 run, 20 SKIPPED; smoke B reproduced the same against the real subprocess.",
+        "callback vs already-locked worker/timer: the flock no-op contract means the second trigger's subprocess exits 0 immediately - at most one real worker cycle runs."
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "Structural bound: dispatch_archive_worker does a non-blocking acquire of a single module-level threading.Lock and starts at most one daemon thread named wecom-archive-worker-trigger; every further call returns SKIPPED (archive_worker_trigger.py:62-66). No queue, no unbounded thread/process/future/task growth.",
+        "Stress-style focused test: test_burst_is_coalesced_and_dispatch_returns_before_worker_finishes (line 46) fires 20 dispatches against a blocking worker and asserts runs == [1], all SKIPPED, then finished.wait + _dispatch_lock.acquire(timeout=1) proves resource release after completion.",
+        "Runtime smoke B: 20-dispatch burst against the real subprocess -> exactly 1 worker run; _dispatch_lock acquirable after completion (lock free).",
+        "Failure path releases the guard: test_dispatch_start_failure_releases_the_coalescing_guard (line 80) - thread.start() raising releases the lock so later dispatches are not wedged."
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "Accept-time failure is not faked as success: thread.start() failure -> ArchiveWorkerDispatch.FAILED -> 503 'Callback worker unavailable' (wecom_events.py:281-283); backend/tests/test_wecom_events.py::test_post_dispatch_failure_is_not_acknowledged (line 391) asserts 503 and no media dispatch.",
+        "Background worker failure is safely observable and does not modify the already-returned response: run_archive_worker_once returns False on exception or non-zero exit and logs only 'archive_worker result=failed' (archive_worker_trigger.py:43-49); the callback ack was already sent (response immutable).",
+        "No payload/secret/command args/traceback leakage: test_worker_failure_is_observable_without_exception_text (line 31) asserts sentinel exception text absent from logs; test_dispatch_failure_does_not_leak_request_data (line 413) recursively asserts sentinels absent from response.json() and all captured log messages."
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "Timer path untouched by this diff (deploy/systemd/wecom-archive-worker.service and .timer not in git status; ExecStart/schedule unchanged: OnCalendar=*:0/5).",
+        "Manual path behavior-preserving refactor: sync.py _run_archive_worker previously subprocess-ran the same script and marked failure on non-zero exit; now delegates to run_archive_worker_once() with identical semantics (exception or non-zero -> _mark_worker_failed). Regression test test_manual_worker_uses_the_shared_archive_worker_seam (line 178); existing sync-now tests (202/cooldown/already_running) still pass.",
+        "Same worker + same flock for timer/manual/callback (see AC-3/AC-4 evidence); lock-held and fatal-failure contracts unchanged (worker script untouched, exit 0 no-op / exit 1 fatal per run_archive_worker_once.py:19-22)."
+      ]
+    },
+    {
+      "id": "AC-8",
+      "status": "PASS",
+      "evidence": [
+        "The diff touches only dispatch wiring: wecom_events.py POST handler, sync.py helper, and the new service module. No change to cursor/dedup/decrypt/normalization/revoke/media/ingest logic; backend/scripts/run_archive_worker_once.py, sync_wecom_archive_once.py, decrypt_wecom_messages_once.py, and all media/ingest modules are untouched (git status shows only the 6 RND-107 files).",
+        "Repeated/duplicate callbacks cannot create duplicate business records: a burst yields one worker cycle (test_burst... runs == [1]; smoke B runs == 1), and an already-running worker is a flock no-op, so the single-cycle worker's own cursor/dedup semantics are preserved."
+      ]
+    },
+    {
+      "id": "AC-9",
+      "status": "PASS",
+      "evidence": [
+        "Callback resolves the env-scoped corp to its active tenant only: _active_tenant_for_corp(_get_corp_id()) filters TenantWecomConfig by that corp_id + is_active (wecom_events.py:172-185); the resolved tenant_id stays in-process, is never logged, and is never passed to the worker (dispatch takes no tenant argument - archive_worker_trigger.py:62).",
+        "Worker is environment-scoped (single WECOM_CORP_ID, same as the manual path's existing guard sync.py:134-136); no cross-tenant read/select/print of other tenants' configs, credentials, or data in callback, config, worker, or logs.",
+        "tenant_id is used only for the pre-existing RND-172 media dispatch trigger (wecom_events.py:287-290), unchanged behavior. Logs contain no tenant ids (fixed allowlist events, wecom_events.py:50-64). Deployment shape is single-corp env-scoped (runbook docs/wecom_archive_worker_runbook.md); noted as a deployment fact, not a defect."
+      ]
+    },
+    {
+      "id": "AC-10",
+      "status": "PASS",
+      "evidence": [
+        "API responses are fixed strings only: 'ok', 'Invalid callback request', 'Invalid signature', 'Callback configuration error', 'Callback worker unavailable' (wecom_events.py:211/217/226/258/264/267/271/279/283).",
+        "Logs are fixed allowlist events: wecom_callback accepted/rejected reason=<enum>, archive_worker result=failed|completed, archive_worker trigger=accepted|skipped|dispatch_failed (wecom_events.py:61-64, archive_worker_trigger.py:44-51/65/77/80).",
+        "Subprocess argv is [sys.executable, script_path] only - no token, key, tenant, corp, or query data (archive_worker_trigger.py:38-42); verified by test_manual_and_callback_paths_share_the_worker_entrypoint.",
+        "Recursive sentinel tests per docs/agent-data-minimization.md: _SENTINELS (14 entries incl. SENTINEL_SECRET, /sentinel/fs/path, SENTINEL_TRACEBACK) asserted absent from response.json() and all log messages in test_dispatch_failure_does_not_leak_request_data, test_callback_business_logs_are_fixed_info_events_without_request_data, test_worker_failure_is_observable_without_exception_text, test_dispatch_start_failure_releases_the_coalescing_guard.",
+        "Uvicorn access-log query redaction covers the callback path (app/main.py:55-70 _RedactOAuthCallbackQueryFilter; test_access_log_filter_redacts_wecom_event_queries_and_preserves_other_paths line 339)."
+      ]
+    },
+    {
+      "id": "AC-11",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_architecture_boundary.py EXIT=0, 25 passed.",
+        "New module app/services/archive_worker_trigger.py classified as 'service' layer by the guardrail's layer_of; imports only stdlib (enum/logging/pathlib/subprocess/sys/threading), zero app.* imports (verified via AST: imports app.* == []).",
+        "Routers import the service (wecom_events.py:28, sync.py:18) - allowed direction; no router imports app.main; app/main.py is unmodified in this diff (git status), no new business route in the composition root, no route-count change (test_http_contract.py untouched and green under make test).",
+        "Callback layer does not copy worker/sync/decrypt implementation: it delegates to the shared script; sync/decrypt orchestration stays in run_archive_worker_once.py:174-176."
+      ]
+    },
+    {
+      "id": "AC-12",
+      "status": "PASS",
+      "evidence": [
+        "git status --short --branch: only the 6 RND-107-owned files (4 modified: sync.py, wecom_events.py, test_sync_api.py, test_wecom_events.py; 2 untracked: archive_worker_trigger.py, test_archive_worker_trigger.py). No RND-321, RND-130, or other-ticket changes present; tasks/WAVE-ownership.md covers RND-335~339 only and does not conflict.",
+        "git log --oneline origin/main..HEAD: empty - zero commits ahead; no agent commit/push; git diff --check EXIT=0.",
+        "Attribution note: the working-tree changes extend RND-105's merged router/tests and RND-211's sync router/tests - both prior tickets are merged/Done, so these are RND-107's intentional continuation edits; no third-party in-flight changes are mixed in."
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": "git status --short --branch && git diff --stat && git diff --name-status && git ls-files --others --exclude-standard && git log --oneline origin/main..HEAD",
+      "result": "EXIT=0; 4 modified + 2 untracked, all RND-107-owned; origin/main..HEAD empty."
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_wecom_events.py backend/tests/test_archive_worker_trigger.py backend/tests/test_sync_api.py -q",
+      "result": "EXIT=0; 53 passed in 7.70s."
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q",
+      "result": "EXIT=0; 25 passed."
+    },
+    {
+      "command": "make BACKEND_PY=/tmp/rnd107-qa-venv/bin/python verify (QA venv: ruff 0.13.3, cryptography 46.0.7)",
+      "result": "EXIT=0; lint-diff OK -> typecheck OK -> build OK -> test: 2654 passed, 83 skipped, 21 warnings -> 'verify: OK'."
+    },
+    {
+      "command": "ruff 0.16.1 check on the 6 RND-107 files (informational; CI installs unpinned ruff)",
+      "result": "EXIT=1; 19 errors = 17 pre-existing at HEAD on the 4 modified files + 2 new style findings in the new files (QA-001). Under ruff 0.13.3 (era toolchain matching RND-105's passing verify): 'All checks passed!' EXIT=0."
+    },
+    {
+      "command": "Runtime smoke A: WORKER_LOCK_PATH=/tmp/rnd107-lock-smoke/worker.lock .venv/bin/python backend/scripts/run_archive_worker_once.py while flock held",
+      "result": "EXIT=0; output 'archive_worker lock already held; exiting' (safe no-op, no overlapping worker)."
+    },
+    {
+      "command": "Runtime smoke B: real dispatch_archive_worker + real subprocess worker (2s sleep), 20-call burst",
+      "result": "EXIT=0; first ACCEPTED in ~2ms while worker still running (response-before-worker); 20-dispatch burst all SKIPPED; exactly 1 worker run; lock acquirable after completion. 'SMOKE B PASS'."
+    },
+    {
+      "command": "git diff --check && git status --short --branch",
+      "result": "EXIT=0; no whitespace errors; tree unchanged by QA (no pycache/artifacts)."
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [
+    {
+      "id": "QA-001",
+      "severity": "minor",
+      "type": "IMPLEMENTATION_DEFECT",
+      "summary": "Under ruff >= 0.14 (expanded default ruleset; CI installs unpinned ruff), the two new files carry 2 lint findings: I001 unsorted import block in backend/app/services/archive_worker_trigger.py:11-18 (from enum/pathlib placement) and BLE001 blind except Exception at :43 and :75. Both are stylistic only and follow the repo's pre-existing conventions (the same 4 modified files already carry 17 identical-category findings at HEAD; the repo-wide FastAPI style uses Depends-in-defaults and safe blind-excepts). Under the era toolchain (ruff 0.13.3) the full diff lints clean ('All checks passed!').",
+      "evidence": "ruff 0.16.1 --statistics on the 6 files: 19 errors (BLE001 5, I001 5, UP045 3, B008 2, UP006 2, S110 1, UP035 1) vs 17 errors on the 4 files at HEAD; new files contribute exactly +1 BLE001 and +1 I001. ruff 0.13.3 on the same 6 files: EXIT=0.",
+      "required_fix": "Narrow fix only: run `ruff check --fix --select I backend/app/services/archive_worker_trigger.py` to sort the import block, and either accept the two BLE001 (deliberate safe-log pattern for data minimization, matching wecom_events.py:184/289) or annotate them with `# noqa: BLE001` plus the existing rationale comment. No behavior change."
+    }
+  ],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "Dependency gates: RND-105 gate PASS - signature verification (sorted SHA1 + hmac.compare_digest, wecom_events.py:76-82), structure extraction, fixed rejection allowlist, and access-log redaction are reused unchanged; RND-107 adds dispatch strictly after structure+signature+tenant checks; no copy/loosen/bypass; sentinel tests confirm no token/key/signature/ciphertext/plaintext/traceback in logs. RND-106 gate PASS - shared one-shot seam (run_archive_worker_once.py) used by timer (systemd, unchanged) and manual (sync.py refactor, behavior-equivalent) and now callback via dispatch_archive_worker; same fcntl flock path semantics (WORKER_LOCK_PATH or shared default); lock-held safe no-op proven at runtime; fatal worker failure observable (exit code -> 'archive_worker result=failed' log; manual path additionally marks SyncState error). Production: RND-105 chain deployment was still pending at the last read-only check (tasks/RND-105-qa-verdict.json: BLOCKED, PRODUCTION_DEPLOYMENT_PENDING, prod SHA 17a92fad); therefore RND-107's callback dispatch is not live in production. Real-event production smoke (WeCom后台 event-server config + genuine POST) is a Human touchpoint and is NOT claimed as production PASS - code-level ACs are fully verified locally. QA environment: venv built at /tmp/rnd107-qa-venv (Python 3.11); cryptography 46.0.7 installed because the pinned 49.0.0 has no macOS x86_64 cp311 wheel and no Rust toolchain is available (API-stable for the AES-CBC usage under test); ruff pinned to 0.13.3 for make verify because ruff>=0.14's expanded default ruleset inflates a repo-wide pre-existing style baseline (17/19 findings on the touched files pre-date this ticket; the 2 attributable ones are QA-001). First verify run's single failure (test_makefile_lint_diff.py::test_lint_diff_still_checks_a_modified_python_file_with_a_real_finding) was a QA-environment artifact: the test resolves BACKEND_PY as REPO_ROOT/.venv, which did not exist; with the venv resolvable it passes (2 passed). QA created and removed a gitignored .venv symlink; no repo file was modified. No RND-107 dev-prompt/qa-prompt/findings files exist under tasks/ (work arrived via Linear; this verdict is the first RND-107 artifact in the repo). QA did not modify code, docs, tests, or config; made no commits; pushed nothing; did not touch Linear."
+}

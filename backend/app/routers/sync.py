@@ -5,9 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import logging
 import os
-from pathlib import Path
-import subprocess
-import sys
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -18,15 +15,13 @@ from app.auth import get_current_user
 from app.db.models import AdminUser, SyncState, TenantWecomConfig
 from app.media_event_dispatch import trigger_recent_image_download
 from app.db.session import get_db, get_engine
+from app.services.archive_worker_trigger import run_archive_worker_once
 from app.schemas.sync import SyncNowResponse, SyncStatusResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _SYNC_NOW_COOLDOWN = timedelta(seconds=30)
-_BACKEND_DIR = Path(__file__).resolve().parents[2]
-_WORKER_SCRIPT = _BACKEND_DIR / "scripts" / "run_archive_worker_once.py"
-
 
 def _active_config(db: Session, tenant_id: str) -> Optional[TenantWecomConfig]:
     return (
@@ -94,23 +89,8 @@ def _trigger_via_dispatcher(tenant_id: str) -> None:
 
 
 def _run_archive_worker(tenant_id: str, corp_id: str) -> None:
-    """Run the production worker after the 202 response has been sent.
-
-    The worker itself owns the cross-trigger ``fcntl.flock``. Its output is
-    inherited so its existing safe operational logs remain available; neither
-    child output nor exception text is placed in the browser-visible status.
-    """
-    try:
-        result = subprocess.run(
-            [sys.executable, str(_WORKER_SCRIPT)],
-            cwd=str(_BACKEND_DIR),
-            check=False,
-        )
-    except Exception:
-        _mark_worker_failed(tenant_id, corp_id)
-        return
-
-    if result.returncode != 0:
+    """Run the shared worker seam after the 202 response has been sent."""
+    if not run_archive_worker_once():
         _mark_worker_failed(tenant_id, corp_id)
 
 
