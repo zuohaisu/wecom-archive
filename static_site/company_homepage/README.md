@@ -53,7 +53,7 @@ app or its static assets live.
 
 Both should serve this static site.
 
-`qwhhcd.crowntime.cn` must continue to route to the existing WeCom archive
+`archive.crowntime.cn` must continue to route to the existing WeCom archive
 backend app and must NOT be affected by this change.
 
 ## Nginx routing (proposed, not applied)
@@ -76,13 +76,13 @@ server {
 }
 
 # Existing WeCom archive backend — must remain untouched/unaffected:
-# server_name qwhhcd.crowntime.cn;  -> proxied to the archive backend app
+# server_name archive.crowntime.cn;  -> proxied to the archive backend app
 ```
 
 If HTTPS is configured (e.g. via certbot/Let's Encrypt), add the
 corresponding `listen 443 ssl;` server block and redirect port 80 to 443
 for `crowntime.cn`/`www.crowntime.cn` only. This does not affect the
-`qwhhcd.crowntime.cn` server block.
+`archive.crowntime.cn` server block.
 
 ## CI/CD
 
