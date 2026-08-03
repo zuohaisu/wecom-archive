@@ -45,13 +45,17 @@ class _RedactOAuthCallbackQueryFilter(logging.Filter):
     started with --no-access-log — see docs/DEPLOYMENT.md, which does not
     pass it) records the full request line for every request, including the
     query string. The WeCom OAuth callback's `code` (a short-lived but
-    directly replayable authorization code) and `state` (CSRF token) would
-    otherwise be written verbatim to that log on every login. This does not
-    cover a reverse proxy's own access log, if one is placed in front of
-    this app — that needs equivalent redaction configured separately.
+    directly replayable authorization code) and `state` (CSRF token), plus
+    encrypted WeCom event callback query data, would otherwise be written
+    verbatim to that log. This does not cover a reverse proxy's own access
+    log, if one is placed in front of this app — that needs equivalent
+    redaction configured separately.
     """
 
-    _REDACT_PREFIXES = ("/api/auth/wecom/callback?",)
+    _REDACT_PREFIXES = (
+        "/api/auth/wecom/callback?",
+        "/api/wecom/archive/events?",
+    )
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
