@@ -1,0 +1,125 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-129",
+  "run_id": "rnd-129-qa-20260804-01",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "89b0656849424b5e6c1d08f58fef1660814ece4a (parent of the RND-129 commit)",
+    "head": "3e90fc955625f685724efd77a34dc9d76c54dcc9 'RND-129 feat: improve conversation display names' (2026-07-04, merged in main); current worktree HEAD 51718245f8cbfef9e8810dad2b8e1eec1eb3eb30 == origin/main, working tree clean",
+    "diff_scope": "Original commit: backend/app/display_names.py (new, +55), backend/app/main.py (+27/-31 review-console display), backend/app/routers/conversations.py (+116/-31 aggregation/schemas), backend/tests/test_conversation_display_names.py (new, +315). No DB migration, CI, deploy, or .gitignore change. Current-tree verification (not a new diff) confirms the feature survived the RND-158/191/219/220/221 refactors and is still wired through app.services.listing_service, app.services.timeline_service, app.schemas.listing, app.schemas.timeline, and the console JS (backend/app/web/static/console/)."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "Focused suite EXIT=0: tests/test_conversation_display_names.py::test_resolve_person_display_name_prefers_name / _strips_whitespace_only_name / _falls_back_to_raw_id / _never_blank, test_resolve_room_display_name_falls_back_when_no_room_name / _uses_room_name_when_available / _never_blank_with_no_roomid — 7/7 passed.",
+        "backend/app/display_names.py:28-39 resolve_person_display_name strips whitespace-only names, prefers non-blank name, falls back to raw_id or 'Unknown contact'; :42-55 resolve_room_display_name never returns the bare roomid as primary label and never returns blank."
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_conversation_display_names.py::test_direct_conversation_prefers_contact_display_name and ::test_direct_conversation_fallback_is_readable_when_name_missing — both passed; direct conv with contacts.name='张三' renders 张三, without a Contact row renders the stable raw ID (never blank).",
+        "backend/app/services/listing_service.py:641-647 (moved from app.routers.conversations by RND-219) resolves direct-conversation display_name via resolve_person_display_name(raw_id, display_names.get(raw_id))."
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_conversation_display_names.py::test_group_conversation_does_not_use_raw_roomid_as_only_label — passed; display_name != bare roomid, starts with 'Group chat', and roomid/room_raw_id remain available as secondary/debug data.",
+        "backend/app/services/listing_service.py:633-637: group display_name = resolve_room_display_name(room_raw_id); backend/app/display_names.py:55 'Group chat · <suffix>'."
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "backend/app/services/listing_service.py:656-684 emits raw_id, monitored_account_raw_ids, monitored_account_display_names, contact_raw_ids, contact_display_names, room_display_name, room_raw_id, latest_sender_raw_id, latest_sender_display_name alongside the pre-existing fields.",
+        "backend/app/schemas/listing.py:30-52 ConversationOut declares all of the above; consumers backend/app/web/static/console/conversation-list.js:8-10,132-141 render display_name as primary and raw_id/room_raw_id as secondary (esc()'d).",
+        "tests/test_conversation_display_names.py::test_latest_sender_display_name_and_raw_id_reflect_most_recent_message — passed."
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_conversation_display_names.py::test_group_messages_endpoint_includes_sender_and_recipient_display_fields — passed against a real SQLite-backed session (RND-191 rewrite): sender_display_name='张三', sender_raw_id, recipient_display_names fallback to raw ID when no Contact row exists.",
+        "backend/app/services/timeline_service.py:969-1008 resolve_timeline_page populates sender_display_name/sender_raw_id/recipient_display_names/recipient_raw_ids; backend/app/schemas/timeline.py:16-18 declares them; backend/app/web/static/console/timeline.js:179,234-237 and message-renderers.js:388 consume them.",
+        "tests/test_conversation_display_names.py::test_group_messages_endpoint_still_requires_auth — passed (401, auth contract intact)."
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "tests/test_conversation_display_names.py::test_contacts_endpoint_includes_raw_id_field — passed: known contact returns display_name='张三' + raw_id; unknown contact returns raw_id with non-blank display fallback.",
+        "backend/app/services/listing_service.py:793-800 list_contacts and backend/app/schemas/listing.py:24-27 ContactOut (contact_id, display_name, raw_id)."
+      ]
+    },
+    {
+      "id": "AC-7",
+      "status": "PASS",
+      "evidence": [
+        "make verify EXIT=0: lint-diff -> typecheck -> build -> test all green; full suite 2644 passed, 83 skipped (163s).",
+        "backend/tests/test_architecture_boundary.py + test_staff_seats.py + test_tenant_isolation.py + test_conversation_membership_service.py + test_search_api.py EXIT=0; 191 passed — no architectural regression from the shared display_names module.",
+        "git log origin/main..HEAD empty; git diff --check EXIT=0; git status --porcelain empty; ruff check on the four RND-129-owned files: 'All checks passed!'.",
+        "No Jinja syntax, no i18n.js key additions, no secrets, no DB/CI/deploy/.gitignore change in the RND-129 diff."
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_conversation_display_names.py -v",
+      "result": "EXIT=0; 14 passed."
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py backend/tests/test_staff_seats.py backend/tests/test_tenant_isolation.py backend/tests/test_conversation_membership_service.py backend/tests/test_search_api.py -q",
+      "result": "EXIT=0; 191 passed."
+    },
+    {
+      "command": "make verify",
+      "result": "EXIT=0; lint-diff/typecheck/build OK; pytest 2644 passed, 83 skipped."
+    },
+    {
+      "command": "git log origin/main..HEAD && git diff --check && git status --porcelain",
+      "result": "EXIT=0; no commits ahead of origin/main, no whitespace errors, working tree clean."
+    },
+    {
+      "command": ".venv/bin/python -m ruff check backend/app/display_names.py backend/tests/test_conversation_display_names.py backend/app/services/listing_service.py backend/app/services/timeline_service.py",
+      "result": "EXIT=0; 'All checks passed!'"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "findings": [
+    {
+      "id": "QA-001",
+      "severity": "minor",
+      "type": "I18N_INCOMPLETE",
+      "summary": "Backend-generated fallback labels are hardcoded English ('Unknown contact', 'Group chat · <suffix>' in backend/app/display_names.py:39,55) and are not localized through the console's zh-CN/zh-TW/en i18n system. The label is served as display_name from the API, so the frontend cannot translate it. Deliberate RND-129 design decision (raw IDs stay available as secondary data), not a regression.",
+      "evidence": "backend/app/display_names.py:39 'Unknown contact'; :55 'Group chat · {suffix}'; no i18n key indirection exists on the backend label path.",
+      "required_fix": "Out of RND-129 scope. Optional future ticket: route backend fallback labels through locale-aware strings once the console needs localized backend labels; do not expand scope now."
+    },
+    {
+      "id": "QA-002",
+      "severity": "minor",
+      "type": "IMPLEMENTATION_DEFECT",
+      "summary": "Group-chat fallback labels use only the last 6 chars of the roomid (_short_suffix, backend/app/display_names.py:21-25), so two distinct rooms sharing a 6-char suffix render identical 'Group chat · <suffix>' labels in the conversation list. Disambiguation remains possible via the title attribute, raw_id, room_raw_id, and conversation_id.",
+      "evidence": "backend/app/display_names.py:21-25,55; collision requires two roomids ending in the same 6 chars — low probability, non-blocking.",
+      "required_fix": "Out of RND-129 scope. Optional future improvement: lengthen the suffix or fall back to more of the roomid on collision; not required for this ticket."
+    }
+  ],
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "Retrospective QA: RND-129 was merged to main 2026-07-04 (commit 3e90fc9, parent 89b0656 RND-130) and predates the tasks/ prompt convention, so no RND-129 dev/qa prompt files exist in git history; acceptance criteria were reconstructed from the commit diff, its test module, and current-tree verification (branch zuohaisu/rnd-129-优化后台会话聚合与显示名称 sits exactly at origin/main 5171824 with a clean tree — the feature is already shipped, not pending). The display-name feature survived the RND-158/191/219/220/221 refactors and is exercised by 14 dedicated tests, all green; full make verify EXIT=0 (2644 passed, 83 skipped). Both findings are minor/non-blocking and explicitly out of scope. Venv note: repo-root .venv symlinked to the primary worktree's working venv (cryptography 43.0.3 — the pinned 49.0.0 has no wheel for this macOS x86_64/Python 3.9 host); requirements.txt unchanged. QA ran 2026-08-04 on branch HEAD 5171824 == origin/main."
+}
