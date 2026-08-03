@@ -197,3 +197,68 @@ Ops agent 不得声称执行了任何生产写操作；不得 commit、push 或�
 **通配符整合后状态**：`*.crowntime.cn` 子域（官网/归档新旧域名/未来子域）一张证书全覆盖，续期由 `qiniu-ssl-renew-wildcard` timer 自动管理（含 nginx reload）。旧 certbot 子域证书（crowntime.cn/qwhhcd/archive）仍在自动续期，**暂留作回滚锚点**，确认稳定后可 `certbot delete` 清理。`xiangyangxinli.com` 不在通配符覆盖范围，保持 certbot 独立管理。
 
 **回滚锚点（通配符整合）**：nginx 配置备份 `conf.d.bak-rnd261-20260803/`、sudoers 备份 `.bak-rnd261-20260803`、systemd unit 备份 `.bak-rnd261-20260803`、renew-wildcard.sh 备份 `.bak-rnd261-20260803`；回滚即恢复这些文件 + 切回 certbot 证书路径 + reload。
+
+### 配置审计与生产验证（§6/§7，2026-08-03）
+
+| 检查项 | 结果 | 备注 |
+|---|---|---|
+| §4.1 Git 基线 | HEAD=origin/main=`da37bfb`(RND-339)，工作区干净（仅 untracked 测试脚本/qn-py-sdk/renew-wildcard.sh，无 tracked 修改） | PASS |
+| §4.2 服务基线 | wecom-archive-365.service + nginx active；uvicorn 127.0.0.1:8035；nginx conf `/etc/nginx/conf.d/*.conf` | PASS |
+| §4.3 旧域名基线 | qwhhcd `/health`=200、`/health/ready`=200、根路径 404（无根路由，正常） | PASS |
+| §4.4 DNS 基线 | qwhhcd/archive→47.115.58.45；**media→七牛 CDN**（未受影响） | PASS |
+| §5.1 DNS 多解析器 | 系统/1.1.1.1/8.8.8.8 均 → 47.115.58.45 | PASS |
+| §6.1 环境变量 | `ARCHIVE_DOMAIN=archive.crowntime.cn` ✓；`ADMIN_DOMAIN=https://qwhhcd.crowntime.cn`（带协议前缀，异常待修正）；`QINIU_DOMAIN=media-origin.crowntime.cn`（媒体，未迁移）；`AUTH_MODE=password`；无 APP_URL/BASE_URL/COOKIE_DOMAIN 等变量（应用不使用） | ⚠️ ADMIN_DOMAIN 前缀异常 |
+| §6.2 旧域名残留 | 8 处：backend/.env(ADMIN_DOMAIN)、static_site README（文档声明）、tasks 归档、.workbuddy/.qoder 历史记录。**无生产代码硬编码**；README 为仓库文档（按 RND-233 纪律，不改回真实域名） | 仅 .env 属生产配置 |
+| §6.3 Cookie/CORS/CSRF | `set_cookie` **无 domain 参数** → host-only cookie；secure=prod、samesite=lax、httponly。**新旧域名 session 不共享（预期行为）**；无 CORS middleware（同源应用）；无 CSRF 组件（session cookie + SameSite=Lax） | 迁移后用户需在新域名重新登录一次 |
+| §7.1/7.2 DNS+TLS+健康 | TLS verify 0、证书指纹一致；`/health` 三次 200（0.09s/0.09s/0.09s） | PASS |
+| §7.3 admin | `/admin/conversations`→302（未登录重定向，正确）；登录页 200 渲染 | PASS |
+| §7.4 API | `/api/admin/dashboard`→401、`/api/conversations`→401（未授权保护正确）；`/api/auth/me`→200 `{"authenticated":false}`（设计语义）；错误凭据登录→401 | PASS |
+| §7.5 静态+媒体 | 全部静态资源 200（favicon/styles/logo，同源 HTTPS 无 mixed content）；媒体 URL 由 QINIU_DOMAIN(media-origin) 构造，与产品域名无关 | PASS |
+| §7.6 日志 | 应用日志 0 error/traceback（仅扫描器 404 探测）；nginx 窗口内无新增错误；无重定向循环；新域名 access 75 请求 | PASS |
+
+**§6+§7 结论：核心迁移 + 配置审计 + 生产验证全部 PASS。剩余：§8 旧域名 301（等 P4 决策）、§9 回滚成文、§11 最终报告。**
+
+### 收尾确认（2026-08-03）
+
+| 项 | 结果 | 备注 |
+|---|---|---|
+| §7.3 前端业务验收 | **PASS（Haisu 亲自确认）**：`https://archive.crowntime.cn/` 前端正常访问，登录页/页面渲染无问题 | AC-3 核心验收通过 |
+| P4 旧域名策略 | **Haisu 决策：旧域名处理延至 2026-08-04 执行**；今日保持新旧域名并行服务（qwhhcd /health=200） | 明日执行时再定具体形式（301 重定向或直接下线），届时验证 Location 指向、无循环 |
+| §9 回滚方案 | 见下方 | 成文 |
+
+### §9 回滚方案（已备好，回滚锚点全部在位）
+
+触发条件：新域名 TLS 失败 / 持续 5xx / 后台不可访问 / API 异常 / 登录严重回归 / 媒体链路异常 / 重定向循环 / 无法确认生产安全。
+
+回滚步骤（全部有备份）：
+
+1. **恢复 nginx 配置**：
+   ```bash
+   cp -a /etc/nginx/conf.d.bak-rnd261-20260803/*.conf /etc/nginx/conf.d/
+   nginx -t && systemctl reload nginx
+   ```
+   （备份含切换前全部 conf：crowntime.cn/qwhhcd.crowntime.cn/archive.crowntime.cn 及原始 certbot 证书路径）
+2. **恢复 .env 域名值**：
+   ```bash
+   cp -a /srv/apps/wecom-archive-365/current/backend/.env.bak.<ts> /srv/apps/wecom-archive-365/current/backend/.env
+   # ARCHIVE_DOMAIN 恢复为 qwhhcd.crowntime.cn
+   ```
+3. **恢复通配符整合相关配置**（如需要完全回退）：
+   ```bash
+   cp -a /etc/sudoers.d/wecomarchive.bak-rnd261-20260803 /etc/sudoers.d/wecomarchive   # 移除 reload nginx 白名单
+   cp -a /etc/systemd/system/qiniu-ssl-renew-wildcard.service.bak-rnd261-20260803 /etc/systemd/system/qiniu-ssl-renew-wildcard.service   # 恢复 NoNewPrivileges
+   cp -a /srv/apps/wecom-archive-365/current/ssl-renew/renew-wildcard.sh.bak-rnd261-20260803 /srv/apps/wecom-archive-365/current/ssl-renew/renew-wildcard.sh
+   systemctl daemon-reload
+   ```
+4. **必要时 restart 应用服务**：`systemctl restart wecom-archive-365.service`
+5. **验证旧域名恢复**：`curl -fsS https://qwhhcd.crowntime.cn/health/ready` → 200
+6. 新域名 DNS 可保留但不承载流量；保存失败证据，不删除日志。
+
+**未执行回滚**（截至收尾无失败迹象）。
+
+### 明日待办（2026-08-04）
+
+- [ ] §8 旧域名处理（P4：Haisu 已决策延至今日执行）：301 重定向或下线，验证 Location/循环/媒体不受影响
+- [ ] 确认稳定后清理旧 certbot 子域证书（`certbot delete`，可选）
+- [ ] §11 最终报告输出（含 RND-108/105/130 是否可继续的结论）
+- [ ] commit + push runbook（Haisu 批准后）
