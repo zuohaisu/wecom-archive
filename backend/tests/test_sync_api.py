@@ -173,3 +173,17 @@ def test_sync_now_enforces_thirty_second_cooldown(
     assert response.json()["accepted"] is False
     assert response.json()["message"] == "rate_limited"
     assert 1 <= response.json()["retryAfterSeconds"] <= 25
+
+
+def test_manual_worker_uses_the_shared_archive_worker_seam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.routers import sync
+
+    failures: list[tuple[str, str]] = []
+    monkeypatch.setattr(sync, "run_archive_worker_once", lambda: False)
+    monkeypatch.setattr(sync, "_mark_worker_failed", lambda tenant_id, corp_id: failures.append((tenant_id, corp_id)))
+
+    sync._run_archive_worker("tenant-sentinel", "corp-sentinel")
+
+    assert failures == [("tenant-sentinel", "corp-sentinel")]
