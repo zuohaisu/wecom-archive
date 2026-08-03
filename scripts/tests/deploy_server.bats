@@ -536,6 +536,29 @@ line_of() {
 	[ -f "$NGINX_DST/assets/app.js" ]
 }
 
+@test "step 9: published webroot is world-readable for the nginx worker (regression RND-263)" {
+	# RND-263 (2026-08-03): the static source is checked out under the
+	# runtime user's umask (027 on prod), which turns git-tracked 100644
+	# files into 0640 owned by the deploy user. cp -a preserves that mode
+	# into the Nginx webroot; Nginx's worker runs as `nginx`, NOT in the
+	# deploy user's group, so a 0640 webroot makes the whole homepage
+	# HTTP 403. The publish step must normalise the webroot to o+rX.
+	mkdir -p "$NGINX_DST"
+	seed_static_site
+	# Simulate the umask-027 checkout: files land 0640, dirs 0750.
+	find "$DEPLOY_DIR/static_site/company_homepage" -type f -exec chmod 0640 {} +
+	find "$DEPLOY_DIR/static_site/company_homepage" -type d -exec chmod 0750 {} +
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "nginx root OK"
+	# Files must be world-readable (ls -ld column 8-10 = other perms).
+	[ "$(ls -ld "$NGINX_DST/index.html" | cut -c8-10)" = "r--" ]
+	[ "$(ls -ld "$NGINX_DST/assets/app.js" | cut -c8-10)" = "r--" ]
+	# Directories must be world-searchable so Nginx can traverse them.
+	[ "$(ls -ld "$NGINX_DST" | cut -c8-10)" = "r-x" ]
+	[ "$(ls -ld "$NGINX_DST/assets" | cut -c8-10)" = "r-x" ]
+}
+
 @test "step 9: a real copy failure in a writable webroot is reported as WARN, not nginx root OK" {
 	# Regression for tiers 1/2 returning 0 unconditionally: a genuine cp
 	# failure (here: a read-only file blocking an overwrite) must propagate

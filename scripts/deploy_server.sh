@@ -733,7 +733,19 @@ if [ -d "$STATIC_SRC" ]; then
     # cosmetic and separately fixable; a missing rollback record is not.
     # The warning is loud and names the one-time operator fix precisely,
     # so this cannot decay into the silent no-op the docs warn about.
-    if _publish_static_dir "$SHARED_DST" "$NGINX_DST"; then
+    #
+    # RND-263 (2026-08-03): cp -a preserves the source tree's mode, and
+    # the source is checked out under the runtime user's umask (027 on
+    # this host), which turns the git-tracked 100644 files into 0640
+    # owned by the deploy user. Nginx's worker runs as `nginx` — NOT a
+    # member of the deploy user's group — so a 0640 webroot yields
+    # HTTP 403 ("stat() ... Permission denied") for the whole homepage.
+    # The publish step therefore normalises the webroot to world-readable
+    # (o+rX: files readable, dirs searchable) after copying, so the
+    # deployed site is actually servable by Nginx. chmod is folded into
+    # the success condition: if the copy worked but the chmod did not,
+    # reporting "nginx root OK" would be a lie (the site would 403).
+    if _publish_static_dir "$SHARED_DST" "$NGINX_DST" && chmod -R o+rX "$NGINX_DST"; then
         echo "  → nginx root OK ($NGINX_DST)"
     else
         echo "  WARN: could not publish the homepage to $NGINX_DST — no plain write access there, and the sudoers whitelist does not cover this exact cp/mkdir invocation (see the VERIFIED-ON-PRODUCTION CAVEAT at the top of this script)." >&2

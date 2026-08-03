@@ -641,3 +641,41 @@ writes nothing — it cannot remove the symlink, and nothing else does).
 
 **If you ever need to undo:** remove the symlink and restore the backup
 (`mv /var/www/crowntime.bak.* /var/www/crowntime`).
+
+---
+
+### §9.1 Deployed webroot is 0640 → homepage HTTP 403 (RND-263, 2026-08-03)
+
+**Symptom:** the deploy's step 9 logs `nginx root OK`, `shared/www/...`
+is fresh, but `https://crowntime.cn/` returns **403** with nginx error
+log entries like:
+
+```
+[crit] stat() "/var/www/crowntime/index.html" failed (13: Permission denied)
+```
+
+**Why:** the webroot copy (`cp -a`) preserves the source tree's mode.
+The static source is checked out under the runtime user's umask — 027 on
+this host — which turns git-tracked `100644` files into `0640` owned by
+`wecomarchive`. Nginx's worker runs as user `nginx`, which is **not** a
+member of `wecomarchive`'s group, so a 0640 webroot cannot be read at
+all → 403 for the entire homepage, not just one asset. This is
+orthogonal to §9 above: §9 is the *webroot not writable* WARN path;
+§9.1 is the *copy succeeded but the result is not servable* case.
+
+**Fix (shipped in the deploy script, RND-263):** step 9 now runs
+`chmod -R o+rX "$NGINX_DST"` after a successful `_publish_static_dir`,
+so the deployed webroot is world-readable (files) and world-searchable
+(directories). The chmod is part of the success condition — a copy that
+cannot be made servable is reported as WARN, never as `nginx root OK`.
+
+**Emergency one-off (no deploy available):** on the host, as root,
+
+```bash
+chmod -R o+rX /var/www/crowntime
+```
+
+**After the fix:** a fresh deploy leaves the webroot at `0644/0755`
+servable by Nginx; the next deploy re-applies the chmod, so it cannot
+regress from a future `cp -a`.
+
