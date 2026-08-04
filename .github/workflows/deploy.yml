@@ -48,7 +48,11 @@ jobs:
           node-version: "22"
 
       - name: Install system test dependencies and ffmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -yqq bats shellcheck ffmpeg
+        # shellcheck ships preinstalled on the ubuntu-latest runner image;
+        # --no-install-recommends skips ffmpeg's optional hardware-accel
+        # (VA-API/VDPAU/mesa) and audio-backend (PulseAudio/JACK/pocketsphinx)
+        # packages, which a headless CI transcode test never touches.
+        run: sudo apt-get update -qq && sudo apt-get install -yqq --no-install-recommends bats ffmpeg
 
       - name: Install Python dependencies
         run: |
