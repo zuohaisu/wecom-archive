@@ -215,6 +215,21 @@ section { scroll-margin-top: 84px; }
   box-shadow: var(--shadow-md);
 }
 .hero-shot img { width: 100%; height: auto; display: block; }
+.ai-badge {
+  position: absolute;
+  top: 12px; right: 12px;
+  z-index: 3;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--ink, #0F172A);
+  background: rgba(255, 255, 255, .82);
+  border: 1px solid var(--border, rgba(15, 23, 42, .12));
+  border-radius: 999px;
+  backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-sm, 0 1px 4px rgba(15, 23, 42, .10));
+}
 .float-card {
   position: absolute;
   left: -18px; bottom: 26px;
