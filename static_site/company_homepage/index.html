@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>康冠时代 · 企业微信会话存档 | 合规留存、随时检索、安心审查</title>
-<meta name="description" content="康冠时代企业微信会话存档，自动拉取并加密留存企业微信全类型会话，支持毫秒级检索与气泡级审查，让每一条对话都可追溯、可举证。">
+<title>康冠时代企业微信会话存档｜99 元/年含 5GB，不限座席</title>
+<meta name="description" content="康冠时代企业微信会话存档按存储空间计费：99 元/年含 5GB，不限座席，不按聊天记录条数或搜索次数收费；超出部分按 1 元/GB/月增加。企业微信官方会话存档接口相关费用另计。">
 <meta name="author" content="深圳康冠时代科技有限公司">
+<meta name="robots" content="index,follow">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="brand/favicon.ico" sizes="any">
@@ -13,31 +14,69 @@
 <link rel="mask-icon" href="brand/logo-icon-mono.svg" color="#1F5CC4">
 <link rel="manifest" href="site.webmanifest">
 <meta name="theme-color" content="#1F5CC4">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "康冠时代企业微信会话存档",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "description": "按存储空间计费的企业微信会话存档、检索与审阅服务。",
+  "offers": {
+    "@type": "Offer",
+    "price": "99",
+    "priceCurrency": "CNY",
+    "description": "年服务费 99 元，含 5GB 存储空间；不限座席。超出部分按 1 元/GB/月增加。"
+  }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "为什么不按员工座席收费？",
+      "acceptedAnswer": {"@type": "Answer", "text": "本服务不按员工数量、聊天记录条数或搜索次数收费，费用主要随实际需要的存储容量变化。"}
+    },
+    {
+      "@type": "Question",
+      "name": "企业微信官方会话存档接口费用是否包含在套餐内？",
+      "acceptedAnswer": {"@type": "Answer", "text": "不包含。企业微信会话存档接口的开通及相关官方费用按企业微信规则另计。"}
+    },
+    {
+      "@type": "Question",
+      "name": "超过 5GB 后如何收费？",
+      "acceptedAnswer": {"@type": "Answer", "text": "基础方案含 5GB 存储空间。超过后，每增加 1GB，费用增加 1 元/GB/月。"}
+    }
+  ]
+}
+</script>
 </head>
 <body id="top">
 
-<input type="checkbox" id="theme-toggle" class="theme-toggle-input" aria-label="切换浅色/深色模式">
+<input type="checkbox" id="theme-toggle" class="theme-toggle-input" aria-label="切换浅色或深色模式">
 
 <header class="top-nav">
   <div class="container top-nav-inner">
-    <a class="brand" href="#top" aria-label="康冠时代 首页">
+    <a class="brand" href="#top" aria-label="康冠时代企业微信会话存档首页">
       <img class="brand-logo" src="brand/logo-horizontal.svg" alt="康冠时代 CROWN TIME" width="120" height="32">
     </a>
     <nav class="nav-links" aria-label="页面导航">
       <a href="#top" class="is-active">首页</a>
-      <a href="#why">价值主张</a>
-      <a href="#capabilities">核心能力</a>
-      <a href="#security">安全合规</a>
-      <a href="#scenarios">应用场景</a>
-      <a href="#contact">联系我们</a>
+      <a href="#capabilities">产品能力</a>
+      <a href="#pricing">计费方式</a>
+      <a href="#faq">常见问题</a>
+      <a href="https://github.com/zuohaisu/wecom-archive-365" target="_blank" rel="noopener noreferrer">开源项目</a>
     </nav>
     <div class="nav-right">
-      <label for="theme-toggle" class="theme-toggle-label" aria-hidden="true" title="切换浅色/深色">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <label for="theme-toggle" class="theme-toggle-label" aria-hidden="true" title="切换浅色或深色模式">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.8 6.8 0 0 0 9.8 9.8z"></path>
         </svg>
       </label>
-      <a class="btn btn-primary nav-cta" href="#cta">预约演示</a>
+      <a class="btn btn-primary nav-cta" href="demo/">查看 Demo</a>
     </div>
   </div>
 </header>
@@ -45,14 +84,18 @@
 <section class="hero" id="top-hero">
   <div class="container hero-inner">
     <div class="hero-copy">
-      <span class="badge">企业微信会话存档</span>
-      <h1 class="hero-title">企业微信对话<br><span class="accent">合规留存、随时检索、安心审查</span></h1>
-      <p class="hero-sub">康冠时代企业微信会话存档，自动拉取并加密留存企业微信全类型会话，支持毫秒级检索与气泡级审查，让每一条对话都可追溯、可举证。</p>
+      <span class="badge">康冠时代企业微信会话存档</span>
+      <h1 class="hero-title">不限座席的企业微信会话存档<br><span class="accent">按存储空间计费</span></h1>
+      <p class="hero-sub">99 元/年含 5GB 存储空间；不按员工数量、聊天记录条数或搜索次数收费。超过 5GB 后，每增加 1GB，增加 1 元/GB/月。</p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="#cta">预约演示</a>
-        <a class="btn btn-ghost" href="#contact">预约咨询</a>
+        <a class="btn btn-primary" href="demo/">查看 Demo</a>
+        <a class="btn btn-ghost" href="mailto:hs@crowntime.cn?subject=%E5%BA%B7%E5%86%A0%E6%97%B6%E4%BB%A3%E4%BC%81%E4%B8%9A%E5%BE%AE%E4%BF%A1%E4%BC%9A%E8%AF%9D%E5%AD%98%E6%A1%A3%E5%92%A8%E8%AF%A2">咨询开通</a>
       </div>
-      <p class="hero-trust">® 康冠时代 · 企业微信会话存档 · 注册商标第 17528858 号</p>
+      <ul class="hero-points" aria-label="套餐核心权益">
+        <li>99 元/年含 5GB</li>
+        <li>不限座席</li>
+        <li>按容量增量计费</li>
+      </ul>
     </div>
     <div class="hero-visual">
       <div class="hero-glow" aria-hidden="true"></div>
@@ -69,8 +112,8 @@
           </svg>
         </span>
         <div>
-          <p class="float-title">RSA + AES 安全解密</p>
-          <p class="float-sub">密文不出域 · 计算隔离解密</p>
+          <p class="float-title">归档、检索与审阅</p>
+          <p class="float-sub">查看 Demo 了解产品内部界面</p>
         </div>
       </div>
     </div>
@@ -78,40 +121,31 @@
 </section>
 
 <main>
-
   <section id="why" class="section">
     <div class="container">
       <p class="eyebrow">价值主张</p>
-      <h2 class="section-title">企业微信对话，正在成为合规与管理的盲区</h2>
+      <h2 class="section-title">企业微信对话既要可追溯，也不该随团队人数线性涨价</h2>
       <div class="why-grid">
         <article class="why-card">
           <span class="icon-tile" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
-              <path d="M14 3v5h5"></path>
-              <path d="M9 13l2 2 4-4"></path>
-            </svg>
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M14 3v5h5"></path><path d="M9 13l2 2 4-4"></path></svg>
           </span>
-          <h3 class="why-title">合规压力</h3>
+          <h3 class="why-title">可追溯的沟通记录</h3>
           <ul class="why-list">
-            <li>监管检查趋严，销售承诺、返佣、违规话术需可举证</li>
-            <li>客诉纠纷时，聊天记录是定责的关键证据</li>
-            <li>金融、保险等行业对会话留存有明确合规要求</li>
+            <li>客诉、协作交接和合规复查时，可回溯完整上下文</li>
+            <li>文本、图片、语音、视频和文件等会话内容统一归档</li>
+            <li>按人员、联系人、关键词和时间快速定位关键信息</li>
           </ul>
         </article>
         <article class="why-card">
           <span class="icon-tile" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
-              <line x1="3" y1="3" x2="21" y2="21"></line>
-            </svg>
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v14H3z"></path><path d="M7 9h10M7 13h7"></path><path d="M17 17h.01"></path></svg>
           </span>
-          <h3 class="why-title">管理盲区</h3>
+          <h3 class="why-title">费用随空间而非人数变化</h3>
           <ul class="why-list">
-            <li>员工私下承诺、转移客户，管理者难以察觉</li>
-            <li>客户资源沉淀在个人微信，离职即流失</li>
-            <li>缺乏统一检索，关键对话沉没在海量聊天里</li>
+            <li>不限座席，不按员工账号包收费</li>
+            <li>不按聊天记录条数或搜索次数追加费用</li>
+            <li>图片、文件等内容占用多少空间，就按容量规则计算</li>
           </ul>
         </article>
       </div>
@@ -120,75 +154,50 @@
 
   <section id="capabilities" class="section section-mist">
     <div class="container">
-      <p class="eyebrow">核心能力</p>
-      <h2 class="section-title">一套平台，覆盖会话存档的全流程</h2>
+      <p class="eyebrow">产品能力</p>
+      <h2 class="section-title">从会话留存，到授权审阅和检索回溯</h2>
       <div class="cap-grid">
-        <article class="cap-card">
-          <span class="icon-tile" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="4" y="5" width="16" height="14" rx="2"></rect>
-              <path d="M4 9h16"></path>
-              <path d="M9 13h6"></path>
-            </svg>
-          </span>
-          <h3 class="card-title">全量合规存档</h3>
-          <p class="card-desc">通过企业微信会话存档 API 定时拉取加密消息，文本、图片、语音、视频、文件全类型覆盖。</p>
+        <article class="cap-card"><span class="icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M4 9h16M9 13h6"></path></svg></span><h3 class="card-title">全量会话存档</h3><p class="card-desc">通过企业微信会话存档 API 拉取加密消息，覆盖文本、图片、语音、视频、文件等常见类型。</p></article>
+        <article class="cap-card"><span class="icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg></span><h3 class="card-title">会话与消息检索</h3><p class="card-desc">按员工、联系人、关键词、时间和消息类型组合查找，无需在海量聊天记录中手动翻找。</p></article>
+        <article class="cap-card"><span class="icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M3 9h18M8 13h5M8 16h8"></path></svg></span><h3 class="card-title">会话审阅控制台</h3><p class="card-desc">三栏式审阅界面还原对话上下文，集中呈现会话、消息时间线和相关信息。</p></article>
+        <article class="cap-card"><span class="icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span><h3 class="card-title">多租户隔离</h3><p class="card-desc">按企业、部门和员工划分数据可见范围，帮助不同业务主体保持访问边界。</p></article>
+        <article class="cap-card"><span class="icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path><circle cx="12" cy="15.5" r="1.3"></circle></svg></span><h3 class="card-title">安全解密</h3><p class="card-desc">RSA + AES 双层加密，解密在计算隔离环境完成，原始密文不以明文方式对外暴露。</p></article>
+        <article class="cap-card"><span class="icon-tile" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="16" rx="2"></rect><path d="M9 4h6v3H9zM8.5 12l2 2 4-4"></path></svg></span><h3 class="card-title">审计留痕</h3><p class="card-desc">查看、检索和导出等关键操作可保留记录，便于后续审阅与核对。</p></article>
+      </div>
+      <p class="section-link"><a href="demo/">进入静态 Demo，查看会话审阅、搜索、媒体、用量和审计界面 →</a></p>
+    </div>
+  </section>
+
+  <section id="pricing" class="section pricing-section">
+    <div class="container">
+      <p class="eyebrow">计费方式</p>
+      <h2 class="section-title">只为需要保存的空间付费</h2>
+      <p class="section-lead">我们不以员工人数、聊天记录条数或搜索次数作为计费基准。基础空间清晰，容量增加时按规则增加费用。</p>
+      <div class="pricing-layout">
+        <article class="pricing-card">
+          <p class="pricing-label">基础方案</p>
+          <div class="pricing-price"><span>99</span><small>元 / 年</small></div>
+          <p class="pricing-summary">含 5GB 存储空间，不限座席。</p>
+          <ul class="pricing-list">
+            <li>不按员工座席数量收费</li>
+            <li>不按聊天记录条数收费</li>
+            <li>不按搜索次数收费</li>
+            <li>可查看静态 Demo 了解产品界面</li>
+          </ul>
+          <a class="btn btn-primary btn-block" href="demo/">查看 Demo</a>
         </article>
-        <article class="cap-card">
-          <span class="icon-tile" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="7"></circle>
-              <line x1="21" y1="21" x2="16.5" y2="16.5"></line>
-            </svg>
-          </span>
-          <h3 class="card-title">毫秒级会话检索</h3>
-          <p class="card-desc">按员工、客户、关键词、时间多维检索，海量会话秒级定位，无需翻找聊天记录。</p>
-        </article>
-        <article class="cap-card">
-          <span class="icon-tile" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="4" width="18" height="14" rx="2"></rect>
-              <path d="M3 9h18"></path>
-              <path d="M8 13h5M8 16h8"></path>
-            </svg>
-          </span>
-          <h3 class="card-title">会话审查控制台</h3>
-          <p class="card-desc">三栏式审查界面，气泡级还原对话现场，支持按角色分配审查权限。</p>
-        </article>
-        <article class="cap-card">
-          <span class="icon-tile" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-              <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-              <rect x="3" y="14" width="7" height="7" rx="1"></rect>
-              <rect x="14" y="14" width="7" height="7" rx="1"></rect>
-            </svg>
-          </span>
-          <h3 class="card-title">多租户隔离</h3>
-          <p class="card-desc">按企业、部门、员工三级隔离，数据互不可见，支持独立私有化部署。</p>
-        </article>
-        <article class="cap-card">
-          <span class="icon-tile" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="5" y="11" width="14" height="9" rx="2"></rect>
-              <path d="M8 11V8a4 4 0 0 1 8 0v3"></path>
-              <circle cx="12" cy="15.5" r="1.3"></circle>
-            </svg>
-          </span>
-          <h3 class="card-title">安全解密</h3>
-          <p class="card-desc">RSA + AES 双层加密，解密在计算隔离环境中完成，原始密文不出域。</p>
-        </article>
-        <article class="cap-card">
-          <span class="icon-tile" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="5" y="4" width="14" height="16" rx="2"></rect>
-              <path d="M9 4h6v3H9z"></path>
-              <path d="M8.5 12l2 2 4-4"></path>
-            </svg>
-          </span>
-          <h3 class="card-title">审计留痕</h3>
-          <p class="card-desc">操作日志全量留存，谁查看、下载了哪条会话，全程可追溯。</p>
-        </article>
+        <div class="pricing-rules">
+          <article class="pricing-rule"><span class="pricing-rule-no">01</span><div><h3>基础容量</h3><p>99 元/年含 5GB 存储空间。图片、文件、语音、视频等归档内容会占用空间。</p></div></article>
+          <article class="pricing-rule"><span class="pricing-rule-no">02</span><div><h3>超出容量</h3><p>超过 5GB 后，每增加 1GB，费用增加 1 元/GB/月。</p></div></article>
+          <article class="pricing-rule"><span class="pricing-rule-no">03</span><div><h3>官方接口费用</h3><p>企业微信会话存档接口的开通及相关官方费用不包含在本套餐中，按企业微信规则另计。</p></div></article>
+        </div>
+      </div>
+      <div class="pricing-compare" role="region" aria-label="计费方式对比">
+        <div class="pricing-compare-head"><h3>按座席与按空间，两种计费方式的区别</h3><p>以下为计费维度说明，不比较或评价任何第三方服务。</p></div>
+        <div class="pricing-compare-grid">
+          <article><p class="compare-kicker">按座席计费</p><h4>团队人数增长，费用通常随之增加</h4><p>以员工账号或席位数量作为主要计费单位。</p></article>
+          <article class="is-highlight"><p class="compare-kicker">本服务按空间计费</p><h4>座席数量不改变基础套餐价格</h4><p>主要按实际需要保存的存储容量计费，超过基础空间后按增量计算。</p></article>
+        </div>
       </div>
     </div>
   </section>
@@ -196,38 +205,10 @@
   <section id="security" class="section">
     <div class="container">
       <p class="eyebrow">安全与合规</p>
-      <h2 class="section-title">数据始终在你的掌控之内</h2>
+      <h2 class="section-title">数据访问应当有边界，也应当可追溯</h2>
       <div class="pillar-grid">
-        <article class="pillar">
-          <span class="icon-tile icon-lg" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"></path>
-              <path d="M9 12l2 2 4-4"></path>
-            </svg>
-          </span>
-          <h3 class="pillar-title">数据安全</h3>
-          <ul class="pillar-list">
-            <li>RSA + AES 双层加密，密文存储，密钥自持</li>
-            <li>解密在计算隔离环境中完成，原始密文不出域</li>
-            <li>多租户隔离，企业、部门、员工三级互不可见</li>
-            <li>存储可插拔，支持本地磁盘与对象存储</li>
-          </ul>
-        </article>
-        <article class="pillar">
-          <span class="icon-tile icon-lg" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-          </span>
-          <h3 class="pillar-title">合规审计</h3>
-          <ul class="pillar-list">
-            <li>访问需 OAuth 授权，杜绝越权查看</li>
-            <li>操作日志全量留存，查看、下载、导出可追溯</li>
-            <li>行为日志审计，异常访问实时预警</li>
-            <li>私有化部署，数据完全自建自管</li>
-          </ul>
-        </article>
+        <article class="pillar"><span class="icon-tile icon-lg" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"></path><path d="M9 12l2 2 4-4"></path></svg></span><h3 class="pillar-title">数据安全</h3><ul class="pillar-list"><li>RSA + AES 双层加密，密文存储，密钥自持</li><li>解密在计算隔离环境完成，降低明文暴露范围</li><li>存储支持本地磁盘与对象存储等部署选择</li></ul></article>
+        <article class="pillar"><span class="icon-tile icon-lg" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"></path><circle cx="12" cy="12" r="3"></circle></svg></span><h3 class="pillar-title">授权与审计</h3><ul class="pillar-list"><li>访问受身份认证和授权范围约束</li><li>查看、下载和导出等关键操作可留痕</li><li>多租户数据分区，减少跨企业数据可见风险</li></ul></article>
       </div>
     </div>
   </section>
@@ -235,78 +216,58 @@
   <section id="scenarios" class="section section-mist">
     <div class="container">
       <p class="eyebrow">应用场景</p>
-      <h2 class="section-title">从合规要求，到日常经营</h2>
+      <h2 class="section-title">从日常服务，到需要回溯的一刻</h2>
       <div class="scn-grid">
-        <article class="scn-card">
-          <span class="scn-num">01</span>
-          <h3 class="card-title">金融保险销售合规</h3>
-          <p class="card-desc">销售承诺、返佣、违规话术全程留痕，从容应对双录与监管检查。</p>
-        </article>
-        <article class="scn-card">
-          <span class="scn-num">02</span>
-          <h3 class="card-title">客诉举证</h3>
-          <p class="card-desc">纠纷发生时一键调取完整对话，还原事实经过，快速定责止损。</p>
-        </article>
-        <article class="scn-card">
-          <span class="scn-num">03</span>
-          <h3 class="card-title">私域防飞单</h3>
-          <p class="card-desc">识别员工私下导流、转移客户资产，守护企业私域客户资源。</p>
-        </article>
-        <article class="scn-card">
-          <span class="scn-num">04</span>
-          <h3 class="card-title">离职继承</h3>
-          <p class="card-desc">客户资源随员工离职自动交接，客户关系不中断、不流失。</p>
-        </article>
+        <article class="scn-card"><span class="scn-num">01</span><h3 class="card-title">客户服务回溯</h3><p class="card-desc">在客诉或服务复盘时，根据人员、客户或关键词还原相关对话。</p></article>
+        <article class="scn-card"><span class="scn-num">02</span><h3 class="card-title">员工交接</h3><p class="card-desc">在授权范围内查看与客户相关的历史会话，减少交接中的信息断层。</p></article>
+        <article class="scn-card"><span class="scn-num">03</span><h3 class="card-title">经营协作留存</h3><p class="card-desc">将项目沟通、文件与多媒体消息一并归档，便于后续查找和核对。</p></article>
+        <article class="scn-card"><span class="scn-num">04</span><h3 class="card-title">合规复查</h3><p class="card-desc">以授权审阅和操作留痕为基础，支持内部核查和证据整理。</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="section faq-section">
+    <div class="container">
+      <p class="eyebrow">常见问题</p>
+      <h2 class="section-title">把价格、容量和访问边界讲清楚</h2>
+      <div class="faq-list">
+        <details class="faq-item" open><summary>为什么不按员工座席收费？</summary><p>本服务不按员工数量、聊天记录条数或搜索次数收费，费用主要随实际需要保存的存储容量变化。</p></details>
+        <details class="faq-item"><summary>企业微信官方会话存档接口费用是否包含在套餐内？</summary><p>不包含。企业微信会话存档接口的开通及相关官方费用按企业微信规则另计。</p></details>
+        <details class="faq-item"><summary>哪些内容会占用存储空间？</summary><p>归档的文本、图片、文件、语音、视频等内容会占用空间；实际占用量会随消息类型和附件大小而变化。</p></details>
+        <details class="faq-item"><summary>超过 5GB 后如何收费？</summary><p>基础方案含 5GB 存储空间。超过后，每增加 1GB，费用增加 1 元/GB/月。</p></details>
+        <details class="faq-item"><summary>是否支持多企业或多租户隔离？</summary><p>系统提供面向企业、部门和员工的数据范围划分能力。具体可见范围以部署配置、角色和授权关系为准。</p></details>
+        <details class="faq-item"><summary>谁可以访问归档数据？</summary><p>访问受身份认证和授权范围约束；查看、检索和导出等关键操作可保留审计记录，便于后续审阅。</p></details>
+        <details class="faq-item"><summary>开源自部署与服务套餐如何选择？</summary><p>开源项目可用于自行部署和评估；如需咨询容量服务套餐或适合的部署方式，请通过页面中的咨询入口联系。</p></details>
       </div>
     </div>
   </section>
 
   <section id="cta" class="cta">
     <div class="container cta-inner">
-      <h2 class="cta-title">准备好让每一条对话都可追溯了吗？</h2>
-      <p class="cta-sub">预约一次演示，看看康冠时代如何为你的企业微信会话建档、留存与审查。</p>
-      <a class="btn btn-light" href="#contact">预约演示</a>
-      <p class="cta-mail">或邮件联系 <a href="mailto:hs@crowntime.cn">hs@crowntime.cn</a></p>
-      <p class="cta-disc">康冠时代企业微信会话存档为独立产品，与腾讯官方无隶属关系。</p>
+      <h2 class="cta-title">先看看产品内部的使用体验</h2>
+      <p class="cta-sub">静态 Demo 展示会话审阅、全局搜索、外部联系人、媒体归档、用量分析和审计日志的界面结构。所有数据均为虚构示例。</p>
+      <a class="btn btn-light" href="demo/">查看 Demo</a>
+      <p class="cta-mail">需要了解开通方式？<a href="mailto:hs@crowntime.cn?subject=%E5%BA%B7%E5%86%A0%E6%97%B6%E4%BB%A3%E4%BC%81%E4%B8%9A%E5%BE%AE%E4%BF%A1%E4%BC%9A%E8%AF%9D%E5%AD%98%E6%A1%A3%E5%92%A8%E8%AF%A2">邮件咨询</a></p>
+      <p class="cta-disc">本产品为第三方独立产品，与腾讯公司及其企业微信无隶属、合作或授权关系。</p>
     </div>
   </section>
-
 </main>
 
 <footer class="site-footer" id="contact">
   <div class="container">
     <div class="footer-top">
-      <div class="footer-brand">
-        <img class="footer-logo" src="brand/logo-horizontal.svg" alt="康冠时代 CROWN TIME" width="120" height="32">
-        <p class="footer-tagline">企业微信会话存档</p>
-      </div>
+      <div class="footer-brand"><img class="footer-logo" src="brand/logo-horizontal-reverse.svg" alt="康冠时代 CROWN TIME" width="120" height="32"><p class="footer-tagline">企业微信会话存档</p></div>
       <nav class="footer-cols" aria-label="页脚导航">
-        <div class="footer-col">
-          <h4>产品</h4>
-          <a href="#capabilities">会话存档</a>
-          <a href="#capabilities">会话检索</a>
-          <a href="#capabilities">审查控制台</a>
-        </div>
-        <div class="footer-col">
-          <h4>资源</h4>
-          <a href="#security">帮助文档</a>
-          <a href="#security">安全白皮书</a>
-          <a href="#scenarios">更新日志</a>
-        </div>
-        <div class="footer-col">
-          <h4>联系</h4>
-          <a href="#cta">预约演示</a>
-          <a href="mailto:hs@crowntime.cn">hs@crowntime.cn</a>
-          <a href="#contact">深圳 · 福田区</a>
-        </div>
+        <div class="footer-col"><h4>产品</h4><a href="#capabilities">会话存档</a><a href="#pricing">按空间计费</a><a href="demo/">查看 Demo</a></div>
+        <div class="footer-col"><h4>资源</h4><a href="#faq">常见问题</a><a href="https://github.com/zuohaisu/wecom-archive-365" target="_blank" rel="noopener noreferrer">开源项目</a><a href="#security">安全与审计</a></div>
+        <div class="footer-col"><h4>联系</h4><a href="demo/">查看 Demo</a><a href="mailto:hs@crowntime.cn?subject=%E5%BA%B7%E5%86%A0%E6%97%B6%E4%BB%A3%E4%BC%81%E4%B8%9A%E5%BE%AE%E4%BF%A1%E4%BC%9A%E8%AF%9D%E5%AD%98%E6%A1%A3%E5%92%A8%E8%AF%A2">hs@crowntime.cn</a></div>
       </nav>
     </div>
     <div class="footer-sep"></div>
     <div class="footer-bottom">
       <p class="footer-copy">© 2026 深圳康冠时代科技有限公司 保留所有权利</p>
       <p class="footer-beian">粤ICP备2026090201号 · 粤公网安备44030002014504号 · ® 第17528858 号</p>
-      <p class="footer-disc">本产品为独立软件，与腾讯公司及其企业微信无隶属、合作或授权关系。</p>
-      <p class="footer-disc">本页面展示图片含 AI 生成内容（首屏主视觉为 AI 生成示意图，素材版权归深圳康冠时代科技有限公司所有）。</p>
+      <p class="footer-disc">本产品为第三方独立产品，与腾讯公司及其企业微信无隶属、合作或授权关系。</p>
     </div>
   </div>
 </footer>

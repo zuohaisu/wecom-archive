@@ -1,100 +1,71 @@
-# Company Homepage (crowntime.cn)
+# Company Homepage and Static Product Demo
 
-Minimal static website for 深圳康冠时代科技有限公司, built for ICP beian (备案) review.
+This directory is the public, standalone static website for **康冠时代企业微信会话存档**. It is intentionally isolated from the archive backend: it must not link to `/admin`, `/api`, health endpoints, or an authenticated archive UI.
 
-This is a plain static site (HTML + CSS, no JS, no build step, no backend
-dependency). It is intentionally isolated from the WeCom archive backend
-app in this repo — do not link it to `/admin`, `/api`, health endpoints,
-or any archive UI.
+It contains two public experiences:
 
-## Source directory
+- `/` — marketing homepage: product capabilities, capacity-based pricing, FAQ, legal footer, and real consultation links.
+- `/demo/` — a static, local-only product tour. It shows fictional examples of the review console, search, contacts, media, usage analysis, and audit logs. It never sends API requests, authenticates a user, or includes production chat data.
 
-```
+## Source tree
+
+```text
 static_site/company_homepage/
 ├── index.html
 ├── style.css
-├── brand/              # logo SVG、favicon、mask-icon
-├── assets/             # console_review.png —— Hero 产品截图
 ├── site.webmanifest
-└── README.md   (this file)
+├── brand/                    # logo and favicon assets
+├── assets/                   # homepage visual assets
+├── demo/
+│   ├── index.html            # static demo overview
+│   ├── conversations.html
+│   ├── search.html
+│   ├── contacts.html
+│   ├── media.html
+│   ├── analytics.html
+│   ├── audit-log.html
+│   └── assets/               # standalone demo CSS and local-only JS/data
+└── README.md                 # contributor documentation; never served
 ```
+
+## Content guardrails
+
+- The currently published package is **99 yuan/year including 5GB storage**, with unlimited seats. Storage above 5GB adds **1 yuan/GB/month**. Do not invent free tiers, annual discounts, or payment flows.
+- State clearly that WeCom Conversation Archive API enablement and related official fees are not included in the package and follow WeCom's rules.
+- The public homepage retains the legal entity, ICP record, public security record, and public contact email. Do **not** publish a detailed street address or telephone number.
+- Keep the clear independent-product disclaimer: this is not a Tencent or WeCom official product.
+- Do not market the service as an official Qiniu reseller or partner without documented authorization. Capacity-based pricing is the public product message; the underlying storage provider is not a marketing claim.
+- Every record in `demo/` must be synthetic. Never copy production conversations, customer details, media, exports, identifiers, or credentials into a static asset.
+- The demo must remain static and read-only: no backend dependency, authentication, API calls, tracking pixels, download, export, or write operation.
 
 ## Target deployment directory
 
-`scripts/deploy_server.sh` (step "[9/9] Deploying company homepage static
-files") syncs the **entire** contents of this directory (excluding
-`README.md`) to a dedicated static directory on the production host:
+`scripts/deploy_server.sh` step `[9/9]` syncs the **entire** contents of this directory (except `README.md`) to the public static directory on the production host:
 
-```
+```text
 /var/www/$STATIC_SITE_DIR_NAME/
 ├── index.html
 ├── style.css
 ├── brand/
 ├── assets/
+├── demo/
 └── site.webmanifest
 ```
 
-`STATIC_SITE_DIR_NAME` is read from the deploy environment (e.g.
-`backend/.env` on the host); it defaults to `site` if unset. **This value
-must match whatever `root` the production Nginx config for
-`crowntime.cn`/`www.crowntime.cn` actually points at** — if they diverge,
-the pipeline will keep syncing files to a directory Nginx never reads,
-and the live site will silently stop reflecting new commits with no
-error anywhere in the deploy. Confirm the two agree before relying on
-automated deploys of this page.
+`STATIC_SITE_DIR_NAME` is read from the deploy environment and defaults to `site`. It must match the `root` in the operator-managed Nginx configuration for `crowntime.cn` / `www.crowntime.cn`; otherwise the deployment can copy successfully to a directory Nginx does not serve.
 
-This directory must be separate from wherever the WeCom archive backend
-app or its static assets live.
+This static directory must remain separate from the WeCom archive backend app and its static assets. `archive.crowntime.cn` continues to route to the backend and must not be affected by homepage changes.
 
-## Domains
+## Local preview
 
-- `crowntime.cn`
-- `www.crowntime.cn`
-
-Both should serve this static site.
-
-`archive.crowntime.cn` must continue to route to the existing WeCom archive
-backend app and must NOT be affected by this change.
-
-## Nginx routing (proposed, not applied)
-
-This repo does not currently contain a checked-in Nginx config, so no
-existing config was modified. The following is a draft for whoever manages
-the production Nginx config to review and apply manually:
-
-```nginx
-server {
-    listen 80;
-    server_name crowntime.cn www.crowntime.cn;
-
-    root /var/www/crowntime-site;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-
-# Existing WeCom archive backend — must remain untouched/unaffected:
-# server_name archive.crowntime.cn;  -> proxied to the archive backend app
+```bash
+cd static_site/company_homepage
+python3 -m http.server 8080
 ```
 
-If HTTPS is configured (e.g. via certbot/Let's Encrypt), add the
-corresponding `listen 443 ssl;` server block and redirect port 80 to 443
-for `crowntime.cn`/`www.crowntime.cn` only. This does not affect the
-`archive.crowntime.cn` server block.
+Open:
 
-## CI/CD
+- `http://127.0.0.1:8080/`
+- `http://127.0.0.1:8080/demo/`
 
-This directory **is** wired into the automated deploy pipeline:
-`.github/workflows/deploy.yml` → `scripts/deploy_server.sh` step "[9/9]"
-runs on every deploy to `main` (see `STATIC_SITE_DIR_NAME` above for the
-target-directory caveat). There is no separate deploy path for this page
-outside that pipeline step.
-
-## Content notes
-
-`index.html` contains the company's address, phone, email, and ICP beian
-number. If any of these change (e.g. beian number is reassigned, office
-address changes), update `index.html` directly and push to `main` — the
-deploy pipeline will sync the change automatically.
+Verify all demo links locally before publishing. A static update does not itself deploy production; commit/push and production deployment remain human-controlled.

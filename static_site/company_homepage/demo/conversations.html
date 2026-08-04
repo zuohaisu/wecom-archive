@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>对话审阅 Demo｜康冠时代企业微信会话存档</title>
+  <link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/demo.css">
+</head>
+<body data-demo-page="conversations">
+  <div class="demo-shell">
+    <aside class="demo-sidebar" data-demo-nav></aside>
+    <div class="demo-main">
+      <header class="demo-topbar" data-demo-topbar></header>
+      <div class="demo-notice" role="status"><span class="demo-notice-mark" aria-hidden="true">i</span><span><b>静态演示数据</b>：点击左侧会话可切换示例内容。归档记录为只读，Demo 不会发送消息或访问任何真实会话。</span></div>
+      <main class="demo-page">
+        <div class="demo-page-head">
+          <div><div class="demo-kicker">审阅</div><h1>对话审阅</h1><p>以三栏布局将会话范围、完整时间线和相关审阅信息放在同一视图中，帮助授权人员快速还原上下文。</p></div>
+          <div class="demo-page-actions"><button class="demo-btn" type="button" data-demo-noop>演示筛选</button><a class="demo-btn demo-btn-primary" href="search.html">体验搜索</a></div>
+        </div>
+        <section class="demo-conversation-app" aria-label="会话审阅界面演示">
+          <aside class="demo-conv-column">
+            <div class="demo-column-title">已授权会话</div>
+            <div class="demo-column-search"><input class="demo-input" type="search" aria-label="搜索演示会话" placeholder="搜索会话名称…"></div>
+            <div class="demo-conversation-list" id="demo-conversation-list"></div>
+          </aside>
+          <section class="demo-timeline-column">
+            <header class="demo-timeline-top"><h2 class="demo-timeline-title" id="demo-timeline-title">星河项目协作群</h2><span>演示时间线</span></header>
+            <div class="demo-timeline" id="demo-timeline"></div>
+            <footer class="demo-timeline-foot">归档会话仅供已授权人员审阅 · Demo 中的消息和附件均为虚构内容</footer>
+          </section>
+          <aside class="demo-info-column" id="demo-conversation-info" aria-label="会话信息"></aside>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="assets/demo-data.js"></script>
+  <script src="assets/demo-shell.js"></script>
+</body>
+</html>
