@@ -34,6 +34,14 @@ function fetchTimelinePage(before, isInitial){
       timelineNextBefore=data.pagination.next_before;
       renderTimeline(isInitial);
       startHistoryObserver();
+      // The stats/participant panel can require an aggregate across an
+      // entire long conversation.  Start it only after the first message
+      // page has rendered, so it cannot contend with the time-to-chat path.
+      if(isInitial){
+        setTimeout(function(){
+          if(timelineConvId===requestConvId&&timelineRequestGen===gen&&typeof loadConversationDetail==='function')loadConversationDetail(requestConvId);
+        },0);
+      }
       // RND-229 AC5/AC6 fix: trigger the initial locate only after the
       // first-screen timeline has rendered, so a slow first-screen response
       // no longer races the fixed 350ms timer used previously. The history

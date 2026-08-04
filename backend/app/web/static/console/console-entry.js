@@ -30,6 +30,7 @@ function selectLocale(code){
 }
 function applyLocale(){
   applyStaticI18n();
+  document.title=I18N.t('app.subtitle');
   renderLangMenu();
   rebuildMediaLabels();
   document.getElementById('entity-header').textContent=mode==='staff'?I18N.t('console.monitoredAccounts'):I18N.t('console.contactsHeader');

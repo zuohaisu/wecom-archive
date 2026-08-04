@@ -142,12 +142,14 @@ _REACHABILITY_AUTOMATION_SCRIPT = os.path.join(
 _EXTERNAL_CONTACT_SYNC_MODULE = "app.services.external_contact_sync"
 
 
-def _run_periodic_external_contact_reconciliation() -> None:
-    """Run the RND-170 full identity backstop only on timer reconciliation.
+def _run_external_contact_reconciliation() -> None:
+    """Best-effort full identity reconciliation after timer or manual sync.
 
-    Callback events refresh one changed customer immediately. A timer-driven
-    full sync catches missed/coalesced callbacks without making archive
-    sync/decrypt success depend on the external-contact API.
+    Callback events refresh one changed customer immediately.  Timer runs
+    remain the durable fallback, while a user-requested archive sync must
+    also refresh the directory so its contacts page and conversation labels
+    do not remain stale until the next timer.  This optional API never turns
+    a successful archive sync/decrypt run into a failure.
     """
     try:
         proc = subprocess.run(
@@ -265,8 +267,8 @@ def main() -> None:
             print(f"[INFO] archive_worker trigger_source={source} trigger=accepted", flush=True)
             _run_script(_SYNC_SCRIPT, "sync_wecom_archive_once.py")
             _run_script(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py")
-            if source == "timer":
-                _run_periodic_external_contact_reconciliation()
+            if source in {"timer", "manual"}:
+                _run_external_contact_reconciliation()
             _run_best_effort_reachability_automation()
             completed = True
         finally:

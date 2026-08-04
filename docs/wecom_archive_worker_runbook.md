@@ -38,11 +38,13 @@ archive work remains the low-latency path; the timer is not removed.
 When `WECOM_EXTERNAL_CONTACT_SECRET` is configured, a validated
 `change_external_contact` callback queues a bounded, coalesced refresh for
 that one customer. The callback still acknowledges independently of that
-refresh and the archive worker. On every timer-sourced archive run, after
-sync/decrypt succeeds, the entrypoint also runs a best-effort full
-external-contact reconciliation. This is the durable fallback for missed,
-coalesced, or failed callback refreshes; a failed identity reconciliation does
-not invalidate a successful archive sync/decrypt run.
+refresh and the archive worker. On every timer-sourced archive run, and after
+an administrator's user-requested sync, the entrypoint also runs a
+best-effort full external-contact reconciliation. This makes a newly enabled
+directory available without waiting for the next timer, while the timer
+remains the durable fallback for missed, coalesced, or failed callback
+refreshes; a failed identity reconciliation does not invalidate a successful
+archive sync/decrypt run.
 
 Never put customer IDs, remarks, nicknames, callback ciphertext, or secrets
 in journal queries, tickets, or manual command arguments.
@@ -148,12 +150,13 @@ python scripts/run_archive_worker_once.py
 ```
 
 Expected safe aggregate lines include sync fetch/insert counts, decrypt counts,
-`archive_worker trigger_source=manual`, duration, child CPU/RSS aggregates,
-and the archive-complete media dispatch outcome. Every exit (including a lock
-no-op or failure) ends with a `lifecycle=ended` line containing `result`, a
-safe `error_class`, and `completed_at`. No token, secret, message body, media
-ID, signed URL, local path, raw provider setting, or exception text should
-appear.
+`archive_worker trigger_source=manual`, an
+`external_contact_reconciliation` outcome when its secret is configured,
+duration, child CPU/RSS aggregates, and the archive-complete media dispatch
+outcome. Every exit (including a lock no-op or failure) ends with a
+`lifecycle=ended` line containing `result`, a safe `error_class`, and
+`completed_at`. No token, secret, message body, media ID, signed URL, local
+path, raw provider setting, or exception text should appear.
 
 Check timers, locks, and the API while workers run:
 
@@ -181,7 +184,7 @@ run. Record only aggregates; do not export messages or media identifiers.
 | `media_trigger=dispatch-failed` | Archive data is already committed; inspect safe journal categories and rely on the media timer. |
 | Archive sync/decrypt failure | No archive-complete media dispatch occurs. Investigate the archive worker journal; cursor/idempotency semantics are unchanged. |
 | Callback missed or callback dispatch fails | The archive reconciliation timer eventually re-pulls through the same shared entrypoint and lock. |
-| `external_contact_reconciliation status=failed` / `error` | Archive sync/decrypt may still have succeeded. Confirm `WECOM_EXTERNAL_CONTACT_SECRET` is configured and rely on the next timer run; do not retry with customer IDs in shell history. |
+| `external_contact_reconciliation status=failed` / `error` | Archive sync/decrypt may still have succeeded. Confirm `WECOM_EXTERNAL_CONTACT_SECRET` is configured, then use the console's **立即同步** or rely on the next timer run; do not retry with customer IDs in shell history. |
 
 Never paste callback query strings, `.env` contents, token/secret values,
 message content, `sdkfileid`, signed URLs, or storage paths into tickets or

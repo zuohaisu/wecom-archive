@@ -17,7 +17,7 @@ from typing import Any, Optional, Tuple
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.orm import Session, load_only
 
 from app.conversation_membership import (
@@ -28,7 +28,7 @@ from app.conversation_membership import (
     _load_display_names_for_ids,
     _load_recipients_map,
 )
-from app.db.models import ArchiveMessage, MediaFile, MessageRevocation
+from app.db.models import ArchiveMessage, ArchiveMessageRecipient, MediaFile, MessageRevocation
 from app.display_names import resolve_person_display_name
 from app.media_classification import classify_media, resolve_downloadable_media_status
 from app.media_download import NESTED_MEDIA_MSGTYPES, iter_nested_media_refs
@@ -563,8 +563,158 @@ def _hydrate_timeline_page_messages(
             ArchiveMessage.id.in_(page_ids),
             ArchiveMessage.tenant_id == tenant_id,
         )
-        .order_by(ArchiveMessage.msgtime.asc(), ArchiveMessage.id.asc())
+        .order_by(func.coalesce(ArchiveMessage.msgtime, 0).asc(), ArchiveMessage.id.asc())
         .all()
+    )
+
+
+def _page_from_compact_query(query, limit: int, before: Optional[str]):
+    """Select one newest-first timeline page without materializing a conversation.
+
+    The result is the page's archive-message IDs plus the existing opaque
+    pagination fields.  ``None`` means the query did not establish that this
+    was a real conversation, so the caller must use the established resolver
+    (which also owns malformed-ID and direct/group-collision semantics).
+    """
+    page_query = query
+    order_time = func.coalesce(ArchiveMessage.msgtime, 0)
+    if before is not None:
+        cursor_time, cursor_id = _decode_message_cursor(before)
+        page_query = page_query.filter(
+            or_(
+                order_time < cursor_time,
+                and_(
+                    order_time == cursor_time,
+                    ArchiveMessage.id < cursor_id,
+                ),
+            )
+        )
+
+    rows = (
+        page_query.order_by(order_time.desc(), ArchiveMessage.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    if not rows:
+        # An exhausted ``before`` cursor is a valid empty page, not a 404.
+        # A first-page miss remains unresolved so the legacy-compatible path
+        # can retain its malformed-ID and collision behaviour.
+        if before is not None and query.limit(1).first() is not None:
+            return [], False, None
+        return None
+
+    has_older = len(rows) > limit
+    page_rows = rows[:limit]
+    oldest = page_rows[-1]
+    return (
+        [row[0] for row in page_rows],
+        has_older,
+        _encode_message_cursor(oldest[1], oldest[0]) if has_older else None,
+    )
+
+
+def _message_has_recipient(tenant_id: str, userid: str):
+    """Return a correlated recipient predicate without duplicating rows."""
+    return exists().where(
+        ArchiveMessageRecipient.message_id == ArchiveMessage.id,
+        ArchiveMessageRecipient.tenant_id == tenant_id,
+        ArchiveMessageRecipient.receiver_userid == userid,
+    )
+
+
+def _fast_timeline_page(
+    db: Session,
+    tenant_id: str,
+    conversation_id: str,
+    *,
+    limit: int,
+    before: Optional[str],
+    entity_id: Optional[str],
+    conversation_type: Optional[str],
+):
+    """Return a DB-paginated page for unambiguous normal conversations.
+
+    A browser supplies ``conversation_type`` from the conversation-list row.
+    For ordinary group rooms and direct pairs this lets us apply the cursor in
+    SQL instead of reading every message just to select 20 rows.  Prefix-shaped
+    direct/group collisions and malformed legacy IDs deliberately return
+    ``None`` and continue through the authoritative compatibility resolver.
+    """
+    if conversation_type == "group" and not conversation_id.startswith("direct__"):
+        return _page_from_compact_query(
+            db.query(ArchiveMessage.id, func.coalesce(ArchiveMessage.msgtime, 0)).filter(
+                ArchiveMessage.tenant_id == tenant_id,
+                ArchiveMessage.roomid == conversation_id,
+            ),
+            limit,
+            before,
+        )
+
+    if conversation_type != "direct" or not conversation_id.startswith("direct__"):
+        return None
+
+    parts = conversation_id[len("direct__") :].split("___", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    uid_a, uid_b = parts
+
+    # A group room may legitimately use a direct-shaped ID.  That rare
+    # collision needs the existing entity-aware resolver, which can merge or
+    # disambiguate both sides correctly; never guess on the fast path.
+    if (
+        db.query(ArchiveMessage.id)
+        .filter(
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessage.roomid == conversation_id,
+        )
+        .first()
+        is not None
+    ):
+        return None
+
+    # The established resolver also admits certain sender-null messages after
+    # recomputing their canonical membership from every recipient.  Keep that
+    # rare legacy shape on the authoritative path rather than risk omitting
+    # it from a pair-only SQL predicate.
+    has_null_sender_candidate = db.query(ArchiveMessage.id).filter(
+        ArchiveMessage.tenant_id == tenant_id,
+        or_(ArchiveMessage.sender.is_(None), ArchiveMessage.sender == ""),
+        or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+        exists().where(
+            ArchiveMessageRecipient.message_id == ArchiveMessage.id,
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.receiver_userid.in_([uid_a, uid_b]),
+        ),
+    ).first()
+    if has_null_sender_candidate is not None:
+        return None
+
+    direct_pair = or_(
+        and_(
+            ArchiveMessage.sender == uid_a,
+            _message_has_recipient(tenant_id, uid_b),
+        ),
+        and_(
+            ArchiveMessage.sender == uid_b,
+            _message_has_recipient(tenant_id, uid_a),
+        ),
+    )
+    filters = [
+        ArchiveMessage.tenant_id == tenant_id,
+        or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
+        direct_pair,
+    ]
+    if entity_id:
+        filters.append(
+            or_(
+                ArchiveMessage.sender == entity_id,
+                _message_has_recipient(tenant_id, entity_id),
+            )
+        )
+    return _page_from_compact_query(
+        db.query(ArchiveMessage.id, func.coalesce(ArchiveMessage.msgtime, 0)).filter(*filters),
+        limit,
+        before,
     )
 
 
@@ -629,42 +779,55 @@ def resolve_timeline_page(
             status_code=400, detail="conversation_type must be 'direct' or 'group'"
         )
 
-    # RND-191: resolve membership as a compact (id, sender, roomid, msgtime)
-    # projection, not full ArchiveMessage rows -- see
-    # _fetch_conversation_messages_compact's module note. A conversation
-    # with thousands of messages no longer means materializing thousands of
-    # rows' raw_encrypted_payload/decrypted_payload/structured_content on
-    # every single page request; only the `limit`-sized page actually
-    # rendered below is ever hydrated to a full row (_hydrate_timeline_page_
-    # messages, after pagination has already picked which ids those are).
-    compact_messages = _fetch_conversation_messages_compact(
-        db, conversation_id, tenant_id, mode=mode, entity_id=entity_id
+    fast_page = _fast_timeline_page(
+        db,
+        tenant_id,
+        conversation_id,
+        limit=limit,
+        before=before,
+        entity_id=entity_id,
+        conversation_type=conversation_type,
     )
-
-    if not compact_messages:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-    # RND-158 Phase 2 QA round 7 (blocker 5, conversation_type policy):
-    # cross-check the caller-supplied hint against the type
-    # _fetch_conversation_messages_compact actually resolved for this
-    # id/entity context -- group if any resolved message carries a real
-    # roomid (_is_valid_roomid, the same truthiness rule
-    # _derive_conversation_membership uses), direct otherwise. A mismatch
-    # means the caller's cached/stale conversation_type no longer matches
-    # this bucket (e.g. an entity-scoped collision resolved to the other
-    # side) -- surfaced as 400 rather than silently served under the
-    # wrong assumption.
-    resolved_conversation_type = (
-        "group" if any(_is_valid_roomid(m.roomid) for m in compact_messages) else "direct"
-    )
-    if conversation_type is not None and conversation_type != resolved_conversation_type:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"conversation_type mismatch: requested '{conversation_type}' but this "
-                f"conversation resolved to '{resolved_conversation_type}'"
-            ),
+    if fast_page is not None:
+        page_ids, has_older, next_before = fast_page
+    else:
+        # Complex/direct-group collision IDs retain the existing authoritative
+        # resolver.  It is intentionally the fallback rather than a second
+        # implementation of those legacy semantics.
+        compact_messages = _fetch_conversation_messages_compact(
+            db, conversation_id, tenant_id, mode=mode, entity_id=entity_id
         )
+
+        if not compact_messages:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        resolved_conversation_type = (
+            "group" if any(_is_valid_roomid(m.roomid) for m in compact_messages) else "direct"
+        )
+        if conversation_type is not None and conversation_type != resolved_conversation_type:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"conversation_type mismatch: requested '{conversation_type}' but this "
+                    f"conversation resolved to '{resolved_conversation_type}'"
+                ),
+            )
+
+        all_sorted_asc = sorted(compact_messages, key=lambda m: (m.msgtime or 0, m.id))
+        if before is not None:
+            cursor = _decode_message_cursor(before)
+            eligible = [m for m in all_sorted_asc if (m.msgtime or 0, m.id) < cursor]
+        else:
+            eligible = all_sorted_asc
+
+        page_compact = eligible[-limit:] if len(eligible) > limit else eligible
+        has_older = len(eligible) > limit
+        next_before = (
+            _encode_message_cursor(page_compact[0].msgtime, page_compact[0].id)
+            if page_compact and has_older
+            else None
+        )
+        page_ids = [message.id for message in page_compact]
 
     # RND-158 Phase 2 QA round 7 (blocker 3, media context propagation):
     # the entity-context query-string suffix (mode/staff_id/contact_id)
@@ -682,23 +845,7 @@ def resolve_timeline_page(
     # context was supplied on this request -- generated media URLs are then
     # byte-identical to previous rounds' behavior.
 
-    all_sorted_asc = sorted(compact_messages, key=lambda m: (m.msgtime or 0, m.id))
-    if before is not None:
-        cursor = _decode_message_cursor(before)
-        eligible = [m for m in all_sorted_asc if (m.msgtime or 0, m.id) < cursor]
-    else:
-        eligible = all_sorted_asc
-
-    page_compact = eligible[-limit:] if len(eligible) > limit else eligible
-
-    has_older = len(eligible) > limit
-    next_before = (
-        _encode_message_cursor(page_compact[0].msgtime, page_compact[0].id)
-        if page_compact and has_older
-        else None
-    )
-
-    page = _hydrate_timeline_page_messages(db, tenant_id, [m.id for m in page_compact])
+    page = _hydrate_timeline_page_messages(db, tenant_id, page_ids)
 
     # RND-191: recipients_map/display_names are scoped to this page's
     # participants only (senders, recipients, and any 名片/business-card

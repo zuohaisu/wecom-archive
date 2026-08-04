@@ -256,7 +256,10 @@ classification happens server-side in `app/reachability_audit.py`.
 The POST acknowledgement never waits for the targeted refresh or archive
 worker. Missed/coalesced external-contact callbacks are reconciled by the
 archive timer's best-effort full external-contact sync when
-`WECOM_EXTERNAL_CONTACT_SECRET` is configured.
+`WECOM_EXTERNAL_CONTACT_SECRET` is configured. The administrator's existing
+`POST /api/admin/sync-now` path invokes that same best-effort reconciliation
+after archive sync/decrypt, so an on-demand sync also refreshes the external
+contacts directory.
 
 These routes are intentionally **not** session-protected.
 

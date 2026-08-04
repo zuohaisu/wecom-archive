@@ -451,8 +451,9 @@ def test_model_and_migration_preserve_legacy_name_for_api_backfill() -> None:
     assert "legacy external_contacts.name" in migration
 
 
-def test_timer_runs_periodic_external_contact_reconciliation_only_after_archive_success(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("source", ("timer", "manual"))
+def test_timer_and_manual_sync_reconcile_external_contacts_only_after_archive_success(
+    source: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     script = Path(__file__).resolve().parents[1] / "scripts/run_archive_worker_once.py"
     spec = importlib.util.spec_from_file_location("rnd170_archive_worker", script)
@@ -461,11 +462,11 @@ def test_timer_runs_periodic_external_contact_reconciliation_only_after_archive_
     spec.loader.exec_module(worker)
     calls: list[str] = []
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
-    monkeypatch.setenv("ARCHIVE_WORKER_TRIGGER_SOURCE", "timer")
+    monkeypatch.setenv("ARCHIVE_WORKER_TRIGGER_SOURCE", source)
     monkeypatch.setattr(worker, "_run_script", lambda _path, label: calls.append(label))
     monkeypatch.setattr(
         worker,
-        "_run_periodic_external_contact_reconciliation",
+        "_run_external_contact_reconciliation",
         lambda: calls.append("external-contact-reconciliation"),
     )
     monkeypatch.setattr(
