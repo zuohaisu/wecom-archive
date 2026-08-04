@@ -81,7 +81,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
-from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
+from app.db.models import (
+    AdminAccessRequest,
+    AdminLoginIdentity,
+    AdminSession,
+    AdminUser,
+    Tenant,
+    TenantWecomConfig,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +143,8 @@ def db() -> Session:
             TenantWecomConfig.__table__,
             AdminUser.__table__,
             AdminSession.__table__,
+            AdminLoginIdentity.__table__,
+            AdminAccessRequest.__table__,
         ],
     )
     session = Session(engine)
@@ -441,6 +450,8 @@ def _real_db_override_with_engine(tenant_id: str):
             TenantWecomConfig.__table__,
             AdminUser.__table__,
             AdminSession.__table__,
+            AdminLoginIdentity.__table__,
+            AdminAccessRequest.__table__,
         ],
     )
     seed = Session(engine)
@@ -493,6 +504,20 @@ def test_callback_active_enabled_user_logs_in_successfully(client, monkeypatch) 
                 status="active",
             )
         )
+        # RND-321: identity resolution is via AdminLoginIdentity, not a
+        # scan of AdminUser.wecom_user_id — without this the scan would be
+        # treated as unbound and produce an access request instead of a
+        # session, which is exactly what this positive-case test verifies
+        # does *not* happen for an already-authorized account.
+        db.add(
+            AdminLoginIdentity(
+                id="login-identity-zhangsan",
+                tenant_id="tenant-ok",
+                provider="wecom",
+                subject="zhangsan",
+                admin_user_id="pre-authorized-zhangsan",
+            )
+        )
         db.commit()
     state = _prepare_callback_env(monkeypatch, override)
     _patch_wecom_http(
@@ -524,6 +549,19 @@ def test_callback_userid_case_insensitive_match_still_logs_in(client, monkeypatc
                 wecom_user_id="ZhangSan",
                 role="compliance",
                 status="active",
+            )
+        )
+        # Bound with the exact case getuserinfo's UserId returns below
+        # ("ZhangSan") — the callback's identity lookup is a plain equality
+        # match on that value; it's the *separate* getuserinfo-vs-user/get
+        # cross-check that's case-insensitive (via .lower()), not this one.
+        db.add(
+            AdminLoginIdentity(
+                id="login-identity-zhangsan-case",
+                tenant_id="tenant-case",
+                provider="wecom",
+                subject="ZhangSan",
+                admin_user_id="pre-authorized-zhangsan-case",
             )
         )
         db.commit()
@@ -1247,6 +1285,30 @@ def test_callback_session_creation_db_failure_log_does_not_leak_session_id(
     from app.main import app
 
     override, engine = _real_db_override_with_engine("tenant-dbfail-log")
+    with Session(engine) as db:
+        # RND-321: a bound, active identity is required to reach the
+        # session-creation step this test targets — an unbound scan now
+        # exits earlier via the access-request path and never gets to the
+        # commit this test injects a failure into.
+        db.add(
+            AdminUser(
+                id="pre-authorized-dbfail-account",
+                tenant_id="tenant-dbfail-log",
+                wecom_user_id="zhangsan",
+                role="compliance",
+                status="active",
+            )
+        )
+        db.add(
+            AdminLoginIdentity(
+                id="login-identity-dbfail-account",
+                tenant_id="tenant-dbfail-log",
+                provider="wecom",
+                subject="zhangsan",
+                admin_user_id="pre-authorized-dbfail-account",
+            )
+        )
+        db.commit()
     state = _prepare_callback_env(monkeypatch, override)
     _patch_wecom_http(
         monkeypatch,

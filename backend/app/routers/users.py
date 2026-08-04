@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import create_password_reset_token, get_current_user, require_role
-from app.db.models import AdminSession, AdminUser, ArchiveMessage
+from app.db.models import (
+    AdminAccessRequest,
+    AdminLoginIdentity,
+    AdminSession,
+    AdminUser,
+    ArchiveMessage,
+)
 from app.db.session import get_db
 from app.email import send_password_reset_email
 from app.schemas.admin_users import AdminUserListItem, AdminUserListOut
@@ -290,3 +298,374 @@ def admin_reset_password(
     )
     db.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# RND-321 — access-request review (owner/admin only)
+#
+# admin_access_requests holds WeCom identities the app has verified but
+# that are not yet bound to any AdminUser (see AdminAccessRequest's model
+# docstring). Nothing here ever auto-links or auto-creates an account —
+# every row is inert until an owner/admin takes one of the two explicit
+# actions below. Deliberately kept separate from the regular user-lifecycle
+# endpoints above rather than folded into /users: a pending request is not
+# a user, has no role, and must not appear in that listing (AC-5).
+# ---------------------------------------------------------------------------
+
+
+def _access_request_dto(db: Session, tenant_id: str, request: AdminAccessRequest) -> dict[str, Any]:
+    """Never includes `subject` (the raw WeCom UserId) — reviewers need the
+    display name and email hint to make a decision, not the raw identity
+    value itself (docs/agent-data-minimization.md: identity fields don't
+    belong on a response surface that doesn't need them to function).
+    """
+    suspected_match = None
+    suspected_match_status = "none"
+    if request.email_hint:
+        # A hint only, shown to a human for their own judgment call — never
+        # used anywhere to auto-link or auto-create (AC-3, product decision
+        # #3). Matches on this tenant's accounts only. Email reuse across
+        # accounts is real (shared mailboxes, reissued addresses), so two or
+        # more accounts sharing this email is a conflict for the reviewer to
+        # judge, not something to resolve by picking one arbitrarily — only
+        # a single unambiguous match is ever surfaced as a candidate.
+        candidates = (
+            db.query(AdminUser)
+            .filter(
+                AdminUser.tenant_id == tenant_id,
+                AdminUser.email.isnot(None),
+                func.lower(AdminUser.email) == request.email_hint,
+            )
+            .limit(2)
+            .all()
+        )
+        if len(candidates) == 1:
+            suspected_match_status = "single"
+            suspected_match = {"id": candidates[0].id, "name": candidates[0].name}
+        elif len(candidates) > 1:
+            suspected_match_status = "multiple"
+    return {
+        "id": request.id,
+        "display_name": request.display_name,
+        "email_hint": request.email_hint,
+        "status": request.status,
+        "resolution": request.resolution,
+        "created_at": request.created_at.isoformat() if request.created_at else None,
+        "resolved_at": request.resolved_at.isoformat() if request.resolved_at else None,
+        "suspected_match": suspected_match,
+        "suspected_match_status": suspected_match_status,
+    }
+
+
+@users_router.get("/access-requests")
+def list_access_requests(
+    status: Optional[str] = Query(None, pattern="^(pending|resolved)$"),
+    auth: tuple[AdminUser, str] = Depends(require_role("admin", "owner")),
+    db: Session = Depends(get_db),
+):
+    """Owner/admin only (AC-5) — ordinary roles cannot see requests, email
+    hints, or identity information via this or any other endpoint."""
+    _, tenant_id = auth
+    statement = db.query(AdminAccessRequest).filter(AdminAccessRequest.tenant_id == tenant_id)
+    statement = statement.filter(AdminAccessRequest.status == (status or "pending"))
+    rows = statement.order_by(AdminAccessRequest.created_at.desc()).all()
+    return {"items": [_access_request_dto(db, tenant_id, row) for row in rows]}
+
+
+def _resolve_pending_request(db: Session, request_id: str, tenant_id: str) -> AdminAccessRequest:
+    """Tenant-scoped lookup without an existence oracle — a wrong-tenant id
+    and a missing id both 404 identically."""
+    request = (
+        db.query(AdminAccessRequest)
+        .filter(AdminAccessRequest.id == request_id, AdminAccessRequest.tenant_id == tenant_id)
+        .first()
+    )
+    if request is None:
+        raise HTTPException(status_code=404, detail="access_request_not_found")
+    if request.status != "pending":
+        raise HTTPException(status_code=409, detail="access_request_already_resolved")
+    return request
+
+
+def _claim_pending_request(db: Session, request_id: str) -> bool:
+    """Atomically flip pending -> claimed-in-progress by including the
+    status in the UPDATE's WHERE clause and checking the row count, not by
+    trusting the read a moment earlier. Two concurrent reviewers resolving
+    the same request race here at the database, not in Python — exactly
+    one UPDATE matches a row; the other sees rowcount 0 and must treat
+    that as "someone else already resolved this", not retry the write.
+    """
+    result = db.query(AdminAccessRequest).filter(
+        AdminAccessRequest.id == request_id,
+        AdminAccessRequest.status == "pending",
+    ).update({AdminAccessRequest.status: "resolved"})
+    return result == 1
+
+
+def _find_wecom_user_id_collision(
+    db: Session, tenant_id: str, subject: str, *, exclude_admin_user_id: Optional[str] = None
+) -> Optional[AdminUser]:
+    """A pre-RND-321 orphaned account — created by the old, superseded
+    access_requested flow, deliberately excluded from migration 0034's
+    identity backfill — can still hold `subject` in the legacy
+    admin_users.wecom_user_id compat column, which carries a
+    (tenant_id, wecom_user_id) uniqueness constraint. Resolving a fresh
+    request for the same subject needs to know about that before
+    attempting a write that would otherwise fail — see the two callers.
+    """
+    query = db.query(AdminUser).filter(
+        AdminUser.tenant_id == tenant_id,
+        AdminUser.wecom_user_id == subject,
+    )
+    if exclude_admin_user_id is not None:
+        query = query.filter(AdminUser.id != exclude_admin_user_id)
+    return query.first()
+
+
+def _is_releasable_legacy_orphan(db: Session, account: AdminUser) -> bool:
+    """True only for a confirmed pre-RND-321 orphan: created by the old
+    access_requested flow, and never itself bound to a login identity.
+    Refusing to release anything else is deliberate — an unexpected
+    collision shape (should not occur under the current design, since
+    admin_login_identities is the sole binding mechanism going forward)
+    surfaces as an error for a human to investigate, never something this
+    silently acts on.
+    """
+    if account.invite_status != "access_requested":
+        return False
+    return (
+        db.query(AdminLoginIdentity)
+        .filter(
+            AdminLoginIdentity.admin_user_id == account.id,
+            AdminLoginIdentity.provider == "wecom",
+        )
+        .first()
+        is None
+    )
+
+
+def _handle_legacy_identity_collision(
+    db: Session,
+    *,
+    tenant_id: str,
+    subject: str,
+    actor: AdminUser,
+    release_requested: bool,
+    exclude_admin_user_id: Optional[str] = None,
+) -> Optional[str]:
+    """Returns the released legacy account's id if a release happened,
+    None if there was no collision to begin with. Raises HTTPException for
+    every other outcome: conflict shown but not released (default —
+    release_requested is opt-in, never implied), release denied to a
+    non-owner, or release refused because the colliding account isn't a
+    confirmed-safe legacy orphan. Never includes the raw WeCom subject in
+    any response — only the colliding account's id and name, exactly like
+    the suspected-match hint.
+    """
+    colliding = _find_wecom_user_id_collision(
+        db, tenant_id, subject, exclude_admin_user_id=exclude_admin_user_id
+    )
+    if colliding is None:
+        return None
+    if not release_requested:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "legacy_identity_conflict",
+                "conflicting_account": {"id": colliding.id, "name": colliding.name},
+            },
+        )
+    if actor.role != "owner":
+        raise HTTPException(status_code=403, detail="owner_required_for_legacy_release")
+    if not _is_releasable_legacy_orphan(db, colliding):
+        raise HTTPException(status_code=409, detail="legacy_release_not_permitted")
+    # Clears only the stale compat value so it stops colliding — never the
+    # AdminUser row itself, its role, status, name, email, or audit history.
+    colliding.wecom_user_id = f"__legacy_ar__:{uuid.uuid4()}"
+    return colliding.id
+
+
+class _LinkAccessRequestBody(BaseModel):
+    admin_user_id: str
+    release_conflicting_legacy_account: bool = False
+
+
+@users_router.post("/access-requests/{request_id}/link")
+def link_access_request(
+    request_id: str,
+    body: _LinkAccessRequestBody,
+    auth: tuple[AdminUser, str] = Depends(require_role("admin", "owner")),
+    db: Session = Depends(get_db),
+):
+    """Bind a pending request to an explicitly chosen, existing account.
+
+    Never triggered by an email or name match — the caller must name the
+    exact target account id (AC-3). The owner-boundary check reuses
+    _require_owner_authority unchanged: with no role/status change
+    proposed, it reduces to exactly "a non-owner actor cannot touch an
+    owner-role target", which is the correct rule here too — attaching a
+    new login path to an owner account is still an operation on that
+    account.
+    """
+    current_user, tenant_id = auth
+    request = _resolve_pending_request(db, request_id, tenant_id)
+    target = _resolve_target(db, body.admin_user_id, tenant_id)
+    _require_owner_authority(db, actor=current_user, target=target)
+
+    existing_identity = (
+        db.query(AdminLoginIdentity)
+        .filter(
+            AdminLoginIdentity.admin_user_id == target.id,
+            AdminLoginIdentity.provider == "wecom",
+        )
+        .first()
+    )
+    if existing_identity is not None:
+        raise HTTPException(status_code=409, detail="account_already_has_login_identity")
+
+    released_legacy_account_id = _handle_legacy_identity_collision(
+        db,
+        tenant_id=tenant_id,
+        subject=request.subject,
+        actor=current_user,
+        release_requested=body.release_conflicting_legacy_account,
+        exclude_admin_user_id=target.id,
+    )
+
+    if not _claim_pending_request(db, request_id):
+        db.rollback()
+        raise HTTPException(status_code=409, detail="access_request_already_resolved")
+
+    now = datetime.now(timezone.utc)
+    request.resolution = "linked"
+    request.resolved_admin_user_id = target.id
+    request.resolved_by_admin_user_id = current_user.id
+    request.resolved_at = now
+    db.add(
+        AdminLoginIdentity(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            provider="wecom",
+            subject=request.subject,
+            admin_user_id=target.id,
+        )
+    )
+    # Uniqueness is verified above; only after that check passes does the
+    # legacy compatibility field get synced (never the other way around —
+    # see AdminLoginIdentity's model docstring).
+    target.wecom_user_id = request.subject
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="identity_conflict")
+
+    audit_detail = {"linked_admin_user_id": target.id}
+    if released_legacy_account_id:
+        audit_detail["released_legacy_account_id"] = released_legacy_account_id
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=current_user.id,
+        action=AuditAction.USER_ACCESS_REQUEST_LINKED,
+        object_type=AuditObjectType.ACCESS_REQUEST,
+        object_id=request.id,
+        detail=audit_detail,
+    )
+    db.commit()
+    return _user_dto(target)
+
+
+class _CreateAccountFromRequestBody(BaseModel):
+    role: str
+    status: str = "active"
+    name: Optional[str] = None
+    release_conflicting_legacy_account: bool = False
+
+
+@users_router.post("/access-requests/{request_id}/create-account")
+def create_account_from_access_request(
+    request_id: str,
+    body: _CreateAccountFromRequestBody,
+    auth: tuple[AdminUser, str] = Depends(require_role("admin", "owner")),
+    db: Session = Depends(get_db),
+):
+    """Create a brand-new account from a pending request and bind it.
+
+    The requester never gets to choose their own role or status (AC-4) —
+    both are explicit choices made by the reviewing owner/admin, defaulted
+    to nothing (role is required) so a client can't silently omit it and
+    get an unintended default.
+    """
+    if body.role not in _USER_ROLES:
+        raise HTTPException(status_code=400, detail="invalid_role")
+    if body.status not in ("active", "disabled"):
+        raise HTTPException(status_code=400, detail="invalid_status")
+    current_user, tenant_id = auth
+    if body.role == "owner" and current_user.role != "owner":
+        raise HTTPException(status_code=403, detail="owner_role_requires_owner")
+
+    request = _resolve_pending_request(db, request_id, tenant_id)
+
+    released_legacy_account_id = _handle_legacy_identity_collision(
+        db,
+        tenant_id=tenant_id,
+        subject=request.subject,
+        actor=current_user,
+        release_requested=body.release_conflicting_legacy_account,
+    )
+
+    if not _claim_pending_request(db, request_id):
+        db.rollback()
+        raise HTTPException(status_code=409, detail="access_request_already_resolved")
+
+    now = datetime.now(timezone.utc)
+    new_user = AdminUser(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
+        wecom_user_id=request.subject,
+        name=body.name or request.display_name,
+        email=request.email_hint,
+        role=body.role,
+        status=body.status,
+    )
+    db.add(new_user)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="identity_conflict")
+
+    request.resolution = "created"
+    request.resolved_admin_user_id = new_user.id
+    request.resolved_by_admin_user_id = current_user.id
+    request.resolved_at = now
+    db.add(
+        AdminLoginIdentity(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            provider="wecom",
+            subject=request.subject,
+            admin_user_id=new_user.id,
+        )
+    )
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="identity_conflict")
+
+    audit_detail = {"created_admin_user_id": new_user.id, "role": body.role, "status": body.status}
+    if released_legacy_account_id:
+        audit_detail["released_legacy_account_id"] = released_legacy_account_id
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=current_user.id,
+        action=AuditAction.USER_ACCESS_REQUEST_ACCOUNT_CREATED,
+        object_type=AuditObjectType.ACCESS_REQUEST,
+        object_id=request.id,
+        detail=audit_detail,
+    )
+    db.commit()
+    return _user_dto(new_user)

@@ -341,7 +341,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 87  # RND-321: +1 user-role management endpoint.
+    assert route_count == 90  # RND-321: +3 access-request review endpoints.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -367,6 +367,9 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/settings",
             "/admin/settings/init",
             "/admin/users",
+            "/api/admin/access-requests",
+            "/api/admin/access-requests/{request_id}/link",
+            "/api/admin/access-requests/{request_id}/create-account",
             "/api/admin/audit-logs",
             "/api/admin/dashboard",
             "/api/admin/export/approve",
@@ -547,6 +550,19 @@ def test_route_snapshot_with_real_model_names() -> None:
         ),
         ("/api/admin/sync-now", frozenset({"POST"}), "SyncNowResponse", "None"),
         ("/api/admin/sync-status", frozenset({"GET"}), "SyncStatusResponse", "None"),
+        ("/api/admin/access-requests", frozenset({"GET"}), "None", "None"),
+        (
+            "/api/admin/access-requests/{request_id}/link",
+            frozenset({"POST"}),
+            "None",
+            "None",
+        ),
+        (
+            "/api/admin/access-requests/{request_id}/create-account",
+            frozenset({"POST"}),
+            "None",
+            "None",
+        ),
         ("/api/admin/users", frozenset({"GET"}), "AdminUserListOut", "None"),
         ("/api/admin/users/accept", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite", frozenset({"POST"}), "None", "None"),

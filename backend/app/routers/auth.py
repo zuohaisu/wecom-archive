@@ -36,6 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
@@ -54,7 +55,14 @@ from app.auth import (
     strict_int_equals,
     verify_password,
 )
-from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
+from app.db.models import (
+    AdminAccessRequest,
+    AdminLoginIdentity,
+    AdminSession,
+    AdminUser,
+    Tenant,
+    TenantWecomConfig,
+)
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
 from app.schemas.auth import (
@@ -1036,6 +1044,83 @@ def wecom_qr_login():
 # ---------------------------------------------------------------------------
 
 
+def _record_access_request(
+    db: Session,
+    *,
+    tenant_id: str,
+    subject: str,
+    display_name: Optional[str],
+    email_hint: Optional[str],
+) -> AdminAccessRequest:
+    """Idempotently get-or-create the pending access request for an
+    unbound WeCom identity. Never creates an AdminUser or session.
+
+    Repeat scans of the same unresolved identity are common (an employee
+    trying again, or re-opening the login page) and must not pile up
+    duplicate requests for an owner/admin to sort through — the read here
+    is a fast path for that common case. The database's partial unique
+    index (`uq_admin_access_requests_pending_tenant_provider_subject`) is
+    the actual idempotency guarantee: two concurrent scans can both read
+    "no existing request" and both attempt to insert, and only the
+    database can arbitrate that race safely. On a conflict, the loser
+    re-reads and returns the winner's row instead of erroring.
+    """
+    existing = (
+        db.query(AdminAccessRequest)
+        .filter(
+            AdminAccessRequest.tenant_id == tenant_id,
+            AdminAccessRequest.provider == "wecom",
+            AdminAccessRequest.subject == subject,
+            AdminAccessRequest.status == "pending",
+        )
+        .first()
+    )
+    if existing is not None:
+        return existing
+
+    request = AdminAccessRequest(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
+        provider="wecom",
+        subject=subject,
+        display_name=display_name,
+        email_hint=email_hint,
+        status="pending",
+    )
+    db.add(request)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.query(AdminAccessRequest)
+            .filter(
+                AdminAccessRequest.tenant_id == tenant_id,
+                AdminAccessRequest.provider == "wecom",
+                AdminAccessRequest.subject == subject,
+                AdminAccessRequest.status == "pending",
+            )
+            .first()
+        )
+        if existing is None:
+            # Only the partial-unique-index conflict is expected here; any
+            # other integrity error is a real bug and must surface, not be
+            # silently swallowed into a phantom "existing" lookup that
+            # will also come back empty.
+            raise
+        return existing
+
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=None,
+        action=AuditAction.USER_ACCESS_REQUESTED,
+        object_type=AuditObjectType.ACCESS_REQUEST,
+        object_id=request.id,
+    )
+    return request
+
+
 def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
     """Exchange a validated callback code and issue the tenant-bound session.
 
@@ -1145,7 +1230,16 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
 
     display_name = user_data.get("name") or wecom_user_id
 
-    # 6-8. Resolve tenant, upsert admin_users, create session row.
+    # RND-321: an optional human-review clue for the access-request screen
+    # only — never used for automatic matching/binding (see AC-3). WeCom
+    # does not guarantee either field is present (both depend on the
+    # employee's own visibility settings and the app's approved scope), so
+    # this must never block the request path; biz_mail is preferred over
+    # the legacy email field when both are present.
+    raw_email_hint = user_data.get("biz_mail") or user_data.get("email")
+    email_hint = raw_email_hint.strip().lower() if isinstance(raw_email_hint, str) and raw_email_hint.strip() else None
+
+    # 6-8. Resolve tenant, look up the login identity, create session row.
     # Wrapped so that any DB failure denies the login (redirect, no cookie
     # set) instead of surfacing an uncaught 500 from a half-completed write.
     try:
@@ -1164,60 +1258,59 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
 
         tenant_id: str = config.tenant_id
 
-        # 7. Upsert admin_users
+        # 7. Resolve the login identity. This table — not
+        # AdminUser.wecom_user_id — is authoritative for "who may this
+        # scan sign a session for" (see AdminLoginIdentity's docstring and
+        # RND-321 product decision #4): an unrecognized WeCom identity
+        # must never upsert an AdminUser directly. WeCom proving someone
+        # is a current employee is a fact about their employment, not a
+        # grant of console access.
         now = datetime.now(timezone.utc)
-        user = (
-            db.query(AdminUser)
+        identity = (
+            db.query(AdminLoginIdentity)
             .filter(
-                AdminUser.tenant_id == tenant_id,
-                AdminUser.wecom_user_id == wecom_user_id,
+                AdminLoginIdentity.tenant_id == tenant_id,
+                AdminLoginIdentity.provider == "wecom",
+                AdminLoginIdentity.subject == wecom_user_id,
             )
             .first()
         )
-        if user is None:
-            user = AdminUser(
-                id=str(uuid.uuid4()),
-                tenant_id=tenant_id,
-                wecom_user_id=wecom_user_id,
-                name=display_name,
-                # WeCom proves employment, not a right to access this
-                # conversation-archive console.  Preserve the employee's
-                # identity as a disabled access request; an owner/admin must
-                # explicitly choose a role and enable the account first.
-                role="readonlyaudit",
-                status="disabled",
-                invite_status="access_requested",
-            )
-            db.add(user)
-            write_audit(
+        if identity is None:
+            _record_access_request(
                 db,
                 tenant_id=tenant_id,
-                admin_user_id=None,
-                action=AuditAction.USER_ACCESS_REQUESTED,
-                object_type=AuditObjectType.USER,
-                object_id=user.id,
+                subject=wecom_user_id,
+                display_name=display_name,
+                email_hint=email_hint,
             )
             db.commit()
             logger.info("wecom_callback: access request recorded; approval required")
             return RedirectResponse("/admin/login?error=access_pending", status_code=302)
-        else:
-            # RND-321 QA-001: WeCom reporting the employee as active (checked
-            # above) is a fact about their employment, not a grant of access
-            # to this app. An account this app has itself suspended, or one
-            # still sitting in invite_status="pending" (created disabled —
-            # see _create_pending_invite — precisely so a bare WeCom login
-            # can't skip password setup), must still fail closed. Without
-            # this check any admin-disabled or not-yet-accepted account
-            # regains a session the moment its WeCom identity scans a QR.
-            if user.status != "active":
-                logger.warning(
-                    "wecom_callback: account is not active in this app, rejecting login"
-                )
-                if user.invite_status == "access_requested":
-                    return RedirectResponse("/admin/login?error=access_pending", status_code=302)
-                return RedirectResponse("/admin/login?error=user_inactive", status_code=302)
-            user.last_login_at = now
-            user.name = display_name
+
+        user = db.query(AdminUser).filter(AdminUser.id == identity.admin_user_id).first()
+        if user is None:
+            # A bound identity pointing at a missing account should be
+            # unreachable — accounts are disabled, never deleted, by every
+            # other path in this app — but fail closed rather than 500 if
+            # it somehow happens.
+            logger.error("wecom_callback: login identity points at a missing account")
+            return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
+
+        # RND-321 QA-001: an account this app has itself suspended, or one
+        # still sitting in invite_status="pending" (created disabled — see
+        # _create_pending_invite — precisely so a bare WeCom login can't
+        # skip password setup), must still fail closed even though WeCom
+        # reports the employee as active. Without this check any
+        # admin-disabled or not-yet-accepted account regains a session the
+        # moment its bound WeCom identity scans a QR.
+        if user.status != "active":
+            logger.warning(
+                "wecom_callback: account is not active in this app, rejecting login"
+            )
+            return RedirectResponse("/admin/login?error=user_inactive", status_code=302)
+
+        user.last_login_at = now
+        user.name = display_name
         db.flush()
 
         # 8. Create session row

@@ -17,7 +17,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.db.models import AdminSession, AdminUser, Base, Tenant, TenantWecomConfig
+from app.db.models import (
+    AdminAccessRequest,
+    AdminLoginIdentity,
+    AdminSession,
+    AdminUser,
+    Base,
+    Tenant,
+    TenantWecomConfig,
+)
 from tests._node_runner import run_node
 
 
@@ -58,7 +66,14 @@ def db_engine():
     )
     Base.metadata.create_all(
         engine,
-        tables=[Tenant.__table__, TenantWecomConfig.__table__, AdminUser.__table__, AdminSession.__table__],
+        tables=[
+            Tenant.__table__,
+            TenantWecomConfig.__table__,
+            AdminUser.__table__,
+            AdminSession.__table__,
+            AdminLoginIdentity.__table__,
+            AdminAccessRequest.__table__,
+        ],
     )
     yield engine
     engine.dispose()
@@ -111,7 +126,13 @@ def _seed_config(engine, corp_id: str = "corp-qr") -> None:
 
 
 def _add_active_qr_user(engine, *, role: str = "admin") -> None:
-    """Pre-authorize the employee returned by ``_WeComClient`` for login."""
+    """Pre-authorize the employee returned by ``_WeComClient`` for login.
+
+    RND-321 identity-binding rework: an AdminUser with wecom_user_id set is
+    no longer sufficient by itself — the callback resolves identity via
+    AdminLoginIdentity, so this helper must also bind one, exactly as the
+    access-request "link to existing account" review action would.
+    """
     with Session(engine) as db:
         db.add(
             AdminUser(
@@ -121,6 +142,21 @@ def _add_active_qr_user(engine, *, role: str = "admin") -> None:
                 name="QR User",
                 role=role,
                 status="active",
+            )
+        )
+        # A referencing row's INSERT must not race the row it references —
+        # a fixture with real FK enforcement on (as production Postgres
+        # always has) needs this explicit ordering; SQLAlchemy's automatic
+        # insert-dependency sort doesn't reliably provide it (confirmed via
+        # a minimal repro against this exact model pair).
+        db.flush()
+        db.add(
+            AdminLoginIdentity(
+                id="login-identity-pre-authorized-qr-user",
+                tenant_id="tenant-qr",
+                provider="wecom",
+                subject="qr-user",
+                admin_user_id="pre-authorized-qr-user",
             )
         )
         db.commit()
@@ -272,8 +308,13 @@ def test_qr_callback_rejects_invalid_and_reused_state_without_cookie(client, mon
     assert "session_id" not in reused.headers.get("set-cookie", "")
 
 
-def test_qr_callback_creates_disabled_access_request_without_session(client, db_engine, monkeypatch) -> None:
-    """A verified employee is not automatically authorized as an admin."""
+def test_qr_callback_creates_pending_access_request_without_admin_user_or_session(
+    client, db_engine, monkeypatch
+) -> None:
+    """RND-321 identity-binding rework, product decision #4: an unbound
+    verified employee must produce an access request, never an AdminUser.
+    Repeat scans of the same identity are idempotent — one request, not
+    one per scan (AC-1)."""
     _set_wecom_env(monkeypatch)
     _seed_config(db_engine)
     from app.routers import auth as auth_router
@@ -300,11 +341,102 @@ def test_qr_callback_creates_disabled_access_request_without_session(client, db_
     assert "session_id" not in response.headers.get("set-cookie", "")
     assert "session_id" not in repeated.headers.get("set-cookie", "")
     with Session(db_engine) as db:
-        user = db.query(AdminUser).filter_by(tenant_id="tenant-qr", wecom_user_id="qr-user").one()
-        assert user.role == "readonlyaudit"
-        assert user.status == "disabled"
-        assert user.invite_status == "access_requested"
+        assert db.query(AdminUser).filter_by(tenant_id="tenant-qr", wecom_user_id="qr-user").count() == 0
         assert db.query(AdminSession).count() == 0
+        assert db.query(AdminLoginIdentity).count() == 0
+
+        requests = (
+            db.query(AdminAccessRequest)
+            .filter_by(tenant_id="tenant-qr", provider="wecom", subject="qr-user")
+            .all()
+        )
+        assert len(requests) == 1, "repeat scan must not create a second request"
+        request = requests[0]
+        assert request.status == "pending"
+        assert request.display_name == "QR User"
+        # _WeComClient's user/get mock returns no biz_mail/email — the
+        # request must still be created (AC-2's "missing email must not
+        # block the request" requirement), just without a matching hint.
+        assert request.email_hint is None
+        assert request.resolved_admin_user_id is None
+
+
+def test_access_request_captures_biz_mail_over_email_as_a_hint_only(
+    client, db_engine, monkeypatch
+) -> None:
+    """AC-3: biz_mail is preferred over the legacy email field, normalized
+    (stripped/lowercased), and captured only as a *hint* — this test does
+    not (and must not) exercise any automatic account matching from it."""
+    _set_wecom_env(monkeypatch)
+    _seed_config(db_engine)
+    from app.routers import auth as auth_router
+
+    class _EmailClient(_WeComClient):
+        def get(self, url, params=None):
+            if "getuserinfo" in url:
+                return _Response({"errcode": 0, "UserId": "qr-user"})
+            if "user/get" in url:
+                return _Response(
+                    {
+                        "errcode": 0,
+                        "userid": "qr-user",
+                        "status": 1,
+                        "name": "QR User",
+                        "email": "wrong-field@example.test",
+                        "biz_mail": "  Preferred.Field@Example.Test  ",
+                    }
+                )
+            raise AssertionError(f"unexpected WeCom URL: {url}")
+
+    with patch.object(auth_router, "get_wecom_token", return_value="token"), patch.object(
+        auth_router.httpx, "Client", _EmailClient
+    ):
+        state = client.get("/api/auth/wecom/qr/login", follow_redirects=False).headers["location"].split("state=")[1].split("&")[0]
+        client.get(f"/api/auth/wecom/qr/callback?code=x&state={state}", follow_redirects=False)
+
+    with Session(db_engine) as db:
+        request = db.query(AdminAccessRequest).filter_by(
+            tenant_id="tenant-qr", provider="wecom", subject="qr-user"
+        ).one()
+        assert request.email_hint == "preferred.field@example.test"
+
+
+def test_access_requests_are_isolated_per_tenant(client, db_engine, monkeypatch) -> None:
+    """AC-3/AC-6: the same WeCom subject scanning against two different
+    tenant configs must produce two independent, tenant-scoped requests —
+    never a cross-tenant match or a single shared row."""
+    _set_wecom_env(monkeypatch)
+    with Session(db_engine) as db:
+        db.add(Tenant(id="tenant-other", name="Other tenant", slug="other", is_active=True))
+        db.add(
+            TenantWecomConfig(
+                id="config-other",
+                tenant_id="tenant-other",
+                corp_id="corp-other",
+                agent_id="100002",
+                app_secret="test-only",
+                is_active=True,
+            )
+        )
+        db.commit()
+    _seed_config(db_engine, corp_id="corp-qr")
+    from app.routers import auth as auth_router
+
+    with patch.object(auth_router, "get_wecom_token", return_value="token"), patch.object(
+        auth_router.httpx, "Client", _WeComClient
+    ):
+        state_a = client.get("/api/auth/wecom/qr/login", follow_redirects=False).headers["location"].split("state=")[1].split("&")[0]
+        client.get(f"/api/auth/wecom/qr/callback?code=x&state={state_a}", follow_redirects=False)
+
+        monkeypatch.setenv("WECOM_CORP_ID", "corp-other")
+        state_b = client.get("/api/auth/wecom/qr/login", follow_redirects=False).headers["location"].split("state=")[1].split("&")[0]
+        client.get(f"/api/auth/wecom/qr/callback?code=y&state={state_b}", follow_redirects=False)
+
+    with Session(db_engine) as db:
+        requests = db.query(AdminAccessRequest).filter_by(provider="wecom", subject="qr-user").all()
+        assert len(requests) == 2
+        tenant_ids = {r.tenant_id for r in requests}
+        assert tenant_ids == {"tenant-qr", "tenant-other"}
 
 
 def test_qr_callback_creates_tenant_bound_session_only_for_pre_authorized_user(
@@ -603,6 +735,18 @@ def test_qr_callback_rejects_internally_disabled_existing_account(client, db_eng
                 status="disabled",
             )
         )
+        # A bound identity — otherwise this scan would resolve as
+        # *unbound* and produce an access request instead of exercising
+        # the "bound but not active" fail-closed path this test targets.
+        db.add(
+            AdminLoginIdentity(
+                id="login-identity-disabled-user",
+                tenant_id="tenant-qr",
+                provider="wecom",
+                subject="qr-user",
+                admin_user_id="disabled-user",
+            )
+        )
         db.commit()
 
     from app.routers import auth as auth_router
@@ -645,6 +789,18 @@ def test_qr_callback_rejects_a_pending_invite_that_never_accepted(client, db_eng
                 status="disabled",
                 invite_status="pending",
                 invite_token="unused-invite-token",
+            )
+        )
+        # See test_qr_callback_rejects_internally_disabled_existing_account
+        # — a bound identity is required to reach the "not active" branch
+        # at all rather than "unbound".
+        db.add(
+            AdminLoginIdentity(
+                id="login-identity-pending-user",
+                tenant_id="tenant-qr",
+                provider="wecom",
+                subject="qr-user",
+                admin_user_id="pending-user",
             )
         )
         db.commit()

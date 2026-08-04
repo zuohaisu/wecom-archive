@@ -316,6 +316,104 @@ class AdminSession(Base):
     is_revoked = Column(Boolean, nullable=False, default=False)
 
 
+class AdminLoginIdentity(Base):
+    """RND-321: which AdminUser a verified external login identity (a
+    WeCom UserId, scoped to one tenant) is authorized to sign a session
+    for.
+
+    This is the source of truth for "is this scanned/OAuth'd identity
+    allowed in" — a callback looks up (tenant_id, provider, subject) here,
+    never by scanning AdminUser.wecom_user_id directly. That legacy column
+    is kept in sync as a read-only compatibility field only *after* a bind
+    succeeds here (see `_bind_login_identity` in app/routers/auth.py),
+    never the other way around, so it can never become a second, drifting
+    source of truth for who is allowed to log in.
+    """
+
+    __tablename__ = "admin_login_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "provider", "subject",
+            name="uq_login_identity_tenant_provider_subject",
+        ),
+        # At most one identity of a given provider per account. Nothing in
+        # this ticket's scope needs an account to hold two WeCom identities;
+        # relaxing this later needs its own tested reason, not a silent
+        # side effect of some other change.
+        UniqueConstraint(
+            "admin_user_id", "provider",
+            name="uq_login_identity_admin_user_provider",
+        ),
+        Index("ix_admin_login_identities_admin_user_id", "admin_user_id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    provider = Column(Text, nullable=False)
+    subject = Column(Text, nullable=False)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    verified_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AdminAccessRequest(Base):
+    """RND-321: a verified-but-unbound external identity asking for
+    console access. No AdminUser exists for this yet — an owner/admin must
+    explicitly link it to an existing account or create a new one before
+    any session can ever be issued for it.
+
+    The partial unique index enforces "one open request per identity" —
+    repeat scans while pending find and return the same row — without
+    blocking a *new* request once the previous one is resolved (linked or
+    used to create an account), since by then the identity is bound and
+    this code path is never reached for it again.
+    """
+
+    __tablename__ = "admin_access_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'resolved')",
+            name="ck_admin_access_requests_status_valid",
+        ),
+        CheckConstraint(
+            "resolution IS NULL OR resolution IN ('linked', 'created')",
+            name="ck_admin_access_requests_resolution_valid",
+        ),
+        Index("ix_admin_access_requests_tenant_status", "tenant_id", "status"),
+        Index(
+            "uq_admin_access_requests_pending_tenant_provider_subject",
+            "tenant_id", "provider", "subject",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    provider = Column(Text, nullable=False)
+    subject = Column(Text, nullable=False)
+    # Human-review clues only — never used for automatic matching/binding.
+    display_name = Column(Text, nullable=True)
+    email_hint = Column(Text, nullable=True)
+    status = Column(
+        Enum("pending", "resolved", name="admin_access_request_status"),
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    resolution = Column(Text, nullable=True)
+    resolved_admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=True)
+    resolved_by_admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class AuditLog(Base):
     """Immutable, append-only audit trail (RND-293 / A7-1).
 
