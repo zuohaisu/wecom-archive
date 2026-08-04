@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>外部联系人 Demo｜康冠时代企业微信会话存档</title>
+  <link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/demo.css">
+</head>
+<body data-demo-page="contacts">
+  <div class="demo-shell">
+    <aside class="demo-sidebar" data-demo-nav></aside>
+    <div class="demo-main">
+      <header class="demo-topbar" data-demo-topbar></header>
+      <div class="demo-notice" role="status"><span class="demo-notice-mark" aria-hidden="true">i</span><span><b>静态演示数据</b>：下方人员与企业均为虚构，用于展示外部联系人、关联员工和会话摘要的呈现方式。</span></div>
+      <main class="demo-page">
+        <div class="demo-page-head">
+          <div><div class="demo-kicker">通讯录</div><h1>外部联系人</h1><p>将客户资料、关联员工和最近会话聚合在一起，帮助授权人员从联系人快速进入对应的沟通记录。</p></div>
+          <div class="demo-page-actions"><button class="demo-btn" type="button" data-demo-noop>演示筛选</button><a class="demo-btn demo-btn-primary" href="conversations.html">查看会话</a></div>
+        </div>
+
+        <section class="demo-contact-layout">
+          <div class="demo-table-wrap">
+            <table class="demo-table">
+              <thead><tr><th>外部联系人</th><th>关联企业</th><th>关联员工</th><th>最近会话</th><th>归档状态</th></tr></thead>
+              <tbody>
+                <tr><td><span class="demo-cell-main">程远</span><span class="demo-cell-sub">外部 ID：demo_contact_001</span></td><td>星河示例科技</td><td>林舟、苏晴</td><td>今天 10:42</td><td><span class="demo-tag demo-tag-green">已归档</span></td></tr>
+                <tr><td><span class="demo-cell-main">周宁</span><span class="demo-cell-sub">外部 ID：demo_contact_002</span></td><td>云帆演示贸易</td><td>林舟</td><td>昨天 16:14</td><td><span class="demo-tag demo-tag-green">已归档</span></td></tr>
+                <tr><td><span class="demo-cell-main">何安</span><span class="demo-cell-sub">外部 ID：demo_contact_003</span></td><td>样例售后服务中心</td><td>赵可、苏晴</td><td>周一 14:07</td><td><span class="demo-tag demo-tag-green">已归档</span></td></tr>
+                <tr><td><span class="demo-cell-main">陈朔</span><span class="demo-cell-sub">外部 ID：demo_contact_004</span></td><td>南风模拟制造</td><td>苏晴</td><td>07-29 11:23</td><td><span class="demo-tag demo-tag-blue">有附件</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <aside class="demo-card demo-contact-profile" aria-label="联系人详情示例">
+            <div class="demo-profile-head"><span class="demo-avatar mint">程</span><div><div class="demo-profile-name">程远</div><div class="demo-profile-company">星河示例科技 · 外部联系人</div></div></div>
+            <section class="demo-profile-block"><h3>关联员工</h3><p>林舟 · 客户经理<br>苏晴 · 项目支持</p></section>
+            <section class="demo-profile-block"><h3>最近会话</h3><p>星河项目协作群<br><span class="demo-meta">最后活跃：今天 10:42</span></p></section>
+            <section class="demo-profile-block"><h3>访问提示</h3><p>联系人详情和关联会话只向具有相应授权范围的用户展示。</p></section>
+            <button class="demo-btn demo-btn-primary" type="button" style="width:100%;margin-top:16px" data-demo-noop>查看关联会话</button>
+          </aside>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="assets/demo-data.js"></script>
+  <script src="assets/demo-shell.js"></script>
+</body>
+</html>
