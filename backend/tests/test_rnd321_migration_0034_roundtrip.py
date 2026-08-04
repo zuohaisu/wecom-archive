@@ -11,8 +11,8 @@ upgrade/downgrade round trip via Alembic against DATABASE_URL, and asserts
 the account's data is byte-for-byte unchanged afterward.
 
 Skips (does not fail) when DATABASE_URL is not set or the target database
-is not already at head 0034, matching the skip-gracefully convention used
-by test_tenant_foundation.py's own migration-dependent tests.
+is not already at the current Alembic head, matching the skip-gracefully
+convention used by test_tenant_foundation.py's own migration-dependent tests.
 """
 from __future__ import annotations
 
@@ -48,8 +48,11 @@ def test_migration_0034_roundtrip_preserves_legacy_access_requested_account_data
 
     with engine.connect() as conn:
         current = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    if current != head or head != "0034":
-        pytest.skip(f"Database not at head 0034 (at {current!r}, head {head!r}) — run alembic upgrade head first")
+    if current != head:
+        pytest.skip(
+            f"Database not at Alembic head (at {current!r}, head {head!r}) — "
+            "run alembic upgrade head first"
+        )
 
     # tenants.id / admin_users.id are varchar(36) — plain UUIDs, not
     # prefixed, to fit exactly; wecom_user_id (varchar(64)) has room.

@@ -9,9 +9,9 @@ Related issues: RND-75 (initial schema), RND-111 (tenant foundation), RND-156 (m
 
 ## Overview
 
-Ten tables cover the full lifecycle from encrypted pull to searchable archive,
-plus the tenant-aware foundation for employee login (RND-110, shipped) and
-future multi-tenant SaaS operation:
+Core archive, tenant, and identity tables cover the lifecycle from encrypted
+pull to searchable archive, plus the tenant-aware foundation for employee
+login (RND-110, shipped) and future multi-tenant SaaS operation:
 
 | Table | Purpose |
 |---|---|
@@ -25,6 +25,9 @@ future multi-tenant SaaS operation:
 | `archive_message_recipients` | Per-receiver lookup rows derived from `tolist` |
 | `media_files` | Download state for media attachments (tenant-scoped via `UNIQUE(tenant_id, sdkfileid)`) |
 | `contacts` | Lightweight WeCom user identity cache |
+| `external_contacts` | Tenant-scoped external-contact compatibility/profile record |
+| `external_contact_follows` | Employee-scoped external-contact remarks and follow state |
+| `external_contact_nickname_history` | Customer nickname transition audit timeline |
 
 ---
 
@@ -258,6 +261,35 @@ Lightweight cache of WeCom user identities encountered in the archive. Populated
 | `updated_at` | timestamptz | last update |
 
 Indexes: unique on `(tenant_id, wecom_userid)` — tenant-scoped deduplication.
+
+---
+
+### External-contact identity (RND-170)
+
+`external_contacts` is one customer-level record per
+`(tenant_id, external_userid)`. Its pre-existing `name` column is a legacy
+compatibility display label and can contain an employee's old local remark;
+it is **not** treated as the customer's real nickname. The current customer
+nickname instead lives in `current_nickname_raw`,
+`current_nickname_normalized`, `current_nickname_display`, and
+`current_nickname_observed_at`.
+
+`external_contact_follows` has one unique row per
+`(tenant_id, external_userid, follow_userid)`. It stores that employee's raw
+and normalized `remark`, `is_active`, and observation time. Its composite
+foreign key points to the tenant-scoped external-contact record, preventing a
+remark from crossing tenants or customers.
+
+`external_contact_nickname_history` records each **normalized state
+transition** after the first authoritative nickname observation. It retains
+old/new raw, normalized, and safe-display values plus `observed_at`; a
+valid-to-blank transition is a real history event, while repeated equivalent
+normalized values are not duplicated. Migration `0035` intentionally does not
+backfill the new nickname fields from legacy `external_contacts.name`, because
+that value's historical meaning is ambiguous.
+
+Indexes include tenant/contact lookup indexes and `pg_trgm` GIN indexes for
+current nickname, active remark, and historical nickname search.
 
 ---
 

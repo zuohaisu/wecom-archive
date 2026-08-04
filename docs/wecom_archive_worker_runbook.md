@@ -33,6 +33,20 @@ the durable compensation path.
 The 15-minute stagger exceeds the required 10-minute offset. Callback-driven
 archive work remains the low-latency path; the timer is not removed.
 
+### External-contact identity reconciliation (RND-170)
+
+When `WECOM_EXTERNAL_CONTACT_SECRET` is configured, a validated
+`change_external_contact` callback queues a bounded, coalesced refresh for
+that one customer. The callback still acknowledges independently of that
+refresh and the archive worker. On every timer-sourced archive run, after
+sync/decrypt succeeds, the entrypoint also runs a best-effort full
+external-contact reconciliation. This is the durable fallback for missed,
+coalesced, or failed callback refreshes; a failed identity reconciliation does
+not invalidate a successful archive sync/decrypt run.
+
+Never put customer IDs, remarks, nicknames, callback ciphertext, or secrets
+in journal queries, tickets, or manual command arguments.
+
 ## Shared lock setup
 
 Run once as root:
@@ -167,6 +181,7 @@ run. Record only aggregates; do not export messages or media identifiers.
 | `media_trigger=dispatch-failed` | Archive data is already committed; inspect safe journal categories and rely on the media timer. |
 | Archive sync/decrypt failure | No archive-complete media dispatch occurs. Investigate the archive worker journal; cursor/idempotency semantics are unchanged. |
 | Callback missed or callback dispatch fails | The archive reconciliation timer eventually re-pulls through the same shared entrypoint and lock. |
+| `external_contact_reconciliation status=failed` / `error` | Archive sync/decrypt may still have succeeded. Confirm `WECOM_EXTERNAL_CONTACT_SECRET` is configured and rely on the next timer run; do not retry with customer IDs in shell history. |
 
 Never paste callback query strings, `.env` contents, token/secret values,
 message content, `sdkfileid`, signed URLs, or storage paths into tickets or

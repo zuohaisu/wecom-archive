@@ -1,4 +1,4 @@
-"""Tenant-scoped WeCom external-contact synchronization service (RND-287)."""
+"""Tenant-scoped WeCom external-contact synchronization service (RND-287/RND-170)."""
 
 from __future__ import annotations
 
@@ -22,6 +22,11 @@ from app.db.models import (
     ExternalContact,
     TenantWecomConfig,
 )
+from app.services.external_contact_identity import (
+    IdentitySyncResult,
+    safe_display_nickname,
+    sync_external_contact_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,18 @@ class RunSummary:
     updated: int = 0
     skipped: int = 0
     failed: int = 0
+    nickname_changes: int = 0
+    follow_relationship_changes: int = 0
+
+
+@dataclass(frozen=True)
+class RefreshResult:
+    """Safe per-contact refresh outcome; it never exposes contact PII."""
+
+    found: bool
+    inserted: bool = False
+    nickname_changed: bool = False
+    follow_relationship_changes: int = 0
 
 
 def _clean(value: object) -> Optional[str]:
@@ -74,23 +91,106 @@ def _tag_ids(follow_user: dict) -> list[str]:
 
 
 def _payload_values(detail: dict, tag_names: dict[str, str]) -> dict:
-    """Normalize a WeCom detail response without retaining its raw PII payload."""
+    """Extract RND-287 compatibility/profile values without conflating identity.
+
+    ``name`` remains a one-way legacy display seed: old consumers can retain
+    their existing remark-first behavior while RND-170 stores the current
+    real nickname and every employee remark in dedicated fields.
+    """
     external = detail.get("external_contact") or {}
     follows = detail.get("follow_user") or []
     follows = [item for item in follows if isinstance(item, dict)]
     primary = follows[0] if follows else {}
 
-    name = next((_clean(item.get("remark")) for item in follows if _clean(item.get("remark"))), None)
-    name = name or _clean(external.get("name"))
+    legacy_name = next(
+        (safe_display_nickname(item.get("remark")) for item in follows if safe_display_nickname(item.get("remark"))),
+        None,
+    )
+    legacy_name = legacy_name or safe_display_nickname(external.get("name"))
     tag_values = [tag_names[tag_id] for tag_id in _tag_ids(primary) if tag_id in tag_names]
 
     return {
-        "name": name,
+        "name": legacy_name,
         "company": _clean(external.get("corp_name")) or _clean(external.get("corp_full_name")),
         "tags_json": json.dumps(tag_values, ensure_ascii=False),
         "source": _clean(primary.get("state")),
         "owner_wecom_userid": _clean(primary.get("userid")),
     }
+
+
+def _persist_external_contact_detail(
+    session: Session,
+    tenant_id: str,
+    external_userid: str,
+    detail: dict,
+    tag_names: dict[str, str],
+) -> tuple[bool, IdentitySyncResult]:
+    """Write one full detail payload in the caller's transaction/savepoint."""
+    existed = (
+        session.query(ExternalContact.id)
+        .filter(
+            ExternalContact.tenant_id == tenant_id,
+            ExternalContact.external_userid == external_userid,
+        )
+        .first()
+        is not None
+    )
+    values = _payload_values(detail, tag_names)
+    last_interaction_at, message_count = _interaction_stats(
+        session, tenant_id, external_userid
+    )
+    contact = upsert_external_contact(
+        session,
+        tenant_id,
+        external_userid,
+        last_interaction_at=last_interaction_at,
+        message_count=message_count,
+        **values,
+    )
+    identity_result = sync_external_contact_identity(session, contact, detail)
+    return existed, identity_result
+
+
+def refresh_external_contact(
+    session: Session,
+    tenant_id: str,
+    corp_id: str,
+    external_secret: str,
+    external_userid: str,
+) -> RefreshResult:
+    """Fetch and persist one callback-targeted external contact.
+
+    The caller supplies the tenant and transaction boundary. Failures are
+    represented as ``found=False`` for a missing/unavailable detail payload;
+    credential/network errors still raise so a caller can record a safe
+    aggregate failure without mistaking it for a successful refresh.
+    """
+    clean_external_userid = _clean(external_userid)
+    if not clean_external_userid:
+        return RefreshResult(found=False)
+
+    token = get_wecom_token(
+        corp_id, external_secret, cache_key=f"{corp_id}:external_contact"
+    )
+    detail = wecom_contacts.get_external_contact(token, clean_external_userid)
+    if not isinstance(detail, dict):
+        return RefreshResult(found=False)
+    tag_names = wecom_contacts.get_corp_tag_list(token) or {}
+
+    with session.begin_nested():
+        existed, identity_result = _persist_external_contact_detail(
+            session,
+            tenant_id,
+            clean_external_userid,
+            detail,
+            tag_names,
+        )
+    return RefreshResult(
+        found=True,
+        inserted=not existed,
+        nickname_changed=identity_result.nickname_changed,
+        follow_relationship_changes=identity_result.follow_relations_changed,
+    )
 
 
 def sync_external_contacts(
@@ -121,38 +221,27 @@ def sync_external_contacts(
     for external_userid in sorted(external_userids):
         summary.total += 1
         detail = wecom_contacts.get_external_contact(token, external_userid)
-        if detail is None:
+        if not isinstance(detail, dict):
             summary.failed += 1
             continue
         try:
-            existed = (
-                session.query(ExternalContact.id)
-                .filter(
-                    ExternalContact.tenant_id == tenant_id,
-                    ExternalContact.external_userid == external_userid,
+            # One malformed record must not invalidate other contacts or leave
+            # a PostgreSQL transaction unusable for the rest of this run.
+            with session.begin_nested():
+                existed, identity_result = _persist_external_contact_detail(
+                    session,
+                    tenant_id,
+                    external_userid,
+                    detail,
+                    tag_names,
                 )
-                .first()
-                is not None
-            )
-            values = _payload_values(detail, tag_names)
-            last_interaction_at, message_count = _interaction_stats(
-                session, tenant_id, external_userid
-            )
-            upsert_external_contact(
-                session,
-                tenant_id,
-                external_userid,
-                last_interaction_at=last_interaction_at,
-                message_count=message_count,
-                **values,
-            )
             if existed:
                 summary.updated += 1
             else:
                 summary.inserted += 1
-        except Exception:
-            # A malformed individual record must not prevent other contacts
-            # from syncing; response bodies and identifiers are never logged.
+            summary.nickname_changes += int(identity_result.nickname_changed)
+            summary.follow_relationship_changes += identity_result.follow_relations_changed
+        except Exception:  # noqa: BLE001 -- never log raw response/contact data
             summary.failed += 1
 
     return summary
@@ -180,7 +269,7 @@ def _require_tenant_id(session: Session, corp_id: str) -> str:
 
 
 def main() -> int:
-    """Run the manual module CLI; scheduled invocation remains out of scope."""
+    """Run the idempotent full refresh used for backfill/reconciliation."""
     logging.basicConfig(level=logging.INFO)
     try:
         database_url = _require_env("DATABASE_URL")
@@ -207,12 +296,15 @@ def main() -> int:
         return 1
 
     logger.info(
-        "External-contact sync complete: total=%d inserted=%d updated=%d skipped=%d failed=%d",
+        "External-contact sync complete: total=%d inserted=%d updated=%d skipped=%d "
+        "failed=%d nickname_changes=%d follow_relationship_changes=%d",
         summary.total,
         summary.inserted,
         summary.updated,
         summary.skipped,
         summary.failed,
+        summary.nickname_changes,
+        summary.follow_relationship_changes,
     )
     return 0
 

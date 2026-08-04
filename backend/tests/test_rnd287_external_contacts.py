@@ -11,13 +11,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.external_contacts import upsert_external_contact
-from app.db.models import ExternalContact
+from app.db.models import (
+    ExternalContact,
+    ExternalContactFollow,
+    ExternalContactNicknameHistory,
+)
 
 
 @pytest.fixture()
 def db_session():
     engine = create_engine("sqlite:///:memory:")
     ExternalContact.__table__.create(engine)
+    ExternalContactFollow.__table__.create(engine)
+    ExternalContactNicknameHistory.__table__.create(engine)
     with Session(engine) as session:
         yield session
 
@@ -183,6 +189,13 @@ def test_sync_writes_tag_names_owner_and_is_idempotent(db_session, monkeypatch) 
     assert (first.inserted, first.updated, first.failed) == (1, 0, 0)
     assert (second.inserted, second.updated, second.failed) == (0, 1, 0)
     assert row.tenant_id == "tenant-a"
+    # RND-170 keeps the legacy compatibility label (employee remark) apart
+    # from the customer's current real nickname and follow relationship.
     assert row.name == "备注名"
+    assert row.current_nickname_normalized == "昵称"
+    assert row.current_nickname_display == "昵称"
+    relation = db_session.query(ExternalContactFollow).one()
+    assert relation.follow_userid == "staff-a"
+    assert relation.remark_normalized == "备注名"
     assert row.owner_wecom_userid == "staff-a"
     assert json.loads(row.tags) == ["重点客户"]

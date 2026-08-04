@@ -34,6 +34,7 @@ from app.conversation_membership import (
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.schemas.listing import ContactOut, MonitoredAccountOut
+from app.services.external_contact_identity import external_contact_display_names
 
 
 def _compact_entity_messages(
@@ -790,6 +791,10 @@ def list_contacts(db: Session, tenant_id: str) -> list[ContactOut]:
     staff_ids = _collect_staff_ids(db, tenant_id, participant_ids)
     contact_ids = participant_ids - staff_ids
     display_names = _load_display_names_for_ids(db, tenant_id, contact_ids)
+    # No employee context exists in contact-centered selection, so the
+    # identity helper intentionally uses a real nickname or opaque fallback,
+    # never a randomly selected employee remark.
+    display_names.update(external_contact_display_names(db, tenant_id, contact_ids))
     return [
         ContactOut(
             contact_id=cid,
@@ -834,4 +839,17 @@ def list_conversations(
 
     display_names = _load_display_names_for_ids(db, tenant_id, participant_ids)
     staff_ids = _staff_ids_for_participants(db, tenant_id, participant_ids)
+    # A staff-centered archive view is the explicit employee context in which
+    # that employee's own remark is the correct direct-conversation title.
+    # A contact-centered view passes no follow user and therefore never picks
+    # another employee's remark arbitrarily.
+    follow_userid = entity_id if entity_id in staff_ids else None
+    display_names.update(
+        external_contact_display_names(
+            db,
+            tenant_id,
+            participant_ids,
+            follow_userid=follow_userid,
+        )
+    )
     return _build_conversation_list(messages, recipients_map, display_names, staff_ids)

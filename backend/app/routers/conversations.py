@@ -105,6 +105,7 @@ from app.schemas.listing import (
     MonitoredAccountOut,
 )
 from app.services import listing_service
+from app.services.external_contact_identity import external_contact_display_names
 from app.services.listing_service import (
     # RND-219: monitored-accounts / contacts / conversation-list logic moved
     # to app.services.listing_service; the three thin routes below call
@@ -543,6 +544,9 @@ def get_conversation_detail(
         participant_ids.update(recipient_ids)
     display_names = _load_display_names_for_ids(db, tenant_id, participant_ids)
     staff_ids = _staff_ids_for_participants(db, tenant_id, participant_ids)
+    # This detail route has no selected employee context. Do not select one
+    # employee's remark for a shared customer; use real nickname/fallback.
+    display_names.update(external_contact_display_names(db, tenant_id, participant_ids))
 
     buckets = _build_conversation_list(slim_messages, recipients_map, display_names, staff_ids)
     bucket = next(

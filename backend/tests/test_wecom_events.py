@@ -11,6 +11,7 @@ from threading import Event
 import pytest
 from app.routers import wecom_events
 from app.services import archive_worker_trigger
+from app.services.external_contact_refresh_trigger import ExternalContactRefreshDispatch
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -216,6 +217,20 @@ def _post(client: TestClient, body: bytes, payload: str, *, signature: str | Non
     )
 
 
+def _event_xml(event: str = "change_archive") -> bytes:
+    return (
+        "<xml><ToUserName><![CDATA[corp-sentinel]]></ToUserName>"
+        "<MsgType><![CDATA[event]]></MsgType>"
+        f"<Event><![CDATA[{event}]]></Event></xml>"
+    ).encode()
+
+
+def _post_encrypted(client: TestClient, message: bytes, *, signature: str | None = None):
+    payload = _encrypt(_envelope(message))
+    body = f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode()
+    return _post(client, body, payload, signature=signature)
+
+
 def test_post_valid_signature_acknowledges_and_dispatches_only_archive_worker(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -226,8 +241,7 @@ def test_post_valid_signature_acknowledges_and_dispatches_only_archive_worker(
         "dispatch_archive_worker",
         lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
-    payload = "post-encrypt-sentinel"
-    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+    response = _post_encrypted(client, _event_xml())
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
@@ -236,6 +250,72 @@ def test_post_valid_signature_acknowledges_and_dispatches_only_archive_worker(
     # Callback HTTP code must not inspect or directly wake media. The shared
     # archive entrypoint does that after sync/decrypt commits.
     assert not hasattr(wecom_events, "trigger_recent_image_download")
+
+
+def test_post_decrypts_external_contact_change_and_queues_targeted_refresh(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refreshes: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_external_contact_refresh",
+        lambda tenant_id, corp_id, external_userid: (
+            refreshes.append((tenant_id, corp_id, external_userid))
+            or ExternalContactRefreshDispatch.ACCEPTED
+        ),
+    )
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+    )
+    event = (
+        b"<xml><MsgType><![CDATA[event]]></MsgType>"
+        b"<Event><![CDATA[change_external_contact]]></Event>"
+        b"<ChangeType><![CDATA[edit_external_contact]]></ChangeType>"
+        b"<ExternalUserID><![CDATA[wm-external-001]]></ExternalUserID></xml>"
+    )
+
+    response = _post_encrypted(client, event)
+
+    assert response.status_code == 200
+    assert refreshes == [("tenant-sentinel", _CORP_ID, "wm-external-001")]
+
+
+def test_post_rejects_malformed_decrypted_event_without_dispatch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dispatches: list[object] = []
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+    )
+
+    response = _post_encrypted(client, b"<xml><Event>unterminated")
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid callback request"}
+    assert dispatches == []
+
+
+def test_post_rejects_decrypted_corp_mismatch_without_dispatch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dispatches: list[object] = []
+    monkeypatch.setattr(
+        wecom_events,
+        "dispatch_archive_worker",
+        lambda: dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+    )
+    payload = _encrypt(_envelope(_event_xml(), corp_id=b"other-corp"))
+    body = f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode()
+
+    response = _post(client, body, payload)
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Corp ID mismatch"}
+    assert dispatches == []
 
 
 @pytest.mark.parametrize(
@@ -293,11 +373,7 @@ def test_callback_business_logs_are_fixed_info_events_without_request_data(
     payload = _encrypt(_envelope(message))
     post_payload = "post-encrypt-secret-sentinel"
     assert _get(client, payload).status_code == 200
-    assert _post(
-        client,
-        f"<xml><Encrypt><![CDATA[{post_payload}]]></Encrypt></xml>".encode(),
-        post_payload,
-    ).status_code == 200
+    assert _post_encrypted(client, _event_xml()).status_code == 200
     assert _get(client, "bad-input-sentinel").status_code == 400
 
     log_text = "\n".join(record.getMessage() for record in caplog.records)
@@ -369,8 +445,7 @@ def test_post_returns_before_the_shared_worker_finishes(
         "dispatch_archive_worker",
         archive_worker_trigger.dispatch_archive_worker,
     )
-    payload = "post-encrypt-sentinel"
-    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+    response = _post_encrypted(client, _event_xml())
 
     try:
         assert response.status_code == 200
@@ -389,8 +464,7 @@ def test_post_dispatch_failure_is_not_acknowledged(
         "dispatch_archive_worker",
         lambda: wecom_events.ArchiveWorkerDispatch.FAILED,
     )
-    payload = "post-encrypt-sentinel"
-    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+    response = _post_encrypted(client, _event_xml())
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Callback worker unavailable"}
@@ -405,8 +479,7 @@ def test_dispatch_failure_does_not_leak_request_data(
         "dispatch_archive_worker",
         lambda: wecom_events.ArchiveWorkerDispatch.FAILED,
     )
-    payload = "SENTINEL_SECRET"
-    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+    response = _post_encrypted(client, _event_xml())
 
     assert response.status_code == 503
     _assert_no_sentinels(response.json())
@@ -423,8 +496,7 @@ def test_post_does_not_dispatch_without_an_active_callback_tenant(
         "dispatch_archive_worker",
         lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
-    payload = "post-encrypt-sentinel"
-    response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
+    response = _post_encrypted(client, _event_xml())
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Callback worker unavailable"}

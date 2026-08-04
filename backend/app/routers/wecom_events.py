@@ -2,7 +2,7 @@
 WeCom callback event handler (RND-105).
 
 GET  /api/wecom/archive/events  — URL verification (decrypt echostr)
-POST /api/wecom/archive/events  — Verified event dispatch to archive worker
+POST /api/wecom/archive/events  — Verified/decrypted event dispatch to archive worker
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ from app.db.session import get_engine
 from app.services.archive_worker_trigger import (
     ArchiveWorkerDispatch,
     dispatch_archive_worker,
+)
+from app.services.external_contact_refresh_trigger import (
+    dispatch_external_contact_refresh,
 )
 from app.settings import get_wecom_callback_settings
 
@@ -152,6 +155,40 @@ def _extract_encrypt(xml_body: bytes) -> str | None:
         raise _CallbackInputError from exc
 
 
+def _parse_external_contact_change_event(message: bytes) -> str | None:
+    """Return an ExternalUserID only for a valid change_external_contact event.
+
+    The encrypted plaintext is still request-controlled input. Unknown valid
+    event types are intentionally ignored by this feature, while malformed
+    XML is rejected as an invalid callback instead of leaking parser detail.
+    """
+    if b"<!DOCTYPE" in message.upper():
+        raise _CallbackInputError
+    try:
+        root = ElementTree.fromstring(message)
+    except (ElementTree.ParseError, UnicodeDecodeError, ValueError) as exc:
+        raise _CallbackInputError from exc
+    if root.tag != "xml":
+        raise _CallbackInputError
+
+    def text_for(tag: str) -> str:
+        value = root.findtext(tag)
+        return value.strip() if isinstance(value, str) else ""
+
+    event_name = text_for("Event")
+    change_type = text_for("ChangeType")
+    if event_name != "change_external_contact" and change_type != "change_external_contact":
+        return None
+
+    external_userid = text_for("ExternalUserID")
+    # WeCom external_userid is bounded by the same persisted model limit.
+    # A malformed event is acknowledged without a targeted refresh; the
+    # periodic full sync remains the durable recovery path.
+    if not external_userid or len(external_userid) > 64:
+        return None
+    return external_userid
+
+
 def _get_token() -> str:
     token = get_wecom_callback_settings().wecom_callback_token.strip()
     if not token:
@@ -236,7 +273,7 @@ def wecom_callback_get(
 
 
 # ---------------------------------------------------------------------------
-# POST — Event signature validation and worker dispatch (RND-107)
+# POST — Event signature/decryption and worker dispatch (RND-107/RND-170)
 # ---------------------------------------------------------------------------
 
 
@@ -248,12 +285,15 @@ async def wecom_callback_post(
     nonce: str = Query(...),
 ):
     """
-    WeCom event callback — verify the request, then request one worker cycle.
+    WeCom event callback — verify/decrypt the request, then queue work.
 
-    RND-107 keeps the acknowledgement independent from worker completion.
+    RND-107 keeps the acknowledgement independent from worker completion;
+    RND-170 additionally queues one bounded targeted profile refresh for an
+    external-contact change event.
     """
     try:
         token = _get_token()
+        aes_key = _get_aes_key()
     except _CallbackConfigurationError:
         _log_rejected("configuration_error")
         raise HTTPException(status_code=500, detail="Callback configuration error")
@@ -271,13 +311,35 @@ async def wecom_callback_post(
         _log_rejected("invalid_signature")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
+    # POST callbacks carry an encrypted XML event envelope. Decrypt and
+    # validate its CorpID before doing any work; the old RND-107 path only
+    # authenticated the outer ciphertext and could not act on event details.
+    configured_corp_id = _get_corp_id()
+    try:
+        plaintext = _decrypt_echostr(encrypt_content, aes_key)
+        message, decrypted_corp_id = _parse_wecom_plaintext(plaintext)
+        external_userid = _parse_external_contact_change_event(message)
+    except _CallbackInputError:
+        _log_rejected("invalid_callback_payload")
+        raise HTTPException(status_code=400, detail="Invalid callback request")
+
+    if configured_corp_id and decrypted_corp_id != configured_corp_id:
+        _log_rejected("corp_id_mismatch")
+        raise HTTPException(status_code=403, detail="Corp ID mismatch")
+
     # The callback configuration must resolve to one active tenant before the
-    # environment-scoped worker may run.  The resolved ID stays in-process and
+    # environment-scoped worker may run. The resolved ID stays in-process and
     # is never put in responses, logs, or child-process arguments.
-    tenant_id = _active_tenant_for_corp(_get_corp_id())
+    tenant_id = _active_tenant_for_corp(configured_corp_id)
     if tenant_id is None:
         logger.error("wecom_callback archive_worker=unavailable")
         raise HTTPException(status_code=503, detail="Callback worker unavailable")
+
+    if external_userid:
+        refresh_dispatch = dispatch_external_contact_refresh(
+            tenant_id, configured_corp_id, external_userid
+        )
+        logger.info("wecom_callback external_contact_refresh=%s", refresh_dispatch.value)
 
     dispatch = dispatch_archive_worker()
     if dispatch is ArchiveWorkerDispatch.FAILED:

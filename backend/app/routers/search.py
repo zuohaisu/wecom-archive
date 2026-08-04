@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import and_, case, or_, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -25,9 +26,20 @@ from app.conversation_membership import (
     _collect_staff_ids,
     _load_display_names_for_ids,
 )
-from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
+from app.db.models import (
+    AdminUser,
+    ArchiveMessage,
+    ArchiveMessageRecipient,
+    Contact,
+    ExternalContact,
+)
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
+from app.services.external_contact_identity import (
+    load_external_contact_search_matches,
+    normalized_search_term,
+    resolve_external_contact_display_name,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -44,7 +56,11 @@ _SNIPPET_CONTEXT_CHARS = 80
 class ContactSearchResult(BaseModel):
     wecom_userid: str
     display_name: str
-    match_field: str  # "name" or "wecom_userid"
+    # "name" | "wecom_userid" | "remark" | "current_nickname" |
+    # "historical_nickname". The latter three identify one external contact.
+    match_field: str
+    match_context_userid: Optional[str] = None
+    is_external_contact: bool = False
 
 
 class MessageSearchResult(BaseModel):
@@ -188,6 +204,10 @@ def search_contacts(
     Searches both Contact.name/Contact.wecom_userid and AdminUser.name/wecom_user_id.
     """
     _, tenant_id = auth
+    # A whitespace/invisible-only term cannot match a meaningful external
+    # identity and should not manufacture a broad or confusing result set.
+    if normalized_search_term(q) is None:
+        return []
     escaped_q = _escape_ilike_pattern(q)
     pattern = f"%{escaped_q}%"
 
@@ -265,7 +285,7 @@ def search_contacts(
         ),
     )[:limit]
 
-    return [
+    internal_results = [
         ContactSearchResult(
             wecom_userid=wecom_userid,
             display_name=resolve_person_display_name(wecom_userid, name),
@@ -273,6 +293,58 @@ def search_contacts(
         )
         for wecom_userid, (name, matched_name, _) in sorted_results
     ]
+
+    # RND-170: the global contact search also resolves the one external
+    # identity behind an employee remark, current nickname, or former
+    # nickname. The new identity tables can be absent only in intentionally
+    # minimal legacy test fixtures; in that case the established Contact/Admin
+    # search remains available rather than turning the whole endpoint into 500.
+    external_matches = load_external_contact_search_matches(
+        db, tenant_id, q, limit=limit
+    )
+    external_rows = []
+    if external_matches:
+        try:
+            with db.begin_nested():
+                external_rows = db.scalars(
+                    select(ExternalContact).where(
+                        ExternalContact.tenant_id == tenant_id,
+                        ExternalContact.external_userid.in_(external_matches),
+                    )
+                ).all()
+        except DBAPIError:
+            external_rows = []
+
+    match_order = {"remark": 0, "current_nickname": 1, "historical_nickname": 2}
+    combined: dict[str, ContactSearchResult] = {
+        item.wecom_userid: item for item in internal_results
+    }
+    for contact in external_rows:
+        matches = external_matches.get(contact.external_userid, [])
+        if not matches:
+            continue
+        match = min(matches, key=lambda item: match_order.get(item["match_type"], 99))
+        combined[contact.external_userid] = ContactSearchResult(
+            wecom_userid=contact.external_userid,
+            display_name=resolve_external_contact_display_name(
+                contact.external_userid,
+                current_nickname=(
+                    contact.current_nickname_display or contact.current_nickname_raw
+                ),
+            ),
+            match_field=match["match_type"],
+            match_context_userid=match.get("follow_userid"),
+            is_external_contact=True,
+        )
+
+    return sorted(
+        combined.values(),
+        key=lambda item: (
+            1 if item.match_field == "wecom_userid" else 0,
+            item.display_name.casefold(),
+            item.wecom_userid,
+        ),
+    )[:limit]
 
 
 @router.get("/api/search/messages", response_model=MessageSearchResponse)

@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.models import ExternalContact
@@ -25,8 +24,11 @@ def upsert_external_contact(
 ) -> ExternalContact:
     """Create or update an external contact scoped to one tenant.
 
-    A partial API response must not replace a usable existing name with an
-    empty value. The caller owns the transaction and commits separately.
+    ``ExternalContact.name`` is a legacy compatibility label from RND-287,
+    not the customer's canonical nickname. It may contain one employee's
+    remark, so an existing non-blank value is never overwritten here. The
+    RND-170 identity fields and per-employee remarks are maintained by the
+    external-contact identity service. The caller owns the transaction.
     """
     contact = (
         session.query(ExternalContact)
@@ -53,15 +55,21 @@ def upsert_external_contact(
         session.add(contact)
         return contact
 
-    if clean_name:
+    # Preserve an existing legacy label. Replacing it with a different
+    # follow user's remark (or a real nickname) would globalize one employee's
+    # local naming decision and regress existing conversation titles.
+    if clean_name and not (isinstance(contact.name, str) and contact.name.strip()):
         contact.name = clean_name
-    contact.company = company
-    contact.tags = tags_json
-    contact.source = source
-    contact.owner_wecom_userid = owner_wecom_userid
-    contact.last_interaction_at = last_interaction_at
-    contact.message_count = message_count
-    # Refresh timestamp even when the upstream payload is unchanged; a repeat
-    # run is still a successful observation of this external contact.
-    contact.updated_at = func.now()
+    if contact.company != company:
+        contact.company = company
+    if contact.tags != tags_json:
+        contact.tags = tags_json
+    if contact.source != source:
+        contact.source = source
+    if contact.owner_wecom_userid != owner_wecom_userid:
+        contact.owner_wecom_userid = owner_wecom_userid
+    if contact.last_interaction_at != last_interaction_at:
+        contact.last_interaction_at = last_interaction_at
+    if contact.message_count != message_count:
+        contact.message_count = message_count
     return contact
