@@ -35,7 +35,6 @@ tool — see that constant's own guard) via _KEY_CATEGORY_OVERRIDES below.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Query, Session
@@ -117,7 +116,7 @@ def build_candidate_query(
     tenant_id: str,
     msgtypes,
     retry: bool,
-    since_ms: Optional[int] = None,
+    since_ms: int | None = None,
     newest_first: bool = False,
 ) -> Query:
     """Tenant-scoped query for rows eligible for a fresh download attempt,
@@ -216,7 +215,7 @@ def _scan_for_stale_downloaded(
     msgtypes,
     needed: int,
     batch_size: int = _REPAIR_SCAN_BATCH_SIZE,
-) -> List[Tuple[ArchiveMessage, MediaFile]]:
+) -> list[tuple[ArchiveMessage, MediaFile]]:
     """Scan "downloaded" rows in ascending-id batches of `batch_size`,
     servability-checking each one, until `needed` stale rows are found or
     the table is exhausted.
@@ -230,7 +229,7 @@ def _scan_for_stale_downloaded(
     runs in Python on each batch, and only rows that fail it ever count
     against `needed`. Pagination (rather than one unbounded fetch) keeps
     memory bounded for tenants with a large "downloaded" set."""
-    stale: List[Tuple[ArchiveMessage, MediaFile]] = []
+    stale: list[tuple[ArchiveMessage, MediaFile]] = []
     if needed <= 0:
         return stale
 
@@ -261,9 +260,9 @@ def select_candidates(
     msgtypes,
     retry: bool,
     limit: int,
-    since_ms: Optional[int] = None,
+    since_ms: int | None = None,
     newest_first: bool = False,
-) -> Tuple[List[ArchiveMessage], List[Tuple[ArchiveMessage, MediaFile]], int]:
+) -> tuple[list[ArchiveMessage], list[tuple[ArchiveMessage, MediaFile]], int]:
     """Return (actionable, stale_repairs, total_eligible).
 
     actionable: fresh-download candidates (see build_candidate_query),
@@ -326,7 +325,7 @@ def count_candidates_with_existing_media_row(session: Session, tenant_id: str, m
 # ---------------------------------------------------------------------------
 
 
-def iter_nested_media_refs(structured_content) -> List[dict]:
+def iter_nested_media_refs(structured_content) -> list[dict]:
     """Extract the media_refs list a mixed/chatrecord message's
     structured_content carries (see parse_mixed_message/
     parse_chatrecord_message) — a flat list of {"path","type","sdkfileid"}
@@ -342,7 +341,7 @@ def iter_nested_media_refs(structured_content) -> List[dict]:
     refs = structured_content.get("media_refs")
     if not isinstance(refs, list):
         return []
-    out: List[dict] = []
+    out: list[dict] = []
     for ref in refs:
         if not isinstance(ref, dict):
             continue
@@ -361,7 +360,7 @@ def iter_nested_media_refs(structured_content) -> List[dict]:
 
 
 def build_nested_media_candidate_query(
-    session: Session, tenant_id: str, since_ms: Optional[int] = None
+    session: Session, tenant_id: str, since_ms: int | None = None
 ) -> Query:
     """Tenant-scoped coarse candidate query for mixed/chatrecord messages
     that may still have undownloaded nested media — decrypted successfully,
@@ -398,9 +397,9 @@ def select_nested_media_candidates(
     tenant_id: str,
     limit: int,
     retry: bool = False,
-    since_ms: Optional[int] = None,
+    since_ms: int | None = None,
     batch_size: int = _REPAIR_SCAN_BATCH_SIZE,
-) -> Tuple[List[Tuple[ArchiveMessage, dict]], int]:
+) -> tuple[list[tuple[ArchiveMessage, dict]], int]:
     """Return (item_candidates, total_messages_scanned).
 
     item_candidates is a flat list of (message, ref) pairs — one entry per
@@ -435,7 +434,7 @@ def select_nested_media_candidates(
     (tenant_id, sdkfileid) this function does not attempt to lift."""
     total_messages_scanned = build_nested_media_candidate_query(session, tenant_id, since_ms).count()
 
-    item_candidates: List[Tuple[ArchiveMessage, dict]] = []
+    item_candidates: list[tuple[ArchiveMessage, dict]] = []
     seen_sdkfileids: set = set()
     last_id = 0
 
@@ -490,8 +489,8 @@ def select_nested_media_candidates(
 
 
 def target_storage_refs(
-    tenant_id: str, msgtype: str, archive_message_id: int, item_key: Optional[str] = None
-) -> Tuple[str, str]:
+    tenant_id: str, msgtype: str, archive_message_id: int, item_key: str | None = None
+) -> tuple[str, str]:
     """Return (base_ref_without_extension, part_ref) under
     tenants/<tenant_id>/<category>/ where category is msgtype's own
     key-category segment (see key_category_for_msgtype). Deterministic per
@@ -514,11 +513,19 @@ def target_storage_refs(
 
 
 def get_or_reset_media_file(
-    session: Session, tenant_id: str, sdkfileid: str, archive_message_id: int
-) -> Optional[MediaFile]:
+    session: Session,
+    tenant_id: str,
+    sdkfileid: str,
+    archive_message_id: int,
+    *,
+    record_attempt: bool = False,
+) -> MediaFile | None:
     """Return the media_files row for (tenant_id, sdkfileid), creating it
     (or resetting an existing pending/failed/stale-downloaded row) to
-    download_status="pending" before an attempt begins — msgtype-
+    download_status="pending" before an attempt begins. When
+    ``record_attempt`` is true, increment ``download_attempts`` in this same
+    pre-download commit so a restart cannot reset the durable retry budget.
+    msgtype-
     independent, since a media_files row's identity is (tenant_id,
     sdkfileid), never the message type.
 
@@ -540,6 +547,7 @@ def get_or_reset_media_file(
             sdkfileid=sdkfileid,
             archive_message_id=archive_message_id,
             download_status="pending",
+            download_attempts=1 if record_attempt else 0,
         )
         session.add(row)
         session.commit()
@@ -550,6 +558,8 @@ def get_or_reset_media_file(
         return None
 
     row.download_status = "pending"
+    if record_attempt:
+        row.download_attempts = int(row.download_attempts or 0) + 1
     row.local_path = None
     row.oss_key = None
     row.storage_backend = None
@@ -562,7 +572,7 @@ def get_or_reset_media_file(
     return row
 
 
-def _safe_delete(provider: MediaStorageProvider, storage_ref: Optional[str]) -> None:
+def _safe_delete(provider: MediaStorageProvider, storage_ref: str | None) -> None:
     """Best-effort remove; never raises, never prints the storage ref."""
     provider.delete(storage_ref)
 
@@ -576,8 +586,8 @@ def download_one(
     msgtype: str,
     sdkfileid: str,
     timeout: int,
-    item_key: Optional[str] = None,
-) -> Tuple[str, Optional[str], Optional[int]]:
+    item_key: str | None = None,
+) -> tuple[str, str | None, int | None]:
     """Download one message's media.
 
     item_key (RND-200): pass the nested item's path (see
@@ -623,8 +633,8 @@ def download_one(
     base_ref, part_ref = target_storage_refs(tenant_id, msgtype, archive_message_id, item_key=item_key)
     allowed_category = _SIGNATURE_CATEGORY_BY_MSGTYPE[msgtype]
     outcome = "failed"
-    detail: Optional[str] = "unknown_error"
-    file_size: Optional[int] = None
+    detail: str | None = "unknown_error"
+    file_size: int | None = None
 
     try:
         try:
@@ -635,7 +645,7 @@ def download_one(
         except wecom_sdk.SdkMediaError:
             detail = "sdk_error"
             return outcome, detail, file_size
-        except Exception:
+        except Exception:  # noqa: BLE001 -- SDK boundary must classify all unexpected failures safely
             detail = "download_error"
             return outcome, detail, file_size
 

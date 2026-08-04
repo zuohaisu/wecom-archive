@@ -1,16 +1,24 @@
-"""RND-172 event image sweep: bounded ordering, retry and safe logs."""
+"""RND-172 regression coverage after RND-343 generalised its dispatch seam."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import logging
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
+import pytest
 from app.db.models import MediaFile
-from app.media_event_dispatch import run_recent_image_sweep, shutdown
-from app.sdk import wecom_sdk
-from tests.fakes import FakeWecomSdk, _TENANT_A, insert_archive_message, install_fake_sdk, worker_db  # noqa: F401
+from app.media_event_dispatch import MediaWorkerDispatch, dispatch_media_worker
+
+from tests.fakes import (
+    _TENANT_A,
+    insert_archive_message,
+    insert_tenant,
+    insert_tenant_wecom_config,
+    worker_db,  # noqa: F401 -- pytest fixture registration
+)
 
 
-def _configure(monkeypatch, tmp_path, db, fake):
+def _configure(monkeypatch, db) -> None:
     from app import media_event_dispatch
 
     monkeypatch.setenv("EVENT_MEDIA_DOWNLOAD_ENABLED", "true")
@@ -18,54 +26,167 @@ def _configure(monkeypatch, tmp_path, db, fake):
     monkeypatch.setenv("EVENT_MEDIA_DOWNLOAD_RECENT_WINDOW_HOURS", "24")
     monkeypatch.setenv("EVENT_MEDIA_DOWNLOAD_RETRY_COUNT", "3")
     monkeypatch.setenv("EVENT_MEDIA_DOWNLOAD_BACKOFF_SECONDS", "30")
-    monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media.lock"))
-    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path / "media"))
-    monkeypatch.setenv("WECOM_SDK_LIB_PATH", "fake")
     monkeypatch.setenv("WECOM_CORP_ID", "corp-a")
-    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "fake-secret")
     monkeypatch.setattr(media_event_dispatch, "get_engine", lambda: db.bind)
-    install_fake_sdk(monkeypatch, fake, wecom_sdk)
+    insert_tenant(db, _TENANT_A)
+    insert_tenant_wecom_config(db, _TENANT_A, "corp-a")
 
 
-def test_event_sweep_downloads_new_decrypted_image_and_logs_safely(worker_db, tmp_path, monkeypatch, caplog):
-    fake = FakeWecomSdk()
-    fake.set_media_chunks("image-safe-id", [b"\xff\xd8\xff\xe0" + b"jpeg"])
-    _configure(monkeypatch, tmp_path, worker_db, fake)
-    message = insert_archive_message(worker_db, tenant_id=_TENANT_A, decrypt_status="success", msgtype="image", sdkfileid="image-safe-id", msgtime=int(datetime.now().timestamp() * 1000))
+@pytest.mark.parametrize("msgtype", ["image", "voice", "video", "file", "emotion"])
+def test_archive_complete_dispatch_accepts_each_generic_top_level_media_type(
+    worker_db, monkeypatch, msgtype
+) -> None:
+    from app import media_event_dispatch
 
-    worker_db.rollback()  # release StaticPool's test transaction for the sweep Session
-    with caplog.at_level(logging.INFO):
-        summary = run_recent_image_sweep(_TENANT_A, "sync")
+    _configure(monkeypatch, worker_db)
+    insert_archive_message(
+        worker_db,
+        tenant_id=_TENANT_A,
+        decrypt_status="success",
+        msgtype=msgtype,
+        sdkfileid=f"safe-{msgtype}",
+        msgtime=int(datetime.now(timezone.utc).timestamp() * 1000),
+    )
+    worker_db.rollback()  # release StaticPool's transaction for preflight Session
+    signals: list[object] = []
+    monkeypatch.setattr(
+        media_event_dispatch,
+        "_signal_media_worker",
+        lambda: signals.append(1) or True,
+    )
 
-    row = worker_db.query(MediaFile).filter_by(archive_message_id=message.id).one()
-    assert (summary.downloaded, row.download_status, row.download_attempts) == (1, "downloaded", 1)
-    record = next(r.message for r in caplog.records if "event_media_download_sweep" in r.message)
-    assert "downloaded=" in record and "failed=" in record and "duration_ms=" in record
-    assert "image-safe-id" not in record
-    shutdown()
+    assert dispatch_media_worker() is MediaWorkerDispatch.ACCEPTED
+    # The bounded event signal starts the existing generic worker through the
+    # systemd path unit; it carries no image-only implementation or IDs.
+    assert signals == [1]
 
 
-def test_event_sweep_prioritizes_new_image_and_backoff_does_not_block_it(worker_db, tmp_path, monkeypatch):
-    fake = FakeWecomSdk()
-    fake.set_media_error("old-failed", RuntimeError("network"))
-    fake.set_media_chunks("new-image", [b"\xff\xd8\xff\xe0" + b"new"])
-    _configure(monkeypatch, tmp_path, worker_db, fake)
-    now_ms = int(datetime.now().timestamp() * 1000)
-    old = insert_archive_message(worker_db, tenant_id=_TENANT_A, decrypt_status="success", msgtype="image", sdkfileid="old-failed", msgtime=now_ms - 1000)
-    new = insert_archive_message(worker_db, tenant_id=_TENANT_A, decrypt_status="success", msgtype="image", sdkfileid="new-image", msgtime=now_ms)
-    worker_db.add(MediaFile(sdkfileid="old-failed", archive_message_id=old.id, tenant_id=_TENANT_A, download_status="failed", download_attempts=1, updated_at=datetime.now(timezone.utc)))
-    worker_db.commit()
+def test_archive_complete_dispatch_accepts_nested_generic_media(worker_db, monkeypatch) -> None:
+    from app import media_event_dispatch
 
-    worker_db.rollback()  # release StaticPool's test transaction for the sweep Session
-    run_recent_image_sweep(_TENANT_A)
-    new_row = worker_db.query(MediaFile).filter_by(archive_message_id=new.id).one()
-    old_row = worker_db.query(MediaFile).filter_by(archive_message_id=old.id).one()
-    assert new_row.download_status == "downloaded"
-    assert old_row.download_attempts == 1
-
-    old_row.updated_at = datetime.now(timezone.utc) - timedelta(seconds=31)
-    worker_db.commit()
+    _configure(monkeypatch, worker_db)
+    insert_archive_message(
+        worker_db,
+        tenant_id=_TENANT_A,
+        decrypt_status="success",
+        msgtype="mixed",
+        msgtime=int(datetime.now(timezone.utc).timestamp() * 1000),
+        structured_content={
+            "media_refs": [
+                {"path": "0", "type": "voice", "sdkfileid": "safe-nested-voice"},
+                {"path": "1", "type": "emotion", "sdkfileid": "safe-nested-emotion"},
+            ]
+        },
+    )
     worker_db.rollback()
-    run_recent_image_sweep(_TENANT_A)
-    assert worker_db.query(MediaFile).filter_by(archive_message_id=old.id).one().download_attempts == 2
-    shutdown()
+    signal = MagicMock(return_value=True)
+    monkeypatch.setattr(media_event_dispatch, "_signal_media_worker", signal)
+
+    assert dispatch_media_worker() is MediaWorkerDispatch.ACCEPTED
+    signal.assert_called_once()
+
+
+def test_event_signal_is_one_empty_coalescing_file(monkeypatch, tmp_path) -> None:
+    from app import media_event_dispatch
+
+    signal_path = tmp_path / "media-dispatch.trigger"
+    monkeypatch.setattr(media_event_dispatch, "_DEFAULT_SIGNAL_PATH", str(signal_path))
+
+    assert media_event_dispatch._signal_media_worker() is True
+    assert signal_path.exists()
+    assert signal_path.read_bytes() == b""
+
+
+def test_archive_complete_dispatch_does_not_signal_for_no_media(worker_db, monkeypatch, caplog) -> None:
+    from app import media_event_dispatch
+
+    _configure(monkeypatch, worker_db)
+    worker_db.rollback()
+    signal = MagicMock(return_value=True)
+    monkeypatch.setattr(media_event_dispatch, "_signal_media_worker", signal)
+
+    with caplog.at_level(logging.INFO, logger=media_event_dispatch.__name__):
+        assert dispatch_media_worker() is MediaWorkerDispatch.NO_WORK
+
+    signal.assert_not_called()
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "trigger=no-work" in log_text
+    assert "tenant-a" not in log_text
+
+
+def test_archive_complete_dispatch_failure_is_safe_and_non_raising(worker_db, monkeypatch, caplog) -> None:
+    from app import media_event_dispatch
+
+    _configure(monkeypatch, worker_db)
+    sentinel = "SENTINEL_TRACEBACK sdkfileid=unsafe-path"
+    insert_archive_message(
+        worker_db,
+        tenant_id=_TENANT_A,
+        decrypt_status="success",
+        msgtype="file",
+        sdkfileid="safe-file",
+        msgtime=int(datetime.now(timezone.utc).timestamp() * 1000),
+    )
+    worker_db.rollback()
+    monkeypatch.setattr(
+        media_event_dispatch,
+        "_signal_media_worker",
+        lambda: (_ for _ in ()).throw(RuntimeError(sentinel)),
+    )
+
+    with caplog.at_level(logging.INFO, logger=media_event_dispatch.__name__):
+        assert dispatch_media_worker() is MediaWorkerDispatch.FAILED
+
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "trigger=dispatch-failed" in log_text
+    assert sentinel not in log_text
+
+
+def test_generic_retry_policy_defers_old_failure_without_blocking_new_media(worker_db, monkeypatch) -> None:
+    import scripts.download_wecom_media_once as script
+
+    _configure(monkeypatch, worker_db)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    old = insert_archive_message(
+        worker_db,
+        tenant_id=_TENANT_A,
+        decrypt_status="success",
+        msgtype="image",
+        sdkfileid="old-failed",
+        msgtime=now_ms - 1000,
+    )
+    fresh = insert_archive_message(
+        worker_db,
+        tenant_id=_TENANT_A,
+        decrypt_status="success",
+        msgtype="video",
+        sdkfileid="fresh-video",
+        msgtime=now_ms,
+    )
+    worker_db.add(
+        MediaFile(
+            sdkfileid="old-failed",
+            archive_message_id=old.id,
+            tenant_id=_TENANT_A,
+            download_status="failed",
+            download_attempts=1,
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    worker_db.commit()
+
+    selected, nested, skipped = script._filter_retryable_candidates(
+        worker_db, _TENANT_A, [old, fresh], [], retry_count=3, backoff_seconds=30
+    )
+    assert [message.sdkfileid for message in selected] == ["fresh-video"]
+    assert nested == []
+    assert skipped == 1
+
+    failed_row = worker_db.query(MediaFile).filter_by(sdkfileid="old-failed").one()
+    failed_row.updated_at = datetime.now(timezone.utc) - timedelta(seconds=31)
+    worker_db.commit()
+    selected, _nested, skipped = script._filter_retryable_candidates(
+        worker_db, _TENANT_A, [old, fresh], [], retry_count=3, backoff_seconds=30
+    )
+    assert {message.sdkfileid for message in selected} == {"old-failed", "fresh-video"}
+    assert skipped == 0

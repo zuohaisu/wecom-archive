@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from app.config.constants import ConfigGroup, RESTART_REQUIRED_KEYS
+from app.config.constants import RESTART_REQUIRED_KEYS, ConfigGroup
 
 
 @dataclass(frozen=True)
@@ -17,9 +17,9 @@ class ConfigItemSpec:
     value_type: Literal["string", "secret", "int", "bool"]
     is_secret: bool
     required: bool
-    conditional_on: Optional[str]
+    conditional_on: Optional[str]  # noqa: UP045 -- Python 3.9 runtime compatibility
     restart_required: bool
-    default: Optional[str]
+    default: Optional[str]  # noqa: UP045 -- Python 3.9 runtime compatibility
 
 
 CONFIG_REGISTRY: dict[str, ConfigItemSpec] = {
@@ -251,7 +251,7 @@ CONFIG_REGISTRY: dict[str, ConfigItemSpec] = {
         required=False,
         conditional_on=None,
         restart_required=False,
-        default="",
+        default="true",
     ),
     "event_media_download_batch_limit": ConfigItemSpec(
         key="event_media_download_batch_limit",

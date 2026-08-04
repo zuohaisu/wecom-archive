@@ -71,7 +71,7 @@ It is **not** a public-facing product. Access is restricted to employees authent
 | REST API | Python 3.11 + FastAPI | ✅ Fully implemented |
 | Database | PostgreSQL 14+ | ✅ Schema deployed, Alembic migrations active |
 | Media storage | Pluggable provider (`MediaStorageProvider` interface) | ✅ Local disk (RND-185) + Qiniu Kodo, optional (RND-174); OSS/S3 contract ready |
-| Sync worker | Python scripts via systemd timer (`OnCalendar=*:0/5`) | ✅ Implemented; worker/media timer units are versioned in repo |
+| Sync worker | Callback-primary Python worker + 30-minute systemd reconciliation (`OnCalendar=*:0/30`) | ✅ Implemented; worker/media timer units are versioned in repo |
 | Admin UI — Conversation Review Console | Server-rendered HTML + JS (FastAPI) | ✅ Three-column, WeCom-style (RND-154/157) |
 | Admin UI — Diagnostics | Server-rendered HTML + JS | ✅ Message reachability audit (RND-180) |
 | Auth — WeCom OAuth | WeCom OAuth 2.0 (`snsapi_base`) | ✅ RND-110 |
@@ -84,9 +84,10 @@ It is **not** a public-facing product. Access is restricted to employees authent
 ### 3.1 Message Sync (pull)
 
 ```
-[systemd timer: OnCalendar=*:0/5]
-         │
-         ▼
+[validated WeCom callback] ──non-blocking──► [archive dispatch]
+[systemd reconciliation: OnCalendar=*:0/30] ─► [same archive entrypoint]
+                                                  │
+                                                  ▼
 run_archive_worker_once.py
   ├── Acquires file lock (WORKER_LOCK_PATH)
   ├── sync_wecom_archive_once.py
@@ -105,19 +106,25 @@ run_archive_worker_once.py
 
 Cursor is persisted after each successful batch so restarts are safe and non-duplicating.
 
-### 3.2 Media Download (separate, independent timer)
+### 3.2 Media Download (archive-complete wake-up + reconciliation)
 
 ```
-[systemd timer: OnBootSec=5min, OnUnitActiveSec=5min]
+[successful archive sync/decrypt commit]
+         │  bounded fresh/pending preflight; no media => no wake-up
+         ▼
+[one mtime-only signal] → wecom-archive-media-event.path/service
          │
          ▼
-download_wecom_media_once.py (unified pipeline: app/media_download.py —
-                               image/voice/video/file/emotion, --types selectable)
-  ├── Acquires file lock (MEDIA_DOWNLOAD_LOCK_PATH)
-  ├── Selects candidate messages (--since-hours 72, --limit 20)
+download_wecom_media_once.py (same unified pipeline: app/media_download.py —
+                               image/voice/video/file/emotion + nested media)
+  ├── Acquires its own file lock (MEDIA_DOWNLOAD_LOCK_PATH)
+  ├── Selects candidate messages (archive-complete: recent/newest-first;
+  │   timer: --since-hours 72 --newest-first --retry --limit 20)
   ├── Downloads via WeCom SDK → .part file
   ├── Validates bytes (magic-byte detection, per-type category)
   └── Publishes → media_files row updated to download_status='downloaded'
+
+[systemd reconciliation: OnCalendar=*:15/30] ──► same media entrypoint
 ```
 
 ### 3.3 Admin Review (read)
@@ -271,11 +278,13 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 
 | Unit | Type | Schedule | Purpose |
 |------|------|----------|---------|
-| `wecom-archive-worker.service` | oneshot | `OnCalendar=*:0/5` | Sync + decrypt archive messages |
+| `wecom-archive-worker.service` | oneshot | `OnCalendar=*:0/30` | Callback-primary sync/decrypt reconciliation; archive-complete media wake-up |
 | `wecom-archive-worker.timer` | timer | — | Activates above |
 | `wecom-archive-reachability-check.service` | oneshot | `OnCalendar=*-*-* 04:30:00` | Full reachability reconciliation |
 | `wecom-archive-reachability-check.timer` | timer | — | Activates above |
-| `wecom-archive-media-download.service` | oneshot | `OnUnitActiveSec=5min` | Download recent image media |
+| `wecom-archive-media-event.service` | oneshot | systemd path signal | Runs existing generic media CLI after archive-complete wake-up |
+| `wecom-archive-media-event.path` | path | shared mtime signal | Activates the event service without a queue payload |
+| `wecom-archive-media-download.service` | oneshot | `OnCalendar=*:15/30` | Reconcile pending/retryable generic media |
 | `wecom-archive-media-download.timer` | timer | — | Activates above |
 
 The repository does **not** currently version:

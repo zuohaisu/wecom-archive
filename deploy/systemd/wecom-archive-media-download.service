@@ -1,5 +1,5 @@
 [Unit]
-Description=WeCom Archive Recent Media Download (RND-168/RND-199, one shot)
+Description=WeCom Archive Generic Media Reconciliation (RND-343, one shot)
 After=network-online.target postgresql.service
 Wants=network-online.target
 
@@ -8,7 +8,7 @@ Type=oneshot
 User=wecomarchive
 WorkingDirectory=/srv/apps/wecom-archive-365/current/backend
 EnvironmentFile=/srv/apps/wecom-archive-365/current/backend/.env
-ExecStart=/srv/apps/wecom-archive-365/current/backend/.venv/bin/python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 20
+ExecStart=/srv/apps/wecom-archive-365/current/backend/.venv/bin/python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 20 --retry --trigger-source timer
 
 # Security hardening (safe subset — must not break access to any of:
 # backend directory, .env, database path, SDK library path, storage root,
