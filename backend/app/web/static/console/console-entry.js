@@ -411,8 +411,14 @@ document.addEventListener('click',function(e){
 // (focusMsgId is declared once near the top of this script, before readFocusFromUrl()
 //  runs during init, so its value is not reset after being set.)
 function focusMessage(msgid, convId, convType, entityId, entityType){
-  if(!convId||!msgid)return;
-  focusMsgId=msgid;
+  // RND-341: msgid is optional -- callers that only want to open a
+  // conversation (e.g. the external-contacts detail drawer's "相关会话"
+  // links), without locating a specific message, pass null/'' here.
+  // focusCheckRow() below already no-ops when focusMsgId is falsy, so this
+  // still reuses the exact same select-entity -> select-conv -> loadTimeline
+  // chain as the RND-229 search-result jump.
+  if(!convId)return;
+  focusMsgId=msgid||null;
   // QA fix: applyConvTypeFilter() only hides non-matching conv-card
   // elements from the DOM -- it never renders them at all. If the
   // currently active 全部/群聊/单聊 filter doesn't match the target
@@ -514,12 +520,19 @@ function showFocusBanner(){
 function readFocusFromUrl(){
   var p=new URLSearchParams(location.search);
   var f=p.get('focus');
-  if(!f)return;
+  var conv=p.get('conv');
+  // RND-341: a bare `conv` (no `focus` msgid) is a valid arrival too -- e.g.
+  // from the external-contacts detail drawer's "相关会话" links, which just
+  // want the conversation opened, not a specific message located.
+  if(!f&&!conv)return;
   // A real cross-page arrival -- the previous history entry is the
-  // standalone search-results page, so history.back() (the banner's
-  // action) is correct here. See focusIsUrlArrival's declaration comment.
+  // standalone search-results page (or, for RND-341, the /admin/contacts
+  // page), so history.back() (the banner's action) is correct here. See
+  // focusIsUrlArrival's declaration comment. The banner itself only ever
+  // renders when focusCheckRow() actually locates a target row, which
+  // requires a real msgid -- so a bare conv-only arrival never shows it.
   focusIsUrlArrival=true;
-  focusMessage(f,p.get('conv'),p.get('convType'),p.get('entityId'),p.get('entityType'));
+  focusMessage(f,conv,p.get('convType'),p.get('entityId'),p.get('entityType'));
 }
 
 function onSearchInput(){
