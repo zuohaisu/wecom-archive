@@ -7,6 +7,31 @@
 
 ---
 
+## 2026-08-04 根地址入口回归：RND-261 重新打开
+
+生产确认 `GET https://archive.crowntime.cn/` 返回 FastAPI 默认
+`404 {"detail":"Not Found"}`。这证明 DNS、TLS、Nginx 到 Uvicorn/FastAPI
+的链路已经到达应用；缺口是应用没有注册精确的 `/` 路由，不是可由
+Nginx catch-all 修复的问题。此前将根地址 404 视为正常或将根地址业务
+验收记为 PASS 的记录，均不得再作为 RND-261 的关闭证据。
+
+本次代码修复后的入口契约为：Nginx 原样转发 `/` →
+`app.main.create_app()` 已注册的 `auth_router` → auth router 的精确 `GET /`
+以**相对** `302` 跳转至现有规范登录页 `/admin/login` → 该既有登录路由
+自行识别有效 session，并在已登录时跳转至既定默认页
+`/admin/conversations`。根路由不新增页面、不读取 session、不复制 tenant
+或鉴权逻辑；它也不是 catch-all，因此 API、企微 callback、health 和静态
+资源路由保持各自原有行为。
+
+下次部署后，人工运维必须在无痕 PC 浏览器完成：未登录访问根地址后显示
+登录页、完成登录后再次访问根地址进入后台；记录每一跳的状态码和 host，
+确认没有旧域名、第三方域名（企业微信官方授权页除外）或循环。使用 GET 的
+`curl -sS -D - -o /dev/null https://archive.crowntime.cn/` 对根地址应先得到
+临时 `302` 和 `Location: /admin/login`。在这项 smoke
+通过前，RND-261 保持 Todo，不得重新标记 Done。
+
+---
+
 ## 0. 仓库现状（已核实证据，2026-08-03）
 
 以下为 agent 从仓库代码核实的事实，供人工运维核对，不作为生产配置的假设：
@@ -15,8 +40,8 @@
 |---|------|---------|
 | F1 | `ARCHIVE_DOMAIN` 是 deploy 脚本 public health gate 的域名来源，默认占位符 `archive.example.com`；脚本 source `backend/.env` 后用 `PUBLIC_HEALTH="https://${ARCHIVE_DOMAIN}/health"` 构造公网健康检查 URL | `scripts/deploy_server.sh:188, 615` |
 | F2 | 公网健康检查失败**不会触发代码回滚**（应用本身已通过内部检查），部署仍以非零退出，需运维排查 proxy/DNS/TLS 层 | `scripts/deploy_server.sh:684-692` |
-| F3 | `ADMIN_DOMAIN` 用于构造 WeCom OAuth 的 `redirect_uri`：`https://{ADMIN_DOMAIN}/api/auth/wecom/callback`；未设置时降级为 `http://localhost:8035`（生产不可用） | `backend/app/routers/auth.py:752-759, 789-794` |
-| F4 | `ADMIN_DOMAIN` 同时也是密码重置 / 邀请链接的 fallback base URL（`PASSWORD_RESET_BASE_URL` / `INVITE_BASE_URL` 未设置时） | `backend/app/routers/auth.py:303, 398` |
+| F3 | `ADMIN_DOMAIN` 用于构造 WeCom OAuth 的 `redirect_uri`：`https://{ADMIN_DOMAIN}/api/auth/wecom/callback`；未设置时降级为 `http://localhost:8035`（生产不可用） | `backend/app/routers/auth.py:755-773, 792-806` |
+| F4 | `ADMIN_DOMAIN` 同时也是密码重置 / 邀请链接的 fallback base URL（`PASSWORD_RESET_BASE_URL` / `INVITE_BASE_URL` 未设置时） | `backend/app/routers/auth.py:316-319, 412` |
 | F5 | 官网（`crowntime.cn` / `www.crowntime.cn`）由 `static_site/company_homepage/` 静态站服务，与归档后端**明确隔离**；仓库 README 声明切换前 `qwhhcd.crowntime.cn` 继续路由到归档后端 | `static_site/company_homepage/README.md:49-80` |
 | F6 | 仓库**不包含受控的生产 Nginx 配置**（README 明示 "This repo does not currently contain a checked-in Nginx config"）；生产 nginx 由运维人工管理 | `static_site/company_homepage/README.md:59-63` |
 | F7 | 仓库**不包含**生产 `wecom-archive-365.service` systemd 单元；应用以 `uvicorn app.main:app --host 127.0.0.1 --port 8035` 运行，经 nginx 反代 | `docs/DEPLOYMENT.md:101-109` |
@@ -204,7 +229,7 @@ Ops agent 不得声称执行了任何生产写操作；不得 commit、push 或�
 |---|---|---|
 | §4.1 Git 基线 | HEAD=origin/main=`da37bfb`(RND-339)，工作区干净（仅 untracked 测试脚本/qn-py-sdk/renew-wildcard.sh，无 tracked 修改） | PASS |
 | §4.2 服务基线 | wecom-archive-365.service + nginx active；uvicorn 127.0.0.1:8035；nginx conf `/etc/nginx/conf.d/*.conf` | PASS |
-| §4.3 旧域名基线 | qwhhcd `/health`=200、`/health/ready`=200、根路径 404（无根路由，正常） | PASS |
+| §4.3 旧域名基线 | qwhhcd `/health`=200、`/health/ready`=200、根路径 404（历史观察；2026-08-04 已确认这是 acceptance miss，不再是可接受基线） | 历史记录 |
 | §4.4 DNS 基线 | qwhhcd/archive→47.115.58.45；**media→七牛 CDN**（未受影响） | PASS |
 | §5.1 DNS 多解析器 | 系统/1.1.1.1/8.8.8.8 均 → 47.115.58.45 | PASS |
 | §6.1 环境变量 | `ARCHIVE_DOMAIN=archive.crowntime.cn` ✓；`ADMIN_DOMAIN=https://qwhhcd.crowntime.cn`（带协议前缀，异常待修正）；`QINIU_DOMAIN=media-origin.crowntime.cn`（媒体，未迁移）；`AUTH_MODE=password`；无 APP_URL/BASE_URL/COOKIE_DOMAIN 等变量（应用不使用） | ⚠️ ADMIN_DOMAIN 前缀异常 |
@@ -216,13 +241,13 @@ Ops agent 不得声称执行了任何生产写操作；不得 commit、push 或�
 | §7.5 静态+媒体 | 全部静态资源 200（favicon/styles/logo，同源 HTTPS 无 mixed content）；媒体 URL 由 QINIU_DOMAIN(media-origin) 构造，与产品域名无关 | PASS |
 | §7.6 日志 | 应用日志 0 error/traceback（仅扫描器 404 探测）；nginx 窗口内无新增错误；无重定向循环；新域名 access 75 请求 | PASS |
 
-**§6+§7 结论：核心迁移 + 配置审计 + 生产验证全部 PASS。剩余：§8 旧域名 301（等 P4 决策）、§9 回滚成文、§11 最终报告。**
+**§6+§7 结论（历史）：当时的核心迁移、配置审计和已覆盖检查为 PASS，但未覆盖根地址产品入口；2026-08-04 已因该 acceptance miss 重新打开 RND-261。完成根地址代码部署及本文件顶部要求的生产 smoke 前，不得据此关闭工单。**
 
 ### 收尾确认（2026-08-03）
 
 | 项 | 结果 | 备注 |
 |---|---|---|
-| §7.3 前端业务验收 | **PASS（Haisu 亲自确认）**：`https://archive.crowntime.cn/` 前端正常访问，登录页/页面渲染无问题 | AC-3 核心验收通过 |
+| §7.3 前端业务验收 | **2026-08-04 已失效**：后续确认根地址返回 FastAPI 默认 404；此前 PASS 不再构成 AC-3 证据 | 根地址修复部署后须重新执行无痕登录 smoke |
 | P4 旧域名策略 | **Haisu 决策：旧域名处理延至 2026-08-04 执行**；今日保持新旧域名并行服务（qwhhcd /health=200） | 明日执行时再定具体形式（301 重定向或直接下线），届时验证 Location 指向、无循环 |
 | §9 回滚方案 | 见下方 | 成文 |
 
@@ -258,6 +283,7 @@ Ops agent 不得声称执行了任何生产写操作；不得 commit、push 或�
 
 ### 明日待办（2026-08-04）
 
+- [ ] 部署根地址产品入口修复；无痕浏览器验证 `/` → `/admin/login` → 登录后 `/admin/conversations`，并记录状态码、host 和无循环证据。完成前 RND-261 保持 Todo。
 - [ ] §8 旧域名处理（P4：Haisu 已决策延至今日执行）：301 重定向或下线，验证 Location/循环/媒体不受影响
 - [ ] 确认稳定后清理旧 certbot 子域证书（`certbot delete`，可选）
 - [ ] §11 最终报告输出（含 RND-108/105/130 是否可继续的结论）
