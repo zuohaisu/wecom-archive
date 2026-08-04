@@ -9,12 +9,11 @@ import struct
 from threading import Event
 
 import pytest
+from app.routers import wecom_events
+from app.services import archive_worker_trigger
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from app.routers import wecom_events
-from app.services import archive_worker_trigger
 
 _TOKEN = "callback-token-sentinel"
 _CORP_ID = "corp-sentinel"
@@ -217,17 +216,11 @@ def _post(client: TestClient, body: bytes, payload: str, *, signature: str | Non
     )
 
 
-def test_post_valid_signature_acknowledges_and_dispatches_worker_and_media(
+def test_post_valid_signature_acknowledges_and_dispatches_only_archive_worker(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    dispatched: list[tuple[str, str]] = []
     worker_dispatches: list[object] = []
     monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: "tenant-sentinel")
-    monkeypatch.setattr(
-        wecom_events,
-        "trigger_recent_image_download",
-        lambda tenant_id, triggered_by: dispatched.append((tenant_id, triggered_by)),
-    )
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
@@ -240,7 +233,9 @@ def test_post_valid_signature_acknowledges_and_dispatches_worker_and_media(
     assert response.headers["content-type"].startswith("text/plain")
     assert response.content == b"ok"
     assert worker_dispatches == [1]
-    assert dispatched == [("tenant-sentinel", "callback")]
+    # Callback HTTP code must not inspect or directly wake media. The shared
+    # archive entrypoint does that after sync/decrypt commits.
+    assert not hasattr(wecom_events, "trigger_recent_image_download")
 
 
 @pytest.mark.parametrize(
@@ -261,9 +256,7 @@ def test_post_malformed_or_unsigned_input_never_dispatches(
     payload: str,
     signature: str | None,
 ) -> None:
-    dispatched: list[object] = []
     worker_dispatches: list[object] = []
-    monkeypatch.setattr(wecom_events, "trigger_recent_image_download", lambda *_args, **_kwargs: dispatched.append(1))
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
@@ -273,7 +266,6 @@ def test_post_malformed_or_unsigned_input_never_dispatches(
 
     assert response.status_code in {400, 403}
     assert response.status_code != 500
-    assert dispatched == []
     assert worker_dispatches == []
 
 
@@ -364,7 +356,8 @@ def test_post_returns_before_the_shared_worker_finishes(
     release = Event()
     finished = Event()
 
-    def _blocking_worker() -> bool:
+    def _blocking_worker(*, trigger_source: str) -> bool:
+        assert trigger_source == "callback"
         started.set()
         assert release.wait(timeout=1)
         finished.set()
@@ -391,23 +384,16 @@ def test_post_returns_before_the_shared_worker_finishes(
 def test_post_dispatch_failure_is_not_acknowledged(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    media_dispatches: list[object] = []
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
         lambda: wecom_events.ArchiveWorkerDispatch.FAILED,
-    )
-    monkeypatch.setattr(
-        wecom_events,
-        "trigger_recent_image_download",
-        lambda *_args, **_kwargs: media_dispatches.append(1),
     )
     payload = "post-encrypt-sentinel"
     response = _post(client, f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode(), payload)
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Callback worker unavailable"}
-    assert media_dispatches == []
 
 
 def test_dispatch_failure_does_not_leak_request_data(

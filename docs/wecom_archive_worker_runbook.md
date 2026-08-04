@@ -1,31 +1,41 @@
-# WeCom Archive Worker — Runbook
+# WeCom Archive Worker — Event-First Reconciliation Runbook
 
-## Overview
+## Purpose and trigger model
 
-`run_archive_worker_once.py` is the shared entrypoint for the archive pipeline.
-It acquires a file lock, runs `sync_wecom_archive_once.py`, and — if sync
-succeeds — runs `decrypt_wecom_messages_once.py`.
+`backend/scripts/run_archive_worker_once.py` remains the **single** archive
+entrypoint. It retains the existing `WORKER_LOCK_PATH` `fcntl.flock`, then
+runs sync and decrypt unchanged. It is called by:
 
-The worker is designed to be triggered by:
+1. a validated WeCom callback (primary, non-blocking HTTP acknowledgement);
+2. the authenticated manual Sync Now path;
+3. the low-frequency systemd reconciliation timer;
+4. an operator's manual CLI invocation.
 
-- **systemd timer** (recommended for unattended production)
-- **manual CLI invocation** (for testing and one-off runs)
-- **future event-triggered callers** (e.g. WeCom callback webhook)
+A successful run releases the archive lock and then performs a read-only,
+bounded preflight for fresh/pending media. Only when that finds work does it
+touch one coalescing signal consumed by
+`wecom-archive-media-event.path`; that path starts the existing
+`backend/scripts/download_wecom_media_once.py` entrypoint with
+`--trigger-source archive-complete` in its own systemd service. The callback
+handler never parses or downloads media itself.
 
-All three triggers coexist safely because the file lock guarantees only one
-worker runs at any time.
+The media worker owns its own `MEDIA_DOWNLOAD_LOCK_PATH`; it never uses the
+archive lock. A lock conflict is a safe no-op and the next media timer run is
+the durable compensation path.
 
----
+## Default schedule (RND-343)
 
-## Shared lock directory setup
+| Worker | Versioned default | Purpose |
+|---|---:|---|
+| Archive reconciliation | `OnCalendar=*:0/30` (`:00`, `:30`) | Catch missed callbacks, failed dispatches, restarts, and cursor reconciliation |
+| Generic media reconciliation | `OnCalendar=*:15/30` (`:15`, `:45`) | Pending/retryable generic media reconciliation |
 
-**Machine:** Aliyun ECS
-**User:** root
-**Directory:** any
-**Virtualenv:** not required
-**.env:** not required
+The 15-minute stagger exceeds the required 10-minute offset. Callback-driven
+archive work remains the low-latency path; the timer is not removed.
 
-Run once during initial deployment:
+## Shared lock setup
+
+Run once as root:
 
 ```bash
 sudo mkdir -p /srv/apps/wecom-archive-365/shared/run
@@ -33,124 +43,131 @@ sudo chown wecomarchive:wecomarchive /srv/apps/wecom-archive-365/shared/run
 sudo chmod 750 /srv/apps/wecom-archive-365/shared/run
 ```
 
-The lock file itself is created automatically by the worker.  If the parent
-directory cannot be created at worker start (e.g. missing permissions), the
-worker fails clearly with a `[FAIL]` message.
+The archive and media lock files are separate:
 
----
+```text
+/srv/apps/wecom-archive-365/shared/run/wecom-archive-worker.lock
+/srv/apps/wecom-archive-365/shared/run/wecom-media-download.lock
+```
 
-## Environment variable
+## Installation / upgrade (Ops-owned)
 
-| Variable           | Default                                                               | Description                     |
-|--------------------|-----------------------------------------------------------------------|---------------------------------|
-| `WORKER_LOCK_PATH` | `/srv/apps/wecom-archive-365/shared/run/wecom-archive-worker.lock`    | Path to the shared lock file    |
+> Production scheduling changes are performed by the operations agent only.
+> Preserve the currently installed units before replacing them.
 
-All other environment variables required by `sync_wecom_archive_once.py` and
-`decrypt_wecom_messages_once.py` must also be set in `.env`.
+```bash
+sudo install -d -m 0750 /srv/apps/wecom-archive-365/shared/rollback/rnd-343
+sudo cp -a /etc/systemd/system/wecom-archive-worker.{service,timer} \
+  /etc/systemd/system/wecom-archive-media-download.{service,timer} \
+  /srv/apps/wecom-archive-365/shared/rollback/rnd-343/
+sudo cp -a /etc/systemd/system/wecom-archive-media-event.{service,path} \
+  /srv/apps/wecom-archive-365/shared/rollback/rnd-343/ 2>/dev/null || true
 
----
+sudo cp deploy/systemd/wecom-archive-worker.service /etc/systemd/system/
+sudo cp deploy/systemd/wecom-archive-worker.timer /etc/systemd/system/
+sudo cp deploy/systemd/wecom-archive-media-download.service /etc/systemd/system/
+sudo cp deploy/systemd/wecom-archive-media-download.timer /etc/systemd/system/
+sudo cp deploy/systemd/wecom-archive-media-event.service /etc/systemd/system/
+sudo cp deploy/systemd/wecom-archive-media-event.path /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-archive-worker.timer
+sudo systemctl enable --now wecom-archive-media-download.timer
+sudo systemctl enable --now wecom-archive-media-event.path
+```
 
-## Manual worker run
+The event signal is one mtime-only file under the existing shared `run/`
+directory. It contains no identifiers and cannot grow into a queue; database
+pending/retryable state remains the task source. The event service and timer
+both reuse the same generic media CLI and media lock.
 
-**Machine:** Aliyun ECS
-**User:** wecomarchive
-**Directory:** /srv/apps/wecom-archive-365/current/backend
-**Virtualenv:** required
-**.env:** source required
+## Safe cadence configuration and emergency rollback
+
+The versioned defaults above are the production recommendation. To restore the
+previous 5-minute cadence, install the reviewed drop-ins (they preserve the
+old two-minute offset), then reload systemd:
+
+```bash
+sudo install -d /etc/systemd/system/wecom-archive-worker.timer.d
+sudo install -d /etc/systemd/system/wecom-archive-media-download.timer.d
+sudo install -m 0644 deploy/systemd/overrides/wecom-archive-worker-5min.conf \
+  /etc/systemd/system/wecom-archive-worker.timer.d/reconciliation.conf
+sudo install -m 0644 deploy/systemd/overrides/wecom-archive-media-download-5min.conf \
+  /etc/systemd/system/wecom-archive-media-download.timer.d/reconciliation.conf
+sudo systemctl daemon-reload
+sudo systemctl restart wecom-archive-worker.timer wecom-archive-media-download.timer
+```
+
+To return to the versioned 30-minute defaults, remove only those drop-ins and
+reload/restart the timers:
+
+```bash
+sudo rm -f /etc/systemd/system/wecom-archive-worker.timer.d/reconciliation.conf
+sudo rm -f /etc/systemd/system/wecom-archive-media-download.timer.d/reconciliation.conf
+sudo systemctl daemon-reload
+sudo systemctl restart wecom-archive-worker.timer wecom-archive-media-download.timer
+```
+
+For a full operational rollback, disable the new path watcher, restore the
+files saved under `shared/rollback/rnd-343/`, remove the newly introduced event
+units if they did not exist in the backup, then run `daemon-reload` and restart
+both timers. Do not delete either reconciliation timer:
+
+```bash
+sudo systemctl disable --now wecom-archive-media-event.path
+sudo rm -f /etc/systemd/system/wecom-archive-media-event.service \
+  /etc/systemd/system/wecom-archive-media-event.path
+sudo cp -a /srv/apps/wecom-archive-365/shared/rollback/rnd-343/* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart wecom-archive-worker.timer wecom-archive-media-download.timer
+```
+
+## Manual checks
+
+Run the archive entrypoint as `wecomarchive` after sourcing the deployed `.env`:
 
 ```bash
 sudo -iu wecomarchive
 cd /srv/apps/wecom-archive-365/current/backend
 source .venv/bin/activate
-set -a
-source .env
-set +a
+set -a; source .env; set +a
 python scripts/run_archive_worker_once.py
 ```
 
-Successful output ends with:
+Expected safe aggregate lines include sync fetch/insert counts, decrypt counts,
+`archive_worker trigger_source=manual`, duration, child CPU/RSS aggregates,
+and the archive-complete media dispatch outcome. Every exit (including a lock
+no-op or failure) ends with a `lifecycle=ended` line containing `result`, a
+safe `error_class`, and `completed_at`. No token, secret, message body, media
+ID, signed URL, local path, raw provider setting, or exception text should
+appear.
 
-```
-[PASS] run_archive_worker_once completed successfully
-```
-
-If another worker is already running:
-
-```
-archive_worker lock already held; exiting
-```
-
-(exit code 0 — this is a safe no-op.)
-
----
-
-## systemd timer installation
-
-**Machine:** Aliyun ECS
-**User:** root
-**Directory:** /srv/apps/wecom-archive-365/current
-**Virtualenv:** not required
-**.env:** not required
+Check timers, locks, and the API while workers run:
 
 ```bash
-sudo cp deploy/systemd/wecom-archive-worker.service /etc/systemd/system/
-sudo cp deploy/systemd/wecom-archive-worker.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-archive-worker.timer
-sudo systemctl status wecom-archive-worker.timer --no-pager
-```
-
-### Timer schedule
-
-The timer fires every 5 minutes at `:00, :05, :10, …` (`OnCalendar=*:0/5`).
-With `Persistent=true`, if the system was powered off during a scheduled
-fire, the timer catches up on boot.
-
-### Manual trigger (for immediate run)
-
-```bash
-sudo systemctl start wecom-archive-worker.service
-```
-
-The lock prevents concurrent runs triggered this way.
-
----
-
-## Log check
-
-**Machine:** Aliyun ECS
-**User:** root
-**Directory:** any
-**Virtualenv:** not required
-**.env:** not required
-
-```bash
-sudo journalctl -u wecom-archive-worker.service -n 100 --no-pager
 sudo systemctl list-timers --all | grep wecom-archive
+sudo systemctl status wecom-archive-worker.timer --no-pager
+sudo systemctl status wecom-archive-media-event.path --no-pager
+sudo systemctl status wecom-archive-media-download.timer --no-pager
+sudo journalctl -u wecom-archive-worker.service -n 100 --no-pager
+sudo journalctl -u wecom-archive-media-download.service -n 100 --no-pager
+curl -fsS http://127.0.0.1:8035/health/ready; echo
 ```
 
----
+For production evidence, capture before/after timer empty-run counts,
+aggregate `candidate_total`/`candidate_selected`, worker duration, and
+CPU/RSS (`systemd-cgtop` or `ps`) during one callback-driven run and one timer
+run. Record only aggregates; do not export messages or media identifiers.
 
-## Disable timer
+## Failure handling
 
-**Machine:** Aliyun ECS
-**User:** root
-**Directory:** any
-**Virtualenv:** not required
-**.env:** not required
+| Observation | Safe meaning / action |
+|---|---|
+| `trigger=skipped-locked` | Another archive dispatch is pending/running; do not kill it. The timer will reconcile. |
+| `media_trigger=no-work` | Archive committed no fresh/pending media in the bounded window; no media process was started. |
+| `media_trigger=dispatch-failed` | Archive data is already committed; inspect safe journal categories and rely on the media timer. |
+| Archive sync/decrypt failure | No archive-complete media dispatch occurs. Investigate the archive worker journal; cursor/idempotency semantics are unchanged. |
+| Callback missed or callback dispatch fails | The archive reconciliation timer eventually re-pulls through the same shared entrypoint and lock. |
 
-```bash
-sudo systemctl disable --now wecom-archive-worker.timer
-```
-
----
-
-## Troubleshooting
-
-| Symptom                                            | Likely cause                             | Action                                                  |
-|----------------------------------------------------|------------------------------------------|---------------------------------------------------------|
-| `[FAIL] Cannot create lock directory`              | Missing permissions on shared dir        | Run the shared lock directory setup commands above       |
-| `[FAIL] Environment variable not set or empty: …`  | Missing `.env` value                     | Verify `.env` has all required variables                |
-| `[FAIL] No active tenant found for this corp` (from `decrypt_wecom_messages_once.py`) | RND-222: decrypt now resolves and fails fast on a missing/inactive `tenant_wecom_configs` row for `WECOM_CORP_ID`, matching sync/media's existing behavior (previously decrypt had no tenant check at all) | Run `bootstrap_default_tenant.py` or verify the active config row for this corp |
-| Subprocess exits non-zero                          | Sync or decrypt failure                  | Run `sudo journalctl -u wecom-archive-worker.service -n 100 --no-pager` |
-| Timer not firing                                   | Timer not enabled/started                | `sudo systemctl status wecom-archive-worker.timer --no-pager` |
+Never paste callback query strings, `.env` contents, token/secret values,
+message content, `sdkfileid`, signed URLs, or storage paths into tickets or
+logs.

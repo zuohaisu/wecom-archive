@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import logging
 import os
-from typing import Optional, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple  # noqa: UP035 -- Python 3.9 runtime compatibility
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -13,17 +13,16 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.db.models import AdminUser, SyncState, TenantWecomConfig
-from app.media_event_dispatch import trigger_recent_image_download
 from app.db.session import get_db, get_engine
-from app.services.archive_worker_trigger import run_archive_worker_once
 from app.schemas.sync import SyncNowResponse, SyncStatusResponse
+from app.services.archive_worker_trigger import run_archive_worker_once
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _SYNC_NOW_COOLDOWN = timedelta(seconds=30)
 
-def _active_config(db: Session, tenant_id: str) -> Optional[TenantWecomConfig]:
+def _active_config(db: Session, tenant_id: str) -> Optional[TenantWecomConfig]:  # noqa: UP045 -- Python 3.9 runtime compatibility
     return (
         db.query(TenantWecomConfig)
         .filter(
@@ -34,7 +33,7 @@ def _active_config(db: Session, tenant_id: str) -> Optional[TenantWecomConfig]:
     )
 
 
-def _sync_state(db: Session, tenant_id: str, corp_id: str) -> Optional[SyncState]:
+def _sync_state(db: Session, tenant_id: str, corp_id: str) -> Optional[SyncState]:  # noqa: UP045 -- Python 3.9 runtime compatibility
     return (
         db.query(SyncState)
         .filter(SyncState.tenant_id == tenant_id, SyncState.corp_id == corp_id)
@@ -42,7 +41,7 @@ def _sync_state(db: Session, tenant_id: str, corp_id: str) -> Optional[SyncState
     )
 
 
-def _status_response(row: Optional[SyncState]) -> SyncStatusResponse:
+def _status_response(row: Optional[SyncState]) -> SyncStatusResponse:  # noqa: UP045 -- Python 3.9 runtime compatibility
     if row is None:
         return SyncStatusResponse(
             status="idle",
@@ -77,27 +76,22 @@ def _mark_worker_failed(tenant_id: str, corp_id: str) -> None:
             row.status = "error"
             row.error_message = "sync_failed"
             db.commit()
-    except Exception:
+    except Exception:  # noqa: BLE001 -- status-write detail must not reach browser/logs
         # A status-write failure must not make the request/background runner
         # emit database details to the browser or application logs.
         logger.error("archive worker failed and sync status could not be updated")
 
 
-def _trigger_via_dispatcher(tenant_id: str) -> None:
-    """Best-effort event signal after the archive worker has been queued."""
-    trigger_recent_image_download(tenant_id, triggered_by="sync")
-
-
 def _run_archive_worker(tenant_id: str, corp_id: str) -> None:
     """Run the shared worker seam after the 202 response has been sent."""
-    if not run_archive_worker_once():
+    if not run_archive_worker_once(trigger_source="manual"):
         _mark_worker_failed(tenant_id, corp_id)
 
 
 @router.get("/sync-status", response_model=SyncStatusResponse)
 def get_sync_status(
-    db: Session = Depends(get_db),
-    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+    db: Session = Depends(get_db),  # noqa: B008 -- FastAPI dependency declaration
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),  # noqa: UP006 -- FastAPI/Python 3.9 compatibility
 ) -> SyncStatusResponse:
     """Return only the authenticated tenant's archive-sync status."""
     _, tenant_id = auth
@@ -114,8 +108,8 @@ def get_sync_status(
 )
 def sync_now(
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+    db: Session = Depends(get_db),  # noqa: B008 -- FastAPI dependency declaration
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),  # noqa: UP006 -- FastAPI/Python 3.9 compatibility
 ) -> SyncNowResponse:
     """Queue one real archive-worker run for the authenticated tenant.
 
@@ -165,6 +159,9 @@ def sync_now(
         db.rollback()
         return SyncNowResponse(accepted=False, message="already_running")
 
+    # The shared archive entrypoint performs the archive-complete media
+    # wake-up after it has committed sync/decrypt work.  Do not queue media
+    # separately here: it would race the archive worker and download from a
+    # callback/manual HTTP request path.
     background_tasks.add_task(_run_archive_worker, tenant_id, config.corp_id)
-    background_tasks.add_task(_trigger_via_dispatcher, tenant_id)
     return SyncNowResponse(accepted=True, message="started")

@@ -19,13 +19,14 @@ from xml.etree import ElementTree
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
-
 from sqlalchemy.orm import Session
 
 from app.db.models import TenantWecomConfig
 from app.db.session import get_engine
-from app.media_event_dispatch import trigger_recent_image_download
-from app.services.archive_worker_trigger import ArchiveWorkerDispatch, dispatch_archive_worker
+from app.services.archive_worker_trigger import (
+    ArchiveWorkerDispatch,
+    dispatch_archive_worker,
+)
 from app.settings import get_wecom_callback_settings
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,7 @@ def _active_tenant_for_corp(corp_id: str) -> str | None:
                 .first()
             )
             return row.tenant_id if row is not None else None
-    except Exception:
+    except Exception:  # noqa: BLE001 -- callback must not expose tenant lookup detail
         return None
 
 
@@ -282,12 +283,8 @@ async def wecom_callback_post(
     if dispatch is ArchiveWorkerDispatch.FAILED:
         raise HTTPException(status_code=503, detail="Callback worker unavailable")
 
-    # RND-172's image dispatcher remains independent of the archive-worker
-    # dispatch: an image-download failure must not alter WeCom's acknowledgement.
-    try:
-        trigger_recent_image_download(tenant_id, triggered_by="callback")
-    except Exception:
-        pass
-
+    # Media is deliberately not parsed or downloaded in this HTTP handler.
+    # The shared archive entrypoint wakes the generic media worker only after
+    # sync/decrypt has committed any newly actionable media metadata.
     logger.info("wecom_callback accepted method=POST")
     return PlainTextResponse(content="ok", media_type="text/plain")

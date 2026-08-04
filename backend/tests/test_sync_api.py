@@ -6,12 +6,11 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from app.db.base import Base
+from app.db.models import SyncState, Tenant, TenantWecomConfig
 from fastapi.testclient import TestClient
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import Session
-
-from app.db.base import Base
-from app.db.models import SyncState, Tenant, TenantWecomConfig
 
 
 @pytest.fixture()
@@ -181,7 +180,7 @@ def test_manual_worker_uses_the_shared_archive_worker_seam(
     from app.routers import sync
 
     failures: list[tuple[str, str]] = []
-    monkeypatch.setattr(sync, "run_archive_worker_once", lambda: False)
+    monkeypatch.setattr(sync, "run_archive_worker_once", lambda **_kwargs: False)
     monkeypatch.setattr(sync, "_mark_worker_failed", lambda tenant_id, corp_id: failures.append((tenant_id, corp_id)))
 
     sync._run_archive_worker("tenant-sentinel", "corp-sentinel")

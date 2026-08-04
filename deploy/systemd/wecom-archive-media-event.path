@@ -1,0 +1,11 @@
+[Unit]
+Description=WeCom Archive Generic Media Event Signal Watcher (RND-343)
+
+[Path]
+# One mtime-only signal written after successful archive commits. It carries no
+# media IDs; the database pending/retryable state remains the task source.
+PathChanged=/srv/apps/wecom-archive-365/shared/run/wecom-media-dispatch.trigger
+Unit=wecom-archive-media-event.service
+
+[Install]
+WantedBy=multi-user.target
