@@ -33,6 +33,8 @@ down_revision: Union[str, None] = "0033"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+_STATUS_ENUM = sa.Enum("pending", "resolved", name="admin_access_request_status")
+
 
 def upgrade() -> None:
     op.create_table(
@@ -71,6 +73,9 @@ def upgrade() -> None:
         ["tenant_id"],
     )
 
+    # Unlike add_column() (see e.g. 0015, 0017), create_table() creates a
+    # column's native enum type itself as part of the table DDL — an
+    # explicit _STATUS_ENUM.create() first would collide with it.
     op.create_table(
         "admin_access_requests",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -79,7 +84,7 @@ def upgrade() -> None:
         sa.Column("subject", sa.Text(), nullable=False),
         sa.Column("display_name", sa.Text(), nullable=True),
         sa.Column("email_hint", sa.Text(), nullable=True),
-        sa.Column("status", sa.Text(), server_default=sa.text("'pending'"), nullable=False),
+        sa.Column("status", _STATUS_ENUM, server_default=sa.text("'pending'"), nullable=False),
         sa.Column("resolution", sa.Text(), nullable=True),
         sa.Column("resolved_admin_user_id", sa.String(length=36), nullable=True),
         sa.Column("resolved_by_admin_user_id", sa.String(length=36), nullable=True),
@@ -102,6 +107,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["resolved_admin_user_id"], ["admin_users.id"]),
         sa.ForeignKeyConstraint(["resolved_by_admin_user_id"], ["admin_users.id"]),
         sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(
+        "ix_admin_access_requests_tenant_id",
+        "admin_access_requests",
+        ["tenant_id"],
     )
     op.create_index(
         "ix_admin_access_requests_tenant_status",
@@ -223,7 +233,9 @@ def downgrade() -> None:
         table_name="admin_access_requests",
     )
     op.drop_index("ix_admin_access_requests_tenant_status", table_name="admin_access_requests")
+    op.drop_index("ix_admin_access_requests_tenant_id", table_name="admin_access_requests")
     op.drop_table("admin_access_requests")
     op.drop_index("ix_admin_login_identities_tenant_id", table_name="admin_login_identities")
     op.drop_index("ix_admin_login_identities_admin_user_id", table_name="admin_login_identities")
     op.drop_table("admin_login_identities")
+    _STATUS_ENUM.drop(op.get_bind(), checkfirst=True)
