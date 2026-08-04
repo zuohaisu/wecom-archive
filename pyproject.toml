@@ -1,6 +1,18 @@
 [tool.ruff]
 target-version = "py39"
 
+[tool.ruff.lint.isort]
+# Without this, ruff's isort treats every `app.*` import as third-party
+# (merged into the same group as fastapi/sqlalchemy/etc, no blank line
+# separating it) — the opposite of the blank-line-separated grouping this
+# codebase already writes by convention everywhere. That mismatch is what
+# made I001 ("Import block is un-sorted") fire on files whose imports were
+# actually fine, purely because ruff didn't know `app` is this project's
+# own package. RND-321 QA-004: confirmed via `ruff check --diff` that two
+# RND-321-touched files' only "unsorted" complaint was this exact
+# mismatch — not anything newly introduced.
+known-first-party = ["app"]
+
 [tool.ruff.lint.per-file-ignores]
 # backend/tests/ has an established, repo-wide convention (68 instances
 # pre-dating this config, already `# noqa: F401`'d on the import half):

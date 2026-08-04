@@ -84,6 +84,9 @@ def test_require_role_is_attached_only_to_authorized_admin_routes() -> None:
             assert "Depends(require_role())" in source
             assert 'Depends(require_role("admin", "owner"))' in source
         elif router_file.name == "users.py":
+            # RND-321: +3 — access-request list/link/create-account.
+            assert source.count('Depends(require_role("admin", "owner"))') == 6
+        elif router_file.name == "auth.py":
             assert source.count('Depends(require_role("admin", "owner"))') == 2
         else:
             assert "Depends(require_role" not in source

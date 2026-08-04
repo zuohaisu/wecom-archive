@@ -37,6 +37,10 @@ class AuditAction:
     USER_INVITE_ACCEPTED = "user.invite_accepted"
     USER_ENABLED = "user.enabled"
     USER_DISABLED = "user.disabled"
+    USER_ROLE_CHANGED = "user.role_changed"
+    USER_ACCESS_REQUESTED = "user.access_requested"
+    USER_ACCESS_REQUEST_LINKED = "user.access_request_linked"
+    USER_ACCESS_REQUEST_ACCOUNT_CREATED = "user.access_request_account_created"
     USER_PASSWORD_RESET_INITIATED = "user.password_reset_initiated"
     CONFIG_CHANGED = "config.changed"
     RETENTION_CONFIG_CHANGED = "retention.config_changed"
@@ -64,6 +68,7 @@ class AuditObjectType:
     TENANT = "tenant"
     RETENTION_CONFIG = "retention_config"
     KEY_VERSION = "key_version"
+    ACCESS_REQUEST = "access_request"
 
 
 # The catalogue is intentionally application-level: category is computed for
@@ -81,6 +86,10 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.USER_INVITE_ACCEPTED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
     AuditAction.USER_ENABLED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
     AuditAction.USER_DISABLED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
+    AuditAction.USER_ROLE_CHANGED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
+    AuditAction.USER_ACCESS_REQUESTED: (AuditCategory.ACCOUNT, AuditObjectType.ACCESS_REQUEST),
+    AuditAction.USER_ACCESS_REQUEST_LINKED: (AuditCategory.ACCOUNT, AuditObjectType.ACCESS_REQUEST),
+    AuditAction.USER_ACCESS_REQUEST_ACCOUNT_CREATED: (AuditCategory.ACCOUNT, AuditObjectType.ACCESS_REQUEST),
     AuditAction.USER_PASSWORD_RESET_INITIATED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
     AuditAction.CONFIG_CHANGED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
     AuditAction.RETENTION_CONFIG_CHANGED: (AuditCategory.CONFIGURATION, AuditObjectType.RETENTION_CONFIG),

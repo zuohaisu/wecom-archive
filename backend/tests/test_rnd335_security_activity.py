@@ -12,6 +12,8 @@ import pytest
 
 from app.audit import ACTION_CATALOG, AuditAction, AuditCategory, audit_category
 from app.db.models import (
+    AdminAccessRequest,
+    AdminLoginIdentity,
     AdminSession,
     AdminUser,
     AppConfigStore,
@@ -51,7 +53,9 @@ def test_catalogue_classifies_every_required_action_and_unknown_history_as_syste
         AuditAction.PASSWORD_RESET_REQUESTED, AuditAction.PASSWORD_RESET_COMPLETED,
         AuditAction.PASSWORD_CHANGED, AuditAction.USER_INVITED,
         AuditAction.USER_INVITE_ACCEPTED, AuditAction.USER_ENABLED,
-        AuditAction.USER_DISABLED, AuditAction.USER_PASSWORD_RESET_INITIATED,
+        AuditAction.USER_DISABLED, AuditAction.USER_ROLE_CHANGED,
+        AuditAction.USER_ACCESS_REQUESTED, AuditAction.USER_ACCESS_REQUEST_LINKED,
+        AuditAction.USER_ACCESS_REQUEST_ACCOUNT_CREATED, AuditAction.USER_PASSWORD_RESET_INITIATED,
         AuditAction.CONFIG_CHANGED, AuditAction.RETENTION_CONFIG_CHANGED,
         AuditAction.RETENTION_CONFIG_LOCKED, AuditAction.EXPORT_APPROVAL_GRANTED,
         AuditAction.EXPORT_APPROVAL_DENIED, AuditAction.EXPORT_APPROVAL_CONSUMED,
@@ -141,6 +145,7 @@ def _persistent_audit_engine():
     for table in (
         Tenant.__table__, TenantWecomConfig.__table__, AdminUser.__table__, AdminSession.__table__,
         PasswordResetToken.__table__, AppConfigStore.__table__, RetentionConfig.__table__,
+        AdminLoginIdentity.__table__, AdminAccessRequest.__table__,
     ):
         table.create(engine)
     with engine.begin() as connection:
@@ -481,6 +486,33 @@ def test_wecom_login_persists_a_minimal_login_audit(monkeypatch) -> None:
             id="config-wecom", tenant_id=tenant.id, corp_id="corp-rnd335",
             agent_id="agent", app_secret="unused", is_active=True,
         ))
+        db.add(
+            AdminUser(
+                id="wecom-user",
+                tenant_id=tenant.id,
+                wecom_user_id="wecom-user",
+                role="compliance",
+                status="active",
+            )
+        )
+        # This engine enforces real FKs (PRAGMA foreign_keys=ON above), so
+        # the referencing row below needs the AdminUser row flushed first —
+        # SQLAlchemy's automatic insert-dependency sort doesn't reliably
+        # order this on its own (confirmed: fails without this flush, even
+        # though both rows are added in the same session before commit).
+        db.flush()
+        # RND-321: the callback now resolves identity via AdminLoginIdentity,
+        # not by scanning AdminUser.wecom_user_id — without this binding the
+        # scan would be treated as unbound and produce an access request.
+        db.add(
+            AdminLoginIdentity(
+                id="login-identity-wecom-user",
+                tenant_id=tenant.id,
+                provider="wecom",
+                subject="wecom-user",
+                admin_user_id="wecom-user",
+            )
+        )
         db.commit()
 
         class FakeClient:

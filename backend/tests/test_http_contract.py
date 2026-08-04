@@ -173,6 +173,11 @@ def _mock_db_with_session() -> Generator:
     mock_user = MagicMock(spec=AdminUser)
     mock_user.id = "user-001"
     mock_user.tenant_id = "tenant-a"
+    # RND-321 QA-001 round 2: get_current_user/require_html_session now
+    # re-check user.status; MagicMock(spec=...) only restricts which
+    # attributes exist, it doesn't give them real values, so without this
+    # mock_user.status was itself a MagicMock — never equal to "active".
+    mock_user.status = "active"
     mock_session = MagicMock(spec=AdminSession)
     mock_session.id = "session-001"
     mock_session.admin_user_id = "user-001"
@@ -336,7 +341,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 87  # RND-261: +1 exact product-entry route.
+    assert route_count == 90  # RND-321: +3 access-request review endpoints.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -363,6 +368,9 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/settings",
             "/admin/settings/init",
             "/admin/users",
+            "/api/admin/access-requests",
+            "/api/admin/access-requests/{request_id}/link",
+            "/api/admin/access-requests/{request_id}/create-account",
             "/api/admin/audit-logs",
             "/api/admin/dashboard",
             "/api/admin/export/approve",
@@ -391,6 +399,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/users/invite",
             "/api/admin/users/invite-batch",
             "/api/admin/users/{user_id}",
+            "/api/admin/users/{user_id}/role",
             "/api/admin/users/{user_id}/reset-password",
             "/api/auth/logout",
             "/api/auth/me",
@@ -543,11 +552,30 @@ def test_route_snapshot_with_real_model_names() -> None:
         ),
         ("/api/admin/sync-now", frozenset({"POST"}), "SyncNowResponse", "None"),
         ("/api/admin/sync-status", frozenset({"GET"}), "SyncStatusResponse", "None"),
+        ("/api/admin/access-requests", frozenset({"GET"}), "None", "None"),
+        (
+            "/api/admin/access-requests/{request_id}/link",
+            frozenset({"POST"}),
+            "None",
+            "None",
+        ),
+        (
+            "/api/admin/access-requests/{request_id}/create-account",
+            frozenset({"POST"}),
+            "None",
+            "None",
+        ),
         ("/api/admin/users", frozenset({"GET"}), "AdminUserListOut", "None"),
         ("/api/admin/users/accept", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite-batch", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/{user_id}", frozenset({"PATCH"}), "None", "None"),
+        (
+            "/api/admin/users/{user_id}/role",
+            frozenset({"PATCH"}),
+            "None",
+            "None",
+        ),
         (
             "/api/admin/users/{user_id}/reset-password",
             frozenset({"POST"}),
