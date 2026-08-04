@@ -54,7 +54,7 @@ BACKEND_PY ?= $(CURDIR)/.venv/bin/python
 ## (ssl-renew/) are out of this round's scope — see `ssl-lint` above, kept
 ## as its own target so this one never requires shellcheck/shfmt.
 lint:
-	@command -v $(BACKEND_PY) >/dev/null 2>&1 || { echo "$(BACKEND_PY) not found — run: python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt ruff" >&2; exit 1; }
+	@command -v $(BACKEND_PY) >/dev/null 2>&1 || { echo "$(BACKEND_PY) not found — run: python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt" >&2; exit 1; }
 	$(BACKEND_PY) -m ruff check backend/app backend/scripts backend/tests
 	$(BACKEND_PY) -m compileall -q backend/app backend/scripts backend/tests
 	@echo "lint: OK"

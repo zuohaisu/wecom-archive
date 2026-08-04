@@ -47,7 +47,9 @@ Run from `backend/` after creating `.env`:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+# For an existing virtual environment, rerun the command above after pulling
+# dependency changes so its pinned tooling (including Ruff) is synchronized.
 alembic upgrade head
 python scripts/bootstrap_default_tenant.py
 ```
