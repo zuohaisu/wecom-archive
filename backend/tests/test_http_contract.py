@@ -341,7 +341,10 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 90  # RND-321: +3 access-request review endpoints.
+    # 90 (RND-321: +3 access-request review endpoints) + 1 (RND-261's "/"
+    # redirect route, dropped by a merge that resolved this scalar line to
+    # only one branch's independent increment) = 91.
+    assert route_count == 91
 
 
 def test_routers_are_registered(client: TestClient) -> None:
