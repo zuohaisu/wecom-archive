@@ -37,6 +37,8 @@ class AuditAction:
     USER_INVITE_ACCEPTED = "user.invite_accepted"
     USER_ENABLED = "user.enabled"
     USER_DISABLED = "user.disabled"
+    USER_ROLE_CHANGED = "user.role_changed"
+    USER_ACCESS_REQUESTED = "user.access_requested"
     USER_PASSWORD_RESET_INITIATED = "user.password_reset_initiated"
     CONFIG_CHANGED = "config.changed"
     RETENTION_CONFIG_CHANGED = "retention.config_changed"
@@ -81,6 +83,8 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.USER_INVITE_ACCEPTED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
     AuditAction.USER_ENABLED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
     AuditAction.USER_DISABLED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
+    AuditAction.USER_ROLE_CHANGED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
+    AuditAction.USER_ACCESS_REQUESTED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
     AuditAction.USER_PASSWORD_RESET_INITIATED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
     AuditAction.CONFIG_CHANGED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
     AuditAction.RETENTION_CONFIG_CHANGED: (AuditCategory.CONFIGURATION, AuditObjectType.RETENTION_CONFIG),

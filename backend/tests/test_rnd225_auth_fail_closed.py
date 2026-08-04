@@ -483,6 +483,17 @@ def test_callback_active_enabled_user_logs_in_successfully(client, monkeypatch) 
     would mask a check that rejects every real active employee in prod.
     """
     override, engine = _real_db_override_with_engine("tenant-ok")
+    with Session(engine) as db:
+        db.add(
+            AdminUser(
+                id="pre-authorized-zhangsan",
+                tenant_id="tenant-ok",
+                wecom_user_id="zhangsan",
+                role="compliance",
+                status="active",
+            )
+        )
+        db.commit()
     state = _prepare_callback_env(monkeypatch, override)
     _patch_wecom_http(
         monkeypatch,
@@ -505,6 +516,17 @@ def test_callback_userid_case_insensitive_match_still_logs_in(client, monkeypatc
     """WeCom userids are case-insensitive; a provider echoing a different
     case for the same identity must not be treated as a mismatch."""
     override, engine = _real_db_override_with_engine("tenant-case")
+    with Session(engine) as db:
+        db.add(
+            AdminUser(
+                id="pre-authorized-zhangsan-case",
+                tenant_id="tenant-case",
+                wecom_user_id="ZhangSan",
+                role="compliance",
+                status="active",
+            )
+        )
+        db.commit()
     state = _prepare_callback_env(monkeypatch, override)
     _patch_wecom_http(
         monkeypatch,

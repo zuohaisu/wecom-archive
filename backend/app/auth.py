@@ -23,13 +23,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from dataclasses import dataclass
 import hmac
 import logging
 import secrets
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -392,7 +392,7 @@ def get_wecom_token(corp_id: str, oauth_secret: str, cache_key: Optional[str] = 
             raise RuntimeError(f"unexpected HTTP status {resp.status_code}")
         data = resp.json()
         if not isinstance(data, dict):
-            raise RuntimeError("unexpected response shape")
+            raise TypeError("unexpected response shape")
     except Exception as exc:
         logger.error("WeCom gettoken request failed: %s", type(exc).__name__)
         raise RuntimeError("Failed to fetch WeCom access_token") from exc
@@ -467,6 +467,15 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
 
+    # RND-321 QA-001 round 2: an unexpired, unrevoked session row only
+    # proves the login was once valid — not that this app still authorizes
+    # the account today. Re-checking status here (not just at session
+    # creation) is what makes disabling someone take effect on their very
+    # next request, for every route that depends on get_current_user, not
+    # only the WeCom/QR login path that created the session.
+    if user.status != "active":
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     if isinstance(user, AdminUser):
         touch_last_active(user, db)
     return user, session.tenant_id
@@ -536,8 +545,13 @@ def require_html_session(
         return None
 
     user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
-    if isinstance(user, AdminUser):
-        touch_last_active(user, db)
+    # RND-321 QA-001 round 2: same re-check as get_current_user — a
+    # suspended account must stop reaching HTML admin pages immediately,
+    # not just be blocked from logging in again.
+    if user is None or user.status != "active":
+        return None
+
+    touch_last_active(user, db)
     return session.tenant_id
 
 

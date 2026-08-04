@@ -51,7 +51,8 @@ def test_catalogue_classifies_every_required_action_and_unknown_history_as_syste
         AuditAction.PASSWORD_RESET_REQUESTED, AuditAction.PASSWORD_RESET_COMPLETED,
         AuditAction.PASSWORD_CHANGED, AuditAction.USER_INVITED,
         AuditAction.USER_INVITE_ACCEPTED, AuditAction.USER_ENABLED,
-        AuditAction.USER_DISABLED, AuditAction.USER_PASSWORD_RESET_INITIATED,
+        AuditAction.USER_DISABLED, AuditAction.USER_ROLE_CHANGED,
+        AuditAction.USER_ACCESS_REQUESTED, AuditAction.USER_PASSWORD_RESET_INITIATED,
         AuditAction.CONFIG_CHANGED, AuditAction.RETENTION_CONFIG_CHANGED,
         AuditAction.RETENTION_CONFIG_LOCKED, AuditAction.EXPORT_APPROVAL_GRANTED,
         AuditAction.EXPORT_APPROVAL_DENIED, AuditAction.EXPORT_APPROVAL_CONSUMED,
@@ -481,6 +482,15 @@ def test_wecom_login_persists_a_minimal_login_audit(monkeypatch) -> None:
             id="config-wecom", tenant_id=tenant.id, corp_id="corp-rnd335",
             agent_id="agent", app_secret="unused", is_active=True,
         ))
+        db.add(
+            AdminUser(
+                id="wecom-user",
+                tenant_id=tenant.id,
+                wecom_user_id="wecom-user",
+                role="compliance",
+                status="active",
+            )
+        )
         db.commit()
 
         class FakeClient:

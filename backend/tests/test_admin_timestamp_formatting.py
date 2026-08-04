@@ -164,6 +164,17 @@ def _db_with_session_and_messages(tenant_id: str, messages):
         session_q.filter.return_value = session_q
         session_q.first.return_value = session_mock
 
+        # RND-321 QA-001 round 2: require_html_session now re-checks
+        # user.status, so this fixture needs an explicit AdminUser branch —
+        # previously AdminUser fell through to msg_q (below), which
+        # resolved to None whenever messages=[], making a legitimately
+        # authenticated fixture session look disabled/absent.
+        user_mock = MagicMock()
+        user_mock.status = "active"
+        user_q = MagicMock()
+        user_q.filter.return_value = user_q
+        user_q.first.return_value = user_mock
+
         msg_q = MagicMock()
         msg_q.filter.return_value = msg_q
 
@@ -181,10 +192,12 @@ def _db_with_session_and_messages(tenant_id: str, messages):
         rcpt_q.all.return_value = []
 
         def _query(model):
-            from app.db.models import AdminSession, ArchiveMessageRecipient
+            from app.db.models import AdminSession, AdminUser, ArchiveMessageRecipient
 
             if model is AdminSession:
                 return session_q
+            if model is AdminUser:
+                return user_q
             if model is ArchiveMessageRecipient:
                 return rcpt_q
             return msg_q

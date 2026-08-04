@@ -174,6 +174,80 @@ def test_patch_rejects_invalid_status_cross_tenant_missing_and_self_disable(
     assert self_enable.status_code == 200
 
 
+def test_patch_role_changes_a_tenant_user_and_audits_actor_target(
+    client: TestClient, db: Session, admin: AdminUser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+    import app.routers.users as users_module
+
+    target = _add_user(db, role="readonlyaudit")
+    audit_writer = MagicMock()
+    monkeypatch.setattr(users_module, "write_audit", audit_writer)
+
+    changed = client.patch(
+        f"/api/admin/users/{target.id}/role", json={"role": "compliance"}
+    )
+    assert changed.status_code == 200
+    assert changed.json()["role"] == "compliance"
+    call = audit_writer.call_args.kwargs
+    assert call["action"] == "user.role_changed"
+    assert call["tenant_id"] == admin.tenant_id
+    assert call["admin_user_id"] == admin.id
+    assert call["object_id"] == target.id
+    assert call["detail"] == {"previous_role": "readonlyaudit", "new_role": "compliance"}
+
+    audit_writer.reset_mock()
+    unchanged = client.patch(
+        f"/api/admin/users/{target.id}/role", json={"role": "compliance"}
+    )
+    assert unchanged.status_code == 200
+    audit_writer.assert_not_called()
+
+
+def test_role_update_rejects_invalid_cross_tenant_and_self_changes(
+    client: TestClient, db: Session, admin: AdminUser
+) -> None:
+    target = _add_user(db)
+    other_tenant = _add_user(db, tenant_id="tenant-b")
+
+    invalid = client.patch(f"/api/admin/users/{target.id}/role", json={"role": "unknown"})
+    cross_tenant = client.patch(f"/api/admin/users/{other_tenant.id}/role", json={"role": "legal"})
+    self_change = client.patch(f"/api/admin/users/{admin.id}/role", json={"role": "legal"})
+
+    assert invalid.status_code == 400
+    assert invalid.json() == {"detail": "invalid_role"}
+    assert cross_tenant.status_code == 404
+    assert cross_tenant.json() == {"detail": "User not found"}
+    assert self_change.status_code == 400
+    assert self_change.json() == {"detail": "cannot_change_own_role"}
+
+
+def test_only_owner_can_manage_owner_role_or_assign_owner(
+    client: TestClient, db: Session, admin: AdminUser
+) -> None:
+    owner = _add_user(db, role="owner")
+    target = _add_user(db, role="legal")
+
+    cannot_change_owner = client.patch(
+        f"/api/admin/users/{owner.id}/role", json={"role": "admin"}
+    )
+    cannot_assign_owner = client.patch(
+        f"/api/admin/users/{target.id}/role", json={"role": "owner"}
+    )
+    cannot_disable_owner = client.patch(
+        f"/api/admin/users/{owner.id}", json={"status": "disabled"}
+    )
+    assert cannot_change_owner.status_code == 403
+    assert cannot_assign_owner.status_code == 403
+    assert cannot_disable_owner.status_code == 403
+
+    admin.role = "owner"
+    db.commit()
+    changed = client.patch(f"/api/admin/users/{target.id}/role", json={"role": "owner"})
+    assert changed.status_code == 200
+    assert changed.json()["role"] == "owner"
+
+
 def test_reset_password_creates_token_and_sends_email(client: TestClient, db: Session) -> None:
     target = _add_user(db, email="reset@example.test")
 
@@ -222,9 +296,11 @@ def test_lifecycle_routes_require_admin_or_owner(
 
     for method, path in (
         ("patch", f"/api/admin/users/{target.id}"),
+        ("patch", f"/api/admin/users/{target.id}/role"),
         ("post", f"/api/admin/users/{target.id}/reset-password"),
     ):
-        response = getattr(client, method)(path, json={"status": "active"} if method == "patch" else None)
+        body = {"role": "legal"} if path.endswith("/role") else {"status": "active"}
+        response = getattr(client, method)(path, json=body if method == "patch" else None)
         assert response.status_code == 403
         assert response.json() == {"detail": "Insufficient role for this operation"}
 
@@ -242,10 +318,12 @@ def test_lifecycle_routes_require_authentication(db: Session, admin: AdminUser) 
         with TestClient(app, raise_server_exceptions=False) as test_client:
             for method, path in (
                 ("patch", f"/api/admin/users/{target.id}"),
+                ("patch", f"/api/admin/users/{target.id}/role"),
                 ("post", f"/api/admin/users/{target.id}/reset-password"),
             ):
+                body = {"role": "legal"} if path.endswith("/role") else {"status": "active"}
                 response = getattr(test_client, method)(
-                    path, json={"status": "active"} if method == "patch" else None
+                    path, json=body if method == "patch" else None
                 )
                 assert response.status_code == 401
     finally:

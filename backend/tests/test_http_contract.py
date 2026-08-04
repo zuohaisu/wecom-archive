@@ -173,6 +173,11 @@ def _mock_db_with_session() -> Generator:
     mock_user = MagicMock(spec=AdminUser)
     mock_user.id = "user-001"
     mock_user.tenant_id = "tenant-a"
+    # RND-321 QA-001 round 2: get_current_user/require_html_session now
+    # re-check user.status; MagicMock(spec=...) only restricts which
+    # attributes exist, it doesn't give them real values, so without this
+    # mock_user.status was itself a MagicMock — never equal to "active".
+    mock_user.status = "active"
     mock_session = MagicMock(spec=AdminSession)
     mock_session.id = "session-001"
     mock_session.admin_user_id = "user-001"
@@ -336,7 +341,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    assert route_count == 86  # RND-339: +1 reachability-findings endpoint.
+    assert route_count == 87  # RND-321: +1 user-role management endpoint.
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -390,6 +395,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/users/invite",
             "/api/admin/users/invite-batch",
             "/api/admin/users/{user_id}",
+            "/api/admin/users/{user_id}/role",
             "/api/admin/users/{user_id}/reset-password",
             "/api/auth/logout",
             "/api/auth/me",
@@ -546,6 +552,12 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/users/invite", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite-batch", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/{user_id}", frozenset({"PATCH"}), "None", "None"),
+        (
+            "/api/admin/users/{user_id}/role",
+            frozenset({"PATCH"}),
+            "None",
+            "None",
+        ),
         (
             "/api/admin/users/{user_id}/reset-password",
             frozenset({"POST"}),

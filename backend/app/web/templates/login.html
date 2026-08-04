@@ -20,6 +20,15 @@
 .btn-wecom{height:40px;font-size:var(--text-base);font-weight:var(--weight-medium)}
 .auth-title{font-size:var(--text-2xl);font-weight:var(--weight-semibold);letter-spacing:-.01em;margin-bottom:6px}
 .auth-sub{font-size:var(--text-sm);color:var(--color-text-4);margin-bottom:var(--space-6)}
+/* QR block (RND-321). Fixed box so the loading/error/expired states and the
+   iframe all occupy the same space — no layout jump between states. */
+.wecom-qr-frame{position:relative;width:100%;max-width:300px;height:340px;margin:var(--space-3) auto 0;border:1px solid var(--color-border);border-radius:var(--radius-lg);overflow:hidden;background:var(--color-surface)}
+.wecom-qr-frame iframe{width:100%;height:100%;border:0;display:block}
+.wecom-qr-frame [hidden]{display:none!important}
+.wecom-qr-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-3);padding:var(--space-4);text-align:center;font-size:var(--text-sm);color:var(--color-text-4)}
+.wecom-qr-spinner{width:22px;height:22px;border:2px solid var(--color-border-strong);border-top-color:var(--color-primary-hover);border-radius:50%;animation:wecom-qr-spin .8s linear infinite}
+@keyframes wecom-qr-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.wecom-qr-spinner{animation-duration:2.4s}}
 .lang-switch{position:relative}
 .lang-menu{position:absolute;bottom:calc(100% + 6px);right:0;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);box-shadow:var(--shadow-2);min-width:7rem;overflow:hidden;z-index:20}
 .lang-option{padding:7px 12px;font-size:var(--text-sm);color:var(--color-text-2);cursor:pointer;white-space:nowrap}
@@ -96,6 +105,12 @@ function applyI18n(){
   var placeholders=document.querySelectorAll('[data-i18n-placeholder]');
   for(var j=0;j<placeholders.length;j++){
     placeholders[j].setAttribute('placeholder',I18N.t(placeholders[j].getAttribute('data-i18n-placeholder')));
+  }
+  // title= is the only accessible name the cross-origin QR iframe can
+  // carry, so it needs translating like any other visible string.
+  var titles=document.querySelectorAll('[data-i18n-title]');
+  for(var k=0;k<titles.length;k++){
+    titles[k].setAttribute('title',I18N.t(titles[k].getAttribute('data-i18n-title')));
   }
 }
 document.addEventListener('click',function(e){

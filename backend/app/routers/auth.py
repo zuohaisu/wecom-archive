@@ -22,13 +22,14 @@ Security notes:
 
 from __future__ import annotations
 
+import hmac as _hmac
+import json
 import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from html import escape as html_escape
 from typing import Optional, Tuple
-
-import hmac as _hmac
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -39,15 +40,16 @@ from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import (
+    _STATE_TTL_SECONDS,
     PASSWORD_MODE_WECOM_PREFIX,
     SESSION_COOKIE,
     _is_production,
     consume_state,
     generate_state,
     get_auth_mode,
-    get_current_user,
     get_session_ttl_hours,
     get_wecom_token,
+    require_role,
     safe_log_value,
     strict_int_equals,
     verify_password,
@@ -55,7 +57,12 @@ from app.auth import (
 from app.db.models import AdminSession, AdminUser, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
-from app.schemas.auth import DEFAULT_LOCALE, DEFAULT_THEME, PreferencesOut, PreferencesUpdate
+from app.schemas.auth import (
+    DEFAULT_LOCALE,
+    DEFAULT_THEME,
+    PreferencesOut,
+    PreferencesUpdate,
+)
 from app.session_lifecycle import cleanup_expired_sessions
 from app.settings import (
     get_auth_settings,
@@ -80,8 +87,170 @@ _ERROR_MESSAGES: dict[str, tuple[str, str]] = {
     "invalid_state": ("login.error.invalidState", "登录会话已过期或请求被篡改，请重试。"),
     "auth_failed": ("login.error.authFailed", "认证失败，请重试。"),
     "user_inactive": ("login.error.userInactive", "您的企业微信账号已停用，请联系管理员。"),
+    "access_pending": ("login.error.accessPending", "您的访问申请正在等待管理员授权。"),
     "config_error": ("login.error.configError", "服务器配置错误，请联系管理员。"),
 }
+
+# The QR iframe is only useful once WeCom OAuth is actually configured —
+# without corp_id/agent_id, /api/auth/wecom/qr/login redirects to
+# /admin/login?error=config_error, which the iframe would then render as a
+# *nested login page*. Gating the section on configuration keeps that case
+# off the page entirely rather than showing a dead frame. oauth_secret is
+# included too: without it the callback can never complete regardless of
+# what the QR itself does (_resolve_and_sign_wecom_session already requires
+# it), so there is no scenario where offering the entry without it ends in
+# anything but the same dead end.
+def _wecom_qr_configured() -> bool:
+    settings = get_wecom_oauth_settings()
+    return bool(
+        settings.wecom_corp_id.strip()
+        and settings.wecom_agent_id.strip()
+        and settings.wecom_oauth_secret.strip()
+    )
+
+
+# The QR is backed by a one-time state token, so the moment that token
+# expires server-side the displayed code is unusable. Sourced from the auth
+# module's own TTL rather than restated here: a local 300 would silently
+# stop matching the moment that TTL is retuned, leaving the UI claiming a
+# dead QR is still good (or expiring a live one).
+_QR_EXPIRY_SECONDS = _STATE_TTL_SECONDS
+_QR_LOAD_TIMEOUT_SECONDS = 15
+
+
+def _wecom_qr_section() -> str:
+    """The PC scan-to-login block shared by both auth modes.
+
+    RND-321: this used to live only in the `wecom` branch of _login_page,
+    so the delivered page (production runs AUTH_MODE=password — see
+    docs/DEPLOYMENT.md) rendered a password form and nothing else. The QR
+    entry is a *second* way in, not an alternative to whichever mode is
+    configured, so it renders in both.
+
+    Deliberately a plain (non-f) string: the JS below is brace-heavy and
+    doubling every one of them for an f-string is how these blocks rot.
+    """
+    return """
+  <section class="mt-6" id="wecom-qr" aria-labelledby="wecom-qr-title">
+    <h2 class="field-label" id="wecom-qr-title" data-i18n="login.qrTitle">扫码登录</h2>
+    <p class="field-help" data-i18n="login.qrScanHint">打开企业微信，扫一扫登录</p>
+    <div class="wecom-qr-frame">
+      <div class="wecom-qr-state" id="wecom-qr-loading" role="status">
+        <span class="wecom-qr-spinner" aria-hidden="true"></span>
+        <span data-i18n="login.qrLoading">二维码加载中…</span>
+      </div>
+      <div class="wecom-qr-state" id="wecom-qr-error" role="alert" hidden>
+        <p data-i18n="login.qrError">二维码加载失败，请检查网络后重试。</p>
+        <button class="btn btn-secondary" type="button" data-qr-retry
+                data-i18n="login.qrRetry">刷新二维码</button>
+      </div>
+      <div class="wecom-qr-state" id="wecom-qr-expired" role="status" hidden>
+        <p data-i18n="login.qrExpired">二维码已过期，请刷新后重新扫码。</p>
+        <button class="btn btn-secondary" type="button" data-qr-retry
+                data-i18n="login.qrRetry">刷新二维码</button>
+      </div>
+      <iframe id="wecom-qr-iframe" data-i18n-title="login.qrFrameTitle"
+              title="企业微信扫码登录" hidden></iframe>
+    </div>
+    <p class="field-help mt-2" data-i18n="login.qrTrouble">若二维码长时间无法扫描或显示异常，请联系管理员核实企业微信配置。</p>
+  </section>
+<script>
+(function(){
+  // When the login page is itself framed, skip QR bootstrap entirely —
+  // otherwise a misconfigured deploy (qr/login redirecting back to
+  // /admin/login) would nest login pages inside each other forever.
+  if(window.self!==window.top)return;
+  var frame=document.getElementById('wecom-qr-iframe');
+  var loading=document.getElementById('wecom-qr-loading');
+  var errorBox=document.getElementById('wecom-qr-error');
+  var expired=document.getElementById('wecom-qr-expired');
+  if(!frame)return;
+  var loadTimer=null,expiryTimer=null,attempt=0,frameReady=false,reachable=null;
+  function show(el){
+    loading.hidden=(el!==loading);
+    errorBox.hidden=(el!==errorBox);
+    expired.hidden=(el!==expired);
+    frame.hidden=(el!==frame);
+  }
+  function clearTimers(){
+    if(loadTimer){clearTimeout(loadTimer);loadTimer=null;}
+    if(expiryTimer){clearTimeout(expiryTimer);expiryTimer=null;}
+  }
+  // A cross-origin frame fires `load` even when the navigation failed, and
+  // the parent cannot read contentDocument, framesLength or location to
+  // tell the two apart — verified in-browser. So the frame's own load
+  // event cannot be the success signal. A no-cors request to the same
+  // host can: it resolves opaquely when the client can reach WeCom and
+  // rejects when it cannot (blocked, offline, DNS/firewall), which is the
+  // failure users actually hit.
+  function checkReachable(myAttempt){
+    if(!window.fetch){reachable=true;settle(myAttempt);return;}
+    fetch('https://open.work.weixin.qq.com/wwopen/sso/qrConnect',
+          {mode:'no-cors',cache:'no-store'})
+      .then(function(){if(myAttempt===attempt){reachable=true;settle(myAttempt);}})
+      .catch(function(){if(myAttempt===attempt){reachable=false;settle(myAttempt);}});
+  }
+  function settle(myAttempt){
+    if(myAttempt!==attempt)return;
+    if(reachable===false){clearTimers();show(errorBox);return;}
+    if(frameReady&&reachable===true){
+      clearTimers();
+      show(frame);
+      // Tied to the server's one-time state TTL: past this point the
+      // displayed code cannot be redeemed, so offer a refresh instead of
+      // letting the user scan a dead QR.
+      expiryTimer=setTimeout(function(){
+        if(myAttempt===attempt)show(expired);
+      },__QR_EXPIRY_MS__);
+    }
+  }
+  function load(){
+    clearTimers();
+    show(loading);
+    attempt++;
+    frameReady=false;
+    reachable=null;
+    var myAttempt=attempt;
+    // A fresh request means a fresh one-time state server-side; the
+    // cache-buster stops the browser from replaying the consumed one.
+    frame.src='/api/auth/wecom/qr/login?_='+myAttempt;
+    // Backstop for a load that hangs instead of failing outright.
+    loadTimer=setTimeout(function(){
+      if(myAttempt===attempt)show(errorBox);
+    },__QR_LOAD_TIMEOUT_MS__);
+    checkReachable(myAttempt);
+  }
+  frame.addEventListener('load',function(){
+    if(!frame.src)return;
+    // /api/auth/wecom/qr/login can itself redirect back to our own
+    // /admin/login (missing/invalid config) instead of reaching WeCom —
+    // left undetected, that renders a full nested login page inside this
+    // 300x400 box with no visible error. Unlike a WeCom-rendered error
+    // (genuinely cross-origin, unreadable — see checkReachable above),
+    // this redirect never leaves our own origin, so contentWindow.location
+    // is readable without throwing; a WeCom page throws SecurityError.
+    // Verified both directions in Chrome.
+    try{
+      frame.contentWindow.location.href;
+      clearTimers();
+      show(errorBox);
+      return;
+    }catch(e){/* cross-origin — this is WeCom's own page, as expected */}
+    frameReady=true;
+    settle(attempt);
+  });
+  frame.addEventListener('error',function(){
+    reachable=false;
+    settle(attempt);
+  });
+  var retries=document.querySelectorAll('[data-qr-retry]');
+  for(var i=0;i<retries.length;i++)retries[i].addEventListener('click',load);
+  load();
+})();
+</script>""".replace("__QR_LOAD_TIMEOUT_MS__", str(_QR_LOAD_TIMEOUT_SECONDS * 1000)).replace(
+        "__QR_EXPIRY_MS__", str(_QR_EXPIRY_SECONDS * 1000)
+    )
+
 
 def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
     """Builds the mode-specific body injected into templates/login.html via
@@ -104,6 +273,8 @@ def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
             f'<span class="alert-ico">⚠</span><div data-i18n="{key}">{fallback_text}</div></div>'
         )
 
+    qr_section = _wecom_qr_section() if _wecom_qr_configured() else ""
+
     if mode == "password":
         login_body = f"""\
   <form id="pwd-form" onsubmit="doLogin(event)">
@@ -123,6 +294,7 @@ def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
     <a class="btn-link" href="/admin/forgot-password" data-i18n="login.forgotPassword">忘记密码</a>
   </p>
   {error_html}
+  {qr_section}
   <p class="field-help mt-2" style="text-align:center" data-i18n="login.footerPassword">临时管理员登录 — 企业微信登录即将上线</p>
 <script>
 function doLogin(e){{
@@ -175,11 +347,7 @@ function doLogin(e){{
   <a class="btn btn-primary btn-block btn-wecom" href="/api/auth/wecom/login">
     <span data-i18n="login.wecomButton">使用企业微信登录</span>
   </a>
-  <section class="mt-4" aria-labelledby="wecom-qr-title">
-    <h2 class="field-label" id="wecom-qr-title" data-i18n="login.qrTitle">扫码登录</h2>
-    <p class="field-help" data-i18n="login.qrScanHint">打开企业微信，扫一扫登录</p>
-    <iframe title="企业微信扫码登录" src="/api/auth/wecom/qr/login" style="width:300px;height:400px;border:0" loading="lazy"></iframe>
-  </section>
+  {qr_section}
   {error_html}
   <p class="field-help mt-2" data-i18n="login.footerWecom">仅限企业内部员工访问</p>"""
 
@@ -401,14 +569,21 @@ def _create_pending_invite(
         send_invite_email(email, accept_link)
 
 
+def _require_invite_role_authority(actor: AdminUser, requested_role: str) -> None:
+    """Only owners may invite an owner-level account."""
+    if actor.role != "owner" and requested_role == "owner":
+        raise HTTPException(status_code=403, detail="owner_role_requires_owner")
+
+
 @router.post("/api/admin/users/invite")
 def invite_user(
     body: _InviteBody,
-    current: Tuple[AdminUser, str] = Depends(get_current_user),
+    current: Tuple[AdminUser, str] = Depends(require_role("admin", "owner")),
     db: Session = Depends(get_db),
 ):
     """Create a disabled pending account and deliver its invitation link."""
     admin_user, tenant_id = current
+    _require_invite_role_authority(admin_user, body.role)
     _create_pending_invite(
         db,
         tenant_id=tenant_id,
@@ -424,7 +599,7 @@ def invite_user(
 @router.post("/api/admin/users/invite-batch")
 def invite_users_batch(
     body: _InviteBatchBody,
-    current: Tuple[AdminUser, str] = Depends(get_current_user),
+    current: Tuple[AdminUser, str] = Depends(require_role("admin", "owner")),
     db: Session = Depends(get_db),
 ):
     """Invite up to 20 users, reporting failures without aborting the batch."""
@@ -432,6 +607,8 @@ def invite_users_batch(
         raise HTTPException(status_code=400, detail="invite_batch_limit_exceeded")
 
     admin_user, tenant_id = current
+    for invite in body.invites:
+        _require_invite_role_authority(admin_user, invite.role)
     results = []
     for invite in body.invites:
         try:
@@ -737,6 +914,31 @@ def password_login(
 # ---------------------------------------------------------------------------
 
 
+def _wecom_callback_base(admin_domain: str) -> str:
+    """Build the https:// origin OAuth/QR callback URLs are constructed
+    against.
+
+    RND-321 QA-005: ADMIN_DOMAIN is documented (.env.example) as a bare
+    host, but production's actual value has been observed *with* a scheme
+    already on it (docs/ops/rnd-261-domain-cutover-runbook.md flagged
+    `ADMIN_DOMAIN=https://qwhhcd.crowntime.cn` as a live anomaly, left
+    unfixed because OAuth wasn't enabled yet — RND-321 is what enables it).
+    Naively prepending "https://" in that case double-schemes the callback
+    into "https://https://...", which WeCom cannot reach; the failure
+    surfaces far from here (a dead callback) and is hard to trace back to
+    this one string. Stripping any scheme the caller already included
+    before rebuilding makes the function correct for both the documented
+    and the observed-in-production input shapes.
+    """
+    domain = admin_domain.strip()
+    for prefix in ("https://", "http://"):
+        if domain.lower().startswith(prefix):
+            domain = domain[len(prefix):]
+            break
+    domain = domain.strip("/")
+    return f"https://{domain}" if domain else "http://localhost:8035"
+
+
 @router.get("/api/auth/wecom/login")
 def wecom_login():
     """Redirect the browser to the WeCom OAuth authorization URL."""
@@ -749,10 +951,7 @@ def wecom_login():
         logger.error("wecom_login: WECOM_CORP_ID or WECOM_AGENT_ID not configured")
         return RedirectResponse("/admin/login?error=config_error", status_code=302)
 
-    if admin_domain:
-        callback_base = f"https://{admin_domain}"
-    else:
-        callback_base = "http://localhost:8035"
+    callback_base = _wecom_callback_base(admin_domain)
 
     import urllib.parse
 
@@ -780,13 +979,40 @@ def wecom_qr_login():
     wecom_oauth_settings = get_wecom_oauth_settings()
     corp_id = wecom_oauth_settings.wecom_corp_id.strip()
     agent_id = wecom_oauth_settings.wecom_agent_id.strip()
+    oauth_secret = wecom_oauth_settings.wecom_oauth_secret.strip()
     admin_domain = wecom_oauth_settings.admin_domain.strip()
 
-    if not corp_id or not agent_id:
-        logger.error("wecom_qr_login: WECOM_CORP_ID or WECOM_AGENT_ID not configured")
+    if not corp_id or not agent_id or not oauth_secret:
+        logger.error(
+            "wecom_qr_login: WECOM_CORP_ID, WECOM_AGENT_ID, or WECOM_OAUTH_SECRET not configured"
+        )
         return RedirectResponse("/admin/login?error=config_error", status_code=302)
 
-    callback_base = f"https://{admin_domain}" if admin_domain else "http://localhost:8035"
+    # QA-002: WeCom rendering a config error (e.g. wrong/unauthorized
+    # appid) shows up *inside* the iframe, on WeCom's own origin — content
+    # this app cannot read to detect (verified: contentDocument,
+    # contentWindow.length, and .location are all unreadable cross-origin
+    # regardless of success or failure, so the frame's own `load` event
+    # can't be trusted as a success signal either). Reusing the same
+    # token-fetch the callback already performs — and its cache, so this
+    # adds a network round trip only on a cold cache — catches a flatly
+    # invalid corp_id/oauth_secret pair *before* ever sending the browser
+    # into an iframe that's going to fail, replacing a WeCom-rendered
+    # error with this app's own translated config_error state.
+    #
+    # This does not catch every provider-side failure: a valid corp_id and
+    # oauth_secret paired with a wrong agent_id, or an app that has scan
+    # login itself disabled in the WeCom console, both authenticate fine
+    # at the token endpoint and only fail once qrConnect actually renders
+    # — that residual class of misconfiguration is exactly what the
+    # ticket's "企业微信管理后台人工配置" human touchpoint exists to catch.
+    try:
+        get_wecom_token(corp_id, oauth_secret)
+    except Exception:
+        logger.error("wecom_qr_login: WeCom credentials invalid, refusing to open a doomed QR iframe")
+        return RedirectResponse("/admin/login?error=config_error", status_code=302)
+
+    callback_base = _wecom_callback_base(admin_domain)
     import urllib.parse
 
     redirect_uri = urllib.parse.quote(
@@ -846,7 +1072,7 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
             raise RuntimeError(f"unexpected HTTP status {resp.status_code}")
         data = resp.json()
         if not isinstance(data, dict):
-            raise RuntimeError("unexpected response shape")
+            raise TypeError("unexpected response shape")
     except Exception as exc:
         logger.error("wecom_callback: getuserinfo request failed: %s", type(exc).__name__)
         return RedirectResponse("/admin/login?error=auth_failed", status_code=302)
@@ -878,7 +1104,7 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
             raise RuntimeError(f"unexpected HTTP status {user_resp.status_code}")
         user_data = user_resp.json()
         if not isinstance(user_data, dict):
-            raise RuntimeError("unexpected response shape")
+            raise TypeError("unexpected response shape")
     except Exception as exc:
         logger.error(
             "wecom_callback: user/get request failed (%s), rejecting login",
@@ -954,10 +1180,42 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
                 tenant_id=tenant_id,
                 wecom_user_id=wecom_user_id,
                 name=display_name,
-                last_login_at=now,
+                # WeCom proves employment, not a right to access this
+                # conversation-archive console.  Preserve the employee's
+                # identity as a disabled access request; an owner/admin must
+                # explicitly choose a role and enable the account first.
+                role="readonlyaudit",
+                status="disabled",
+                invite_status="access_requested",
             )
             db.add(user)
+            write_audit(
+                db,
+                tenant_id=tenant_id,
+                admin_user_id=None,
+                action=AuditAction.USER_ACCESS_REQUESTED,
+                object_type=AuditObjectType.USER,
+                object_id=user.id,
+            )
+            db.commit()
+            logger.info("wecom_callback: access request recorded; approval required")
+            return RedirectResponse("/admin/login?error=access_pending", status_code=302)
         else:
+            # RND-321 QA-001: WeCom reporting the employee as active (checked
+            # above) is a fact about their employment, not a grant of access
+            # to this app. An account this app has itself suspended, or one
+            # still sitting in invite_status="pending" (created disabled —
+            # see _create_pending_invite — precisely so a bare WeCom login
+            # can't skip password setup), must still fail closed. Without
+            # this check any admin-disabled or not-yet-accepted account
+            # regains a session the moment its WeCom identity scans a QR.
+            if user.status != "active":
+                logger.warning(
+                    "wecom_callback: account is not active in this app, rejecting login"
+                )
+                if user.invite_status == "access_requested":
+                    return RedirectResponse("/admin/login?error=access_pending", status_code=302)
+                return RedirectResponse("/admin/login?error=user_inactive", status_code=302)
             user.last_login_at = now
             user.name = display_name
         db.flush()
@@ -1030,6 +1288,51 @@ def wecom_callback(
     return _resolve_and_sign_wecom_session(code, db)
 
 
+def _break_out_of_qr_frame(redirect: RedirectResponse) -> HTMLResponse:
+    """Turn the shared flow's 302 into a top-window navigation.
+
+    The QR iframe uses WeCom's self_redirect=true, so the post-scan redirect
+    lands *inside* the 300x400 frame. Left as a 302, the whole admin console
+    would render in that box while the top window sat on the login page. A
+    cross-origin frame cannot retarget the top window without a user
+    gesture, but by this point the frame is back on our own origin, so
+    window.top is same-origin and writable.
+
+    Only the response envelope changes: identity verification, employee
+    status, tenant binding, the session row and every cookie attribute
+    still come from _resolve_and_sign_wecom_session, so the QR and in-WeCom
+    OAuth paths cannot drift apart.
+    """
+    target = redirect.headers.get("location", "/admin/login?error=auth_failed")
+    # Server-built and never user-supplied, but a same-origin path is the
+    # only thing this page is ever allowed to navigate to — assert it
+    # rather than trust a future edit upstream.
+    if not target.startswith("/") or target.startswith("//"):
+        target = "/admin/login?error=auth_failed"
+    target_json = json.dumps(target)
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title data-i18n="login.pageTitle">登录 — Crowntime WeCom Archive</title></head>
+<body>
+<noscript><a href="{html_escape(target, quote=True)}" data-i18n="login.qrContinue">登录成功，点击继续</a></noscript>
+{I18N_SCRIPT_TAG}
+<script>
+var nodes=document.querySelectorAll('[data-i18n]');
+for(var i=0;i<nodes.length;i++)nodes[i].textContent=I18N.t(nodes[i].getAttribute('data-i18n'));
+document.documentElement.lang=I18N.getLocale();
+(window.top||window).location.replace({target_json});
+</script>
+</body>
+</html>"""
+    response = HTMLResponse(content=html)
+    # Carry over the Set-Cookie headers verbatim so the session cookie's
+    # HttpOnly/Secure/SameSite/Max-Age flags stay identical to the OAuth path.
+    for key, value in redirect.raw_headers:
+        if key.decode("latin-1").lower() == "set-cookie":
+            response.raw_headers.append((key, value))
+    return response
+
+
 @router.get("/api/auth/wecom/qr/callback")
 def wecom_qr_callback(
     code: str = Query(...),
@@ -1039,8 +1342,10 @@ def wecom_qr_callback(
     """Handle the PC QR callback using the identical OAuth session flow."""
     if not consume_state(state):
         logger.warning("wecom_qr_callback: invalid or expired state")
-        return RedirectResponse("/admin/login?error=invalid_state", status_code=302)
-    return _resolve_and_sign_wecom_session(code, db)
+        return _break_out_of_qr_frame(
+            RedirectResponse("/admin/login?error=invalid_state", status_code=302)
+        )
+    return _break_out_of_qr_frame(_resolve_and_sign_wecom_session(code, db))
 
 
 # ---------------------------------------------------------------------------
@@ -1066,7 +1371,14 @@ def _resolve_session_user(request: Request, db: Session) -> Optional[AdminUser]:
     )
     if session is None:
         return None
-    return db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
+    user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
+    # RND-321 QA-001 (defense in depth): the session row can outlive an
+    # account being disabled after login — status is re-checked on every
+    # call, not just at session creation, so /api/auth/me stops confirming
+    # an identity the moment this app suspends it.
+    if user is None or user.status != "active":
+        return None
+    return user
 
 
 @router.get("/api/auth/me")

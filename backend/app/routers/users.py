@@ -19,6 +19,7 @@ from app.schemas.admin_users import AdminUserListItem, AdminUserListOut
 from app.settings import get_email_settings, get_wecom_oauth_settings
 
 users_router = APIRouter()
+_USER_ROLES = {"owner", "admin", "compliance", "legal", "readonlyaudit"}
 
 
 @users_router.get("/users", response_model=AdminUserListOut)
@@ -110,6 +111,10 @@ class _StatusUpdate(BaseModel):
     status: str
 
 
+class _RoleUpdate(BaseModel):
+    role: str
+
+
 def _resolve_target(db: Session, user_id: str, tenant_id: str) -> AdminUser:
     """Look up a target within the caller's tenant without account enumeration."""
     user = (
@@ -132,6 +137,46 @@ def _user_dto(user: AdminUser) -> dict[str, Any]:
     }
 
 
+def _require_owner_authority(
+    db: Session,
+    *,
+    actor: AdminUser,
+    target: AdminUser,
+    next_role: Optional[str] = None,
+    next_status: Optional[str] = None,
+) -> None:
+    """Protect the owner role from peer-admin escalation or lockout.
+
+    ``admin`` is intentionally allowed to manage ordinary tenant accounts, but
+    it must never be able to turn itself (or another account) into an owner,
+    nor change an existing owner's access.  Owners may manage each other, but
+    the tenant must retain at least one owner.
+    """
+    if actor.role != "owner" and (
+        target.role == "owner" or next_role == "owner"
+    ):
+        raise HTTPException(status_code=403, detail="owner_role_requires_owner")
+
+    removes_active_owner = (
+        target.role == "owner"
+        and target.status == "active"
+        and (next_role not in (None, "owner") or next_status == "disabled")
+    )
+    if removes_active_owner:
+        owner_count = (
+            db.query(func.count(AdminUser.id))
+            .filter(
+                AdminUser.tenant_id == target.tenant_id,
+                AdminUser.role == "owner",
+                AdminUser.status == "active",
+            )
+            .scalar()
+            or 0
+        )
+        if owner_count <= 1:
+            raise HTTPException(status_code=400, detail="cannot_remove_last_owner")
+
+
 @users_router.patch("/users/{user_id}")
 def update_user_status(
     user_id: str,
@@ -146,6 +191,9 @@ def update_user_status(
     target = _resolve_target(db, user_id, tenant_id)
     if target.id == current_user.id and body.status == "disabled":
         raise HTTPException(status_code=400, detail="cannot_disable_self")
+    _require_owner_authority(
+        db, actor=current_user, target=target, next_status=body.status
+    )
 
     if target.status == body.status:
         return _user_dto(target)
@@ -165,6 +213,42 @@ def update_user_status(
         action=AuditAction.USER_DISABLED if body.status == "disabled" else AuditAction.USER_ENABLED,
         object_type=AuditObjectType.USER,
         object_id=target.id,
+    )
+    db.commit()
+    return _user_dto(target)
+
+
+@users_router.patch("/users/{user_id}/role")
+def update_user_role(
+    user_id: str,
+    body: _RoleUpdate,
+    auth: tuple[AdminUser, str] = Depends(require_role("admin", "owner")),
+    db: Session = Depends(get_db),
+):
+    """Change a tenant user's role, with an owner-only escalation boundary."""
+    if body.role not in _USER_ROLES:
+        raise HTTPException(status_code=400, detail="invalid_role")
+    current_user, tenant_id = auth
+    target = _resolve_target(db, user_id, tenant_id)
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail="cannot_change_own_role")
+    _require_owner_authority(
+        db, actor=current_user, target=target, next_role=body.role
+    )
+
+    if target.role == body.role:
+        return _user_dto(target)
+
+    previous_role = target.role
+    target.role = body.role
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=current_user.id,
+        action=AuditAction.USER_ROLE_CHANGED,
+        object_type=AuditObjectType.USER,
+        object_id=target.id,
+        detail={"previous_role": previous_role, "new_role": body.role},
     )
     db.commit()
     return _user_dto(target)

@@ -60,8 +60,16 @@ def test_users_page_operations_call_existing_user_management_endpoints() -> None
 
     assert "'/api/admin/users/invite'" in source
     assert "method:'PATCH'" in source
+    assert "'/role'" in source
+    assert 'data-action="role"' in source
     assert "'/reset-password'" in source
     assert "method:'POST'" in source
+    assert "fetch('/api/auth/me'" in source
+    assert "function canManage(user)" in source
+    assert "user.id!==state.currentUserId" in source
+    assert "state.currentRole==='owner'" in source
+    assert "function setRoleChoices()" in source
+    assert '#invite-role option[value="owner"],#role-select option[value="owner"]' in source
 
 
 def test_users_i18n_keys_are_complete_in_all_three_locales_and_at_own_anchor() -> None:
