@@ -1217,6 +1217,12 @@ class ExternalContact(Base):
             postgresql_ops={"name": "gin_trgm_ops"},
         ),
         Index(
+            "ix_external_contacts_current_nickname_trgm",
+            "current_nickname_normalized",
+            postgresql_using="gin",
+            postgresql_ops={"current_nickname_normalized": "gin_trgm_ops"},
+        ),
+        Index(
             "ix_external_contacts_company_trgm",
             "company",
             postgresql_using="gin",
@@ -1226,7 +1232,16 @@ class ExternalContact(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     external_userid = Column(String(64), nullable=False)
+    # Compatibility display label from RND-287. It can contain an employee
+    # remark and is deliberately not repurposed as the customer's real name.
     name = Column(Text, nullable=True)
+    # The current WeCom self-chosen nickname is a separate customer-level
+    # identity field. The raw value remains auditable; normalized/display
+    # values keep comparison and rendering safe.
+    current_nickname_raw = Column(Text, nullable=True)
+    current_nickname_normalized = Column(Text, nullable=True)
+    current_nickname_display = Column(Text, nullable=True)
+    current_nickname_observed_at = Column(DateTime(timezone=True), nullable=True)
     company = Column(Text, nullable=True)
     tags = Column(Text, nullable=True)
     source = Column(Text, nullable=True)
@@ -1245,3 +1260,94 @@ class ExternalContact(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class ExternalContactFollow(Base):
+    """One tenant-scoped employee-to-external-contact follow relationship."""
+
+    __tablename__ = "external_contact_follows"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "external_userid"],
+            ["external_contacts.tenant_id", "external_contacts.external_userid"],
+            name="fk_external_contact_follows_tenant_contact",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "external_userid",
+            "follow_userid",
+            name="uq_external_contact_follows_tenant_contact_user",
+        ),
+        Index(
+            "ix_external_contact_follows_tenant_contact_active",
+            "tenant_id",
+            "external_userid",
+            "is_active",
+        ),
+        Index(
+            "ix_external_contact_follows_remark_trgm",
+            "remark_normalized",
+            postgresql_using="gin",
+            postgresql_ops={"remark_normalized": "gin_trgm_ops"},
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(36), nullable=False)
+    external_userid = Column(String(64), nullable=False)
+    follow_userid = Column(String(64), nullable=False)
+    remark_raw = Column(Text, nullable=True)
+    remark_normalized = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    observed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ExternalContactNicknameHistory(Base):
+    """Observed transitions of a customer's own WeCom nickname."""
+
+    __tablename__ = "external_contact_nickname_history"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "external_userid"],
+            ["external_contacts.tenant_id", "external_contacts.external_userid"],
+            name="fk_external_contact_nickname_history_tenant_contact",
+        ),
+        Index(
+            "ix_external_contact_nickname_history_tenant_contact_observed",
+            "tenant_id",
+            "external_userid",
+            "observed_at",
+            "id",
+        ),
+        Index(
+            "ix_external_contact_nickname_history_old_trgm",
+            "old_nickname_normalized",
+            postgresql_using="gin",
+            postgresql_ops={"old_nickname_normalized": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_external_contact_nickname_history_new_trgm",
+            "new_nickname_normalized",
+            postgresql_using="gin",
+            postgresql_ops={"new_nickname_normalized": "gin_trgm_ops"},
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(36), nullable=False)
+    external_userid = Column(String(64), nullable=False)
+    old_nickname_raw = Column(Text, nullable=True)
+    old_nickname_normalized = Column(Text, nullable=True)
+    old_nickname_display = Column(Text, nullable=True)
+    new_nickname_raw = Column(Text, nullable=True)
+    new_nickname_normalized = Column(Text, nullable=True)
+    new_nickname_display = Column(Text, nullable=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

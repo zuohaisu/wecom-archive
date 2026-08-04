@@ -10,7 +10,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.db.models import ArchiveMessage, ArchiveMessageRecipient, Contact, ExternalContact
+from app.db.models import (
+    ArchiveMessage,
+    ArchiveMessageRecipient,
+    Contact,
+    ExternalContact,
+    ExternalContactFollow,
+    ExternalContactNicknameHistory,
+)
 
 
 @pytest.fixture()
@@ -22,12 +29,17 @@ def db() -> Session:
         text(
             "CREATE TABLE external_contacts ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, external_userid TEXT NOT NULL, "
-            "name TEXT, company TEXT, tags TEXT, source TEXT, "
+            "name TEXT, current_nickname_raw TEXT, current_nickname_normalized TEXT, "
+            "current_nickname_display TEXT, current_nickname_observed_at TEXT, "
+            "company TEXT, tags TEXT, source TEXT, "
             "owner_wecom_userid TEXT, last_interaction_at TEXT, message_count INTEGER, "
             "tenant_id TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TEXT DEFAULT CURRENT_TIMESTAMP)"
         )
     )
+    session.commit()
+    ExternalContactFollow.__table__.create(session.get_bind())
+    ExternalContactNicknameHistory.__table__.create(session.get_bind())
     session.commit()
     yield session
     session.close()
@@ -150,6 +162,43 @@ def test_detail_returns_profile_and_all_conversations(client: TestClient, db: Se
         200,
         100,
     ]
+
+
+def test_detail_exposes_separated_remarks_current_nickname_and_history(
+    client: TestClient, db: Session
+) -> None:
+    from app.services.external_contact_identity import sync_external_contact_identity
+
+    db.add(Contact(tenant_id="tenant-a", wecom_userid="staff-owner", name="Owner Name"))
+    contact = _external_contact(db, "external-identity")
+    sync_external_contact_identity(
+        db,
+        contact,
+        {
+            "external_contact": {"name": "旧昵称"},
+            "follow_user": [{"userid": "staff-owner", "remark": "员工备注"}],
+        },
+    )
+    sync_external_contact_identity(
+        db,
+        contact,
+        {
+            "external_contact": {"name": "当前昵称"},
+            "follow_user": [{"userid": "staff-owner", "remark": "员工备注"}],
+        },
+    )
+    db.commit()
+
+    response = client.get("/api/admin/external-contacts/external-identity")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["display_name"] == "当前昵称"
+    assert body["current_nickname"] == "当前昵称"
+    assert body["follow_remarks"][0]["follow_userid"] == "staff-owner"
+    assert body["follow_remarks"][0]["remark"] == "员工备注"
+    assert body["nickname_history"][0]["old_nickname"] == "旧昵称"
+    assert body["nickname_history"][0]["new_nickname"] == "当前昵称"
 
 
 def test_detail_returns_empty_conversations_for_contact_without_messages(

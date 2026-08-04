@@ -12,7 +12,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.db.models import Contact, ExternalContact
+from app.db.models import (
+    Contact,
+    ExternalContact,
+    ExternalContactFollow,
+    ExternalContactNicknameHistory,
+)
 
 
 @pytest.fixture()
@@ -24,6 +29,8 @@ def db() -> Session:
     )
     Contact.__table__.create(engine)
     ExternalContact.__table__.create(engine)
+    ExternalContactFollow.__table__.create(engine)
+    ExternalContactNicknameHistory.__table__.create(engine)
     session = Session(engine)
     yield session
     session.close()

@@ -64,6 +64,22 @@ authenticated admin identities; there is no separate seat-roster table.
 |--------|------|-------|----------|
 | `GET` | `/api/contacts` | none | Array of contact summary objects |
 
+### External contacts
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/api/admin/external-contacts` | `company`, `tags`, `owner_wecom_userid`, `q`, `offset`, `limit` | Tenant-scoped external-contact page |
+| `GET` | `/api/admin/external-contacts/{external_userid}` | none | One external-contact identity, follow remarks, nickname history, and conversations |
+
+The RND-170 identity contract keeps three facts distinct: `name` is a legacy
+compatibility label, `current_nickname` is the customer-level current WeCom
+nickname, and `follow_remarks` contains employee-scoped remarks. List/detail
+`display_name` has no selected employee context and therefore uses the current
+nickname (or a safe fallback), never an arbitrary employee remark. A `q`
+search can match an active employee remark, current nickname, or former
+nickname; `search_matches` identifies the match type and, for a remark, the
+matching `follow_userid`. Each external identity appears once per result page.
+
 ### Conversations
 
 | Method | Path | Query | Response |
@@ -201,8 +217,14 @@ conversation-oriented review console.
 
 | Method | Path | Query | Response |
 |--------|------|-------|----------|
+| `GET` | `/api/search/contacts` | `q`, `limit` | Contact/global identity search results |
 | `GET` | `/api/messages` | `sender`, `q`, `msgtype`, `roomid`, `limit` | Array of messages |
 | `GET` | `/api/messages/{msgid}` | none | One message plus recipient list |
+
+`/api/search/contacts` includes matching external identities once. Its
+`match_field` is `remark`, `current_nickname`, or `historical_nickname` for an
+external result; `match_context_userid` is populated only for a remark match.
+
 
 Search behavior:
 
@@ -229,7 +251,12 @@ classification happens server-side in `app/reachability_audit.py`.
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET` | `/api/wecom/archive/events` | Decrypts and verifies WeCom `echostr` |
-| `POST` | `/api/wecom/archive/events` | Verifies signature only; does not trigger worker execution |
+| `POST` | `/api/wecom/archive/events` | Verifies signature, decrypts the event envelope, validates CorpID, queues a bounded targeted external-contact refresh for `change_external_contact`, and dispatches archive work asynchronously |
+
+The POST acknowledgement never waits for the targeted refresh or archive
+worker. Missed/coalesced external-contact callbacks are reconciled by the
+archive timer's best-effort full external-contact sync when
+`WECOM_EXTERNAL_CONTACT_SECRET` is configured.
 
 These routes are intentionally **not** session-protected.
 
