@@ -98,8 +98,8 @@ class MediaStorageSettings(BaseSettings):
     # argument -- callers rely on the "unset" case being falsy in an `or`
     # chain, and on a present-but-empty value staying an empty string
     # rather than being coerced to the fallback.
-    media_storage_provider: Optional[str] = None
-    storage_backend: Optional[str] = None
+    media_storage_provider: Optional[str] = None  # noqa: UP045 -- Python 3.9 runtime compatibility
+    storage_backend: Optional[str] = None  # noqa: UP045 -- Python 3.9 runtime compatibility
     storage_local_path: str = ""
     qiniu_access_key: str = ""
     qiniu_secret_key: str = ""
@@ -134,13 +134,21 @@ def get_voice_transcode_settings() -> VoiceTranscodeSettings:
 
 
 class EventMediaDownloadSettings(BaseSettings):
-    """Fail-closed controls for the lightweight event image sweep."""
+    """Controls for archive-complete generic-media dispatch and retries.
 
-    event_media_download_enabled: str = ""
+    The historical ``event_media_download_*`` names remain stable for the
+    settings UI and deployed environment files.  Dispatch is now generic
+    (not image-only) and defaults on; set ``EVENT_MEDIA_DOWNLOAD_ENABLED``
+    explicitly to ``false`` only for an emergency rollback.
+    """
+
+    event_media_download_enabled: str = "true"
     event_media_download_batch_limit: str = "20"
     event_media_download_recent_window_hours: str = "24"
     event_media_download_retry_count: str = "3"
     event_media_download_backoff_seconds: str = "30"
+    # Retained for configuration-store compatibility. RND-343 removes the
+    # in-process sweep thread, so this no longer schedules worker execution.
     event_media_download_sweep_interval_seconds: str = "15"
 
 

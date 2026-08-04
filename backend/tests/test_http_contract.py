@@ -352,6 +352,7 @@ def test_routers_are_registered(client: TestClient) -> None:
     )
     expected = sorted(
         [
+            "/",
             "/admin/analytics",
             "/admin/audit-logs",
             "/admin/conversations",
@@ -465,6 +466,7 @@ def test_route_snapshot_with_real_model_names() -> None:
             )
         )
     expected = [
+        ("/", frozenset({"GET"}), "None", "RedirectResponse"),
         ("/admin/analytics", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/audit-logs", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/conversations", frozenset({"GET"}), "None", "HTMLResponse"),
@@ -721,6 +723,21 @@ class TestPublicRoutes:
         assert resp.headers["content-type"] == "application/json"
         assert resp.json() == {"status": "unavailable"}
 
+    def test_root_is_a_temporary_relative_redirect_to_the_canonical_login(
+        self, client: TestClient
+    ) -> None:
+        first = client.get("/", follow_redirects=False)
+        assert first.status_code == 302
+        assert first.headers["location"] == "/admin/login"
+        assert "session_id" not in first.headers.get("set-cookie", "")
+
+        final = client.get("/", follow_redirects=True)
+        assert [hop.status_code for hop in final.history] == [302]
+        assert [hop.headers["location"] for hop in final.history] == ["/admin/login"]
+        assert final.status_code == 200
+        assert final.url.path == "/admin/login"
+        assert "text/html" in final.headers["content-type"]
+
     def test_login_page(self, client: TestClient) -> None:
         resp = client.get("/admin/login")
         assert resp.status_code == 200
@@ -752,6 +769,47 @@ class TestPublicRoutes:
     def test_wecom_events_not_session_gated(self, client: TestClient) -> None:
         for m in ("GET", "POST"):
             assert client.request(m, "/api/wecom/archive/events").status_code != 401
+
+
+class TestProductEntryBoundaries:
+    def test_authenticated_root_uses_existing_login_session_redirect(
+        self, authed_html_client: TestClient
+    ) -> None:
+        final = authed_html_client.get("/", follow_redirects=True)
+
+        assert [hop.status_code for hop in final.history] == [302, 302]
+        assert [hop.headers["location"] for hop in final.history] == [
+            "/admin/login",
+            "/admin/conversations",
+        ]
+        assert final.status_code == 200
+        assert final.url.path == "/admin/conversations"
+        assert "text/html" in final.headers["content-type"]
+
+    def test_unknown_path_remains_a_404_not_a_login_redirect(
+        self, client: TestClient
+    ) -> None:
+        response = client.get("/rnd-261-unknown-path", follow_redirects=False)
+
+        assert response.status_code == 404
+        assert "location" not in response.headers
+        assert response.json() == {"detail": "Not Found"}
+
+    def test_root_does_not_capture_existing_health_api_static_or_wecom_routes(
+        self, client: TestClient
+    ) -> None:
+        health = client.get("/health/live", follow_redirects=False)
+        api = client.get("/api/monitored-accounts", follow_redirects=False)
+        static = client.get("/web/static/base.css", follow_redirects=False)
+        oauth_callback = client.get("/api/auth/wecom/callback", follow_redirects=False)
+        event_callback = client.get("/api/wecom/archive/events", follow_redirects=False)
+
+        assert health.status_code == 200
+        assert api.status_code == 401
+        assert static.status_code == 200
+        assert static.headers["cache-control"] == "public, max-age=31536000, immutable"
+        assert oauth_callback.status_code == 422
+        assert event_callback.status_code == 422
 
 
 # =====================================================================

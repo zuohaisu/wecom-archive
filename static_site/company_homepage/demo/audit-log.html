@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>审计日志 Demo｜康冠时代企业微信会话存档</title>
+  <link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/demo.css">
+</head>
+<body data-demo-page="audit">
+  <div class="demo-shell">
+    <aside class="demo-sidebar" data-demo-nav></aside>
+    <div class="demo-main">
+      <header class="demo-topbar" data-demo-topbar></header>
+      <div class="demo-notice" role="status"><span class="demo-notice-mark" aria-hidden="true">i</span><span><b>静态演示数据</b>：日志项目、身份和 IP 均为虚构示例，目的是展示查看、检索和导出等行为的审计信息结构。</span></div>
+      <main class="demo-page">
+        <div class="demo-page-head">
+          <div><div class="demo-kicker">安全</div><h1>审计日志</h1><p>在可访问范围内，查看、搜索、导出和配置变更等关键行为可形成可追溯记录，辅助后续审阅和核对。</p></div>
+          <div class="demo-page-actions"><button class="demo-btn" type="button" data-demo-noop>演示筛选</button><button class="demo-btn demo-btn-primary" type="button" data-demo-noop>导出日志</button></div>
+        </div>
+
+        <section class="demo-alert"><span aria-hidden="true">✓</span><span><strong>演示审计链路</strong> · 下列内容仅展示日志字段与呈现方式；实际记录以系统权限、操作和归档数据为准。</span></section>
+
+        <section class="demo-table-wrap" style="margin-top:16px">
+          <table class="demo-table">
+            <thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象与范围</th><th>结果</th><th>审计 ID</th></tr></thead>
+            <tbody>
+              <tr><td>08-03 10:45:12</td><td><span class="demo-cell-main">林舟</span><span class="demo-cell-sub">演示审阅管理员</span></td><td><span class="demo-tag demo-tag-blue">查看</span></td><td><span class="demo-cell-main">星河项目协作群</span><span class="demo-cell-sub">scope=conversation:demo_orbit</span></td><td><span class="demo-tag demo-tag-green">成功</span></td><td><code class="demo-meta">audit_demo_031</code></td></tr>
+              <tr><td>08-03 10:38:27</td><td><span class="demo-cell-main">苏晴</span><span class="demo-cell-sub">演示审阅管理员</span></td><td><span class="demo-tag demo-tag-blue">检索</span></td><td><span class="demo-cell-main">关键词：归档</span><span class="demo-cell-sub">range=90d type=text</span></td><td><span class="demo-tag demo-tag-green">成功</span></td><td><code class="demo-meta">audit_demo_030</code></td></tr>
+              <tr><td>08-02 16:20:08</td><td><span class="demo-cell-main">林舟</span><span class="demo-cell-sub">演示审阅管理员</span></td><td><span class="demo-tag">导出</span></td><td><span class="demo-cell-main">搜索结果示例</span><span class="demo-cell-sub">演示站不会生成真实文件</span></td><td><span class="demo-tag demo-tag-green">已记录</span></td><td><code class="demo-meta">audit_demo_029</code></td></tr>
+              <tr><td>08-01 14:08:44</td><td><span class="demo-cell-main">系统</span><span class="demo-cell-sub">demo-worker</span></td><td><span class="demo-tag">归档</span></td><td><span class="demo-cell-main">售后问题跟进群</span><span class="demo-cell-sub">messages=3 media=0</span></td><td><span class="demo-tag demo-tag-green">成功</span></td><td><code class="demo-meta">audit_demo_028</code></td></tr>
+              <tr><td>07-31 09:18:03</td><td><span class="demo-cell-main">苏晴</span><span class="demo-cell-sub">演示审阅管理员</span></td><td><span class="demo-tag">配置</span></td><td><span class="demo-cell-main">演示授权范围</span><span class="demo-cell-sub">role=viewer scope=demo_only</span></td><td><span class="demo-tag demo-tag-green">成功</span></td><td><code class="demo-meta">audit_demo_027</code></td></tr>
+            </tbody>
+          </table>
+          <footer class="demo-card-foot">实际产品中的数据访问与审计能力取决于部署配置、身份认证与被授予的权限范围。</footer>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="assets/demo-data.js"></script>
+  <script src="assets/demo-shell.js"></script>
+</body>
+</html>

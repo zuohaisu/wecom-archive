@@ -23,12 +23,12 @@ import sys
 from pathlib import Path
 
 import pytest
+from app.db.models import MediaFile
 from sqlalchemy.orm import Session
 
-from app.db.models import MediaFile
 from tests.fakes import (
-    FakeWecomSdk,
     _TENANT_A,
+    FakeWecomSdk,
     insert_archive_message,
     insert_tenant,
     insert_tenant_wecom_config,
@@ -76,15 +76,75 @@ def test_main_downloads_candidate_and_prints_expected_summary(
 
     out = capsys.readouterr().out
     assert "[INFO] candidate_selected: 1" in out
+    assert "media_worker trigger_source=manual trigger=completed attempted=1 succeeded=1 failed=0" in out
     assert "[INFO] downloaded: 1" in out
     assert "[INFO] failed: 0" in out
     assert "[PASS] download_wecom_media_once completed" in out
+    assert "media_worker trigger_source=manual lifecycle=ended result=completed" in out
+    assert "error_class=none" in out
+    assert "completed_at=" in out
     assert fake.destroyed is True
 
     with Session(engine) as db:
         media_file = db.query(MediaFile).filter_by(tenant_id=_TENANT_A, sdkfileid="sdk-voice-1").one()
         assert media_file.download_status == "downloaded"
+        assert media_file.download_attempts == 1
         assert Path(media_file.local_path).read_bytes() == amr_bytes
+
+
+def test_main_hides_secret_like_provider_value_and_emits_failed_lifecycle(
+    monkeypatch, tmp_path, capsys, worker_engine
+) -> None:
+    """An invalid provider must not carry a pasted URL into the journal."""
+    import scripts.download_wecom_media_once as script
+
+    with Session(worker_engine) as db:
+        insert_tenant(db, _TENANT_A)
+        insert_tenant_wecom_config(db, _TENANT_A, "corp1")
+        insert_archive_message(
+            db,
+            tenant_id=_TENANT_A,
+            decrypt_status="success",
+            msgtype="voice",
+            sdkfileid="sdk-voice-for-provider-validation",
+            msgtime=100,
+        )
+
+    unsafe_provider = "https://storage.invalid/private/path?sig=fixture-only"
+    monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media.lock"))
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
+    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
+    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "test-secret")
+    monkeypatch.setenv("MEDIA_STORAGE_PROVIDER", unsafe_provider)
+    monkeypatch.setattr(script, "create_engine", lambda _url: worker_engine)
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as exc:
+        script.main()
+
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert unsafe_provider not in captured.out
+    assert unsafe_provider not in captured.err
+    assert "error_class=storage_configuration" in captured.out
+    assert "lifecycle=ended result=failed" in captured.out
+    assert "completed_at=" in captured.out
+
+
+def test_main_invalid_argument_emits_classified_failed_lifecycle(monkeypatch, capsys) -> None:
+    import scripts.download_wecom_media_once as script
+
+    monkeypatch.setattr(sys, "argv", ["prog", "--limit", "0"])
+
+    with pytest.raises(SystemExit) as exc:
+        script.main()
+
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "error_class=invalid_arguments" in out
+    assert "lifecycle=ended result=failed" in out
+    assert "completed_at=" in out
 
 
 def test_media_worker_symbols_remain_importable_from_the_script() -> None:

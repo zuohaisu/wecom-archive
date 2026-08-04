@@ -2,6 +2,7 @@
 Auth routes for RND-110 (WeCom OAuth) and RND-112 (password fallback).
 
 Routes (public):
+  GET  /                              Product entry -> canonical login redirect
   GET  /admin/login                   Login page HTML (mode-aware: password or WeCom)
   GET  /api/auth/wecom/login          Redirect to WeCom OAuth URL
   GET  /api/auth/wecom/callback       Handle WeCom OAuth callback
@@ -360,6 +361,19 @@ function doLogin(e){{
   <p class="field-help mt-2" data-i18n="login.footerWecom">仅限企业内部员工访问</p>"""
 
     return render_template("login", i18n_script=I18N_SCRIPT_TAG, login_body=login_body)
+
+
+@router.get("/", response_class=RedirectResponse, include_in_schema=False)
+def product_entry(request: Request) -> RedirectResponse:
+    """Send the product origin to the canonical login entry.
+
+    The login route already owns valid-session recognition and the default
+    post-login destination, so this deliberately contains neither session
+    lookup nor a second dashboard redirect contract.
+    """
+    return RedirectResponse(
+        url=request.app.url_path_for("admin_login_page"), status_code=302
+    )
 
 
 @router.get("/admin/login", response_class=HTMLResponse)

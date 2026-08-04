@@ -60,6 +60,10 @@ from app.voice_playback_pipeline import (
 
 @dataclass
 class MediaDownloadSummary:
+    # Aggregate attempt counters are shared by every supported top-level and
+    # nested media type. They intentionally contain no identifiers/paths.
+    attempted: int = 0
+    skipped: int = 0
     downloaded: int = 0
     failed: int = 0
     reason_counts: dict = field(default_factory=dict)
@@ -77,14 +81,14 @@ def _persist_download_outcome(
     storage_provider: MediaStorageProvider,
     media_file,
     outcome: str,
-    detail: Optional[str],
-    file_size: Optional[int],
+    detail: Optional[str],  # noqa: UP045 -- Python 3.9 runtime compatibility
+    file_size: Optional[int],  # noqa: UP045 -- Python 3.9 runtime compatibility
     write_backend_name: str,
     file_type: str,
     downloaded: int,
     failed: int,
     reason_counts: dict,
-) -> "tuple[int, int]":
+) -> tuple[int, int]:
     """Persist one download_one() outcome onto its media_files row and
     return the updated (downloaded, failed) counters.
 
@@ -122,7 +126,7 @@ def _persist_download_outcome(
         session.commit()
         reason_counts[detail or "unknown"] = reason_counts.get(detail or "unknown", 0) + 1
         return downloaded, failed + 1
-    except Exception:
+    except Exception:  # noqa: BLE001 -- persistence boundary must safely count every DB failure
         session.rollback()
         if outcome == "downloaded" and detail:
             _safe_delete_after_commit_failure(storage_provider, detail)
@@ -151,11 +155,15 @@ def download_media_candidates(
     candidates: list,
     nested_item_candidates: list,
     before_attempt=None,
+    record_attempt: bool = False,
 ) -> MediaDownloadSummary:
     """Download every candidate and nested item, persisting each outcome.
 
     *candidates* / *nested_item_candidates* are already-selected (see
     module docstring for why selection itself stays in the CLI script).
+    ``record_attempt`` folds each durable retry-attempt increment into the
+    existing pre-download pending-state commit; callers must not add a second
+    commit between that state transition and ``download_one``.
     Never prints and never calls sys.exit — every failure mode is counted
     into the returned summary, exactly as the original script's _run()
     counted them before this extraction.
@@ -163,8 +171,15 @@ def download_media_candidates(
     summary = MediaDownloadSummary()
 
     for msg in candidates:
-        media_file = get_or_reset_media_file(session, tenant_id, msg.sdkfileid, msg.id)
+        media_file = get_or_reset_media_file(
+            session,
+            tenant_id,
+            msg.sdkfileid,
+            msg.id,
+            record_attempt=record_attempt,
+        )
         if media_file is None:
+            summary.skipped += 1
             summary.failed += 1
             summary.reason_counts["media_identity_conflict"] = (
                 summary.reason_counts.get("media_identity_conflict", 0) + 1
@@ -174,6 +189,7 @@ def download_media_candidates(
         if before_attempt is not None:
             before_attempt(media_file)
 
+        summary.attempted += 1
         outcome, detail, file_size = download_one(
             lib, handle, storage_provider, tenant_id, msg.id, msg.msgtype, msg.sdkfileid, timeout
         )
@@ -183,8 +199,15 @@ def download_media_candidates(
         )
 
     for msg, ref in nested_item_candidates:
-        media_file = get_or_reset_media_file(session, tenant_id, ref["sdkfileid"], msg.id)
+        media_file = get_or_reset_media_file(
+            session,
+            tenant_id,
+            ref["sdkfileid"],
+            msg.id,
+            record_attempt=record_attempt,
+        )
         if media_file is None:
+            summary.skipped += 1
             summary.nested_failed += 1
             summary.nested_reason_counts["media_identity_conflict"] = (
                 summary.nested_reason_counts.get("media_identity_conflict", 0) + 1
@@ -194,6 +217,7 @@ def download_media_candidates(
         if before_attempt is not None:
             before_attempt(media_file)
 
+        summary.attempted += 1
         outcome, detail, file_size = download_one(
             lib, handle, storage_provider, tenant_id, msg.id, ref["type"], ref["sdkfileid"],
             timeout, item_key=ref["path"],

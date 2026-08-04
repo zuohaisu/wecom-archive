@@ -20,11 +20,13 @@ Versioned in this repository:
 | Revision verification | `backend/scripts/verify_alembic_head.py` | Non-interactive DB-revision-vs-repo-head check used by the deploy script and independently testable |
 | Deploy integration tests | `scripts/tests/deploy_server.bats` | Mocked end-to-end coverage of the deploy script's ordering and rollback behavior |
 | Worker unit | `deploy/systemd/wecom-archive-worker.service` | One-shot sync + decrypt |
-| Worker timer | `deploy/systemd/wecom-archive-worker.timer` | Runs worker every 5 minutes |
+| Worker timer | `deploy/systemd/wecom-archive-worker.timer` | Callback-primary archive reconciliation every 30 minutes by default (`:00`, `:30`) |
 | Reachability reconciliation unit | `deploy/systemd/wecom-archive-reachability-check.service` | One-shot daily full visibility reconciliation |
 | Reachability reconciliation timer | `deploy/systemd/wecom-archive-reachability-check.timer` | Runs reconciliation daily at 04:30 local time |
-| Media unit | `deploy/systemd/wecom-archive-media-download.service` | One-shot image download |
-| Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Runs media download every 5 minutes |
+| Media event unit | `deploy/systemd/wecom-archive-media-event.service` | Archive-complete event service; invokes the existing generic media worker |
+| Media event path | `deploy/systemd/wecom-archive-media-event.path` | Coalescing mtime-only wake-up signal watcher (no task payload) |
+| Media unit | `deploy/systemd/wecom-archive-media-download.service` | One-shot generic media worker (image/voice/video/file/emotion/nested media) |
+| Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Pending/retryable reconciliation every 30 minutes by default (`:15`, `:45`) |
 | GitHub Actions workflow | `.github/workflows/deploy.yml` | CI tests + migration + schema-drift gate, then triggers deploy script on `main` push (see §7) |
 
 Not versioned in this repository:
@@ -45,7 +47,9 @@ Run from `backend/` after creating `.env`:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+# For an existing virtual environment, rerun the command above after pulling
+# dependency changes so its pinned tooling (including Ruff) is synchronized.
 alembic upgrade head
 python scripts/bootstrap_default_tenant.py
 ```
@@ -153,14 +157,25 @@ for manual invocation, journal inspection, lock behavior, and rollback. To
 roll back, an operator disables this timer before reverting the corresponding
 code and reviewed migration.
 
-Media download worker:
+Media event wake-up and reconciliation worker:
 
 ```bash
+sudo cp deploy/systemd/wecom-archive-media-event.service /etc/systemd/system/
+sudo cp deploy/systemd/wecom-archive-media-event.path /etc/systemd/system/
 sudo cp deploy/systemd/wecom-archive-media-download.service /etc/systemd/system/
 sudo cp deploy/systemd/wecom-archive-media-download.timer /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-archive-media-event.path
 sudo systemctl enable --now wecom-archive-media-download.timer
 ```
+
+RND-343 defaults are intentionally staggered: archive reconciliation at
+`:00/:30`, generic media reconciliation at `:15/:45`. Callback → archive
+worker is the low-latency primary path; after a successful archive commit it
+non-blockingly touches a coalescing systemd-path signal only if pending media
+exists. That path starts the existing generic media worker in its own service.
+The two versioned 5-minute rollback drop-ins and the backup-first
+operator procedure are documented in the runbooks below.
 
 Detailed operational behavior lives in:
 

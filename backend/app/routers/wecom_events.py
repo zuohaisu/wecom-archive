@@ -2,7 +2,7 @@
 WeCom callback event handler (RND-105).
 
 GET  /api/wecom/archive/events  — URL verification (decrypt echostr)
-POST /api/wecom/archive/events  — Event signature validation (no worker trigger)
+POST /api/wecom/archive/events  — Verified event dispatch to archive worker
 """
 
 from __future__ import annotations
@@ -19,12 +19,14 @@ from xml.etree import ElementTree
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
-
 from sqlalchemy.orm import Session
 
 from app.db.models import TenantWecomConfig
 from app.db.session import get_engine
-from app.media_event_dispatch import trigger_recent_image_download
+from app.services.archive_worker_trigger import (
+    ArchiveWorkerDispatch,
+    dispatch_archive_worker,
+)
 from app.settings import get_wecom_callback_settings
 
 logger = logging.getLogger(__name__)
@@ -180,7 +182,7 @@ def _active_tenant_for_corp(corp_id: str) -> str | None:
                 .first()
             )
             return row.tenant_id if row is not None else None
-    except Exception:
+    except Exception:  # noqa: BLE001 -- callback must not expose tenant lookup detail
         return None
 
 
@@ -234,7 +236,7 @@ def wecom_callback_get(
 
 
 # ---------------------------------------------------------------------------
-# POST — Event signature validation (no worker trigger in RND-105)
+# POST — Event signature validation and worker dispatch (RND-107)
 # ---------------------------------------------------------------------------
 
 
@@ -246,10 +248,9 @@ async def wecom_callback_post(
     nonce: str = Query(...),
 ):
     """
-    WeCom event callback — validate signature only (RND-105).
+    WeCom event callback — verify the request, then request one worker cycle.
 
-    Does NOT trigger the archive worker.
-    RND-107 will trigger archive worker after valid POST event.
+    RND-107 keeps the acknowledgement independent from worker completion.
     """
     try:
         token = _get_token()
@@ -270,14 +271,20 @@ async def wecom_callback_post(
         _log_rejected("invalid_signature")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    # This is intentionally independent of RND-107's archive-worker trigger:
-    # a dispatcher failure must never change WeCom's callback acknowledgement.
+    # The callback configuration must resolve to one active tenant before the
+    # environment-scoped worker may run.  The resolved ID stays in-process and
+    # is never put in responses, logs, or child-process arguments.
     tenant_id = _active_tenant_for_corp(_get_corp_id())
-    if tenant_id is not None:
-        try:
-            trigger_recent_image_download(tenant_id, triggered_by="callback")
-        except Exception:
-            pass
+    if tenant_id is None:
+        logger.error("wecom_callback archive_worker=unavailable")
+        raise HTTPException(status_code=503, detail="Callback worker unavailable")
 
+    dispatch = dispatch_archive_worker()
+    if dispatch is ArchiveWorkerDispatch.FAILED:
+        raise HTTPException(status_code=503, detail="Callback worker unavailable")
+
+    # Media is deliberately not parsed or downloaded in this HTTP handler.
+    # The shared archive entrypoint wakes the generic media worker only after
+    # sync/decrypt has committed any newly actionable media metadata.
     logger.info("wecom_callback accepted method=POST")
     return PlainTextResponse(content="ok", media_type="text/plain")

@@ -58,7 +58,10 @@ without a working SDK or live WeCom credentials.
 cd <repository-directory>
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r backend/requirements.txt
+python -m pip install -r backend/requirements.txt
+# Existing root .venv: rerun this command after pulling dependency changes;
+# the requirements pin Ruff, so do not rely on a global Ruff installation.
+# Root make lint, make lint-diff, and make verify use .venv/bin/python -m ruff.
 
 # 2. Create local configuration (never commit it)
 cp .env.example backend/.env
