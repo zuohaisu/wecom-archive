@@ -246,7 +246,11 @@ def test_callback_targeted_refresh_fetches_current_profile_and_writes_history(
     monkeypatch.setattr(sync, "get_wecom_token", lambda *args, **kwargs: "token")
     monkeypatch.setattr(sync.wecom_contacts, "get_external_contact", lambda *args: payload)
     monkeypatch.setattr(sync.wecom_contacts, "get_corp_tag_list", lambda _token: {})
-    monkeypatch.setattr(sync, "_interaction_stats", lambda *args: (None, None))
+    monkeypatch.setattr(
+        sync,
+        "_interaction_stats",
+        lambda *args: pytest.fail("targeted refresh must not rescan archive messages"),
+    )
 
     first = sync.refresh_external_contact(
         identity_db, TENANT_A, "corp-a", "secret", "wm-callback-001"
@@ -451,8 +455,9 @@ def test_model_and_migration_preserve_legacy_name_for_api_backfill() -> None:
     assert "legacy external_contacts.name" in migration
 
 
-def test_timer_runs_periodic_external_contact_reconciliation_only_after_archive_success(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("source", ("timer", "manual"))
+def test_archive_worker_never_runs_full_external_contact_sync(
+    source: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     script = Path(__file__).resolve().parents[1] / "scripts/run_archive_worker_once.py"
     spec = importlib.util.spec_from_file_location("rnd170_archive_worker", script)
@@ -461,13 +466,8 @@ def test_timer_runs_periodic_external_contact_reconciliation_only_after_archive_
     spec.loader.exec_module(worker)
     calls: list[str] = []
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
-    monkeypatch.setenv("ARCHIVE_WORKER_TRIGGER_SOURCE", "timer")
+    monkeypatch.setenv("ARCHIVE_WORKER_TRIGGER_SOURCE", source)
     monkeypatch.setattr(worker, "_run_script", lambda _path, label: calls.append(label))
-    monkeypatch.setattr(
-        worker,
-        "_run_periodic_external_contact_reconciliation",
-        lambda: calls.append("external-contact-reconciliation"),
-    )
     monkeypatch.setattr(
         worker,
         "_run_best_effort_reachability_automation",
@@ -486,7 +486,6 @@ def test_timer_runs_periodic_external_contact_reconciliation_only_after_archive_
     assert calls == [
         "sync_wecom_archive_once.py",
         "decrypt_wecom_messages_once.py",
-        "external-contact-reconciliation",
         "reachability",
     ]
 

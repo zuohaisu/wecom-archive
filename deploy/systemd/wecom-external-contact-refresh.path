@@ -1,0 +1,11 @@
+[Unit]
+Description=WeCom External-contact Incremental Refresh Signal Watcher
+
+[Path]
+# The task identifier is stored only in PostgreSQL. This mtime-only signal
+# coalesces bursts without putting customer information on the filesystem.
+PathChanged=/srv/apps/wecom-archive-365/shared/run/wecom-external-contact-refresh.trigger
+Unit=wecom-external-contact-refresh.service
+
+[Install]
+WantedBy=multi-user.target

@@ -511,6 +511,44 @@ process.stdout.write(JSON.stringify({{
     assert "Alice" in out["scopeLabel"]
 
 
+def test_apply_locale_refreshes_the_browser_tab_title() -> None:
+    """Issue #18: the console tab must follow the selected UI locale too."""
+    apply_locale_src = _extract(r"function applyLocale\(\)\{.*?\n\}", "applyLocale()")
+    harness = f"""
+{_DOM_STUB}
+{_console_state_bundle()}
+var localeCode='zh-CN';
+var I18N={{
+  getLocale:function(){{return localeCode;}},
+  t:function(key){{
+    if(key==='app.subtitle')return localeCode==='en' ? 'Conversation Review Console' : '对话审阅控制台';
+    return key;
+  }},
+  availableLocales:function(){{return [];}}
+}};
+function applyStaticI18n(){{}} function renderLangMenu(){{}} function rebuildMediaLabels(){{}}
+function updateRefreshStatus(){{}} function renderEntityList(){{}} function renderConvList(){{}}
+function renderTimeline(){{}} function renderSearchFilters(){{}} function updateLocatorText(){{}}
+function renderPanelAudit(){{}} function renderPanelAuditEmpty(){{}} function renderPanelInfo(){{}}
+function findTimelineMessage(){{return null;}}
+document=makeStubDocument({json.dumps(_STUB_IDS)});
+document.title='Conversation Review Console';
+selEntityId=null; selConvId=null; selectedMsgId=null;
+{apply_locale_src}
+applyLocale();
+var zhTitle=document.title;
+localeCode='en';
+applyLocale();
+process.stdout.write(JSON.stringify({{zhTitle:zhTitle,enTitle:document.title}}));
+"""
+    result = run_node(harness)
+    assert result.returncode == 0, f"node harness failed: {result.stderr}"
+    assert json.loads(result.stdout) == {
+        "zhTitle": "对话审阅控制台",
+        "enTitle": "Conversation Review Console",
+    }
+
+
 # ---------------------------------------------------------------------------
 # QA fix #5 -- 1024px layout: the timeline column was squeezed to ~184px
 # because side-nav (212px) + col-conv (328px) + col-panel (300px) are all

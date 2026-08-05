@@ -157,7 +157,6 @@ function onConvClick(el){
   document.getElementById('timeline-header').textContent=I18N.t('console.timelineHeader')+' — '+el.dataset.name;
   clearPanelForNewConversation();
   loadTimeline(selConvId, el.dataset.type);
-  loadConversationDetail(selConvId);
 }
 // Archive Console v2: switching conversations invalidates any previously
 // selected message (it belongs to the OLD conversation's timeline) and the

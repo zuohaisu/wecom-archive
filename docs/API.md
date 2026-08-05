@@ -251,12 +251,15 @@ classification happens server-side in `app/reachability_audit.py`.
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET` | `/api/wecom/archive/events` | Decrypts and verifies WeCom `echostr` |
-| `POST` | `/api/wecom/archive/events` | Verifies signature, decrypts the event envelope, validates CorpID, queues a bounded targeted external-contact refresh for `change_external_contact`, and dispatches archive work asynchronously |
+| `POST` | `/api/wecom/archive/events` | Verifies signature, decrypts the event envelope, validates CorpID, persists a targeted external-contact refresh task for `change_external_contact`, and dispatches archive work asynchronously |
 
-The POST acknowledgement never waits for the targeted refresh or archive
-worker. Missed/coalesced external-contact callbacks are reconciled by the
-archive timer's best-effort full external-contact sync when
-`WECOM_EXTERNAL_CONTACT_SECRET` is configured.
+The POST acknowledgement never waits for targeted refresh, archive work, or
+any outbound contact API request. Direct inbound archive messages from a
+WeCom external-user identifier persist the same coalesced task after decrypt
+commit; group messages and messages sent by an archive seat do not. A small
+dedicated worker drains persisted tasks, while the independent daily full
+reconciliation is the durable fallback for missed callbacks, unavailable
+customer relationships, and worker restarts.
 
 These routes are intentionally **not** session-protected.
 

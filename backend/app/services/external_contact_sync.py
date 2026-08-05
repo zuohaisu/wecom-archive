@@ -8,9 +8,9 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Iterable, Optional
 
-from sqlalchemy import exists, func, or_
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import wecom_contacts
@@ -29,6 +29,11 @@ from app.services.external_contact_identity import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Each batch is used in two ``IN`` clauses. Keep it comfortably below common
+# SQLite parameter limits while still avoiding one archive scan per contact.
+_INTERACTION_STATS_BATCH_SIZE = 300
 
 
 @dataclass
@@ -74,6 +79,61 @@ def _interaction_stats(
         .one()
     )
     return (last_interaction_at, int(count)) if count else (None, None)
+
+
+def _interaction_stats_for_external_contacts(
+    session: Session, tenant_id: str, external_userids: Iterable[str]
+) -> dict[str, tuple[Optional[datetime], Optional[int]]]:
+    """Return tenant-scoped interaction stats for a full contact-sync batch.
+
+    A full directory sync can include many contacts. Calculating the previous
+    single-contact query for every record repeats a scan of the archive table
+    for each contact. This performs one aggregate query per bounded batch
+    instead. ``UNION`` (rather than ``UNION ALL``) preserves the single-contact
+    query's OR semantics when a contact is both sender and recipient of one
+    message.
+    """
+    normalized_ids = sorted(
+        {cleaned for value in external_userids if (cleaned := _clean(value))}
+    )
+    stats: dict[str, tuple[Optional[datetime], Optional[int]]] = {}
+    for offset in range(0, len(normalized_ids), _INTERACTION_STATS_BATCH_SIZE):
+        batch = normalized_ids[offset : offset + _INTERACTION_STATS_BATCH_SIZE]
+        sent = select(
+            ArchiveMessage.sender.label("external_userid"),
+            ArchiveMessage.id.label("message_id"),
+            ArchiveMessage.created_at.label("created_at"),
+        ).where(
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessage.sender.in_(batch),
+        )
+        received = (
+            select(
+                ArchiveMessageRecipient.receiver_userid.label("external_userid"),
+                ArchiveMessage.id.label("message_id"),
+                ArchiveMessage.created_at.label("created_at"),
+            )
+            .join(
+                ArchiveMessage,
+                ArchiveMessage.id == ArchiveMessageRecipient.message_id,
+            )
+            .where(
+                ArchiveMessage.tenant_id == tenant_id,
+                ArchiveMessageRecipient.tenant_id == tenant_id,
+                ArchiveMessageRecipient.receiver_userid.in_(batch),
+            )
+        )
+        matching_messages = sent.union(received).subquery()
+        rows = session.execute(
+            select(
+                matching_messages.c.external_userid,
+                func.max(matching_messages.c.created_at),
+                func.count(matching_messages.c.message_id),
+            ).group_by(matching_messages.c.external_userid)
+        )
+        for external_userid, last_interaction_at, message_count in rows:
+            stats[external_userid] = (last_interaction_at, int(message_count))
+    return stats
 
 
 def _tag_ids(follow_user: dict) -> list[str]:
@@ -124,6 +184,9 @@ def _persist_external_contact_detail(
     external_userid: str,
     detail: dict,
     tag_names: dict[str, str],
+    interaction_stats: Optional[tuple[Optional[datetime], Optional[int]]] = None,
+    *,
+    update_interaction_stats: bool = True,
 ) -> tuple[bool, IdentitySyncResult]:
     """Write one full detail payload in the caller's transaction/savepoint."""
     existed = (
@@ -136,15 +199,18 @@ def _persist_external_contact_detail(
         is not None
     )
     values = _payload_values(detail, tag_names)
-    last_interaction_at, message_count = _interaction_stats(
-        session, tenant_id, external_userid
-    )
+    if update_interaction_stats and interaction_stats is None:
+        interaction_stats = _interaction_stats(session, tenant_id, external_userid)
+    if interaction_stats is None:
+        interaction_stats = (None, None)
+    last_interaction_at, message_count = interaction_stats
     contact = upsert_external_contact(
         session,
         tenant_id,
         external_userid,
         last_interaction_at=last_interaction_at,
         message_count=message_count,
+        update_interaction_stats=update_interaction_stats,
         **values,
     )
     identity_result = sync_external_contact_identity(session, contact, detail)
@@ -157,6 +223,8 @@ def refresh_external_contact(
     corp_id: str,
     external_secret: str,
     external_userid: str,
+    *,
+    update_interaction_stats: bool = False,
 ) -> RefreshResult:
     """Fetch and persist one callback-targeted external contact.
 
@@ -184,6 +252,7 @@ def refresh_external_contact(
             clean_external_userid,
             detail,
             tag_names,
+            update_interaction_stats=update_interaction_stats,
         )
     return RefreshResult(
         found=True,
@@ -198,6 +267,8 @@ def sync_external_contacts(
     tenant_id: str,
     corp_id: str,
     external_secret: str,
+    *,
+    commit_every: Optional[int] = None,
 ) -> RunSummary:
     """Synchronize one tenant; callers provide credentials and transaction scope."""
     summary = RunSummary()
@@ -218,6 +289,9 @@ def sync_external_contacts(
             continue
         external_userids.update(ids)
 
+    interaction_stats_by_external_userid = _interaction_stats_for_external_contacts(
+        session, tenant_id, external_userids
+    )
     for external_userid in sorted(external_userids):
         summary.total += 1
         detail = wecom_contacts.get_external_contact(token, external_userid)
@@ -234,6 +308,9 @@ def sync_external_contacts(
                     external_userid,
                     detail,
                     tag_names,
+                    interaction_stats_by_external_userid.get(
+                        external_userid, (None, None)
+                    ),
                 )
             if existed:
                 summary.updated += 1
@@ -243,6 +320,12 @@ def sync_external_contacts(
             summary.follow_relationship_changes += identity_result.follow_relations_changed
         except Exception:  # noqa: BLE001 -- never log raw response/contact data
             summary.failed += 1
+
+        if commit_every and summary.total % commit_every == 0:
+            # Full reconciliation is intentionally resumable: each contact is
+            # idempotent, so a long first directory import should expose prior
+            # batches rather than hold one large transaction until the end.
+            session.commit()
 
     return summary
 
@@ -289,7 +372,13 @@ def main() -> int:
     try:
         with Session(engine) as session:
             tenant_id = _require_tenant_id(session, corp_id)
-            summary = sync_external_contacts(session, tenant_id, corp_id, external_secret)
+            summary = sync_external_contacts(
+                session,
+                tenant_id,
+                corp_id,
+                external_secret,
+                commit_every=100,
+            )
             session.commit()
     except Exception as exc:
         logger.error("External-contact sync failed: %s", type(exc).__name__)

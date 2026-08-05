@@ -1,114 +1,150 @@
-"""Bounded asynchronous refresh dispatch for WeCom external-contact events."""
+"""Durable, non-blocking dispatch for external-contact metadata refreshes.
+
+WeCom callbacks and archive decryption must never call the external-contact
+API themselves. They only coalesce an identifier into the database-backed
+task source and touch one identifier-free systemd-path signal. A separate
+worker owns all network I/O and retry timing.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
-import threading
-from collections import deque
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy.orm import Session
 
+from app.db.models import ExternalContactRefreshTask
 from app.db.session import get_engine
-from app.services.external_contact_sync import refresh_external_contact
 
 logger = logging.getLogger(__name__)
 
-# A callback burst must not create one thread per customer. Overflow safely
-# falls back to the periodic full external-contact reconciliation.
-_MAX_PENDING_REFRESHES = 64
-_dispatch_lock = threading.Lock()
-_pending: deque[tuple[str, str, str]] = deque()
-_pending_keys: set[tuple[str, str, str]] = set()
-_worker_running = False
+_DEFAULT_SIGNAL_PATH = (
+    "/srv/apps/wecom-archive-365/shared/run/wecom-external-contact-refresh.trigger"
+)
+_SOURCES = frozenset({"callback", "inbound-direct-message"})
 
 
 class ExternalContactRefreshDispatch(str, Enum):
+    """Safe aggregate outcomes visible to callers without exposing PII."""
+
     ACCEPTED = "accepted"
     COALESCED = "coalesced"
-    SKIPPED_CAPACITY = "skipped-capacity"
     FAILED = "dispatch-failed"
 
 
-def refresh_external_contact_from_callback(
-    tenant_id: str, corp_id: str, external_userid: str
-) -> None:
-    """Fetch one current profile and commit only safe identity changes."""
-    external_secret = os.environ.get("WECOM_EXTERNAL_CONTACT_SECRET", "").strip()
-    if not external_secret:
-        logger.info("external_contact_refresh result=skipped reason=not_configured")
-        return
+def _clean_identifier(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    clean = value.strip()
+    return clean if clean and len(clean) <= 64 else None
 
-    try:
-        with Session(get_engine()) as session:
-            outcome = refresh_external_contact(
-                session,
-                tenant_id,
-                corp_id,
-                external_secret,
-                external_userid,
-            )
-            session.commit()
-    except Exception:  # noqa: BLE001 -- callbacks must not expose response/PII details
-        logger.info("external_contact_refresh result=failed")
-        return
 
-    if not outcome.found:
-        logger.info("external_contact_refresh result=skipped reason=not_found")
-        return
-    logger.info(
-        "external_contact_refresh result=completed inserted=%d nickname_changed=%d "
-        "follow_relationship_changes=%d",
-        int(outcome.inserted),
-        int(outcome.nickname_changed),
-        outcome.follow_relationship_changes,
+def _safe_source(value: object) -> str:
+    return value if value in _SOURCES else "callback"
+
+
+def enqueue_external_contact_refresh(
+    session: Session,
+    tenant_id: str,
+    external_userid: str,
+    *,
+    source: str,
+    now: datetime | None = None,
+) -> ExternalContactRefreshDispatch:
+    """Create or reactivate one durable refresh task in the caller's transaction."""
+    clean_tenant_id = _clean_identifier(tenant_id)
+    clean_external_userid = _clean_identifier(external_userid)
+    if not clean_tenant_id or not clean_external_userid:
+        return ExternalContactRefreshDispatch.FAILED
+
+    observed_at = now or datetime.now(timezone.utc)
+    task = (
+        session.query(ExternalContactRefreshTask)
+        .filter(
+            ExternalContactRefreshTask.tenant_id == clean_tenant_id,
+            ExternalContactRefreshTask.external_userid == clean_external_userid,
+        )
+        .first()
     )
+    if task is None:
+        session.add(
+            ExternalContactRefreshTask(
+                tenant_id=clean_tenant_id,
+                external_userid=clean_external_userid,
+                source=_safe_source(source),
+                state="pending",
+                next_attempt_at=observed_at,
+            )
+        )
+        return ExternalContactRefreshDispatch.ACCEPTED
+
+    # New events are evidence that a previous no-relation/API failure may no
+    # longer apply. Make the existing task eligible now, without creating an
+    # unbounded queue of duplicate identifiers.
+    task.source = _safe_source(source)
+    task.state = "pending"
+    task.next_attempt_at = observed_at
+    task.last_error_class = None
+    return ExternalContactRefreshDispatch.COALESCED
 
 
-def _drain_refreshes() -> None:
-    global _worker_running
-    while True:
-        with _dispatch_lock:
-            if not _pending:
-                _worker_running = False
-                return
-            key = _pending.popleft()
+def _signal_refresh_worker() -> bool:
+    """Touch one identifier-free path watched by a dedicated systemd unit."""
+    try:
+        directory = os.path.dirname(_DEFAULT_SIGNAL_PATH)
+        if directory:
+            os.makedirs(directory, mode=0o750, exist_ok=True)
+        fd = os.open(_DEFAULT_SIGNAL_PATH, os.O_CREAT | os.O_WRONLY, 0o640)
         try:
-            refresh_external_contact_from_callback(*key)
+            os.utime(_DEFAULT_SIGNAL_PATH, None)
         finally:
-            with _dispatch_lock:
-                _pending_keys.discard(key)
+            os.close(fd)
+        return True
+    except OSError:
+        return False
+
+
+def signal_external_contact_refresh_worker() -> bool:
+    """Request a worker wake-up after a caller has committed task rows."""
+    return _signal_refresh_worker()
 
 
 def dispatch_external_contact_refresh(
-    tenant_id: str, corp_id: str, external_userid: str
+    tenant_id: str,
+    corp_id: str,
+    external_userid: str,
+    *,
+    source: str = "callback",
 ) -> ExternalContactRefreshDispatch:
-    """Queue a coalesced refresh without blocking the callback acknowledgement."""
-    global _worker_running
-    key = (tenant_id, corp_id, external_userid)
-    with _dispatch_lock:
-        if key in _pending_keys:
-            return ExternalContactRefreshDispatch.COALESCED
-        if len(_pending) >= _MAX_PENDING_REFRESHES:
-            return ExternalContactRefreshDispatch.SKIPPED_CAPACITY
+    """Persist a refresh request and return without doing external network I/O.
 
-        _pending.append(key)
-        _pending_keys.add(key)
-        if _worker_running:
-            return ExternalContactRefreshDispatch.ACCEPTED
-        _worker_running = True
-        try:
-            thread = threading.Thread(
-                target=_drain_refreshes,
-                name="wecom-external-contact-refresh",
-                daemon=True,
+    ``corp_id`` remains part of the public callback seam for compatibility and
+    tenant/corp binding happens before this function is called. The worker
+    resolves credentials from its own trusted environment instead of carrying
+    any credential or user identifier in a process argument or path signal.
+    """
+    del corp_id
+    try:
+        with Session(get_engine()) as session:
+            outcome = enqueue_external_contact_refresh(
+                session, tenant_id, external_userid, source=source
             )
-            thread.start()
-        except Exception:  # noqa: BLE001 -- keep callback failure classification safe
-            _pending.pop()
-            _pending_keys.discard(key)
-            _worker_running = False
-            return ExternalContactRefreshDispatch.FAILED
+            if outcome is ExternalContactRefreshDispatch.FAILED:
+                return outcome
+            session.commit()
+    except Exception:  # noqa: BLE001 -- callback must fail closed without DB detail
+        logger.info("external_contact_refresh_dispatch result=failed")
+        return ExternalContactRefreshDispatch.FAILED
 
-    return ExternalContactRefreshDispatch.ACCEPTED
+    # A signal failure does not discard the committed task: the periodic
+    # worker timer will retry it. The caller can still acknowledge promptly.
+    signal = signal_external_contact_refresh_worker()
+    logger.info(
+        "external_contact_refresh_dispatch result=%s signal=%s source=%s",
+        outcome.value,
+        "accepted" if signal else "deferred",
+        _safe_source(source),
+    )
+    return outcome

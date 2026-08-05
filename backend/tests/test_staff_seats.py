@@ -765,6 +765,126 @@ def test_conversation_messages_pagination_mixed_timestamps_still_works(client, d
     assert combined == [m.msgid for m in all_msgs]
 
 
+def test_timeline_uses_sql_cursor_pagination_for_normal_group_conversations(
+    client, db: Session, monkeypatch
+) -> None:
+    """Issue #21: a normal room must not load every message before paging."""
+    from app.auth import get_current_user
+    from app.db.session import get_db
+    from app.main import app
+    from app.services import timeline_service
+
+    for index in range(45):
+        _insert_message(
+            db,
+            msgid=f"issue-21-{index}",
+            sender="staff-speed",
+            roomid="issue-21-room",
+            msgtime=1_000 + index,
+            content_text=f"message {index}",
+            seq=10_000 + index,
+        )
+    db.commit()
+
+    compact_calls: list[object] = []
+
+    def unexpected_full_conversation_load(*args, **kwargs):
+        compact_calls.append((args, kwargs))
+        raise AssertionError("normal group timeline must page in SQL")
+
+    monkeypatch.setattr(
+        timeline_service,
+        "_fetch_conversation_messages_compact",
+        unexpected_full_conversation_load,
+    )
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), _TENANT_A)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        first = client.get(
+            "/api/conversations/issue-21-room/messages?limit=20&conversation_type=group"
+        )
+        assert first.status_code == 200
+        first_body = first.json()
+        assert [item["msgid"] for item in first_body["messages"]] == [
+            f"issue-21-{index}" for index in range(25, 45)
+        ]
+        assert first_body["pagination"]["has_older"] is True
+
+        second = client.get(
+            "/api/conversations/issue-21-room/messages?limit=20&conversation_type=group"
+            f"&before={first_body['pagination']['next_before']}"
+        )
+        assert second.status_code == 200
+        second_body = second.json()
+        assert [item["msgid"] for item in second_body["messages"]] == [
+            f"issue-21-{index}" for index in range(5, 25)
+        ]
+        assert second_body["pagination"]["has_older"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+    assert compact_calls == []
+
+
+def test_timeline_uses_sql_cursor_pagination_for_normal_direct_conversations(
+    client, db: Session, monkeypatch
+) -> None:
+    """Issue #21: ordinary direct pairs use the same bounded page query."""
+    from app.auth import get_current_user
+    from app.db.session import get_db
+    from app.main import app
+    from app.services import timeline_service
+
+    for index in range(45):
+        message = _insert_message(
+            db,
+            msgid=f"issue-21-direct-{index}",
+            sender="staff-speed",
+            msgtime=2_000 + index,
+            content_text=f"direct message {index}",
+            seq=20_000 + index,
+        )
+        _insert_recipient(db, message.id, "contact-speed")
+    db.commit()
+
+    compact_calls: list[object] = []
+
+    def unexpected_full_conversation_load(*args, **kwargs):
+        compact_calls.append((args, kwargs))
+        raise AssertionError("normal direct timeline must page in SQL")
+
+    monkeypatch.setattr(
+        timeline_service,
+        "_fetch_conversation_messages_compact",
+        unexpected_full_conversation_load,
+    )
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), _TENANT_A)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        first = client.get(
+            "/api/conversations/direct__contact-speed___staff-speed/messages?limit=20"
+            "&conversation_type=direct"
+        )
+        assert first.status_code == 200
+        first_body = first.json()
+        assert [item["msgid"] for item in first_body["messages"]] == [
+            f"issue-21-direct-{index}" for index in range(25, 45)
+        ]
+        assert first_body["pagination"]["has_older"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+    assert compact_calls == []
+
+
 # ---------------------------------------------------------------------------
 # Seat active/history classification must not be polluted by group expansion
 # ---------------------------------------------------------------------------

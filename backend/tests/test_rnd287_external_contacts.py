@@ -98,6 +98,57 @@ def test_interaction_stats_are_tenant_scoped(db_session) -> None:
     assert last_interaction_at.replace(tzinfo=timezone.utc) == later
 
 
+def test_batch_interaction_stats_preserve_sender_recipient_or_semantics(db_session) -> None:
+    """A message with the contact on both sides is counted only once."""
+    from app.services.external_contact_sync import _interaction_stats_for_external_contacts
+
+    db_session.execute(text("""
+        CREATE TABLE archive_messages (
+            id INTEGER PRIMARY KEY, tenant_id VARCHAR(36), sender VARCHAR(64), created_at DATETIME
+        )
+    """))
+    db_session.execute(text("""
+        CREATE TABLE archive_message_recipients (
+            id INTEGER PRIMARY KEY, message_id INTEGER, tenant_id VARCHAR(36), receiver_userid VARCHAR(64)
+        )
+    """))
+    earlier = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    later = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    db_session.execute(
+        text("INSERT INTO archive_messages VALUES (1, 'tenant-a', 'wm-a', :at)"),
+        {"at": earlier},
+    )
+    db_session.execute(
+        text("INSERT INTO archive_messages VALUES (2, 'tenant-a', 'staff', :at)"),
+        {"at": later},
+    )
+    db_session.execute(
+        text("INSERT INTO archive_messages VALUES (3, 'tenant-a', 'wm-b', :at)"),
+        {"at": later},
+    )
+    db_session.execute(
+        text("INSERT INTO archive_messages VALUES (4, 'tenant-b', 'wm-a', :at)"),
+        {"at": later},
+    )
+    db_session.execute(
+        text("INSERT INTO archive_message_recipients VALUES (1, 1, 'tenant-a', 'wm-a')")
+    )
+    db_session.execute(
+        text("INSERT INTO archive_message_recipients VALUES (2, 2, 'tenant-a', 'wm-a')")
+    )
+    db_session.commit()
+
+    stats = _interaction_stats_for_external_contacts(
+        db_session, "tenant-a", {"wm-a", "wm-b", "wm-missing"}
+    )
+
+    assert stats["wm-a"][1] == 2
+    assert stats["wm-a"][0] is not None
+    assert stats["wm-a"][0].replace(tzinfo=timezone.utc) == later
+    assert stats["wm-b"][1] == 1
+    assert "wm-missing" not in stats
+
+
 class _Response:
     def __init__(self, payload: dict) -> None:
         self.payload = payload
@@ -164,6 +215,7 @@ def test_external_contact_client_failure_is_safe(monkeypatch) -> None:
 def test_sync_writes_tag_names_owner_and_is_idempotent(db_session, monkeypatch) -> None:
     from app.services import external_contact_sync as sync
 
+    batched_last_interaction = datetime(2026, 1, 3, tzinfo=timezone.utc)
     monkeypatch.setattr(sync, "get_wecom_token", lambda *args, **kwargs: "token")
     monkeypatch.setattr(sync.wecom_contacts, "list_follow_userids", lambda token: ["staff-a"])
     monkeypatch.setattr(
@@ -178,7 +230,16 @@ def test_sync_writes_tag_names_owner_and_is_idempotent(db_session, monkeypatch) 
             "follow_user": [{"userid": "staff-a", "remark": "备注名", "state": "source", "tags": ["t1"]}],
         },
     )
-    monkeypatch.setattr(sync, "_interaction_stats", lambda *args: (None, None))
+    monkeypatch.setattr(
+        sync,
+        "_interaction_stats_for_external_contacts",
+        lambda *args: {"wm-ext": (batched_last_interaction, 3)},
+    )
+    monkeypatch.setattr(
+        sync,
+        "_interaction_stats",
+        lambda *args: pytest.fail("full sync must use batched interaction stats"),
+    )
 
     first = sync.sync_external_contacts(db_session, "tenant-a", "corp-a", "secret")
     db_session.commit()
@@ -194,6 +255,9 @@ def test_sync_writes_tag_names_owner_and_is_idempotent(db_session, monkeypatch) 
     assert row.name == "备注名"
     assert row.current_nickname_normalized == "昵称"
     assert row.current_nickname_display == "昵称"
+    assert row.message_count == 3
+    assert row.last_interaction_at is not None
+    assert row.last_interaction_at.replace(tzinfo=timezone.utc) == batched_last_interaction
     relation = db_session.query(ExternalContactFollow).one()
     assert relation.follow_userid == "staff-a"
     assert relation.remark_normalized == "备注名"

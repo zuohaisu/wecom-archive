@@ -139,36 +139,6 @@ _DECRYPT_SCRIPT = os.path.join(_SCRIPTS_DIR, "decrypt_wecom_messages_once.py")
 _REACHABILITY_AUTOMATION_SCRIPT = os.path.join(
     _SCRIPTS_DIR, "run_reachability_automation_once.py"
 )
-_EXTERNAL_CONTACT_SYNC_MODULE = "app.services.external_contact_sync"
-
-
-def _run_periodic_external_contact_reconciliation() -> None:
-    """Run the RND-170 full identity backstop only on timer reconciliation.
-
-    Callback events refresh one changed customer immediately. A timer-driven
-    full sync catches missed/coalesced callbacks without making archive
-    sync/decrypt success depend on the external-contact API.
-    """
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-m", _EXTERNAL_CONTACT_SYNC_MODULE],
-            cwd=_BACKEND_DIR,
-            capture_output=False,
-            check=False,
-        )
-    except Exception:  # noqa: BLE001 -- best-effort identity reconciliation
-        print(
-            "[WARN] archive_worker external_contact_reconciliation status=error",
-            flush=True,
-        )
-        return
-    status = "finished" if proc.returncode == 0 else "failed"
-    print(
-        f"[INFO] archive_worker external_contact_reconciliation status={status}",
-        flush=True,
-    )
-
-
 def _run_best_effort_reachability_automation() -> None:
     """Run incremental diagnosis without changing archive-worker truth."""
     try:
@@ -265,8 +235,6 @@ def main() -> None:
             print(f"[INFO] archive_worker trigger_source={source} trigger=accepted", flush=True)
             _run_script(_SYNC_SCRIPT, "sync_wecom_archive_once.py")
             _run_script(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py")
-            if source == "timer":
-                _run_periodic_external_contact_reconciliation()
             _run_best_effort_reachability_automation()
             completed = True
         finally:

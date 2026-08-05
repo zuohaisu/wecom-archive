@@ -29,6 +29,8 @@ the durable compensation path.
 |---|---:|---|
 | Archive reconciliation | `OnCalendar=*:0/30` (`:00`, `:30`) | Catch missed callbacks, failed dispatches, restarts, and cursor reconciliation |
 | Generic media reconciliation | `OnCalendar=*:15/30` (`:15`, `:45`) | Pending/retryable generic media reconciliation |
+| External-contact incremental refresh | path signal + `OnUnitInactiveSec=15min` retry | Drain small, persisted metadata-refresh batches |
+| External-contact full reconciliation | daily at `04:15` | Correct missed/unreadable/stale customer metadata in resumable batches |
 
 The 15-minute stagger exceeds the required 10-minute offset. Callback-driven
 archive work remains the low-latency path; the timer is not removed.
@@ -36,13 +38,20 @@ archive work remains the low-latency path; the timer is not removed.
 ### External-contact identity reconciliation (RND-170)
 
 When `WECOM_EXTERNAL_CONTACT_SECRET` is configured, a validated
-`change_external_contact` callback queues a bounded, coalesced refresh for
-that one customer. The callback still acknowledges independently of that
-refresh and the archive worker. On every timer-sourced archive run, after
-sync/decrypt succeeds, the entrypoint also runs a best-effort full
-external-contact reconciliation. This is the durable fallback for missed,
-coalesced, or failed callback refreshes; a failed identity reconciliation does
-not invalidate a successful archive sync/decrypt run.
+`change_external_contact` callback persists a bounded, coalesced refresh task
+for that one customer and immediately acknowledges. A successfully decrypted
+direct inbound message from an external-user identifier persists the same
+task after archive commit. Group messages and messages sent by an archive
+seat are deliberately excluded, so a group burst cannot create customer API
+work.
+
+The callback and decrypt workers never call the external-contact API. They
+only write the durable task row and touch an identifier-free systemd-path
+signal. `wecom-external-contact-refresh.service` drains a small batch and
+commits every customer independently; unavailable records are retried with a
+bounded backoff. `wecom-external-contact-reconcile.timer` performs one daily
+full reconciliation at 04:15, with periodic commits, as the fallback. The
+30-minute archive timer no longer performs a full contact API sweep.
 
 Never put customer IDs, remarks, nicknames, callback ciphertext, or secrets
 in journal queries, tickets, or manual command arguments.
@@ -83,10 +92,15 @@ sudo cp deploy/systemd/wecom-archive-media-download.service /etc/systemd/system/
 sudo cp deploy/systemd/wecom-archive-media-download.timer /etc/systemd/system/
 sudo cp deploy/systemd/wecom-archive-media-event.service /etc/systemd/system/
 sudo cp deploy/systemd/wecom-archive-media-event.path /etc/systemd/system/
+sudo cp deploy/systemd/wecom-external-contact-refresh.{service,path,timer} /etc/systemd/system/
+sudo cp deploy/systemd/wecom-external-contact-reconcile.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now wecom-archive-worker.timer
 sudo systemctl enable --now wecom-archive-media-download.timer
 sudo systemctl enable --now wecom-archive-media-event.path
+sudo systemctl enable --now wecom-external-contact-refresh.path
+sudo systemctl enable --now wecom-external-contact-refresh.timer
+sudo systemctl enable --now wecom-external-contact-reconcile.timer
 ```
 
 The event signal is one mtime-only file under the existing shared `run/`
@@ -148,12 +162,13 @@ python scripts/run_archive_worker_once.py
 ```
 
 Expected safe aggregate lines include sync fetch/insert counts, decrypt counts,
-`archive_worker trigger_source=manual`, duration, child CPU/RSS aggregates,
-and the archive-complete media dispatch outcome. Every exit (including a lock
-no-op or failure) ends with a `lifecycle=ended` line containing `result`, a
-safe `error_class`, and `completed_at`. No token, secret, message body, media
-ID, signed URL, local path, raw provider setting, or exception text should
-appear.
+`archive_worker trigger_source=manual`, an
+external-contact refresh `selected`/`refreshed`/`unavailable` counts, duration,
+child CPU/RSS aggregates, and the archive-complete media dispatch outcome.
+Every exit (including a lock no-op or failure) ends with a
+`lifecycle=ended` line containing `result`, a safe `error_class`, and
+`completed_at`. No token, secret, message body, media ID, signed URL, local
+path, raw provider setting, or exception text should appear.
 
 Check timers, locks, and the API while workers run:
 
@@ -162,6 +177,9 @@ sudo systemctl list-timers --all | grep wecom-archive
 sudo systemctl status wecom-archive-worker.timer --no-pager
 sudo systemctl status wecom-archive-media-event.path --no-pager
 sudo systemctl status wecom-archive-media-download.timer --no-pager
+sudo systemctl status wecom-external-contact-refresh.path --no-pager
+sudo systemctl status wecom-external-contact-refresh.timer --no-pager
+sudo systemctl status wecom-external-contact-reconcile.timer --no-pager
 sudo journalctl -u wecom-archive-worker.service -n 100 --no-pager
 sudo journalctl -u wecom-archive-media-download.service -n 100 --no-pager
 curl -fsS http://127.0.0.1:8035/health/ready; echo
@@ -181,7 +199,7 @@ run. Record only aggregates; do not export messages or media identifiers.
 | `media_trigger=dispatch-failed` | Archive data is already committed; inspect safe journal categories and rely on the media timer. |
 | Archive sync/decrypt failure | No archive-complete media dispatch occurs. Investigate the archive worker journal; cursor/idempotency semantics are unchanged. |
 | Callback missed or callback dispatch fails | The archive reconciliation timer eventually re-pulls through the same shared entrypoint and lock. |
-| `external_contact_reconciliation status=failed` / `error` | Archive sync/decrypt may still have succeeded. Confirm `WECOM_EXTERNAL_CONTACT_SECRET` is configured and rely on the next timer run; do not retry with customer IDs in shell history. |
+| `external_contact_refresh unavailable>0` | Archive sync/decrypt may still have succeeded. The customer may not currently have a readable external-contact relationship; leave the durable task to back off and rely on daily reconciliation. Do not retry with customer IDs in shell history. |
 
 Never paste callback query strings, `.env` contents, token/secret values,
 message content, `sdkfileid`, signed URLs, or storage paths into tickets or

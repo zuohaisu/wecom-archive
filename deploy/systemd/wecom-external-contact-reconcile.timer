@@ -1,0 +1,10 @@
+[Unit]
+Description=WeCom External-contact Daily Full Reconciliation Timer
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+Persistent=true
+Unit=wecom-external-contact-reconcile.service
+
+[Install]
+WantedBy=timers.target

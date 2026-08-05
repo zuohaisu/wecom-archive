@@ -28,6 +28,7 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | `external_contacts` | Tenant-scoped external-contact compatibility/profile record |
 | `external_contact_follows` | Employee-scoped external-contact remarks and follow state |
 | `external_contact_nickname_history` | Customer nickname transition audit timeline |
+| `external_contact_refresh_tasks` | Durable, coalesced external-contact metadata refresh work |
 
 ---
 
@@ -290,6 +291,13 @@ that value's historical meaning is ambiguous.
 
 Indexes include tenant/contact lookup indexes and `pg_trgm` GIN indexes for
 current nickname, active remark, and historical nickname search.
+
+`external_contact_refresh_tasks` is separate from the contact profile tables:
+it stores one coalesced, tenant-scoped task per external identifier, including
+safe source, attempt count, next retry time, and fixed failure classification.
+That lets an inbound direct archive message request a later API lookup even
+when no readable external-contact relationship exists yet. It never stores a
+nickname, remark, callback payload, or API response.
 
 ---
 

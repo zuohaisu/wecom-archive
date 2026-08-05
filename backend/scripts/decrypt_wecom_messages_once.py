@@ -270,6 +270,13 @@ def main() -> None:
             print(f"[FAIL] Database commit failed: {exc}", flush=True)
             sys.exit(1)
 
+    if summary.external_contact_refresh_enqueued:
+        from app.services.external_contact_refresh_trigger import (
+            signal_external_contact_refresh_worker,
+        )
+
+        signal_external_contact_refresh_worker()
+
     # --- 6. Cleanup SDK ---
     try:
         wecom_sdk.destroy_sdk(lib, handle)
@@ -282,6 +289,12 @@ def main() -> None:
     print(f"[INFO] decrypt failed: {summary.failed}", flush=True)
     print(f"[INFO] decrypt skipped_unsupported: {summary.unsupported}", flush=True)
     print(f"[INFO] decrypt pending_remaining: {summary.pending_remaining}", flush=True)
+    if summary.external_contact_refresh_enqueued:
+        print(
+            "[INFO] decrypt external_contact_refresh_enqueued: "
+            f"{summary.external_contact_refresh_enqueued}",
+            flush=True,
+        )
     if summary.key_mismatch:
         print(f"[INFO] decrypt key_version_mismatch: {summary.key_mismatch}", flush=True)
     if summary.rsa_failed:

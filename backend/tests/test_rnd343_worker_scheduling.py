@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pytest
 from app.media_event_dispatch import _DEFAULT_SIGNAL_PATH, MediaWorkerDispatch
+from app.services.external_contact_refresh_trigger import (
+    _DEFAULT_SIGNAL_PATH as EXTERNAL_CONTACT_REFRESH_SIGNAL_PATH,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 ARCHIVE_SCRIPT = ROOT / "backend/scripts/run_archive_worker_once.py"
@@ -17,6 +20,11 @@ MEDIA_SERVICE = ROOT / "deploy/systemd/wecom-archive-media-download.service"
 MEDIA_TIMER = ROOT / "deploy/systemd/wecom-archive-media-download.timer"
 MEDIA_EVENT_SERVICE = ROOT / "deploy/systemd/wecom-archive-media-event.service"
 MEDIA_EVENT_PATH = ROOT / "deploy/systemd/wecom-archive-media-event.path"
+EXTERNAL_CONTACT_REFRESH_SERVICE = ROOT / "deploy/systemd/wecom-external-contact-refresh.service"
+EXTERNAL_CONTACT_REFRESH_PATH = ROOT / "deploy/systemd/wecom-external-contact-refresh.path"
+EXTERNAL_CONTACT_REFRESH_TIMER = ROOT / "deploy/systemd/wecom-external-contact-refresh.timer"
+EXTERNAL_CONTACT_RECONCILE_SERVICE = ROOT / "deploy/systemd/wecom-external-contact-reconcile.service"
+EXTERNAL_CONTACT_RECONCILE_TIMER = ROOT / "deploy/systemd/wecom-external-contact-reconcile.timer"
 ARCHIVE_5MIN_OVERRIDE = ROOT / "deploy/systemd/overrides/wecom-archive-worker-5min.conf"
 MEDIA_5MIN_OVERRIDE = ROOT / "deploy/systemd/overrides/wecom-archive-media-download-5min.conf"
 
@@ -185,3 +193,35 @@ def test_timer_templates_are_low_frequency_staggered_and_retryable() -> None:
 def test_versioned_5_minute_rollback_overrides_preserve_prior_offset() -> None:
     assert "OnCalendar=*:0/5" in ARCHIVE_5MIN_OVERRIDE.read_text(encoding="utf-8")
     assert "OnCalendar=*:2/5" in MEDIA_5MIN_OVERRIDE.read_text(encoding="utf-8")
+
+
+def test_external_contact_network_work_is_separate_from_archive_reconciliation() -> None:
+    refresh_service = _pairs(EXTERNAL_CONTACT_REFRESH_SERVICE)
+    refresh_path = _pairs(EXTERNAL_CONTACT_REFRESH_PATH)
+    refresh_timer = _pairs(EXTERNAL_CONTACT_REFRESH_TIMER)
+    reconcile_service = _pairs(EXTERNAL_CONTACT_RECONCILE_SERVICE)
+    reconcile_timer = _pairs(EXTERNAL_CONTACT_RECONCILE_TIMER)
+    media_service = _pairs(MEDIA_SERVICE)
+
+    assert "external_contact_sync" not in ARCHIVE_SCRIPT.read_text(encoding="utf-8")
+    assert refresh_path["PathChanged"] == EXTERNAL_CONTACT_REFRESH_SIGNAL_PATH
+    assert refresh_path["Unit"] == "wecom-external-contact-refresh.service"
+    assert refresh_timer["OnUnitInactiveSec"] == "15min"
+    assert refresh_timer["Unit"] == "wecom-external-contact-refresh.service"
+    assert "refresh_external_contacts_once.py" in refresh_service["ExecStart"]
+    assert reconcile_timer["OnCalendar"] == "*-*-* 04:15:00"
+    assert reconcile_timer["Unit"] == "wecom-external-contact-reconcile.service"
+    assert reconcile_service["ExecStart"].endswith("-m app.services.external_contact_sync")
+    for key in (
+        "User",
+        "WorkingDirectory",
+        "EnvironmentFile",
+        "NoNewPrivileges",
+        "ProtectSystem",
+        "ProtectHome",
+        "ReadWritePaths",
+        "ReadOnlyPaths",
+        "PrivateTmp",
+    ):
+        assert refresh_service[key] == media_service[key]
+        assert reconcile_service[key] == media_service[key]

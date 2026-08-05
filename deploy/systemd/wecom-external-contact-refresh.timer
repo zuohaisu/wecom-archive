@@ -1,0 +1,13 @@
+[Unit]
+Description=WeCom External-contact Incremental Refresh Retry Timer
+
+[Timer]
+# Path signals provide low latency. This timer makes retryable persisted tasks
+# recover after service restarts or a failed/missed path wake-up.
+OnBootSec=10min
+OnUnitInactiveSec=15min
+Persistent=true
+Unit=wecom-external-contact-refresh.service
+
+[Install]
+WantedBy=timers.target

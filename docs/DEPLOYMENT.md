@@ -21,6 +21,9 @@ Versioned in this repository:
 | Deploy integration tests | `scripts/tests/deploy_server.bats` | Mocked end-to-end coverage of the deploy script's ordering and rollback behavior |
 | Worker unit | `deploy/systemd/wecom-archive-worker.service` | One-shot sync + decrypt |
 | Worker timer | `deploy/systemd/wecom-archive-worker.timer` | Callback-primary archive reconciliation every 30 minutes by default (`:00`, `:30`) |
+| External-contact refresh unit | `deploy/systemd/wecom-external-contact-refresh.service` | Small, durable event-driven metadata refresh worker |
+| External-contact refresh path/timer | `deploy/systemd/wecom-external-contact-refresh.{path,timer}` | Immediate identifier-free wake-up plus retryable task recovery |
+| External-contact daily unit/timer | `deploy/systemd/wecom-external-contact-reconcile.{service,timer}` | Full customer metadata reconciliation once daily at 04:15 |
 | Reachability reconciliation unit | `deploy/systemd/wecom-archive-reachability-check.service` | One-shot daily full visibility reconciliation |
 | Reachability reconciliation timer | `deploy/systemd/wecom-archive-reachability-check.timer` | Runs reconciliation daily at 04:30 local time |
 | Media event unit | `deploy/systemd/wecom-archive-media-event.service` | Archive-complete event service; invokes the existing generic media worker |
@@ -141,6 +144,22 @@ sudo cp deploy/systemd/wecom-archive-worker.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now wecom-archive-worker.timer
 ```
+
+External-contact refresh and daily reconciliation (operator action only):
+
+```bash
+sudo cp deploy/systemd/wecom-external-contact-refresh.{service,path,timer} /etc/systemd/system/
+sudo cp deploy/systemd/wecom-external-contact-reconcile.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-external-contact-refresh.path
+sudo systemctl enable --now wecom-external-contact-refresh.timer
+sudo systemctl enable --now wecom-external-contact-reconcile.timer
+```
+
+The 30-minute archive timer continues to sync/decrypt messages; it no longer
+calls the full external-contact API. Callback events and direct inbound
+external messages only persist a coalesced task, so neither the HTTP request
+nor archive worker waits for contact metadata network I/O.
 
 Reachability reconciliation (RND-339; operator action only):
 
@@ -693,4 +712,3 @@ chmod -R o+rX /var/www/crowntime
 **After the fix:** a fresh deploy leaves the webroot at `0644/0755`
 servable by Nginx; the next deploy re-applies the chmod, so it cannot
 regress from a future `cp -a`.
-

@@ -280,6 +280,11 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 |------|------|----------|---------|
 | `wecom-archive-worker.service` | oneshot | `OnCalendar=*:0/30` | Callback-primary sync/decrypt reconciliation; archive-complete media wake-up |
 | `wecom-archive-worker.timer` | timer | — | Activates above |
+| `wecom-external-contact-refresh.service` | oneshot | path signal / retry timer | Drains small persisted external-contact metadata refresh batches |
+| `wecom-external-contact-refresh.path` | path | shared mtime signal | Starts incremental refresh work without putting identifiers on disk |
+| `wecom-external-contact-refresh.timer` | timer | `OnUnitInactiveSec=15min` | Retries ready persisted refresh tasks |
+| `wecom-external-contact-reconcile.service` | oneshot | daily timer | Full external-contact metadata reconciliation |
+| `wecom-external-contact-reconcile.timer` | timer | `OnCalendar=*-*-* 04:15:00` | Activates above |
 | `wecom-archive-reachability-check.service` | oneshot | `OnCalendar=*-*-* 04:30:00` | Full reachability reconciliation |
 | `wecom-archive-reachability-check.timer` | timer | — | Activates above |
 | `wecom-archive-media-event.service` | oneshot | systemd path signal | Runs existing generic media CLI after archive-complete wake-up |
