@@ -95,6 +95,18 @@ CREATE TABLE admin_users (
     created_at TEXT,
     updated_at TEXT
 );
+CREATE TABLE group_chat_metadata (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    roomid TEXT NOT NULL,
+    display_name TEXT,
+    source TEXT NOT NULL DEFAULT 'wecom_external_groupchat',
+    sync_status TEXT NOT NULL DEFAULT 'unresolved',
+    last_checked_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    UNIQUE(tenant_id, roomid)
+);
 """
 
 
@@ -364,6 +376,32 @@ def test_list_conversations_resolves_display_names() -> None:
         result = svc.list_conversations(db, _TENANT_A, "staff_a")
         assert len(result) == 1
         assert result[0]["display_name"] == "Zhang San"
+    finally:
+        db.close()
+
+
+def test_list_conversations_prefers_tenant_scoped_group_metadata_name() -> None:
+    from app.db.models import GroupChatMetadata
+
+    db = _make_session()
+    try:
+        message = _insert_message(db, sender="staff_a", msgtime=100, roomid="room-named")
+        _insert_recipient(db, message.id, "contact_a")
+        db.add(
+            GroupChatMetadata(
+                tenant_id=_TENANT_A,
+                roomid="room-named",
+                display_name="Support Team",
+                source="wecom_external_groupchat",
+                sync_status="resolved",
+            )
+        )
+        db.commit()
+
+        result = svc.list_conversations(db, _TENANT_A, "staff_a")
+        assert result[0]["display_name"] == "Support Team"
+        assert result[0]["room_display_name"] == "Support Team"
+        assert result[0]["room_raw_id"] == "room-named"
     finally:
         db.close()
 

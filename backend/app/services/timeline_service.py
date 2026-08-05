@@ -28,8 +28,14 @@ from app.conversation_membership import (
     _load_display_names_for_ids,
     _load_recipients_map,
 )
-from app.db.models import ArchiveMessage, ArchiveMessageRecipient, MediaFile, MessageRevocation
-from app.display_names import resolve_person_display_name
+from app.db.group_chat_metadata import load_group_chat_display_names
+from app.db.models import (
+    ArchiveMessage,
+    ArchiveMessageRecipient,
+    MediaFile,
+    MessageRevocation,
+)
+from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.media_classification import classify_media, resolve_downloadable_media_status
 from app.media_download import NESTED_MEDIA_MSGTYPES, iter_nested_media_refs
 from app.media_storage import (
@@ -43,6 +49,36 @@ from app.media_storage import (
 from app.message_type_registry import describe_message_type
 from app.revoke_reconciliation import display_status as _revoke_display_status
 from app.schemas.timeline import ConversationMessagesOut, PaginationOut, TimelineMessageOut
+
+
+def attach_group_chat_display_name(
+    db: Session,
+    tenant_id: str,
+    conversation_id: str,
+    conversation_type: Optional[str],
+    page: ConversationMessagesOut,
+) -> ConversationMessagesOut:
+    """Attach the authoritative group title/fallback to either timeline path.
+
+    This wrapper intentionally runs after both the current and emergency
+    legacy timeline resolvers, so an operational rollback flag cannot bypass
+    the RND-340 display contract.
+    """
+    roomid = next(
+        (
+            message.roomid
+            for message in page.messages
+            if _is_valid_roomid(getattr(message, "roomid", None))
+        ),
+        None,
+    )
+    if roomid is None and conversation_type == "group":
+        roomid = conversation_id
+    if not _is_valid_roomid(roomid):
+        return page
+    display_names = load_group_chat_display_names(db, tenant_id, [roomid])
+    page.room_display_name = resolve_room_display_name(roomid, display_names.get(roomid))
+    return page
 
 
 def _entity_context_query_string(

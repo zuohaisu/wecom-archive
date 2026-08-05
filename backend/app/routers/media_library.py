@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_role
 from app.conversation_membership import _direct_conv_id
+from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.db.session import get_db
@@ -134,11 +135,17 @@ def list_media(
         )
     } if person_ids else {}
 
+    room_display_names = load_group_chat_display_names(
+        db, tenant_id, (message.roomid for _, message in rows)
+    )
+
     items = []
     for media_file, message in rows:
         if message.roomid:
             conversation_id = message.roomid
-            session_title = resolve_room_display_name(message.roomid, None)
+            session_title = resolve_room_display_name(
+                message.roomid, room_display_names.get(message.roomid)
+            )
         else:
             # Direct messages normally have exactly one recipient. Keep a
             # visible, non-empty fallback for malformed legacy rows rather

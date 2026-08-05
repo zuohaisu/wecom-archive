@@ -19,6 +19,7 @@ Security notes:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
 import httpx
@@ -26,6 +27,18 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 10.0
+
+
+@dataclass(frozen=True)
+class GroupChatMetadataLookup:
+    """Safe result envelope for customer-group metadata lookup.
+
+    ``status`` is a small allowlist used for persistence and aggregate
+    observability.  It never includes a provider message, a token, or an ID.
+    """
+
+    name: Optional[str]
+    status: str
 
 
 def _clean(value: object) -> Optional[str]:
@@ -89,6 +102,52 @@ def fetch_external_contact_display_name(
 
     contact = data.get("external_contact") or {}
     return _clean(contact.get("name"))
+
+
+def fetch_group_chat_metadata(access_token: str, chat_id: str) -> GroupChatMetadataLookup:
+    """Look up one customer group through the documented WeCom group-chat API.
+
+    The caller supplies an archive ``roomid`` only after proving it is the
+    corresponding official ``chat_id``.  Response payloads and identifiers are
+    intentionally never logged; only a bounded status reaches callers.
+    """
+    try:
+        with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
+            resp = client.post(
+                "https://qyapi.weixin.qq.com/cgi-bin/externalcontact/groupchat/get",
+                params={"access_token": access_token},
+                json={"chat_id": chat_id, "need_name": 1},
+            )
+    except Exception:  # noqa: BLE001 -- providers/mocks can raise non-httpx transport errors
+        logger.warning("fetch_group_chat_metadata: request failed")
+        return GroupChatMetadataLookup(name=None, status="transport_error")
+
+    try:
+        data = resp.json()
+    except Exception:  # noqa: BLE001 -- response parsing must remain fail-soft
+        return GroupChatMetadataLookup(name=None, status="malformed_response")
+
+    if not isinstance(data, dict):
+        return GroupChatMetadataLookup(name=None, status="malformed_response")
+    if data.get("errcode", -1) != 0:
+        errcode = data.get("errcode")
+        if errcode == 40050:
+            status = "not_found"
+        elif errcode == 48002:
+            status = "permission_denied"
+        elif errcode in {45009, 45011}:
+            status = "rate_limited"
+        else:
+            status = "api_error"
+        return GroupChatMetadataLookup(name=None, status=status)
+
+    group_chat = data.get("group_chat")
+    if not isinstance(group_chat, dict):
+        return GroupChatMetadataLookup(name=None, status="malformed_response")
+    name = group_chat.get("name")
+    if not isinstance(name, str):
+        return GroupChatMetadataLookup(name=None, status="missing_name")
+    return GroupChatMetadataLookup(name=name, status="resolved")
 
 
 def _external_contact_get(

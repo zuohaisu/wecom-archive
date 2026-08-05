@@ -86,3 +86,7 @@ class PaginationOut(BaseModel):
 class ConversationMessagesOut(BaseModel):
     messages: list[TimelineMessageOut]
     pagination: PaginationOut
+    # Group only: a current verified group title or the stable room fallback.
+    # Direct conversations keep this absent rather than introducing a new
+    # identity-display contract outside RND-340.
+    room_display_name: Optional[str] = None

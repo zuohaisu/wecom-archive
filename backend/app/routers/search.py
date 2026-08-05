@@ -26,6 +26,7 @@ from app.conversation_membership import (
     _collect_staff_ids,
     _load_display_names_for_ids,
 )
+from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import (
     AdminUser,
     ArchiveMessage,
@@ -480,6 +481,9 @@ def search_messages(
         for rid in recipients_map.get(r.id, []):
             all_userids.add(rid)
     display_names = _load_display_names_for_ids(db, tenant_id, all_userids)
+    room_display_names = load_group_chat_display_names(
+        db, tenant_id, (row.roomid for row in rows)
+    )
 
     results: list[MessageSearchResult] = []
     for row in rows:
@@ -493,7 +497,8 @@ def search_messages(
 
         # Compute conversation display name
         if conv_type == "group":
-            conv_name = resolve_room_display_name(conv_id)
+            roomid = row.roomid or conv_id
+            conv_name = resolve_room_display_name(roomid, room_display_names.get(roomid))
         else:
             # For direct conversations, show the other party's name (load all participant names)
             other_ids = [p for p in recipients if p != row.sender]

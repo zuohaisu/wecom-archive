@@ -214,6 +214,76 @@ def test_search_messages_by_content(client, db) -> None:
     assert body["results"][0]["sender_display_name"] == "staff_a"
 
 
+def test_search_messages_prefers_tenant_scoped_group_name(client, db) -> None:
+    from app.db.models import GroupChatMetadata
+    from app.main import app
+
+    msg = _insert_message(
+        db,
+        msgtype="text",
+        sender="staff_a",
+        tenant_id=_TENANT_A,
+        roomid="room-search",
+        content_text="searchable group text",
+        msgtime=100,
+    )
+    _insert_recipient(db, msg.id, "contact_a", tenant_id=_TENANT_A)
+    db.add(
+        GroupChatMetadata(
+            tenant_id=_TENANT_A,
+            roomid="room-search",
+            display_name="Searchable Group",
+            source="wecom_external_groupchat",
+            sync_status="resolved",
+        )
+    )
+    db.commit()
+
+    _authed(app, db, _TENANT_A)
+    try:
+        resp = client.get("/api/search/messages?q=searchable")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json()["results"][0]["conversation_name"] == "Searchable Group"
+
+
+def test_group_timeline_returns_same_room_display_name(client, db) -> None:
+    from app.db.models import GroupChatMetadata
+    from app.main import app
+
+    msg = _insert_message(
+        db,
+        msgtype="text",
+        sender="staff_a",
+        tenant_id=_TENANT_A,
+        roomid="room-timeline",
+        content_text="timeline group text",
+        msgtime=100,
+    )
+    _insert_recipient(db, msg.id, "contact_a", tenant_id=_TENANT_A)
+    db.add(
+        GroupChatMetadata(
+            tenant_id=_TENANT_A,
+            roomid="room-timeline",
+            display_name="Timeline Group",
+            source="wecom_external_groupchat",
+            sync_status="resolved",
+        )
+    )
+    db.commit()
+
+    _authed(app, db, _TENANT_A)
+    try:
+        resp = client.get("/api/conversations/room-timeline/messages?conversation_type=group")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json()["room_display_name"] == "Timeline Group"
+
+
 def test_search_messages_no_match(client, db) -> None:
     from app.main import app
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from copy import copy
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Any
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
@@ -22,6 +22,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer
 from sqlalchemy.orm import Session
 
+from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.message_type_registry import describe_message_type
@@ -124,6 +125,9 @@ def _load_export_rows(
             else []
         )
     }
+    room_display_names = load_group_chat_display_names(
+        db, tenant_id, (message.roomid for message in messages)
+    )
     media_by_message = {
         message_id: (file_type, file_size)
         for message_id, file_type, file_size in (
@@ -137,7 +141,13 @@ def _load_export_rows(
     }
 
     return [
-        _project_message(message, recipients_by_message, display_names, media_by_message)
+        _project_message(
+            message,
+            recipients_by_message,
+            display_names,
+            media_by_message,
+            room_display_names,
+        )
         for message in messages
     ]
 
@@ -147,10 +157,14 @@ def _project_message(
     recipients_by_message: dict[int, list[str]],
     display_names: dict[str, str],
     media_by_message: dict[int, tuple[str | None, int | None]],
+    room_display_names: Optional[dict[str, str]] = None,
 ) -> dict[str, str]:
     recipients = recipients_by_message.get(message.id, [])
+    room_display_names = room_display_names or {}
     if message.roomid:
-        conversation = resolve_room_display_name(message.roomid, None)
+        conversation = resolve_room_display_name(
+            message.roomid, room_display_names.get(message.roomid)
+        )
     elif recipients:
         conversation = ", ".join(
             resolve_person_display_name(recipient, display_names.get(recipient))

@@ -63,6 +63,87 @@ def _make_pending(db, tenant_id, pub, encrypt_msg, **kwargs):
 
 
 # ---------------------------------------------------------------------------
+# RND-340 — newly observed room IDs are dispatched fail-soft after decrypt.
+# ---------------------------------------------------------------------------
+
+
+def test_new_group_room_dispatches_metadata_refresh_without_blocking_decrypt(
+    worker_db, rsa_keys, monkeypatch
+) -> None:
+    priv, pub = rsa_keys
+    message = _make_pending(worker_db, _TENANT_A, pub, "payload-group", seq=1)
+    sdk = FakeWecomSdk()
+    sdk.set_decrypt_response(
+        "payload-group",
+        {
+            "msgtype": "text",
+            "from": "staff_a",
+            "tolist": ["contact_a"],
+            "roomid": "test-group-room",
+            "msgtime": 100,
+            "text": {"content": "hi"},
+        },
+    )
+    dispatched = []
+    monkeypatch.setattr(
+        decrypt_worker_module,
+        "dispatch_group_chat_metadata_refresh",
+        lambda tenant_id, corp_id, roomid: dispatched.append((tenant_id, corp_id, roomid)),
+    )
+
+    summary = run_decrypt_once(
+        worker_db,
+        _TENANT_A,
+        "fake-lib",
+        priv,
+        _PUBKEY_VER,
+        sdk=sdk,
+        corp_id="test-corp",
+    )
+
+    assert summary.success == 1
+    assert dispatched == [(_TENANT_A, "test-corp", "test-group-room")]
+    worker_db.refresh(message)
+    assert message.decrypt_status == "success"
+
+
+def test_group_metadata_dispatch_failure_never_blocks_decrypt(worker_db, rsa_keys, monkeypatch) -> None:
+    priv, pub = rsa_keys
+    message = _make_pending(worker_db, _TENANT_A, pub, "payload-group-fail", seq=1)
+    sdk = FakeWecomSdk()
+    sdk.set_decrypt_response(
+        "payload-group-fail",
+        {
+            "msgtype": "text",
+            "from": "staff_a",
+            "tolist": ["contact_a"],
+            "roomid": "test-group-room",
+            "msgtime": 100,
+            "text": {"content": "hi"},
+        },
+    )
+    monkeypatch.setattr(
+        decrypt_worker_module,
+        "dispatch_group_chat_metadata_refresh",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("dispatch failed")),
+    )
+
+    summary = run_decrypt_once(
+        worker_db,
+        _TENANT_A,
+        "fake-lib",
+        priv,
+        _PUBKEY_VER,
+        sdk=sdk,
+        corp_id="test-corp",
+    )
+
+    assert summary.success == 1
+    worker_db.refresh(message)
+    assert message.decrypt_status == "success"
+
+
+# ---------------------------------------------------------------------------
 # Tenant scope — the RND-222 audit fix
 # ---------------------------------------------------------------------------
 

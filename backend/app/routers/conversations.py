@@ -54,6 +54,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, load_only
 
 from app.auth import get_current_user
+from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import (
     AdminUser,
     ArchiveMessage,
@@ -156,6 +157,7 @@ from app.services.timeline_service import (
     _project_public_structured_fields,  # noqa: F401
     _RevocationMaps,  # noqa: F401
     _thumbnail_timeline_fields,  # noqa: F401
+    attach_group_chat_display_name,
     resolve_timeline_page,
 )
 from app.schemas.media import (
@@ -447,7 +449,7 @@ def get_conversation_messages(
         if os.environ.get("WEARCHIVE_LEGACY_TIMELINE")
         else resolve_timeline_page
     )
-    return resolver(
+    page = resolver(
         db,
         tenant_id,
         conversation_id,
@@ -457,6 +459,13 @@ def get_conversation_messages(
         staff_id=staff_id,
         contact_id=contact_id,
         conversation_type=conversation_type,
+    )
+    return attach_group_chat_display_name(
+        db,
+        tenant_id,
+        conversation_id,
+        conversation_type,
+        page,
     )
 
 
@@ -548,7 +557,16 @@ def get_conversation_detail(
     # employee's remark for a shared customer; use real nickname/fallback.
     display_names.update(external_contact_display_names(db, tenant_id, participant_ids))
 
-    buckets = _build_conversation_list(slim_messages, recipients_map, display_names, staff_ids)
+    room_display_names = load_group_chat_display_names(
+        db, tenant_id, (message.roomid for message in slim_messages)
+    )
+    buckets = _build_conversation_list(
+        slim_messages,
+        recipients_map,
+        display_names,
+        staff_ids,
+        room_display_names,
+    )
     bucket = next(
         (b for b in buckets if b["conversation_id"] == conversation_id),
         buckets[0],

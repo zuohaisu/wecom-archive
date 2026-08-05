@@ -31,6 +31,7 @@ from app.conversation_membership import (
     _load_display_names_for_ids,
     _staff_ids_for_participants,
 )
+from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.schemas.listing import ContactOut, MonitoredAccountOut
@@ -539,6 +540,7 @@ def _build_conversation_list(
     recipients_map: dict[int, list[str]],
     display_names: dict[str, str],
     staff_ids: Optional[set[str]] = None,
+    room_display_names: Optional[dict[str, str]] = None,
 ) -> list[dict]:
     """
     Aggregate a flat message list into conversation summary objects.
@@ -575,6 +577,7 @@ def _build_conversation_list(
     message set conversation_type.
     """
     convs: dict[str, dict] = {}
+    room_display_names = room_display_names or {}
 
     def is_staff(uid: str) -> bool:
         if staff_ids is not None:
@@ -633,7 +636,9 @@ def _build_conversation_list(
 
         if data["conversation_type"] == "group":
             room_raw_id = data["roomid"] or conv_id
-            room_display_name = resolve_room_display_name(room_raw_id)
+            room_display_name = resolve_room_display_name(
+                room_raw_id, room_display_names.get(room_raw_id)
+            )
             display_name = room_display_name
             raw_id = room_raw_id
         else:
@@ -852,4 +857,13 @@ def list_conversations(
             follow_userid=follow_userid,
         )
     )
-    return _build_conversation_list(messages, recipients_map, display_names, staff_ids)
+    room_display_names = load_group_chat_display_names(
+        db, tenant_id, (message.roomid for message in messages)
+    )
+    return _build_conversation_list(
+        messages,
+        recipients_map,
+        display_names,
+        staff_ids,
+        room_display_names,
+    )
