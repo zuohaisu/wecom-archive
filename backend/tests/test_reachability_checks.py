@@ -7,6 +7,8 @@ from threading import Barrier
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import MagicMock
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -30,6 +32,7 @@ _MIGRATION_PATH = (
     Path(__file__).resolve().parent.parent
     / "alembic/versions/0032_reachability_audit_runs.py"
 )
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 _RUNS_SCHEMA = """
 CREATE TABLE reachability_audit_runs (
@@ -82,6 +85,38 @@ def _insert_candidate(db: Session, *, tenant_id: str = TENANT_A, when: datetime 
         sender=None,  # avoids membership work; still a classifier-owned reason.
         msgtime=_msg_time(when),
     )
+
+
+def test_reachability_entrypoints_import_app_when_executed_as_scripts(tmp_path: Path) -> None:
+    """Production invokes both files directly, without relying on PYTHONPATH."""
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.pop("DATABASE_URL", None)
+    env["REACHABILITY_AUTOMATION_LOCK_PATH"] = str(tmp_path / "reachability.lock")
+
+    manual = subprocess.run(
+        [sys.executable, "scripts/run_reachability_check_once.py", "probe-public-id"],
+        cwd=_BACKEND_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    automation = subprocess.run(
+        [sys.executable, "scripts/run_reachability_automation_once.py", "reconcile"],
+        cwd=_BACKEND_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert manual.returncode == 1
+    assert manual.stdout == "[FAIL] DATABASE_URL is not set\n"
+    assert "ModuleNotFoundError" not in manual.stderr
+    assert automation.returncode == 1
+    assert "status=database_unavailable" in automation.stdout
+    assert "ModuleNotFoundError" not in automation.stderr
 
 
 def test_model_and_migration_are_field_aligned_and_data_minimized() -> None:

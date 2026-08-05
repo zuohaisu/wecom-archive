@@ -132,7 +132,7 @@ def test_archive_health_i18n_keys_exist_in_each_locale() -> None:
 
 @pytest.mark.parametrize(
     ("locale", "title"),
-    (("zh-CN", "归档可用性"), ("zh-TW", "歸檔可用性"), ("en", "Archive availability")),
+    (("zh-CN", "消息可查阅性"), ("zh-TW", "訊息可查閱性"), ("en", "Message visibility")),
 )
 def test_archive_health_title_is_localized(locale: str, title: str) -> None:
     assert f'"diagnostics.pageTitle": "{title}"' in _JS

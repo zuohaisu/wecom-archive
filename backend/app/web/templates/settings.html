@@ -7,13 +7,20 @@
 <link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
 <link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
 <link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
-<link rel="stylesheet" href="/web/static/styles.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <style>
 .settings-layout{display:flex;align-items:flex-start;gap:var(--space-5)}
 .settings-nav{width:160px;flex-shrink:0;position:sticky;top:var(--space-4)}
 .settings-nav-item{justify-content:flex-start;width:100%}
 .settings-sections{flex:1;min-width:0}
+.set-row{display:flex;gap:var(--space-5);padding:var(--space-4) var(--space-5);align-items:flex-start}
+.set-label{width:200px;flex-shrink:0}
+.set-label h3{font-size:var(--text-md);margin-bottom:2px}
+.set-label p{font-size:var(--text-xs);color:var(--color-text-4);line-height:var(--leading-loose)}
+.set-ctl{flex:1;min-width:0;max-width:420px}
+@media (max-width:900px){.page{padding:var(--space-4)}}
 @media (max-width:720px){.settings-layout{flex-direction:column}.settings-nav{position:static;width:100%;flex-direction:row;flex-wrap:wrap}.settings-nav-item{width:auto}}
+@media (max-width:640px){.side-nav{display:none}.set-row{flex-direction:column}.set-label{width:auto}.set-ctl{width:100%}}
 </style>
 </head>
 <body>

@@ -12,6 +12,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+
+# Direct script execution sets sys.path[0] to backend/scripts rather than
+# backend. Keep the production systemd/manual invocation contract while making
+# the sibling app package importable, matching the other worker entrypoints.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session

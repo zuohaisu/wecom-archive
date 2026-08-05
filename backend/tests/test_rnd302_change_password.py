@@ -146,7 +146,8 @@ def test_settings_page_requires_a_valid_session_and_renders_the_form(
     authenticated = client.get("/admin/settings", follow_redirects=False)
     assert authenticated.status_code == 200
     assert 'id="change-password-form"' in authenticated.text
-    assert "/web/static/styles.css" in authenticated.text
+    assert "/web/static/design-system.css" in authenticated.text
+    assert "/web/static/styles.css" not in authenticated.text
 
     client.cookies.clear()
     unauthenticated = client.get("/admin/settings", follow_redirects=False)

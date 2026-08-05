@@ -94,6 +94,7 @@ def admin_settings_init(db=Depends(get_db)):
 
 @router.get("/admin/search", response_class=HTMLResponse)
 def admin_search_page(
+    request: Request,
     tenant_id: Optional[str] = Depends(require_html_session),
 ):
     """Standalone search-results page (RND-229). Requires valid session."""
@@ -104,6 +105,10 @@ def admin_search_page(
             "search",
             i18n_script=I18N_SCRIPT_TAG,
             msgtype_options_json=_SEARCH_MSGTYPE_OPTIONS_JSON,
+            sidenav=render_sidenav(
+                "search",
+                {route.path for route in request.app.routes if hasattr(route, "path")},
+            ),
         )
     )
 

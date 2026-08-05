@@ -16,6 +16,8 @@ function msgtypeOptionLabel(normalizedType){
   return normalizedType;
 }
 function applyStaticI18n(){
+  document.documentElement.lang=I18N.getLocale();
+  document.title=I18N.t('nav.globalSearch')+' · '+I18N.t('app.subtitle');
   document.querySelectorAll('[data-i18n]').forEach(function(el){
     el.textContent=I18N.t(el.getAttribute('data-i18n'));
   });
@@ -338,3 +340,4 @@ function init(){
   runSearchOrShowHint();
 }
 init();
+I18N.onChange(function(){applyStaticI18n();updateFilterUI();render();});

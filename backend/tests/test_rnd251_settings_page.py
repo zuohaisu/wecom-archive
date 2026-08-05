@@ -29,6 +29,8 @@ def test_settings_page_requires_session_and_renders_group_navigation() -> None:
 
     assert response.status_code == 200
     assert script_response.status_code == 200
+    assert '/web/static/design-system.css?v=' in response.text
+    assert '/web/static/styles.css?v=' not in response.text
     assert '<a class="side-nav-item active" href="/admin/settings" data-i18n="nav.settings" aria-current="page"></a>' in response.text
     assert 'class="settings-nav stack gap-2"' in response.text
     assert '/web/static/settings.js?v=' in response.text

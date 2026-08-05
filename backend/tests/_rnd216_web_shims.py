@@ -124,6 +124,16 @@ def search_page_html() -> str:
         "search",
         i18n_script=I18N_SCRIPT_TAG,
         msgtype_options_json=_SEARCH_MSGTYPE_OPTIONS_JSON,
+        sidenav=render_sidenav(
+            "search",
+            {
+                "/admin/conversations",
+                "/admin/search",
+                "/admin/messages",
+                "/admin/diagnostics/reachability",
+                "/admin/settings",
+            },
+        ),
     )
 
 

@@ -82,6 +82,21 @@ def test_production_conversations_route_renders_the_sidenav_without_tokens() -> 
     assert not re.search(r"__[A-Z0-9_]+__", response.text)
 
 
+def test_global_search_route_uses_the_shared_active_sidenav() -> None:
+    app = create_app()
+    app.dependency_overrides[require_html_session] = lambda: "test-tenant"
+    try:
+        response = TestClient(app).get("/admin/search")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert '<div class="shell">' in response.text
+    assert '/web/static/design-system.css?v=' in response.text
+    assert '<a class="side-nav-item active" href="/admin/search" data-i18n="nav.globalSearch" aria-current="page"></a>' in response.text
+    assert "__SIDENAV__" not in response.text
+
+
 def test_template_uses_sidenav_token_and_i18n_has_audit_and_page_anchors() -> None:
     template = _TEMPLATE.read_text(encoding="utf-8")
     assert "__SIDENAV__" in template
