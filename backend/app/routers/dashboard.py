@@ -22,7 +22,12 @@ def get_dashboard(
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
     """Return dashboard aggregates scoped exclusively to the authenticated tenant."""
-    _, tenant_id = auth
+    user, tenant_id = auth
     if range_days not in (14, 30, 90):
         range_days = 30
-    return build_dashboard(db, tenant_id, range_days)
+    return build_dashboard(
+        db,
+        tenant_id,
+        can_manage_settings=getattr(user, "role", None) in {"admin", "owner"},
+        range_days=range_days,
+    )

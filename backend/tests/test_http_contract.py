@@ -353,10 +353,8 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    # 90 (RND-321: +3 access-request review endpoints) + 1 (RND-261's "/"
-    # redirect route, dropped by a merge that resolved this scalar line to
-    # only one branch's independent increment) = 91.
-    assert route_count == 91
+    # RND-344 adds the formal /dashboard HTML route.
+    assert route_count == 92
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -368,6 +366,7 @@ def test_routers_are_registered(client: TestClient) -> None:
     expected = sorted(
         [
             "/",
+            "/dashboard",
             "/admin/analytics",
             "/admin/audit-logs",
             "/admin/conversations",
@@ -482,6 +481,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         )
     expected = [
         ("/", frozenset({"GET"}), "None", "RedirectResponse"),
+        ("/dashboard", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/analytics", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/audit-logs", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/conversations", frozenset({"GET"}), "None", "HTMLResponse"),
@@ -792,13 +792,10 @@ class TestProductEntryBoundaries:
     ) -> None:
         final = authed_html_client.get("/", follow_redirects=True)
 
-        assert [hop.status_code for hop in final.history] == [302, 302]
-        assert [hop.headers["location"] for hop in final.history] == [
-            "/admin/login",
-            "/admin/conversations",
-        ]
+        assert [hop.status_code for hop in final.history] == [302]
+        assert [hop.headers["location"] for hop in final.history] == ["/dashboard"]
         assert final.status_code == 200
-        assert final.url.path == "/admin/conversations"
+        assert final.url.path == "/dashboard"
         assert "text/html" in final.headers["content-type"]
 
     def test_unknown_path_remains_a_404_not_a_login_redirect(
@@ -859,6 +856,7 @@ class TestAuthGates:
         "path",
         [
             "/admin/conversations",
+            "/dashboard",
             "/admin/diagnostics/reachability",
             "/admin/messages",
             "/admin/messages/any",

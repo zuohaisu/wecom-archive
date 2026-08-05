@@ -33,3 +33,18 @@ class DashboardOut(BaseModel):
     daily_series: List[DayBucket]
     recent_activity: List[ActivityItem]
     generated_at: str
+    # RND-344: additive fields for the tenant's formal archive overview.
+    # Existing dashboard consumers keep their original windowed fields above.
+    total_archived_messages: int
+    archive_coverage_days: int
+    first_archived_at: Optional[str] = None
+    last_archived_at: Optional[str] = None
+    archive_status: str
+    sync_updated_at: Optional[str] = None
+    archive_configured: bool
+    can_manage_settings: bool
+    type_composition: List[dict]
+    storage_composition: List[dict]
+    hourly_distribution: List[dict]
+    # Optional insight errors are generic and safe to render to end users.
+    insight_errors: dict[str, str]

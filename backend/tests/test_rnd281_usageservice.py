@@ -48,6 +48,7 @@ def _message(*, msgid: str, seq: int, tenant_id: str | None, msgtime: int) -> Ar
         encrypt_chat_msg="test-message",
         tenant_id=tenant_id,
         msgtime=msgtime,
+        decrypt_status="success",
     )
 
 
@@ -74,7 +75,10 @@ def test_usage_aggregations_are_tenant_scoped_and_global_when_unscoped() -> None
             global_days_before = {
                 datetime.fromtimestamp(msgtime / 1000.0, tz=timezone.utc).date()
                 for msgtime in db.execute(
-                    select(ArchiveMessage.msgtime).where(ArchiveMessage.msgtime.isnot(None))
+                    select(ArchiveMessage.msgtime).where(
+                        ArchiveMessage.msgtime.isnot(None),
+                        ArchiveMessage.decrypt_status == "success",
+                    )
                 ).scalars()
             }
 
@@ -122,12 +126,14 @@ def test_usage_aggregations_are_tenant_scoped_and_global_when_unscoped() -> None
                     archive_message_id=messages[0].id,
                     tenant_id=tenant_id,
                     file_size=10,
+                    download_status="downloaded",
                 ),
                 MediaFile(
                     sdkfileid=f"{prefix}-media-2",
                     archive_message_id=messages[1].id,
                     tenant_id=tenant_id,
                     file_size=20,
+                    download_status="downloaded",
                 ),
                 MediaFile(
                     sdkfileid=f"{prefix}-media-null-size",
@@ -140,6 +146,7 @@ def test_usage_aggregations_are_tenant_scoped_and_global_when_unscoped() -> None
                     archive_message_id=messages[3].id,
                     tenant_id=None,
                     file_size=5,
+                    download_status="downloaded",
                 ),
             ]
             contacts = [
@@ -187,7 +194,7 @@ def test_usage_aggregations_are_tenant_scoped_and_global_when_unscoped() -> None
                 usageservice.count_monitored_employees(db, None)
                 == global_employee_count_before + 3
             )
-            assert usageservice.get_archived_days(db, tenant_id) == 0
+            assert usageservice.get_archived_days(db, tenant_id) == 2
             assert usageservice.get_archived_days(db, None) == len(
                 global_days_before
                 | {

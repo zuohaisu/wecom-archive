@@ -456,7 +456,7 @@ def test_qr_callback_creates_tenant_bound_session_only_for_pre_authorized_user(
             follow_redirects=False,
         )
 
-    assert _breakout_target(response) == "/admin/conversations"
+    assert _breakout_target(response) == "/dashboard"
     cookie = response.headers.get("set-cookie", "")
     assert "session_id" in cookie
     assert "HttpOnly" in cookie

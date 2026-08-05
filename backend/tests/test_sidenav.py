@@ -25,10 +25,10 @@ def test_navigation_omits_unimplemented_review_tasks_and_export_records() -> Non
     items = [item for group in NAV for item in group["items"]]
     assert len(items) == 9
     assert {item["id"] for item in items} == {
+        "dashboard",
         "review",
         "search",
         "messages",
-        "analytics",
         "media",
         "users",
         "contacts",
@@ -39,8 +39,9 @@ def test_navigation_omits_unimplemented_review_tasks_and_export_records() -> Non
     assert "/admin/audit-logs" not in {item["path"] for item in items}
     assert "review-tasks" not in {item["id"] for item in items}
     assert "exports" not in {item["id"] for item in items}
-    analytics = next(item for item in items if item["id"] == "analytics")
-    assert analytics["path"] == "/admin/analytics"
+    dashboard = next(item for item in items if item["id"] == "dashboard")
+    assert dashboard["path"] == "/dashboard"
+    assert "analytics" not in {item["id"] for item in items}
     assert "sync" not in {item["id"] for item in items}
 
 

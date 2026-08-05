@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, select
+from sqlalchemy import Integer, case, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import ArchiveMessage, MediaFile
@@ -12,54 +12,74 @@ from app.message_type_registry import describe_message_type
 # A deliberately visible estimate for database/text records not represented by
 # attachment rows. It is not measured storage and must remain labelled as such.
 ESTIMATED_TEXT_BYTES = 512
-_PERIODS = frozenset((7, 30, 90))
+_PERIODS = frozenset((7, 14, 30, 90))
+_MS_PER_DAY = 86_400_000
+_MS_PER_HOUR = 3_600_000
+_BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000
 
 
 def _bounds(days: int) -> tuple[datetime, datetime, datetime]:
     if days not in _PERIODS:
-        raise ValueError("days must be one of 7, 30, or 90")
+        raise ValueError("days must be one of 7, 14, 30, or 90")
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
     return start, end, start - timedelta(days=days)
 
 
-def _message_timestamp():
-    return func.to_timestamp(ArchiveMessage.msgtime / 1000.0)
+def _epoch_ms(value: datetime) -> int:
+    return int(value.timestamp() * 1000)
+
+
+def _beijing_day_bucket():
+    return cast(
+        func.floor((ArchiveMessage.msgtime + _BEIJING_OFFSET_MS) / _MS_PER_DAY),
+        Integer,
+    )
 
 
 def trend(db: Session, tenant_id: str, days: int = 30) -> dict:
     """Daily current and preceding-period message counts, with no row data."""
     start, end, previous_start = _bounds(days)
-    timestamp = _message_timestamp()
+    start_ms, end_ms, previous_start_ms = map(_epoch_ms, (start, end, previous_start))
+    day_bucket = _beijing_day_bucket()
+    current_start_day = int((start_ms + _BEIJING_OFFSET_MS) // _MS_PER_DAY)
     stmt = (
-        select(func.date_trunc("day", timestamp).label("day"), func.count().label("count"))
+        select(day_bucket.label("day"), func.count().label("count"))
         .where(
             ArchiveMessage.tenant_id == tenant_id,
             ArchiveMessage.msgtime.isnot(None),
-            timestamp >= previous_start,
-            timestamp < end,
+            ArchiveMessage.decrypt_status == "success",
+            ArchiveMessage.msgtime >= previous_start_ms,
+            ArchiveMessage.msgtime < end_ms,
         )
-        .group_by(func.date_trunc("day", timestamp))
-        .order_by(func.date_trunc("day", timestamp))
+        .group_by(day_bucket)
+        .order_by(day_bucket)
     )
     current, previous = [], []
     for day, count in db.execute(stmt):
-        point = {"date": day.date().isoformat(), "count": int(count)}
-        (current if day >= start else previous).append(point)
+        point = {
+            "date": datetime.fromtimestamp(
+                (int(day) * _MS_PER_DAY - _BEIJING_OFFSET_MS) / 1000,
+                tz=timezone.utc,
+            ).date().isoformat(),
+            "count": int(count),
+        }
+        (current if int(day) >= current_start_day else previous).append(point)
     return {"current": current, "previous": previous}
 
 
 def type_composition(db: Session, tenant_id: str, days: int = 30) -> list[dict]:
     """Map raw types through the central registry into stable UI categories."""
     start, end, _ = _bounds(days)
-    timestamp = _message_timestamp()
+    start_ms, end_ms = map(_epoch_ms, (start, end))
     stmt = (
         select(ArchiveMessage.msgtype, func.count())
         .where(
             ArchiveMessage.tenant_id == tenant_id,
             ArchiveMessage.msgtime.isnot(None),
-            timestamp >= start,
-            timestamp < end,
+            ArchiveMessage.decrypt_status == "success",
+            ArchiveMessage.msgtime >= start_ms,
+            ArchiveMessage.msgtime < end_ms,
         )
         .group_by(ArchiveMessage.msgtype)
     )
@@ -92,7 +112,12 @@ def storage_composition(db: Session, tenant_id: str) -> list[dict]:
     media_stmt = (
         select(media_category.label("category"), func.coalesce(func.sum(MediaFile.file_size), 0))
         .join(ArchiveMessage, MediaFile.archive_message_id == ArchiveMessage.id)
-        .where(ArchiveMessage.tenant_id == tenant_id)
+        .where(
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessage.decrypt_status == "success",
+            MediaFile.tenant_id == tenant_id,
+            MediaFile.download_status == "downloaded",
+        )
         .group_by(media_category)
     )
     values = {name: 0 for name in ("image", "file", "voice", "video")}
@@ -102,6 +127,7 @@ def storage_composition(db: Session, tenant_id: str) -> list[dict]:
         select(func.count()).where(
             ArchiveMessage.tenant_id == tenant_id,
             ArchiveMessage.msgtype == "text",
+            ArchiveMessage.decrypt_status == "success",
         )
     ).scalar() or 0
     values["text_and_index_estimate"] = int(text_count) * ESTIMATED_TEXT_BYTES
@@ -119,17 +145,23 @@ def storage_composition(db: Session, tenant_id: str) -> list[dict]:
 
 
 def hourly_distribution(db: Session, tenant_id: str, days: int = 30) -> list[dict]:
-    """Exactly 24 UTC hour buckets for messages in the requested period."""
+    """Exactly 24 Beijing-hour buckets for messages in the requested period."""
     start, end, _ = _bounds(days)
-    timestamp = _message_timestamp()
-    hour = func.extract("hour", timestamp)
+    start_ms, end_ms = map(_epoch_ms, (start, end))
+    hour = cast(
+        func.floor(
+            ((ArchiveMessage.msgtime + _BEIJING_OFFSET_MS) % _MS_PER_DAY) / _MS_PER_HOUR
+        ),
+        Integer,
+    )
     stmt = (
         select(hour.label("hour"), func.count())
         .where(
             ArchiveMessage.tenant_id == tenant_id,
             ArchiveMessage.msgtime.isnot(None),
-            timestamp >= start,
-            timestamp < end,
+            ArchiveMessage.decrypt_status == "success",
+            ArchiveMessage.msgtime >= start_ms,
+            ArchiveMessage.msgtime < end_ms,
         )
         .group_by(hour)
     )

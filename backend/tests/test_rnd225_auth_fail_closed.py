@@ -532,7 +532,7 @@ def test_callback_active_enabled_user_logs_in_successfully(client, monkeypatch) 
         follow_redirects=False,
     )
     assert resp.status_code == 302
-    assert resp.headers["location"] == "/admin/conversations"
+    assert resp.headers["location"] == "/dashboard"
     assert "session_id" in resp.headers.get("set-cookie", "")
     assert _session_count(engine) == 1
 
@@ -578,7 +578,7 @@ def test_callback_userid_case_insensitive_match_still_logs_in(client, monkeypatc
         follow_redirects=False,
     )
     assert resp.status_code == 302
-    assert resp.headers["location"] == "/admin/conversations"
+    assert resp.headers["location"] == "/dashboard"
     assert _session_count(engine) == 1
 
 
@@ -1377,7 +1377,7 @@ def test_admin_login_with_error_and_valid_session_shows_error_not_redirect(clien
 
 def test_admin_login_without_error_and_valid_session_still_redirects(client, db) -> None:
     """Regression guard: the ordinary already-authenticated bounce to the
-    console (no error param) is unchanged by the M1 fix."""
+    dashboard (no error param) is unchanged by the M1 fix."""
     from app.db.session import get_db
     from app.main import app
 
@@ -1393,4 +1393,4 @@ def test_admin_login_without_error_and_valid_session_still_redirects(client, db)
     resp = client.get("/admin/login", follow_redirects=False)
 
     assert resp.status_code == 302
-    assert resp.headers["location"] == "/admin/conversations"
+    assert resp.headers["location"] == "/dashboard"

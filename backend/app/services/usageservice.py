@@ -12,22 +12,42 @@ converting to a timestamp.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Date, func, select
+from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import ArchiveMessage, Contact, MediaFile, SyncState, Tenant
+from app import conversation_membership
+from app.db.models import ArchiveMessage, Contact, MediaFile, SyncState
 
 
 _SYNC_ERROR = "error"
 _SYNC_SYNCING = "syncing"
+_MS_PER_DAY = 86_400_000
+_BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000
+
+
+def _reviewable_message_filter():
+    """Return the archive condition shared by user-facing aggregates.
+
+    A row becomes available to the review console only after decryption
+    succeeds.  Counting pending/failed envelopes made a headline number look
+    larger than the data users could actually inspect.
+    """
+    return ArchiveMessage.decrypt_status == "success"
 
 
 def count_messages(db: Session, tenant_id: Optional[str] = None) -> int:
-    """Total archived messages for the tenant (or all tenants)."""
+    """Total ingested archive envelopes for an existing usage consumer."""
     stmt = select(func.count(ArchiveMessage.id))
+    if tenant_id is not None:
+        stmt = stmt.where(ArchiveMessage.tenant_id == tenant_id)
+    return int(db.execute(stmt).scalar() or 0)
+
+
+def count_reviewable_messages(db: Session, tenant_id: Optional[str] = None) -> int:
+    """Count successfully archived messages that can appear in review UI."""
+    stmt = select(func.count(ArchiveMessage.id)).where(_reviewable_message_filter())
     if tenant_id is not None:
         stmt = stmt.where(ArchiveMessage.tenant_id == tenant_id)
     return int(db.execute(stmt).scalar() or 0)
@@ -47,6 +67,16 @@ def sum_storage(db: Session, tenant_id: Optional[str] = None) -> int:
     return int(db.execute(stmt).scalar() or 0)
 
 
+def sum_downloaded_storage(db: Session, tenant_id: Optional[str] = None) -> int:
+    """Return the byte total of media files whose download completed."""
+    stmt = select(func.coalesce(func.sum(MediaFile.file_size), 0)).where(
+        MediaFile.download_status == "downloaded"
+    )
+    if tenant_id is not None:
+        stmt = stmt.where(MediaFile.tenant_id == tenant_id)
+    return int(db.execute(stmt).scalar() or 0)
+
+
 def count_monitored_employees(db: Session, tenant_id: Optional[str] = None) -> int:
     """Distinct monitored WeCom employees (dedup on contacts.wecom_userid)."""
     stmt = select(func.count(func.distinct(Contact.wecom_userid)))
@@ -55,46 +85,34 @@ def count_monitored_employees(db: Session, tenant_id: Optional[str] = None) -> i
     return int(db.execute(stmt).scalar() or 0)
 
 
-def get_archived_days(db: Session, tenant_id: Optional[str] = None) -> int:
-    """Number of archived days.
+def count_archived_members(db: Session, tenant_id: str) -> int:
+    """Return internal members actually represented in this tenant's archive.
 
-    Per-tenant (tenant_id given): span from the tenant's ``created_at`` to
-    the first archived message's msgtime (or ``now`` when the tenant has no
-    messages yet) — literal reading of the planner spec
-    "tenant 创建→首条消息或 now".
-
-    Global (tenant_id is None): number of DISTINCT calendar days across all
-    messages (no single tenant anchor exists at platform scope).
-
-    Both return an int >= 0.
+    This deliberately uses the same internal-member classifier as conversation
+    review instead of treating every ``contacts`` row as an archive member.
     """
-    if tenant_id is None:
-        stmt = select(
-            func.count(
-                func.distinct(
-                    func.to_timestamp(ArchiveMessage.msgtime / 1000.0).cast(Date)
-                )
-            )
-        ).where(ArchiveMessage.msgtime.isnot(None))
-        return int(db.execute(stmt).scalar() or 0)
+    return len(conversation_membership._collect_staff_ids(db, tenant_id))
 
-    tenant = db.get(Tenant, tenant_id)
-    if tenant is None or tenant.created_at is None:
-        return 0
-    start = tenant.created_at
 
-    first_msg = db.execute(
-        select(func.min(ArchiveMessage.msgtime)).where(
-            ArchiveMessage.tenant_id == tenant_id,
-            ArchiveMessage.msgtime.isnot(None),
-        )
-    ).scalar()
-    end = (
-        datetime.fromtimestamp(first_msg / 1000.0, tz=timezone.utc)
-        if first_msg
-        else datetime.now(timezone.utc)
+def get_archived_days(db: Session, tenant_id: Optional[str] = None) -> int:
+    """Count Beijing calendar days containing reviewable archived messages.
+
+    This is intentionally *not* the elapsed time from the first message to
+    today: gaps in an archive must not be presented as continuous coverage.
+    The result is therefore an honest coverage count for both tenant and
+    platform summaries.
+    """
+    beijing_day = cast(
+        func.floor((ArchiveMessage.msgtime + _BEIJING_OFFSET_MS) / _MS_PER_DAY),
+        Integer,
     )
-    return max(0, (end.date() - start.date()).days)
+    stmt = select(func.count(func.distinct(beijing_day))).where(
+        ArchiveMessage.msgtime.isnot(None),
+        _reviewable_message_filter(),
+    )
+    if tenant_id is not None:
+        stmt = stmt.where(ArchiveMessage.tenant_id == tenant_id)
+    return int(db.execute(stmt).scalar() or 0)
 
 
 def sync_health(db: Session, tenant_id: Optional[str] = None) -> dict:
