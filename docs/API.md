@@ -88,13 +88,16 @@ matching `follow_userid`. Each external identity appears once per result page.
 
 | Method | Path | Query | Response |
 |--------|------|-------|----------|
-| `GET` | `/api/conversations` | `mode=staff&staff_id=...` or `mode=contact&contact_id=...` | Array of conversation summaries |
+| `GET` | `/api/conversations` | `mode=staff&staff_id=...` or `mode=contact&contact_id=...`; optional `include_participant_metadata` | Array of conversation summaries |
 
 Rules:
 
 - `mode=staff` requires `staff_id`
 - `mode=contact` requires `contact_id`
 - conversations are returned latest-activity-first
+- `include_participant_metadata=false` uses the compact staff-list path: direct
+  conversation titles remain resolved, while group-card participant arrays are
+  omitted because the console does not render them
 
 ### Conversation timeline
 

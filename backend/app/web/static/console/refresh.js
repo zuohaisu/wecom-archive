@@ -6,7 +6,9 @@ function refreshEntityList(){
   // a stale entity-list response can never overwrite the list the user has
   // since switched to.
   var reqMode=mode;
-  var url=mode==='staff'?'/api/monitored-accounts':'/api/contacts';
+  var url=mode==='staff'
+    ?'/api/monitored-accounts?include_conversation_count=false'
+    :'/api/contacts';
   return fetch(url).then(function(r){
     if(handleUnauth(r))return null;
     if(!r.ok)throw new Error('HTTP '+r.status);
@@ -29,7 +31,7 @@ function refreshConversationList(){
   // convId/gen guard already protects the timeline; this protects the list.
   var reqMode=mode, reqEntityId=selEntityId;
   var url=mode==='staff'
-    ?'/api/conversations?mode=staff&staff_id='+encodeURIComponent(selEntityId)
+    ?'/api/conversations?mode=staff&staff_id='+encodeURIComponent(selEntityId)+'&include_participant_metadata=false'
     :'/api/conversations?mode=contact&contact_id='+encodeURIComponent(selEntityId);
   return fetch(url).then(function(r){
     if(handleUnauth(r))return null;

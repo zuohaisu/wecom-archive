@@ -354,6 +354,13 @@ def get_conversations(
     mode: str = Query(..., description="'staff' or 'contact'"),
     staff_id: Optional[str] = Query(None, description="Required when mode=staff"),
     contact_id: Optional[str] = Query(None, description="Required when mode=contact"),
+    include_participant_metadata: bool = Query(
+        True,
+        description=(
+            "Whether to return inferred participant metadata. The staff console's "
+            "conversation-card list sets this false because it does not render it."
+        ),
+    ),
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
@@ -378,7 +385,18 @@ def get_conversations(
     else:
         raise HTTPException(status_code=400, detail="mode must be 'staff' or 'contact'")
 
-    return listing_service.list_conversations(db, tenant_id, entity_id)
+    return listing_service.list_conversations(
+        db,
+        tenant_id,
+        entity_id,
+        # Compact summaries are intentionally a staff-console optimization.
+        # Contact cards render their related monitored-account badge, so they
+        # retain the complete participant metadata even if a caller sends the
+        # optional flag on that mode.
+        include_participant_metadata=(
+            include_participant_metadata or mode != "staff"
+        ),
+    )
 
 
 # INTERNAL_STRUCTURED_FIELD_KEYS, PUBLIC_STRUCTURED_FIELD_ALLOWLIST,

@@ -531,12 +531,74 @@ def _load_recipients_map_compact(
     return result
 
 
+def _fetch_group_conversation_summaries(
+    db: Session, tenant_id: str, group_rooms: set[str]
+) -> list:
+    """Return one compact latest-row summary per requested group room.
+
+    The review console's initial staff view renders a group as one card; it
+    does not render the full inferred participant roster on that card.  Do
+    the count and latest-row selection in SQL so a long group history is not
+    materialized as one Python object per message before it can become one
+    conversation summary.
+
+    ``coalesce(msgtime, 0), id`` deliberately mirrors
+    _build_conversation_list's deterministic latest-message key, including
+    rows whose archive timestamp is NULL.  Window functions used here are
+    supported by both PostgreSQL and the SQLite versions this project tests.
+    """
+    if not group_rooms:
+        return []
+
+    ranked = (
+        db.query(
+            ArchiveMessage.id.label("latest_message_id"),
+            ArchiveMessage.roomid.label("roomid"),
+            ArchiveMessage.sender.label("latest_sender_id"),
+            ArchiveMessage.msgtime.label("last_message_time"),
+            func.substr(ArchiveMessage.content_text, 1, 200).label("last_message_text"),
+            func.count(ArchiveMessage.id)
+            .over(partition_by=ArchiveMessage.roomid)
+            .label("message_count"),
+            func.row_number()
+            .over(
+                partition_by=ArchiveMessage.roomid,
+                order_by=(
+                    func.coalesce(ArchiveMessage.msgtime, 0).desc(),
+                    ArchiveMessage.id.desc(),
+                ),
+            )
+            .label("recency_rank"),
+        )
+        .filter(
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessage.roomid.in_(group_rooms),
+        )
+        .subquery()
+    )
+    return (
+        db.query(
+            ranked.c.latest_message_id,
+            ranked.c.roomid,
+            ranked.c.latest_sender_id,
+            ranked.c.last_message_time,
+            ranked.c.last_message_text,
+            ranked.c.message_count,
+        )
+        .filter(ranked.c.recency_rank == 1)
+        .all()
+    )
+
+
 def _build_conversation_list(
     messages: list,
     recipients_map: dict[int, list[str]],
     display_names: dict[str, str],
     staff_ids: Optional[set[str]] = None,
     room_display_names: Optional[dict[str, str]] = None,
+    *,
+    include_participant_metadata: bool = True,
+    include_internal_latest_message_id: bool = False,
 ) -> list[dict]:
     """
     Aggregate a flat message list into conversation summary objects.
@@ -611,8 +673,14 @@ def _build_conversation_list(
             convs[conv_id]["conversation_type"] = "group"
             convs[conv_id]["roomid"] = msg.roomid if roomid else None
 
-        convs[conv_id]["monitored_account_ids"].update(staff_set)
-        convs[conv_id]["contact_ids"].update(contact_set)
+        # A compact staff-console response needs direct-conversation
+        # participants to resolve its title, but a group card needs only its
+        # room metadata.  Avoid accumulating every observed group member
+        # when participant metadata is deliberately omitted from the API
+        # response.
+        if include_participant_metadata or conv_type == "direct":
+            convs[conv_id]["monitored_account_ids"].update(staff_set)
+            convs[conv_id]["contact_ids"].update(contact_set)
         data = convs[conv_id]
         message_sort_key = (msg.msgtime or 0, msg.id)
         if data["latest_sort_key"] is None or message_sort_key > data["latest_sort_key"]:
@@ -656,23 +724,26 @@ def _build_conversation_list(
             else None
         )
 
-        result.append(
-            {
+        row = {
                 "conversation_id": conv_id,
                 "conversation_type": data["conversation_type"],
                 "display_name": display_name,
                 "raw_id": raw_id,
                 "roomid": data["roomid"],
-                "monitored_account_ids": sids,
-                "monitored_account_raw_ids": sids,
-                "monitored_account_display_names": [
-                    resolve_person_display_name(sid, display_names.get(sid)) for sid in sids
-                ],
-                "contact_ids": cids,
-                "contact_raw_ids": cids,
-                "contact_display_names": [
-                    resolve_person_display_name(cid, display_names.get(cid)) for cid in cids
-                ],
+                "monitored_account_ids": sids if include_participant_metadata else [],
+                "monitored_account_raw_ids": sids if include_participant_metadata else [],
+                "monitored_account_display_names": (
+                    [resolve_person_display_name(sid, display_names.get(sid)) for sid in sids]
+                    if include_participant_metadata
+                    else []
+                ),
+                "contact_ids": cids if include_participant_metadata else [],
+                "contact_raw_ids": cids if include_participant_metadata else [],
+                "contact_display_names": (
+                    [resolve_person_display_name(cid, display_names.get(cid)) for cid in cids]
+                    if include_participant_metadata
+                    else []
+                ),
                 "room_display_name": room_display_name,
                 "room_raw_id": room_raw_id,
                 "last_message_time": latest.msgtime,
@@ -685,7 +756,9 @@ def _build_conversation_list(
                 "ai_status": None,
                 "ai_summary": None,
             }
-        )
+        if include_internal_latest_message_id:
+            row["_latest_message_id"] = latest.id
+        result.append(row)
 
     # RND-158 tie-break fix: deterministic conversation ordering contract —
     # sort by (last_message_time, conversation_id), both descending.
@@ -700,6 +773,176 @@ def _build_conversation_list(
     # conversation_id (a string) compares/reverses correctly as the tuple
     # secondary key.
     result.sort(key=lambda x: (x["last_message_time"] or 0, x["conversation_id"]), reverse=True)
+    return result
+
+
+def _list_compact_staff_conversations(
+    db: Session, tenant_id: str, entity_id: str
+) -> list[dict]:
+    """Fast staff-console listing without group participant metadata.
+
+    Direct messages retain the established Python aggregation because their
+    canonical IDs depend on sender/recipient membership.  Group rooms have a
+    stable conversation ID already, so their count and latest preview can be
+    summarized in SQL.  This preserves the existing group-wins collision
+    policy while avoiding group-history and group-recipient materialization.
+    """
+    seed_ids = _entity_seed_ids(db, entity_id, tenant_id)
+    if not seed_ids:
+        return []
+
+    seed_rows = (
+        db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid)
+        .filter(
+            ArchiveMessage.id.in_(seed_ids),
+            ArchiveMessage.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    group_rooms = {roomid for _id, _sender, roomid in seed_rows if _is_valid_roomid(roomid)}
+    direct_ids = {message_id for message_id, _sender, roomid in seed_rows if not _is_valid_roomid(roomid)}
+
+    direct_messages = []
+    if direct_ids:
+        direct_rows = (
+            db.query(
+                ArchiveMessage.id,
+                ArchiveMessage.sender,
+                ArchiveMessage.roomid,
+                ArchiveMessage.msgtime,
+                func.substr(ArchiveMessage.content_text, 1, 200),
+            )
+            .filter(
+                ArchiveMessage.id.in_(direct_ids),
+                ArchiveMessage.tenant_id == tenant_id,
+            )
+            .order_by(ArchiveMessage.msgtime.asc(), ArchiveMessage.id.asc())
+            .all()
+        )
+        direct_messages = [
+            SimpleNamespace(
+                id=row[0], sender=row[1], roomid=row[2], msgtime=row[3], content_text=row[4]
+            )
+            for row in direct_rows
+        ]
+
+    recipients_map = _load_recipients_map_compact(
+        db, tenant_id, [message.id for message in direct_messages]
+    )
+    direct_participant_ids: set[str] = {
+        message.sender for message in direct_messages if message.sender
+    }
+    for recipient_ids in recipients_map.values():
+        direct_participant_ids.update(recipient_ids)
+
+    display_names = _load_display_names_for_ids(db, tenant_id, direct_participant_ids)
+    staff_ids = _staff_ids_for_participants(db, tenant_id, direct_participant_ids)
+    follow_userid = entity_id if entity_id in staff_ids else None
+    display_names.update(
+        external_contact_display_names(
+            db,
+            tenant_id,
+            direct_participant_ids,
+            follow_userid=follow_userid,
+        )
+    )
+    direct_conversations = _build_conversation_list(
+        direct_messages,
+        recipients_map,
+        display_names,
+        staff_ids,
+        include_participant_metadata=False,
+        include_internal_latest_message_id=True,
+    )
+
+    room_display_names = load_group_chat_display_names(db, tenant_id, group_rooms)
+    conversations_by_id = {
+        conversation["conversation_id"]: conversation for conversation in direct_conversations
+    }
+    for summary in _fetch_group_conversation_summaries(db, tenant_id, group_rooms):
+        roomid = summary.roomid
+        group_conversation = {
+            "conversation_id": roomid,
+            "conversation_type": "group",
+            "display_name": resolve_room_display_name(
+                roomid, room_display_names.get(roomid)
+            ),
+            "raw_id": roomid,
+            "roomid": roomid,
+            "monitored_account_ids": [],
+            "monitored_account_raw_ids": [],
+            "monitored_account_display_names": [],
+            "contact_ids": [],
+            "contact_raw_ids": [],
+            "contact_display_names": [],
+            "room_display_name": resolve_room_display_name(
+                roomid, room_display_names.get(roomid)
+            ),
+            "room_raw_id": roomid,
+            "last_message_time": summary.last_message_time,
+            "last_message_text": summary.last_message_text or "",
+            "message_count": summary.message_count,
+            "latest_sender_id": summary.latest_sender_id,
+            "latest_sender_raw_id": summary.latest_sender_id,
+            "latest_sender_display_name": resolve_person_display_name(
+                summary.latest_sender_id, None
+            )
+            if summary.latest_sender_id
+            else None,
+            "review_status": None,
+            "ai_status": None,
+            "ai_summary": None,
+            "_latest_message_id": summary.latest_message_id,
+        }
+        existing = conversations_by_id.get(roomid)
+        if existing is None:
+            conversations_by_id[roomid] = group_conversation
+            continue
+
+        # _build_conversation_list's group-wins policy also merges the two
+        # colliding buckets' counts and selects the latest (msgtime, id).
+        # Retain that exact behavior even on this compact path.
+        combined_count = existing["message_count"] + group_conversation["message_count"]
+        existing_key = (
+            existing["last_message_time"] or 0,
+            existing["_latest_message_id"],
+        )
+        group_key = (
+            group_conversation["last_message_time"] or 0,
+            group_conversation["_latest_message_id"],
+        )
+        if existing_key > group_key:
+            existing.update(
+                {
+                    "conversation_type": "group",
+                    "display_name": group_conversation["display_name"],
+                    "raw_id": roomid,
+                    "roomid": roomid,
+                    "monitored_account_ids": [],
+                    "monitored_account_raw_ids": [],
+                    "monitored_account_display_names": [],
+                    "contact_ids": [],
+                    "contact_raw_ids": [],
+                    "contact_display_names": [],
+                    "room_display_name": group_conversation["room_display_name"],
+                    "room_raw_id": roomid,
+                    "message_count": combined_count,
+                }
+            )
+        else:
+            group_conversation["message_count"] = combined_count
+            conversations_by_id[roomid] = group_conversation
+
+    result = list(conversations_by_id.values())
+    for conversation in result:
+        conversation.pop("_latest_message_id", None)
+    result.sort(
+        key=lambda conversation: (
+            conversation["last_message_time"] or 0,
+            conversation["conversation_id"],
+        ),
+        reverse=True,
+    )
     return result
 
 
@@ -824,7 +1067,11 @@ def list_contacts(db: Session, tenant_id: str) -> list[ContactOut]:
 
 
 def list_conversations(
-    db: Session, tenant_id: str, entity_id: str
+    db: Session,
+    tenant_id: str,
+    entity_id: str,
+    *,
+    include_participant_metadata: bool = True,
 ) -> list[dict]:
     """Return conversations for a monitored account or contact entity_id.
 
@@ -833,6 +1080,9 @@ def list_conversations(
     response_model=list[ConversationOut] handles serialization, exactly as
     the original inline get_conversations() body did.
     """
+    if not include_participant_metadata:
+        return _list_compact_staff_conversations(db, tenant_id, entity_id)
+
     # RND-158 Phase 2: compact-projection fetch — see
     # _fetch_compact_messages_for_entity / _load_recipients_map_compact
     # docstrings. Avoids full ArchiveMessage/ArchiveMessageRecipient ORM

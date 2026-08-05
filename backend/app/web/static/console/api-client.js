@@ -59,7 +59,7 @@ function loadEntityList(){
 }
 function loadConversations(entityId){
   var url=mode==='staff'
-    ?'/api/conversations?mode=staff&staff_id='+encodeURIComponent(entityId)
+    ?'/api/conversations?mode=staff&staff_id='+encodeURIComponent(entityId)+'&include_participant_metadata=false'
     :'/api/conversations?mode=contact&contact_id='+encodeURIComponent(entityId);
   document.getElementById('conv-body').innerHTML='<div class="loading">'+I18N.t('console.loading')+'</div>';
   fetch(url).then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(convs){if(convs)renderConvList(convs);})

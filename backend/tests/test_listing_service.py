@@ -421,6 +421,91 @@ def test_compact_conversation_fetch_expands_groups_without_a_full_id_round_trip(
         db.close()
 
 
+def test_compact_staff_list_summarizes_group_history_without_loading_group_recipients() -> None:
+    """The initial staff console needs one group card, not every historical
+    group message and recipient row.  Direct-title semantics still remain."""
+    db = _make_session()
+    try:
+        direct = _insert_message(
+            db, sender="staff_a", msgtime=100, content_text="direct latest"
+        )
+        _insert_recipient(db, direct.id, "contact_direct")
+        group_seed = _insert_message(
+            db, sender="staff_a", roomid="room_1", msgtime=200, content_text="group old"
+        )
+        _insert_recipient(db, group_seed.id, "contact_group")
+        for msgtime, text in ((300, "group newer"), (400, "group latest")):
+            _insert_message(
+                db,
+                sender="contact_group",
+                roomid="room_1",
+                msgtime=msgtime,
+                content_text=text,
+            )
+        _insert_contact(db, "contact_direct", "Direct Contact")
+
+        recipient_ids_requested: list[list[int]] = []
+        original_loader = svc._load_recipients_map_compact
+
+        def track_recipients(session, tenant_id, message_ids):
+            recipient_ids_requested.append(list(message_ids))
+            return original_loader(session, tenant_id, message_ids)
+
+        with patch.object(svc, "_load_recipients_map_compact", side_effect=track_recipients):
+            conversations = svc.list_conversations(
+                db,
+                _TENANT_A,
+                "staff_a",
+                include_participant_metadata=False,
+            )
+
+        by_id = {conversation["conversation_id"]: conversation for conversation in conversations}
+        direct_id = "direct__contact_direct___staff_a"
+        assert recipient_ids_requested == [[direct.id]]
+        assert by_id[direct_id]["display_name"] == "Direct Contact"
+        assert by_id[direct_id]["message_count"] == 1
+        assert by_id["room_1"]["last_message_text"] == "group latest"
+        assert by_id["room_1"]["message_count"] == 3
+        assert by_id["room_1"]["contact_ids"] == []
+        assert by_id["room_1"]["monitored_account_ids"] == []
+    finally:
+        db.close()
+
+
+def test_compact_staff_list_preserves_group_wins_collision_aggregation() -> None:
+    """A rare direct ID matching a real room ID remains one group card with
+    the combined count and deterministic latest preview."""
+    db = _make_session()
+    try:
+        roomid = "direct__contact_x___staff_a"
+        direct = _insert_message(db, sender="staff_a", msgtime=100, content_text="direct")
+        _insert_recipient(db, direct.id, "contact_x")
+        group = _insert_message(
+            db,
+            sender="staff_a",
+            roomid=roomid,
+            msgtime=200,
+            content_text="group latest",
+        )
+        _insert_recipient(db, group.id, "contact_x")
+
+        conversations = svc.list_conversations(
+            db,
+            _TENANT_A,
+            "staff_a",
+            include_participant_metadata=False,
+        )
+
+        assert len(conversations) == 1
+        conversation = conversations[0]
+        assert conversation["conversation_id"] == roomid
+        assert conversation["conversation_type"] == "group"
+        assert conversation["message_count"] == 2
+        assert conversation["last_message_text"] == "group latest"
+    finally:
+        db.close()
+
+
 def test_list_conversations_sorted_by_last_activity_desc() -> None:
     db = _make_session()
     try:

@@ -591,6 +591,53 @@ def test_staff_sessions_sorted_by_latest_message_time_desc(client, monkeypatch) 
         app.dependency_overrides.clear()
 
 
+def test_staff_sessions_compact_flag_uses_group_summary_response(client, db: Session) -> None:
+    """The console's initial staff request opts into the group-summary path;
+    its cards do not need inferred group participant arrays."""
+    from app.auth import get_current_user
+    from app.db.session import get_db
+    from app.main import app
+
+    seed = _insert_message(
+        db,
+        msgid="compact-group-seed",
+        sender="staff_speed",
+        roomid="room_compact",
+        msgtime=100,
+        content_text="old",
+    )
+    _insert_recipient(db, seed.id, "contact_group")
+    _insert_message(
+        db,
+        msgid="compact-group-latest",
+        sender="contact_group",
+        roomid="room_compact",
+        msgtime=200,
+        content_text="latest",
+    )
+    db.commit()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_current_user] = lambda: (MagicMock(), _TENANT_A)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        response = client.get(
+            "/api/conversations?mode=staff&staff_id=staff_speed"
+            "&include_participant_metadata=false"
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body) == 1
+        assert body[0]["conversation_type"] == "group"
+        assert body[0]["last_message_text"] == "latest"
+        assert body[0]["contact_ids"] == []
+        assert body[0]["monitored_account_ids"] == []
+    finally:
+        app.dependency_overrides.clear()
+
+
 # ---------------------------------------------------------------------------
 # /api/conversations/{id}/messages — default latest-20 ascending + before cursor
 # ---------------------------------------------------------------------------
