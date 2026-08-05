@@ -334,6 +334,67 @@ process.stdout.write(JSON.stringify(result));
     assert out == expected
 
 
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        (
+            "zh-CN",
+            {
+                "console.monitoredAccounts": "存档员工",
+                "console.pickScope": "请选择员工或外部联系人查看会话",
+                "console.scopeLabelStaffPrefix": "存档员工：",
+                "console.selectAccountOrContact": "请选择员工或外部联系人查看会话",
+            },
+        ),
+        (
+            "zh-TW",
+            {
+                "console.monitoredAccounts": "存檔員工",
+                "console.pickScope": "請選擇員工或外部聯絡人查看會話",
+                "console.scopeLabelStaffPrefix": "存檔員工：",
+                "console.selectAccountOrContact": "請選擇員工或外部聯絡人查看會話",
+            },
+        ),
+        (
+            "en",
+            {
+                "console.monitoredAccounts": "Archived Employees",
+                "console.pickScope": "Select an employee or external contact to view conversations",
+                "console.scopeLabelStaffPrefix": "Archived Employee: ",
+                "console.selectAccountOrContact": "Select an employee or external contact to view conversations",
+            },
+        ),
+    ],
+)
+def test_conversation_archive_terminology_translates_per_locale(code: str, expected: dict) -> None:
+    lookups = "".join(f"result[{json.dumps(k)}]=I18N.t({json.dumps(k)});" for k in expected)
+    out = _run(
+        f"""
+I18N.setLocale({json.dumps(code)});
+var result = {{}};
+{lookups}
+process.stdout.write(JSON.stringify(result));
+"""
+    )
+    assert out == expected
+
+
+def test_conversation_template_uses_archive_employee_fallback_copy() -> None:
+    scope_label = re.search(r'<span class="scope-label" id="scope-label">([^<]+)</span>', _REVIEW_CONSOLE_HTML)
+    entity_header = re.search(
+        r'<div class="col-header" id="entity-header" data-i18n="console\.monitoredAccounts">([^<]+)</div>',
+        _REVIEW_CONSOLE_HTML,
+    )
+    conversation_empty_state = re.search(
+        r'<div class="col-body" id="conv-body"><div class="empty-state" data-i18n="console\.selectAccountOrContact">([^<]+)</div></div>',
+        _REVIEW_CONSOLE_HTML,
+    )
+
+    assert scope_label and scope_label.group(1) == "请选择员工或外部联系人查看会话"
+    assert entity_header and entity_header.group(1) == "存档员工"
+    assert conversation_empty_state and conversation_empty_state.group(1) == "请选择员工或外部联系人查看会话"
+
+
 # ---------------------------------------------------------------------------
 # UI coverage — settings entry exists on both pages and console labels render
 # through i18n instead of hardcoded strings.
