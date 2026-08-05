@@ -357,6 +357,9 @@
         "login.error.userInactive": "您的企业微信账号已停用，请联系管理员。",
         "login.error.accessPending": "您的访问申请正在等待管理员授权。",
         "login.error.configError": "服务器配置错误，请联系管理员。",
+        "login.error.organizationNotFound": "组织不存在，请先创建组织。",
+        "login.error.organizationExists": "该组织已存在，请使用已有组织登录。",
+        "login.createOrganization": "创建组织",
 
         "nav.diagnostics": "消息可查阅性",
 
@@ -908,6 +911,9 @@
         "login.error.userInactive": "您的企業微信帳號已停用，請聯絡管理員。",
         "login.error.accessPending": "你的存取申請正在等待管理員授權。",
         "login.error.configError": "伺服器設定錯誤，請聯絡管理員。",
+        "login.error.organizationNotFound": "組織不存在，請先建立組織。",
+        "login.error.organizationExists": "該組織已存在，請使用現有組織登入。",
+        "login.createOrganization": "建立組織",
 
         "nav.diagnostics": "訊息可查閱性",
 
@@ -1459,6 +1465,9 @@
         "login.error.userInactive": "Your WeCom account is inactive. Contact your administrator.",
         "login.error.accessPending": "Your access request is waiting for administrator approval.",
         "login.error.configError": "Server configuration error. Please contact your administrator.",
+        "login.error.organizationNotFound": "Organization not found. Create an organization first.",
+        "login.error.organizationExists": "This organization already exists. Log in to the existing organization.",
+        "login.createOrganization": "Create organization",
 
         "nav.diagnostics": "Message visibility",
 

@@ -164,6 +164,25 @@ class WecomAuthorizationProof(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class WecomOrganizationClaim(Base):
+    """Browser-bound, minimal handoff from trusted proof to provisioning."""
+
+    __tablename__ = "wecom_organization_claims"
+
+    id = Column(String(36), primary_key=True)
+    public_ref_hash = Column(String(64), nullable=False, unique=True)
+    corp_id = Column(String(64), nullable=False)
+    corp_name = Column(String(255), nullable=False)
+    authorized_subject = Column(String(128), nullable=False)
+    agent_id = Column(String(64), nullable=True)
+    permanent_code_encrypted = Column(Text, nullable=False)
+    state = Column(String(16), nullable=False, server_default=text("'pending'"))
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class RetentionConfig(Base):
     """Per-tenant message retention policy (RND-318)."""
 

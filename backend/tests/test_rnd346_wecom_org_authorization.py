@@ -18,6 +18,7 @@ from app.db.models import (
     TenantWecomConfig,
     WecomAuthorizationAttempt,
     WecomAuthorizationProof,
+    WecomOrganizationClaim,
 )
 from app.db.session import get_db
 from app.main import create_app
@@ -123,6 +124,7 @@ def _client(monkeypatch, provider: FakeProvider):
             AdminSession.__table__,
             WecomAuthorizationAttempt.__table__,
             WecomAuthorizationProof.__table__,
+            WecomOrganizationClaim.__table__,
         ],
     )
     factory = sessionmaker(bind=engine)

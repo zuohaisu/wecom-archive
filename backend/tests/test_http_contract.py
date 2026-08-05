@@ -354,7 +354,7 @@ def test_router_count() -> None:
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
     # RND-344 adds the formal /dashboard HTML route.
-    assert route_count == 94
+    assert route_count == 97
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -374,6 +374,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/diagnostics/reachability",
             "/admin/forgot-password",
             "/admin/login",
+            "/admin/organization/confirm",
             "/admin/media",
             "/admin/messages",
             "/admin/messages/{msgid}",
@@ -427,6 +428,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/auth/wecom/qr/login",
             "/api/auth/wecom/third-party/callback",
             "/api/auth/wecom/third-party/install",
+            "/api/auth/wecom/organization-claim/cancel",
+            "/api/auth/wecom/organization-claim/confirm",
             "/api/contacts",
             "/api/conversations",
             "/api/conversations/{conversation_id}/detail",
@@ -491,6 +494,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/forgot-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/login", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/organization/confirm", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/media", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages/{msgid}", frozenset({"GET"}), "None", "HTMLResponse"),
@@ -616,6 +620,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/auth/wecom/qr/login", frozenset({"GET"}), "None", "None"),
         ("/api/auth/wecom/third-party/callback", frozenset({"GET"}), "None", "RedirectResponse"),
         ("/api/auth/wecom/third-party/install", frozenset({"GET"}), "None", "RedirectResponse"),
+        ("/api/auth/wecom/organization-claim/cancel", frozenset({"POST"}), "None", "RedirectResponse"),
+        ("/api/auth/wecom/organization-claim/confirm", frozenset({"POST"}), "None", "RedirectResponse"),
         ("/api/contacts", frozenset({"GET"}), "list[ContactOut]", "None"),
         ("/api/conversations", frozenset({"GET"}), "list[ConversationOut]", "None"),
         (
