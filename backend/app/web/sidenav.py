@@ -8,6 +8,12 @@ from typing import Iterable
 # whether an item is available.
 NAV = (
     {
+        "group_key": "nav.group.overview",
+        "items": (
+            {"id": "dashboard", "key": "nav.dashboard", "path": "/dashboard"},
+        ),
+    },
+    {
         "group_key": "nav.group.review",
         "items": (
             {"id": "review", "key": "nav.conversationsReview", "path": "/admin/conversations"},
@@ -18,7 +24,6 @@ NAV = (
         "group_key": "nav.group.data",
         "items": (
             {"id": "messages", "key": "nav.messages", "path": "/admin/messages"},
-            {"id": "analytics", "key": "nav.usageAnalytics", "path": "/admin/analytics"},
             {"id": "media", "key": "nav.mediaAttachments", "path": "/admin/media"},
         ),
     },

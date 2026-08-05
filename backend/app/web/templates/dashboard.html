@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title></title>
+<link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
+<link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
+<link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/dashboard.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.overview">总览</span><span class="sep">/</span><span class="cur" data-i18n="dashboard.pageTitle">会话存档总览</span></div></header>
+  <main class="page dashboard-page">
+    <div class="page-hd"><div><h1 data-i18n="dashboard.pageTitle">会话存档总览</h1><p data-i18n="dashboard.description">查看会话归档状态、数据规模、存储用量和近期变化。</p></div></div>
+    <section id="dashboard-root" aria-live="polite" aria-atomic="false" aria-busy="true"><p class="dashboard-loading" data-i18n="dashboard.loading">正在加载会话存档总览…</p></section>
+  </main>
+</div></div>
+<script src="/web/static/dashboard.js?v=__STATIC_VERSION__"></script>
+<script>
+(function(){
+  function langMenu(){var menu=document.getElementById('lang-menu');if(!menu)return;menu.textContent='';I18N.availableLocales().forEach(function(locale){var option=document.createElement('div');option.className='lang-option'+(locale.code===I18N.getLocale()?' active':'');option.dataset.locale=locale.code;option.textContent=locale.nativeName;menu.appendChild(option);});}
+  window.toggleLangMenu=function(){var menu=document.getElementById('lang-menu');menu.style.display=menu.style.display==='none'?'block':'none';langMenu();};
+  window.doLogout=function(){fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){window.location='/admin/login';});};
+  document.addEventListener('click',function(event){var option=event.target.closest('.lang-option');if(option){I18N.setLocale(option.dataset.locale);document.getElementById('lang-menu').style.display='none';}});
+  I18N.onChange(langMenu);langMenu();
+}());
+</script>
+</body>
+</html>

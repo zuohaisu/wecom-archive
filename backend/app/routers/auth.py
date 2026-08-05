@@ -320,7 +320,7 @@ function doLogin(e){{
       password:document.getElementById('pwd').value
     }})
   }}).then(function(r){{
-    if(r.ok){{window.location.href='/admin/conversations';return;}}
+  if(r.ok){{window.location.href='/dashboard';return;}}
     return r.json().then(function(d){{
       var el=document.getElementById('login-error');
       if(!el){{
@@ -364,16 +364,11 @@ function doLogin(e){{
 
 
 @router.get("/", response_class=RedirectResponse, include_in_schema=False)
-def product_entry(request: Request) -> RedirectResponse:
-    """Send the product origin to the canonical login entry.
-
-    The login route already owns valid-session recognition and the default
-    post-login destination, so this deliberately contains neither session
-    lookup nor a second dashboard redirect contract.
-    """
-    return RedirectResponse(
-        url=request.app.url_path_for("admin_login_page"), status_code=302
-    )
+def product_entry(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    """Route the product origin to the appropriate entry for its session."""
+    if _resolve_session_user(request, db) is not None:
+        return RedirectResponse("/dashboard", status_code=302)
+    return RedirectResponse(url=request.app.url_path_for("admin_login_page"), status_code=302)
 
 
 @router.get("/admin/login", response_class=HTMLResponse)
@@ -382,7 +377,7 @@ def admin_login_page(
     error: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """Login page. Redirects to /admin/conversations if already authenticated.
+    """Login page. Redirects to /dashboard if already authenticated.
 
     Renders password form when AUTH_MODE=password; WeCom button otherwise.
 
@@ -406,7 +401,7 @@ def admin_login_page(
             .first()
         )
         if session:
-            return RedirectResponse("/admin/conversations", status_code=302)
+            return RedirectResponse("/dashboard", status_code=302)
 
     mode = get_auth_mode()
     safe_error = error if error in _ERROR_MESSAGES else (error and "auth_failed")
@@ -1359,7 +1354,7 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
         # successful commit and `return response` below, or a committed
         # session could end up with its cookie never actually reaching the
         # client.
-        response = RedirectResponse("/admin/conversations", status_code=302)
+        response = RedirectResponse("/dashboard", status_code=302)
         response.set_cookie(
             key=SESSION_COOKIE,
             value=session_id,

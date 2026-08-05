@@ -100,18 +100,28 @@ def admin_search_page(
 
 @router.get("/admin/analytics", response_class=HTMLResponse)
 def admin_analytics(
+    tenant_id: Optional[str] = Depends(require_html_session),
+):
+    """Compatibility entry for the merged usage analytics page."""
+    if tenant_id is None:
+        return RedirectResponse("/admin/login", status_code=302)
+    return RedirectResponse("/dashboard#data-insights", status_code=307)
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page(
     request: Request,
     tenant_id: Optional[str] = Depends(require_html_session),
 ):
-    """Usage analytics page. Requires valid session."""
+    """Formal tenant archive overview. Requires a valid session."""
     if tenant_id is None:
         return RedirectResponse("/admin/login", status_code=302)
     return HTMLResponse(
         content=render_template(
-            "analytics",
+            "dashboard",
             i18n_script=I18N_SCRIPT_TAG,
             sidenav=render_sidenav(
-                "analytics",
+                "dashboard",
                 {route.path for route in request.app.routes if hasattr(route, "path")},
             ),
         )
