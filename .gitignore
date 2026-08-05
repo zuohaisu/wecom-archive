@@ -232,6 +232,9 @@ secrets*
 # Local AI-editor workspace
 .qoder/
 
+# Firecrawl output cache
+.firecrawl/
+
 # SSL renewal (ssl-renew/) — never commit private keys, certificates,
 # acme.sh account state, or per-domain secrets/state files.
 *.key
