@@ -425,7 +425,7 @@ process.stdout.write(JSON.stringify({{
 def test_scope_label_has_no_data_i18n_attribute() -> None:
     """A data-i18n attribute on #scope-label would make every
     applyStaticI18n() call (i.e. every locale switch) stomp the
-    dynamically-set "监控账号：Alice" text back to the generic
+    dynamically-set "存档员工：Alice" text back to the generic
     placeholder -- this element must be JS-managed only."""
     match = re.search(r'<span class="scope-label"[^>]*>', _REVIEW_CONSOLE_HTML)
     assert match is not None, "expected #scope-label span in review_console.html"
@@ -596,7 +596,7 @@ def test_locator_text_truncates_instead_of_wrapping_per_character() -> None:
 
 
 def test_set_mode_resets_scope_label_and_avatar_to_placeholder() -> None:
-    """setMode() clears selEntityId/selEntityName, but the "监控账号：X"
+    """setMode() clears selEntityId/selEntityName, but the "存档员工：X"
     scope-label/avatar updateScopeButton() set on selection is JS-managed
     (see the template comment on #scope-label) and was never reset here --
     switching staff<->contact left the OLD entity's name showing at the
@@ -614,7 +614,7 @@ function renderPanelAuditEmpty(){{}}
 {reset_panel_src}
 {set_mode_src}
 document = makeStubDocument({json.dumps(_STUB_IDS)});
-__elements['scope-label'].textContent='监控账号：365客服英子';
+__elements['scope-label'].textContent='存档员工：365客服英子';
 __elements['scope-avatar'].textContent='3';
 setMode('contact');
 process.stdout.write(JSON.stringify({{
@@ -808,7 +808,7 @@ def test_scope_button_prefix_localizes_correctly_for_english() -> None:
 var mode='staff';
 var I18N={{t:function(k){{
   var table={{
-    'console.scopeLabelStaffPrefix':'Monitored account: ',
+    'console.scopeLabelStaffPrefix':'Archived Employee: ',
     'console.scopeLabelContactPrefix':'Contact: '
   }};
   return table.hasOwnProperty(k)?table[k]:k;
@@ -821,7 +821,7 @@ process.stdout.write(JSON.stringify(__elements['scope-label'].textContent));
     result = run_node(harness)
     assert result.returncode == 0, f"node harness failed: {result.stderr}"
     label = json.loads(result.stdout)
-    assert label == "Monitored account: Alice"
+    assert label == "Archived Employee: Alice"
     assert "：" not in label  # no stray full-width colon in the English label
 
 

@@ -392,7 +392,7 @@ __SIDENAV__
                to the generic placeholder below. applyLocale() refreshes
                this element explicitly instead (updateScopeButton() when
                an entity is selected, the placeholder text otherwise). -->
-          <span class="scope-label" id="scope-label">选择监控账号或联系人</span>
+          <span class="scope-label" id="scope-label">请选择员工或外部联系人查看会话</span>
           <span class="scope-caret">▾</span>
         </button>
         <div class="scope-popover" id="scope-popover" style="display:none">
@@ -400,7 +400,7 @@ __SIDENAV__
             <button class="mode-tab active" id="tab-staff" onclick="setMode('staff')" data-i18n="nav.staff">员工</button>
             <button class="mode-tab" id="tab-contact" onclick="setMode('contact')" data-i18n="nav.contact">联系人</button>
           </div>
-          <div class="col-header" id="entity-header" data-i18n="console.monitoredAccounts">监控账号</div>
+          <div class="col-header" id="entity-header" data-i18n="console.monitoredAccounts">存档员工</div>
           <div class="scope-popover-body" id="entity-body"><div class="loading" data-i18n="console.loading">加载中…</div></div>
         </div>
       </div>
@@ -410,7 +410,7 @@ __SIDENAV__
         <button type="button" class="ctab" data-type="direct" onclick="setConvTypeFilter('direct')" data-i18n="convList.directBadge">单聊</button>
       </div>
       <div class="col-header" id="conv-header" data-i18n="nav.conversations">会话</div>
-      <div class="col-body" id="conv-body"><div class="empty-state" data-i18n="console.selectAccountOrContact">请选择账号或联系人</div></div>
+      <div class="col-body" id="conv-body"><div class="empty-state" data-i18n="console.selectAccountOrContact">请选择员工或外部联系人查看会话</div></div>
       <div class="search-filters" id="search-filters" style="display:none"></div>
       <div class="search-results" id="search-results" style="display:none"></div>
     </div>
