@@ -60,6 +60,20 @@ def test_normalise_fields_returns_structured_content_for_news() -> None:
     assert len(normalised["structured_content"]["fields"]["articles"]) == 1
 
 
+def test_normalise_fields_returns_structured_content_for_sphfeed() -> None:
+    decrypted = {
+        "msgtype": "sphfeed",
+        "sphfeed": {"feed_type": 4, "sph_name": "Video Channels", "feed_desc": "A post"},
+    }
+    normalised = _normalise_fields(decrypted)
+    assert normalised["structured_content"]["fields"] == {
+        "feed_type": 4,
+        "sph_name": "Video Channels",
+        "feed_desc": "A post",
+    }
+    assert normalised["structured_content"]["raw"] == decrypted["sphfeed"]
+
+
 def test_normalise_fields_returns_structured_content_for_weapp() -> None:
     decrypted = {
         "msgtype": "weapp",

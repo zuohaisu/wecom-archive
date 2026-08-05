@@ -226,6 +226,7 @@ def test_registry_is_immutable() -> None:
             MediaCapability.NONE,
         ),
         ("news", MessageCategory.STRUCTURED, MessageSupportStatus.SUPPORTED, MediaCapability.MULTIPLE),
+        ("sphfeed", MessageCategory.STRUCTURED, MessageSupportStatus.SUPPORTED, MediaCapability.NONE),
         (
             "docmsg",
             MessageCategory.STRUCTURED,

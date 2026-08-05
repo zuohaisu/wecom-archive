@@ -112,6 +112,19 @@ _TEXT_ONLY_CHATRECORD_DECRYPTED = {
     },
 }
 
+_SPHFEED_DECRYPTED = {
+    "msgtype": "sphfeed",
+    "from": "contact_a",
+    "tolist": ["staff_a"],
+    "roomid": "",
+    "msgtime": 100,
+    "sphfeed": {
+        "feed_type": 4,
+        "sph_name": "Travel Channel",
+        "feed_desc": "A mountain video",
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # is_stale_structured_content / _has_raw_json_echo
@@ -223,6 +236,27 @@ def test_find_candidates_excludes_non_success_decrypt_status(worker_db) -> None:
     insert_archive_message(worker_db, msgtype="mixed", decrypt_status="pending", seq=1)
     candidates = find_reparse_candidates(worker_db).all()
     assert candidates == []
+
+
+def test_find_candidates_requires_sphfeed_to_be_explicitly_selected(worker_db) -> None:
+    insert_tenant(worker_db, _TENANT_A)
+    sphfeed = insert_archive_message(worker_db, msgtype="sphfeed", structured_content=None, seq=1)
+    assert find_reparse_candidates(worker_db).all() == []
+    assert find_reparse_candidates(worker_db, msgtypes=("sphfeed",)).all() == [sphfeed]
+
+
+def test_select_sphfeed_candidates_skips_rows_with_current_fields(worker_db) -> None:
+    insert_tenant(worker_db, _TENANT_A)
+    stale = insert_archive_message(worker_db, msgtype="sphfeed", structured_content=None, seq=1)
+    insert_archive_message(
+        worker_db,
+        msgtype="sphfeed",
+        structured_content={"fields": {"feed_type": 4, "sph_name": "Channel", "feed_desc": "Post"}},
+        seq=2,
+    )
+    candidates, total = select_reparse_candidates(worker_db, msgtypes=("sphfeed",))
+    assert total == 2
+    assert candidates == [stale]
 
 
 def test_select_candidates_excludes_already_correct_rows(worker_db) -> None:
@@ -441,6 +475,42 @@ def test_run_reparse_once_fixes_structured_content_and_only_that_column(worker_d
     assert fresh.tolist == ["contact_a"]
     assert fresh.sdkfileid is None
     assert fresh.msgtype == "chatrecord"
+
+
+def test_run_reparse_once_backfills_only_selected_sphfeed_rows(worker_db) -> None:
+    insert_tenant(worker_db, _TENANT_A)
+    keypair = generate_test_rsa_keypair()
+    row = _insert_reparseable_row(
+        worker_db,
+        keypair,
+        "sphfeed-payload",
+        _SPHFEED_DECRYPTED,
+        msgtype="sphfeed",
+        structured_content=None,
+        sender="contact_a",
+        roomid="",
+    )
+    row_id = row.id
+    fake = FakeWecomSdk()
+    fake.set_decrypt_response("sphfeed-payload", _SPHFEED_DECRYPTED)
+
+    summary = run_reparse_once(
+        worker_db, keypair[0], fake.lib, 1, sdk=fake, msgtypes=("sphfeed",)
+    )
+
+    assert summary.scanned == 1
+    assert summary.stale_detected == 1
+    assert summary.reparsed == 1
+    assert summary.media_refs_added == 0
+    fresh = worker_db.query(ArchiveMessage).get(row_id)
+    assert fresh.structured_content == {
+        "fields": {"feed_type": 4, "sph_name": "Travel Channel", "feed_desc": "A mountain video"},
+        "raw": _SPHFEED_DECRYPTED["sphfeed"],
+        "parse_warnings": [],
+    }
+    assert fresh.decrypted_payload is None
+    assert fresh.decrypt_status == "success"
+    assert fresh.msgtype == "sphfeed"
 
 
 def test_run_reparse_once_dry_run_persists_nothing(worker_engine) -> None:

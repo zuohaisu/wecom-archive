@@ -183,7 +183,7 @@ Primary message store. Each row is one WeCom conversation archive message. Colum
 | Column | Type | Notes |
 |---|---|---|
 | `content_text` | text | plain-text body extracted from `decrypted_payload`; indexed for FTS |
-| `msgtype` | varchar(32) | message type as received from WeCom. The canonical list (26 registered types as of RND-224), per-type support tier (`SUPPORTED`/`PARTIAL`/`UNSUPPORTED`), category, and alias resolution (e.g. `weapp`↔`miniprogram`, `audio_archive`↔`meeting_voice_call`) live in `app/message_type_registry.py` — treat it, not this table, as the source of truth. Examples: `text`, `image`, `video`, `voice`, `file`, `location`, `link`, `card`, `markdown`, `news`, `docmsg`, `revoke`, `mixed`, `chatrecord`, `sys`, `vote`, `collect`, `meeting`, `schedule`, `redpacket`, `switch_corp`, … |
+| `msgtype` | varchar(32) | message type as received from WeCom. The canonical list (27 registered types as of #25), per-type support tier (`SUPPORTED`/`PARTIAL`/`UNSUPPORTED`), category, and alias resolution (e.g. `weapp`↔`miniprogram`, `audio_archive`↔`meeting_voice_call`) live in `app/message_type_registry.py` — treat it, not this table, as the source of truth. Examples: `text`, `image`, `video`, `voice`, `file`, `location`, `link`, `card`, `markdown`, `news`, `sphfeed`, `docmsg`, `revoke`, `mixed`, `chatrecord`, `sys`, `vote`, `collect`, `meeting`, `schedule`, `redpacket`, `switch_corp`, … |
 | `sender` | varchar(64) | WeCom user ID of the message sender (`from` field) |
 | `roomid` | varchar(64) | group chat room ID; null for 1:1 messages |
 | `msgtime` | bigint | WeCom message timestamp in milliseconds since epoch |

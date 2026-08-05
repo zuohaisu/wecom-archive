@@ -346,6 +346,22 @@ _DEFINITIONS: Tuple[MessageTypeDefinition, ...] = (
         media_capability=MediaCapability.MULTIPLE,
     ),
     MessageTypeDefinition(
+        # WeCom conversation archives call Video Channels posts "sphfeed".
+        # The protocol supplies classification, channel name, and a text
+        # description, but no SDK media reference or playback URL. Treat it
+        # as a fully supported structured card, not a video attachment: the
+        # UI can faithfully display every protocol field without claiming it
+        # can play a video that the archive did not provide.
+        raw_type="sphfeed",
+        normalized_type="sphfeed",
+        category=MessageCategory.STRUCTURED,
+        support_status=MessageSupportStatus.SUPPORTED,
+        display_label_key="messageType.sphfeed",
+        parser_strategy=ParserStrategy.STRUCTURED_FIELDS,
+        renderer_strategy=RendererStrategy.STRUCTURED_CARD,
+        media_capability=MediaCapability.NONE,
+    ),
+    MessageTypeDefinition(
         # RND-197: no fixture/doc in this repo confirms docmsg's real field
         # structure — RAW_PASSTHROUGH only (raw preserved, no field
         # extraction); see structured_message_parser.py and the RND-197 dev

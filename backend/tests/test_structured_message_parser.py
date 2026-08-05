@@ -36,6 +36,7 @@ from app.structured_message_parser import (
     parse_miniprogram_message,
     parse_mixed_message,
     parse_news_message,
+    parse_sphfeed_message,
     parse_structured_content,
     safe_url,
 )
@@ -278,6 +279,37 @@ def test_parse_news_message_rejects_unsafe_article_urls() -> None:
 
 
 # ---------------------------------------------------------------------------
+# parse_sphfeed_message
+# ---------------------------------------------------------------------------
+
+
+def test_parse_sphfeed_message_extracts_documented_video_channel_fields() -> None:
+    fields, warnings = parse_sphfeed_message(
+        {"feed_type": 4, "sph_name": "Travel Channel", "feed_desc": "A mountain video"}
+    )
+    assert fields == {
+        "feed_type": 4,
+        "sph_name": "Travel Channel",
+        "feed_desc": "A mountain video",
+    }
+    assert warnings == []
+
+
+def test_parse_sphfeed_message_degrades_without_inventing_media_data() -> None:
+    fields, warnings = parse_sphfeed_message({"feed_type": "future", "sph_name": "  "})
+    assert fields == {"feed_type": None, "sph_name": None, "feed_desc": None}
+    assert set(warnings) == {"missing_feed_type", "missing_sph_name", "missing_feed_desc"}
+
+
+def test_parse_sphfeed_message_keeps_unknown_numeric_type_visible() -> None:
+    fields, warnings = parse_sphfeed_message(
+        {"feed_type": 99, "sph_name": "Future Channel", "feed_desc": "Future post"}
+    )
+    assert fields["feed_type"] == 99
+    assert warnings == ["unknown_feed_type"]
+
+
+# ---------------------------------------------------------------------------
 # parse_miniprogram_message
 # ---------------------------------------------------------------------------
 
@@ -335,6 +367,12 @@ def test_dispatch_structured_fields_type_returns_fields_raw_and_warnings() -> No
     assert result["fields"]["title"] == "x"
     assert result["raw"] == {"title": "x", "link_url": "https://example.com"}
     assert isinstance(result["parse_warnings"], list)
+
+
+def test_dispatch_sphfeed_routes_to_structured_field_parser() -> None:
+    payload = {"feed_type": 9, "sph_name": "Live channel", "feed_desc": "Starting now"}
+    result = parse_structured_content("sphfeed", {"msgtype": "sphfeed", "sphfeed": payload})
+    assert result == {"fields": {"feed_type": 9, "sph_name": "Live channel", "feed_desc": "Starting now"}, "raw": payload, "parse_warnings": []}
 
 
 @pytest.mark.parametrize("msgtype", ["docmsg"])

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-One-shot historical backfill: re-decrypt and re-parse chatrecord/mixed
-archive_messages rows still stuck in the pre-RND-243 broken
-structured_content shape (RND-257).
+One-shot historical backfill: re-decrypt and re-parse selected structured
+archive_messages rows whose persisted structured_content predates a parser
+fix (RND-257, extended for sphfeed support).
 
 Background: RND-243 fixed app.structured_message_parser's chatrecord/mixed
 nested-item parser (ChatRecord-prefixed child types now normalize to their
@@ -39,11 +39,13 @@ second, independent decrypt or parse implementation:
   - app.structured_message_parser.parse_structured_content — the RND-243
     fix itself; this script changes none of its logic.
 
-Candidate rows: msgtype in ("chatrecord", "mixed"), decrypt_status=
-"success", and structured_content still in the old broken shape (see
-is_stale_structured_content below). A row already fixed (by a previous run
-of this script, or coincidentally already correct) never matches again —
-idempotent, safe to re-run any number of times.
+Candidate rows: decrypt_status="success", an explicitly reparseable
+``msgtype``, and structured_content still in that type's known stale shape.
+The default remains the historical RND-257 chatrecord/mixed repair; pass
+``--msgtype sphfeed`` to backfill Video Channels messages after that parser
+ships. A row already fixed (by a previous run of this script, or
+coincidentally already correct) never matches again — idempotent, safe to
+re-run any number of times.
 
 Mode: unlike scripts/backfill_revoke_associations_once.py (dry-run by
 default, --apply to write), this script WRITES by default and --dry-run
@@ -58,6 +60,8 @@ Usage (from backend/):
     python scripts/reparse_structured_content_once.py --tenant X          # scope to one tenant
     python scripts/reparse_structured_content_once.py --limit 10          # cap rows processed this run
     python scripts/reparse_structured_content_once.py --since 1700000000000 --until 1800000000000
+    python scripts/reparse_structured_content_once.py --msgtype sphfeed   # apply Video Channels backfill
+    python scripts/reparse_structured_content_once.py --msgtype sphfeed --dry-run
     python scripts/reparse_structured_content_once.py --download          # also trigger the existing
                                                                            # nested-media download scan
 
@@ -119,6 +123,23 @@ from app.sdk import wecom_sdk as _default_sdk
 
 _DEFAULT_BATCH_SIZE = 500
 
+# Keep the existing RND-257 behavior as the default. New types are opt-in so
+# adding a parser never causes this maintenance command to re-decrypt an
+# unrelated archive population merely because an operator ran it with no
+# arguments.
+_DEFAULT_REPARSE_MSGTYPES = frozenset(NESTED_MEDIA_MSGTYPES)
+_REPARSEABLE_MSGTYPES = _DEFAULT_REPARSE_MSGTYPES | frozenset({"sphfeed"})
+
+
+def _validated_msgtypes(msgtypes: Optional[tuple[str, ...]]) -> frozenset[str]:
+    selected = frozenset(msgtypes) if msgtypes else _DEFAULT_REPARSE_MSGTYPES
+    if not selected:
+        raise ValueError("at least one msgtype is required")
+    unknown = selected - _REPARSEABLE_MSGTYPES
+    if unknown:
+        raise ValueError(f"unsupported reparse msgtype(s): {sorted(unknown)!r}")
+    return selected
+
 
 def _require_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
@@ -173,13 +194,23 @@ def _has_raw_json_echo(structured_content: dict) -> bool:
     return False
 
 
-def is_stale_structured_content(structured_content) -> bool:
-    """True if *structured_content* is still in the pre-RND-243 broken
-    shape for a chatrecord/mixed row: unset entirely, missing/empty
-    media_refs, or carrying a raw-JSON-echoed item (see _has_raw_json_echo).
-    Never raises — a malformed/unexpected shape is treated as stale so a
-    re-parse attempt (which itself never raises) can fix or safely leave
-    it, rather than this detector silently skipping it forever."""
+def is_stale_structured_content(structured_content, msgtype: Optional[str] = None) -> bool:
+    """Return whether a selected type still needs a historical reparse.
+
+    ``None`` preserves the historical chatrecord/mixed detector contract for
+    callers and tests.  Video Channels rows need a deliberately narrower
+    rule: before this parser existed they have no ``fields`` object; once it
+    succeeds, even a degraded-but-valid fields object is current and must not
+    be decrypted again on every maintenance run.
+    """
+    if msgtype == "sphfeed":
+        return not (
+            isinstance(structured_content, dict)
+            and isinstance(structured_content.get("fields"), dict)
+        )
+
+    # chatrecord/mixed: stale when unset, missing/empty media_refs, or still
+    # carrying a raw-JSON echo from the pre-RND-243 nested parser.
     if not isinstance(structured_content, dict):
         return True
     media_refs = structured_content.get("media_refs")
@@ -198,16 +229,17 @@ def find_reparse_candidates(
     tenant_id: "str | None" = None,
     since_ms: Optional[int] = None,
     until_ms: Optional[int] = None,
+    msgtypes: Optional[tuple[str, ...]] = None,
 ) -> Query:
-    """Coarse, tenant-scoped candidate query: every decrypt_status=
-    'success' chatrecord/mixed row, optionally windowed by msgtime. The
-    precise "is this row's structured_content actually still broken" check
-    happens in Python via is_stale_structured_content (same coarse-SQL-
-    then-precise-Python split app.media_download.build_nested_media_
-    candidate_query / select_nested_media_candidates already uses for the
-    same two msgtypes). Pure query construction — no execution."""
+    """Coarse tenant-scoped query for selected successful archive rows.
+
+    The precise type-specific stale check happens in Python via
+    :func:`is_stale_structured_content`; keeping SQL broad avoids embedding
+    PostgreSQL- and SQLite-specific JSON predicates in a safety tool.
+    """
+    selected_msgtypes = _validated_msgtypes(msgtypes)
     query = session.query(ArchiveMessage).filter(
-        ArchiveMessage.msgtype.in_(NESTED_MEDIA_MSGTYPES),
+        ArchiveMessage.msgtype.in_(selected_msgtypes),
         ArchiveMessage.decrypt_status == "success",
     )
     if tenant_id is not None:
@@ -226,21 +258,19 @@ def select_reparse_candidates(
     until_ms: Optional[int] = None,
     limit: Optional[int] = None,
     batch_size: int = _DEFAULT_BATCH_SIZE,
+    msgtypes: Optional[tuple[str, ...]] = None,
 ) -> Tuple[List[ArchiveMessage], int]:
-    """Return (stale_candidates, total_messages_scanned). total_messages_
-    scanned is the coarse count (every chatrecord/mixed success row in
-    scope, stale or not); stale_candidates is the precise subset actually
-    needing a re-parse, capped at `limit` (None = no cap). Paginated in
-    ascending-id batches so cost scales with `limit` reached rather than
-    full history — mirrors select_nested_media_candidates's own pagination
-    rationale in app/media_download.py."""
-    total_scanned = find_reparse_candidates(session, tenant_id, since_ms, until_ms).count()
+    """Return (stale_candidates, total_messages_scanned) for selected types."""
+    selected_msgtypes = tuple(_validated_msgtypes(msgtypes))
+    total_scanned = find_reparse_candidates(
+        session, tenant_id, since_ms, until_ms, selected_msgtypes
+    ).count()
 
     candidates: List[ArchiveMessage] = []
     last_id = 0
     while limit is None or len(candidates) < limit:
         batch = (
-            find_reparse_candidates(session, tenant_id, since_ms, until_ms)
+            find_reparse_candidates(session, tenant_id, since_ms, until_ms, selected_msgtypes)
             .filter(ArchiveMessage.id > last_id)
             .limit(batch_size)
             .all()
@@ -248,7 +278,7 @@ def select_reparse_candidates(
         if not batch:
             break
         for row in batch:
-            if is_stale_structured_content(row.structured_content):
+            if is_stale_structured_content(row.structured_content, row.msgtype):
                 candidates.append(row)
                 if limit is not None and len(candidates) >= limit:
                     break
@@ -348,9 +378,10 @@ def run_reparse_once(
     dry_run: bool = False,
     sdk=_default_sdk,
     lib_path: "str | None" = None,
+    msgtypes: Optional[tuple[str, ...]] = None,
 ) -> ReparseSummary:
-    """Re-decrypt + re-parse every stale chatrecord/mixed candidate in
-    scope, writing only structured_content. dry_run=True runs the exact
+    """Re-decrypt + re-parse every stale selected-type candidate in scope,
+    writing only structured_content. dry_run=True runs the exact
     same re-decrypt/re-parse/compare logic (so the reported counts reflect
     what WOULD happen) but rolls back instead of committing — same
     dry-run-via-rollback convention scripts/backfill_revoke_associations_
@@ -364,7 +395,12 @@ def run_reparse_once(
     """
     summary = ReparseSummary()
     candidates, total_scanned = select_reparse_candidates(
-        session, tenant_id=tenant_id, since_ms=since_ms, until_ms=until_ms, limit=limit
+        session,
+        tenant_id=tenant_id,
+        since_ms=since_ms,
+        until_ms=until_ms,
+        limit=limit,
+        msgtypes=msgtypes,
     )
     summary.scanned = total_scanned
     summary.stale_detected = len(candidates)
@@ -441,6 +477,13 @@ def trigger_nested_media_download_scan() -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tenant", default=None, help="Scope the scan to a single tenant_id (default: every tenant)")
+    parser.add_argument(
+        "--msgtype",
+        dest="msgtypes",
+        action="append",
+        choices=sorted(_REPARSEABLE_MSGTYPES),
+        help="Type to reparse; repeat for multiple types. Default: chatrecord and mixed.",
+    )
     parser.add_argument("--limit", type=int, default=None, help="Max stale rows to reparse this run (default: no cap)")
     parser.add_argument("--since", type=int, default=None, help="Only consider rows with msgtime >= this epoch-ms cutoff")
     parser.add_argument("--until", type=int, default=None, help="Only consider rows with msgtime <= this epoch-ms cutoff")
@@ -530,6 +573,7 @@ def main() -> None:
             limit=args.limit,
             dry_run=args.dry_run,
             lib_path=lib_path,
+            msgtypes=tuple(args.msgtypes) if args.msgtypes else None,
         )
 
     try:
@@ -540,6 +584,10 @@ def main() -> None:
     mode = "DRY-RUN" if args.dry_run else "APPLY"
     print(f"[INFO] reparse mode: {mode}", flush=True)
     print(f"[INFO] reparse tenant: {args.tenant or 'ALL'}", flush=True)
+    print(
+        f"[INFO] reparse msgtypes: {','.join(args.msgtypes or sorted(_DEFAULT_REPARSE_MSGTYPES))}",
+        flush=True,
+    )
     print(f"[INFO] reparse scanned: {summary.scanned}", flush=True)
     print(f"[INFO] reparse stale_detected: {summary.stale_detected}", flush=True)
     print(f"[INFO] reparse reparsed: {summary.reparsed}", flush=True)

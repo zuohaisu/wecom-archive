@@ -205,6 +205,31 @@ function renderMiniprogramCard(m){
   html+='</div>';
   return html;
 }
+function sphfeedTypeLabel(feedType){
+  if(feedType===2)return I18N.t('card.sphfeed.image');
+  if(feedType===4)return I18N.t('card.sphfeed.video');
+  if(feedType===9)return I18N.t('card.sphfeed.live');
+  return I18N.t('card.sphfeed.unknown');
+}
+// WeCom's sphfeed payload has no playback URL or SDK media id.  This is a
+// faithful archive card (type, account and description), never a fake video
+// player or a link reconstructed from untrusted content.
+function renderSphfeedCard(m){
+  var f=m.structured_content&&m.structured_content.fields;
+  if(!f)return renderStructuredFallback(m);
+  var title=f.sph_name||I18N.t('messageType.sphfeed');
+  var html='<div class="structured-card structured-card-sphfeed">'
+    +structuredCardHeader('messageType.sphfeed',m.msgtype,CARD_DOT_COLORS.sphfeed)
+    +'<div class="structured-card-title">'+esc(title)+'</div>'
+    +'<div class="structured-card-meta">'+esc(sphfeedTypeLabel(f.feed_type))+'</div>';
+  if(f.feed_desc){
+    html+='<div class="structured-card-desc">'+esc(f.feed_desc)+'</div>';
+  }else{
+    html+='<div class="structured-card-degraded">'+esc(I18N.t('card.sphfeed.empty'))+'</div>';
+  }
+  html+='</div>';
+  return html;
+}
 // Archive Console v2 (Message Types spec, section 四 · 互动业务类): a
 // single shared card header (color dot + type label + raw msgtype badge)
 // for every interactive/business card type below plus audio_archive/
@@ -212,7 +237,7 @@ function renderMiniprogramCard(m){
 // redpacket is the one deliberate exception (keeps its own warm-gradient
 // header, see renderRedpacketCard) -- the spec calls that out explicitly
 // as mirroring WeCom's native orange bubble rather than the plain-dot card.
-var CARD_DOT_COLORS={todo:'#e5844d',vote:'#0891b2',collect:'#8b5cf6',meeting:'#1677ff',schedule:'#8b5cf6',switch_corp:'#98a0ab',audio_archive:'#0891b2',audio_doc:'#0891b2'};
+var CARD_DOT_COLORS={todo:'#e5844d',vote:'#0891b2',collect:'#8b5cf6',meeting:'#1677ff',schedule:'#8b5cf6',switch_corp:'#98a0ab',audio_archive:'#0891b2',audio_doc:'#0891b2',sphfeed:'#e5844d'};
 function structuredCardHeader(labelKey,rawType,dotColor){
   return '<div class="sc-hd"><div class="sc-hd-dot" style="background:'+esc(dotColor)+'"></div>'
     +'<span class="sc-hd-label">'+esc(I18N.t(labelKey))+'</span>'
@@ -450,6 +475,7 @@ var STRUCTURED_CARD_RENDERERS={
   markdown:renderMarkdownCard,
   news:renderNewsCard,
   miniprogram:renderMiniprogramCard,
+  sphfeed:renderSphfeedCard,
   card:renderCardMessage,
   docmsg:renderStructuredFallback,
   // RND-210 (+ QA FAIL remediation): audio_archive now renders a dedicated

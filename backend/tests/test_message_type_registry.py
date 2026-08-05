@@ -132,6 +132,7 @@ def _bundle() -> str:
         "function isSafeUrl(u){return typeof u==='string'&&/^https?:/i.test(u);}",
         _extract(r"function renderAudioArchiveMessage\(m\)\{.*?\n\}", "renderAudioArchiveMessage()"),
         _extract(r"function renderAudioDocMessage\(m\)\{.*?\n\}", "renderAudioDocMessage()"),
+        "function renderSphfeedCard(m){return '';}",
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
         _extract(r"function renderStructuredCard\(m\)\{.*?\n\}", "renderStructuredCard()"),
         # RND-206: renderMessageBody()/renderTimeline() now also depend on
@@ -228,10 +229,11 @@ def test_registry_has_entries_for_every_documented_msgtype() -> None:
             "emotion",
             "miniprogram",
             "todo",
-            # RND-197
-            "markdown",
-            "news",
-            "docmsg",
+                # RND-197
+                "markdown",
+                "news",
+                "sphfeed",
+                "docmsg",
             "audio_archive",
             "audio_doc",
             # RND-198 interactive business types

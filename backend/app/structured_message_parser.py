@@ -421,6 +421,38 @@ def parse_news_message(payload: dict) -> tuple[dict, list[str]]:
     return {"articles": articles}, warnings
 
 
+def parse_sphfeed_message(payload: dict) -> tuple[dict, list[str]]:
+    """Parse WeCom ``sphfeed`` (Video Channels) archive messages.
+
+    The archive protocol supplies only ``feed_type`` (2=image, 4=video,
+    9=live), ``sph_name`` and ``feed_desc``.  In particular it does *not*
+    contain an SDK file id or a playback URL, so this parser deliberately
+    preserves those display fields only; a renderer must never invent a
+    playable-media capability from the type value alone.
+    """
+    warnings: list[str] = []
+    payload = payload if isinstance(payload, dict) else {}
+
+    feed_type = _safe_int(payload.get("feed_type"))
+    if feed_type is None:
+        warnings.append("missing_feed_type")
+    elif feed_type not in (2, 4, 9):
+        warnings.append("unknown_feed_type")
+
+    sph_name = _clean_str(payload.get("sph_name"))
+    feed_desc = _clean_str(payload.get("feed_desc"))
+    if not sph_name:
+        warnings.append("missing_sph_name")
+    if not feed_desc:
+        warnings.append("missing_feed_desc")
+
+    return {
+        "feed_type": feed_type,
+        "sph_name": sph_name,
+        "feed_desc": feed_desc,
+    }, warnings
+
+
 def parse_miniprogram_message(payload: dict) -> tuple[dict, list[str]]:
     """WeCom weapp (小程序) message.
 
@@ -878,6 +910,7 @@ _STRUCTURED_FIELD_PARSERS = {
     "location": parse_location_message,
     "markdown": parse_markdown_message,
     "news": parse_news_message,
+    "sphfeed": parse_sphfeed_message,
     "weapp": parse_miniprogram_message,
     # RND-198 interactive business types
     "vote": parse_vote_message,

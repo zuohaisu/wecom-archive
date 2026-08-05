@@ -69,6 +69,8 @@ def _bundle() -> str:
         _extract(r"function renderMarkdownCard\(m\)\{.*?\n\}", "renderMarkdownCard()"),
         _extract(r"function renderNewsCard\(m\)\{.*?\n\}", "renderNewsCard()"),
         _extract(r"function renderMiniprogramCard\(m\)\{.*?\n\}", "renderMiniprogramCard()"),
+        _extract(r"function sphfeedTypeLabel\(feedType\)\{.*?\n\}", "sphfeedTypeLabel()"),
+        _extract(r"function renderSphfeedCard\(m\)\{.*?\n\}", "renderSphfeedCard()"),
         # Archive Console v2 (design import): todo/vote/collect/meeting/
         # schedule/switch_corp (+ audio_archive/audio_doc, stubbed below)
         # now share one card header (structuredCardHeader) instead of a
@@ -347,6 +349,41 @@ def test_switch_corp_card_renders_corp_name() -> None:
     )
     html = _render(msg)
     assert "Acme Inc." in html
+
+
+def test_sphfeed_card_renders_video_channel_metadata_without_a_player() -> None:
+    msg = _msg(
+        "sphfeed", "structured", renderer_strategy="structured_card", normalized_type="sphfeed",
+        display_label_key="messageType.sphfeed",
+        structured_content={
+            "fields": {
+                "feed_type": 4,
+                "sph_name": "Travel Channel",
+                "feed_desc": "A mountain video",
+            }
+        },
+    )
+    html = _render(msg)
+    assert "Video Channel post" in html
+    assert "Travel Channel" in html
+    assert "Video post" in html
+    assert "A mountain video" in html
+    assert "<video" not in html
+
+
+def test_sphfeed_card_escapes_channel_metadata() -> None:
+    msg = _msg(
+        "sphfeed", "structured", renderer_strategy="structured_card", normalized_type="sphfeed",
+        display_label_key="messageType.sphfeed",
+        structured_content={
+            "fields": {"feed_type": 2, "sph_name": "<img src=x>", "feed_desc": "<script>x</script>"}
+        },
+    )
+    html = _render(msg)
+    assert "<img" not in html
+    assert "<script>" not in html
+    assert "&lt;img" in html
+    assert "&lt;script&gt;" in html
 
 
 # ============================================================================

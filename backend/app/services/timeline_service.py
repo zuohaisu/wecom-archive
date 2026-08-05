@@ -489,6 +489,9 @@ PUBLIC_STRUCTURED_FIELD_ALLOWLIST = {
     "audio_archive": frozenset({"voiceid", "endtime", "shared_doc"}),
     # audio_doc (voip_doc_share / voipdocshare): shared-document metadata only.
     "audio_doc": frozenset({"title", "url", "docid"}),
+    # sphfeed is a Video Channels post.  It has no media reference in the
+    # archive protocol, so expose only its documented display metadata.
+    "sphfeed": frozenset({"feed_type", "sph_name", "feed_desc"}),
 }
 
 

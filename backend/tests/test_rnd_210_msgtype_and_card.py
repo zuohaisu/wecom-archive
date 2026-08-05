@@ -289,6 +289,8 @@ def _bundle() -> str:
             r"var CARD_DOT_COLORS=\{.*?\nfunction structuredCardHeader\(labelKey,rawType,dotColor\)\{.*?\n\}",
             "structuredCardHeader",
         ),
+        _extract(r"function sphfeedTypeLabel\(feedType\)\{.*?\n\}", "sphfeedTypeLabel()"),
+        _extract(r"function renderSphfeedCard\(m\)\{.*?\n\}", "renderSphfeedCard()"),
         _extract(r"function renderAudioArchiveMessage\(m\)\{.*?\n\}", "renderAudioArchiveMessage()"),
         _extract(r"function renderAudioDocMessage\(m\)\{.*?\n\}", "renderAudioDocMessage()"),
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
@@ -536,6 +538,23 @@ def test_project_public_structured_fields_audio_archive_whitelist() -> None:
     assert set(out.keys()) == {"voiceid", "endtime", "shared_doc"}
     assert "sdkfileid" not in out
     assert "unexpected" not in out
+
+
+def test_project_public_structured_fields_sphfeed_whitelist() -> None:
+    from app.routers.conversations import _project_public_structured_fields
+
+    fields = {
+        "feed_type": 4,
+        "sph_name": "Video Channels",
+        "feed_desc": "A post",
+        "sdkfileid": "must-not-leak",
+        "unexpected": "must-not-leak",
+    }
+    assert _project_public_structured_fields("sphfeed", fields) == {
+        "feed_type": 4,
+        "sph_name": "Video Channels",
+        "feed_desc": "A post",
+    }
 
 
 def test_audio_archive_timeline_does_not_leak_sdkfileid(client, db) -> None:

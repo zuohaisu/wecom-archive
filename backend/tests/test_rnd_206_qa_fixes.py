@@ -110,7 +110,7 @@ def _bundle(extra=None) -> str:
         _extract(r"function renderCardMessage\(m\)\{.*?\n\}", "renderCardMessage()"),
         # RND-210: STRUCTURED_CARD_RENDERERS now also references these two
         # audio renderers — stub them (these tests don't exercise audio).
-        "function renderAudioArchiveMessage(m){return '';} function renderAudioDocMessage(m){return '';}",
+        "function renderAudioArchiveMessage(m){return '';} function renderAudioDocMessage(m){return '';} function renderSphfeedCard(m){return '';}",
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
         _extract(r"function renderStructuredCard\(m\)\{.*?\n\}", "renderStructuredCard()"),
         _rnd206_block(),

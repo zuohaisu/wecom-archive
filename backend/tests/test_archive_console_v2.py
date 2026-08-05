@@ -362,7 +362,7 @@ def _timeline_row_bundle() -> str:
         "function renderScheduleCard(m){return '';}function renderRedpacketCard(m){return '';}"
         "function renderSwitchCorpCard(m){return '';}function renderSystemCard(m){return '';}"
         "function renderCardMessage(m){return '';}function renderAudioArchiveMessage(m){return '';}"
-        "function renderAudioDocMessage(m){return '';}",
+        "function renderAudioDocMessage(m){return '';}function renderSphfeedCard(m){return '';}",
         _extract(r"var STRUCTURED_CARD_RENDERERS=\{.*?\n\};", "STRUCTURED_CARD_RENDERERS"),
         _extract(r"function renderStructuredCard\(m\)\{.*?\n\}", "renderStructuredCard()"),
         _extract(
