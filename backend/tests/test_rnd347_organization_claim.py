@@ -3,13 +3,20 @@ from __future__ import annotations
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
 from app.db.models import (
+    AdminLoginIdentity,
+    AdminSession,
+    AdminUser,
+    AuditLog,
     Tenant,
     TenantWecomConfig,
+    ThirdPartyOrganizationBinding,
     WecomAuthorizationAttempt,
     WecomAuthorizationProof,
     WecomOrganizationClaim,
@@ -20,6 +27,11 @@ from app.services.wecom_org_authorization import (
     AuthorizedOrganization,
     get_wecom_org_authorization_provider,
 )
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_for_sqlite(_type, _compiler, **_kw):
+    return "JSON"
 
 
 class FakeProvider:
@@ -50,6 +62,11 @@ def _setup(monkeypatch):
         tables=[
             Tenant.__table__,
             TenantWecomConfig.__table__,
+            AdminUser.__table__,
+            AdminLoginIdentity.__table__,
+            AdminSession.__table__,
+            AuditLog.__table__,
+            ThirdPartyOrganizationBinding.__table__,
             WecomAuthorizationAttempt.__table__,
             WecomAuthorizationProof.__table__,
             WecomOrganizationClaim.__table__,
@@ -114,20 +131,25 @@ def test_confirmation_is_read_only_safe_and_localized(monkeypatch):
         assert "<output" in page.text
 
 
-def test_confirm_and_cancel_are_single_browser_claim_transitions(monkeypatch):
+def test_confirm_is_consumed_by_atomic_provisioning_and_replay_is_safe(monkeypatch):
     client, factory, provider = _setup(monkeypatch)
     _authorize(client, provider)
     confirmed = client.post(
         "/api/auth/wecom/organization-claim/confirm", follow_redirects=False
     )
     assert confirmed.status_code == 303
+    assert confirmed.headers["location"] == "/admin/provisioning"
     with factory() as db:
-        assert db.query(WecomOrganizationClaim).one().state == "confirmed"
+        assert db.query(WecomOrganizationClaim).one().state == "consumed"
     replay = client.post(
         "/api/auth/wecom/organization-claim/confirm", follow_redirects=False
     )
     assert replay.headers["location"] == "/admin/login?error=auth_failed"
 
+
+def test_cancel_before_confirmation_consumes_claim_without_provisioning(monkeypatch):
+    client, factory, provider = _setup(monkeypatch)
+    _authorize(client, provider)
     cancelled = client.post(
         "/api/auth/wecom/organization-claim/cancel", follow_redirects=False
     )

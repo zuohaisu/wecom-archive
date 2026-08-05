@@ -18,7 +18,7 @@ from app.db.session import get_db
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT 1, created_at DATETIME,
+    is_active BOOLEAN NOT NULL DEFAULT 1, lifecycle_status TEXT NOT NULL DEFAULT 'active', created_at DATETIME,
     updated_at DATETIME, onboarding_completed_at DATETIME
 );
 CREATE TABLE platform_admins (

@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from html import escape
 from sqlalchemy.orm import Session
 
-from app.auth import _is_production
+from app.auth import SESSION_COOKIE, _is_production
 from app.db.session import get_db
 from app.services.wecom_org_authorization import (
     WecomAuthorizationError,
@@ -23,9 +23,13 @@ from app.services.wecom_organization_claims import (
     OrganizationAlreadyExists,
     OrganizationClaimError,
     cancel_browser_claim,
-    confirm_browser_claim,
     create_claim_from_proof,
     get_browser_claim,
+)
+from app.services.organization_provisioning import (
+    OrganizationProvisioningConflict,
+    OrganizationProvisioningError,
+    provision_organization,
 )
 from app.web import render_template
 
@@ -161,11 +165,24 @@ def confirm_organization_claim(
     request: Request, db: Session = Depends(get_db)
 ) -> RedirectResponse:
     try:
-        confirm_browser_claim(db, request.cookies.get(CLAIM_COOKIE))
-    except OrganizationClaimError:
+        result = provision_organization(db, request.cookies.get(CLAIM_COOKIE))
+    except OrganizationProvisioningConflict:
+        db.rollback()
+        return RedirectResponse("/admin/login?error=organization_exists", status_code=303)
+    except OrganizationProvisioningError:
         db.rollback()
         return RedirectResponse("/admin/login?error=auth_failed", status_code=303)
-    return RedirectResponse("/admin/organization/confirm", status_code=303)
+    response = RedirectResponse("/admin/provisioning", status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE,
+        result.session_id,
+        httponly=True,
+        secure=_is_production(),
+        samesite="lax",
+        path="/",
+    )
+    response.delete_cookie(CLAIM_COOKIE, path="/")
+    return response
 
 
 @router.post("/api/auth/wecom/organization-claim/cancel", response_class=RedirectResponse)

@@ -414,8 +414,16 @@ def admin_login_page(
             )
             .first()
         )
-        if session:
+        if session and session.session_scope == "admin":
             return RedirectResponse("/dashboard", status_code=302)
+        if session and session.session_scope == "provisioning":
+            tenant_status = (
+                db.query(Tenant.lifecycle_status)
+                .filter(Tenant.id == session.tenant_id)
+                .scalar()
+            )
+            if tenant_status == "provisioning":
+                return RedirectResponse("/admin/provisioning", status_code=302)
 
     mode = get_auth_mode()
     safe_error = error if error in _ERROR_MESSAGES else (error and "auth_failed")
@@ -1500,6 +1508,7 @@ def _resolve_session_user(request: Request, db: Session) -> Optional[AdminUser]:
             AdminSession.id == session_id,
             AdminSession.expires_at > now,
             AdminSession.is_revoked.is_(False),
+            AdminSession.session_scope == "admin",
         )
         .first()
     )

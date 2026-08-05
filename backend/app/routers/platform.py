@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import get_wecom_token, require_platform_admin
-from app.db.models import DuplicateCorpIdError, Tenant, TenantWecomConfig
+from app.db.models import AdminSession, DuplicateCorpIdError, Tenant, TenantWecomConfig
 from app.db.session import get_db
 from app.routers.auth import _create_pending_invite
 from app.schemas.tenant_provision import (
@@ -47,7 +47,12 @@ def create_tenant(
     if db.query(Tenant).filter(Tenant.slug == payload.slug).first():
         raise HTTPException(status_code=409, detail="Tenant slug already exists")
 
-    tenant = Tenant(id=str(uuid.uuid4()), name=payload.name, slug=payload.slug)
+    tenant = Tenant(
+        id=str(uuid.uuid4()),
+        name=payload.name,
+        slug=payload.slug,
+        lifecycle_status="active",
+    )
     db.add(tenant)
     config = TenantWecomConfig(
         id=str(uuid.uuid4()),
@@ -102,7 +107,7 @@ def list_tenants(
     """Return all provisioned tenants with their config status (no key leakage)."""
     rows = (
         db.query(Tenant, TenantWecomConfig)
-        .join(TenantWecomConfig, TenantWecomConfig.tenant_id == Tenant.id)
+        .outerjoin(TenantWecomConfig, TenantWecomConfig.tenant_id == Tenant.id)
         .all()
     )
     return TenantListOut(
@@ -111,10 +116,10 @@ def list_tenants(
                 tenant_id=t.id,
                 tenant_name=t.name,
                 tenant_slug=t.slug,
-                corp_id=c.corp_id,
-                agent_id=c.agent_id,
+                corp_id=c.corp_id if c is not None else None,
+                agent_id=c.agent_id if c is not None else None,
                 tenant_is_active=t.is_active,
-                config_is_active=c.is_active,
+                config_is_active=c.is_active if c is not None else False,
                 created_at=t.created_at,
             )
             for t, c in rows
@@ -150,9 +155,32 @@ def update_tenant_status(
         )
 
     old_status = tenant.is_active
+    old_lifecycle_status = tenant.lifecycle_status
     new_status = payload.is_active
     if old_status != new_status:
         tenant.is_active = new_status
+        tenant.lifecycle_status = "active" if new_status else "suspended"
+        promoted_sessions = 0
+        if new_status and old_lifecycle_status == "provisioning":
+            promoted_sessions = (
+                db.query(AdminSession)
+                .filter(
+                    AdminSession.tenant_id == tenant_id,
+                    AdminSession.session_scope == "provisioning",
+                    AdminSession.is_revoked.is_(False),
+                )
+                .update(
+                    {AdminSession.session_scope: "admin"},
+                    synchronize_session=False,
+                )
+            )
+        audit_detail = {
+            "platform_admin_id": admin_user.id,
+            "previous_is_active": old_status,
+            "is_active": new_status,
+        }
+        if promoted_sessions:
+            audit_detail["promoted_provisioning_sessions"] = promoted_sessions
         write_audit(
             db,
             tenant_id=tenant_id,
@@ -164,11 +192,7 @@ def update_tenant_status(
             # PlatformAdmin is tenant-less and cannot satisfy this FK.
             admin_user_id=None,
             object_id=tenant_id,
-            detail={
-                "platform_admin_id": admin_user.id,
-                "previous_is_active": old_status,
-                "is_active": new_status,
-            },
+            detail=audit_detail,
         )
         # Persist the state transition and its audit row together.
         db.commit()
@@ -256,4 +280,3 @@ def list_tenant_usage(
             for tenant in tenants
         ]
     )
-

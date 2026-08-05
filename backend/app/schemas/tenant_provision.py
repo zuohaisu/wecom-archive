@@ -42,8 +42,8 @@ class TenantListItemOut(BaseModel):
     tenant_id: str
     tenant_name: str
     tenant_slug: str
-    corp_id: str
-    agent_id: str
+    corp_id: Optional[str]
+    agent_id: Optional[str]
     tenant_is_active: bool
     config_is_active: bool
     created_at: datetime

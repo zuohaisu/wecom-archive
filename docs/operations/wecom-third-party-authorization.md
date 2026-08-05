@@ -19,3 +19,8 @@ query string 做脱敏。服务只接受管理员授权模式，并再次确认�
 
 排障时只能记录粗粒度错误类型。禁止记录授权 code、state、suite ticket、suite token、
 permanent code、CorpID、UserID 或完整回调 URL。
+
+自助创建完成后租户保持 `provisioning` 且 `is_active=false`。其会话只能访问
+`/admin/provisioning`、`/admin/provisioning/settings` 与 `/api/provisioning/status`；归档、
+同步、导出、邀请和普通后台均失败关闭。运维完成会话存档凭证、回调与连通性验证后，
+再由平台启用租户；本流程不会更改现有单 `WECOM_CORP_ID` worker。

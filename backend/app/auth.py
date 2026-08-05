@@ -39,7 +39,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
-from app.db.models import AdminSession, AdminUser, PasswordResetToken, PlatformAdmin
+from app.db.models import AdminSession, AdminUser, PasswordResetToken, PlatformAdmin, Tenant
 from app.db.session import get_db
 from app.session_lifecycle import touch_last_active
 from app.settings import get_auth_settings
@@ -443,6 +443,7 @@ def get_current_user(
                 AdminSession.id == session_id,
                 AdminSession.expires_at > now,
                 AdminSession.is_revoked.is_(False),
+                AdminSession.session_scope == "admin",
             )
             .first()
         )
@@ -531,6 +532,7 @@ def require_html_session(
                 AdminSession.id == session_id,
                 AdminSession.expires_at > now,
                 AdminSession.is_revoked.is_(False),
+                AdminSession.session_scope == "admin",
             )
             .first()
         )
@@ -557,6 +559,39 @@ def require_html_session(
 
 def _is_production() -> bool:
     return get_auth_settings().app_env.strip().lower() == "production"
+
+
+def get_provisioning_user(
+    session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
+    db: Session = Depends(get_db),
+) -> Tuple[AdminUser, Tenant]:
+    """Authorize only the restricted self-service provisioning surface."""
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    now = datetime.now(timezone.utc)
+    session = (
+        db.query(AdminSession)
+        .filter(
+            AdminSession.id == session_id,
+            AdminSession.expires_at > now,
+            AdminSession.is_revoked.is_(False),
+            AdminSession.session_scope == "provisioning",
+        )
+        .first()
+    )
+    if session is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
+    tenant = db.query(Tenant).filter(Tenant.id == session.tenant_id).first()
+    if (
+        user is None
+        or user.status != "active"
+        or user.role != "owner"
+        or tenant is None
+        or tenant.lifecycle_status != "provisioning"
+    ):
+        raise HTTPException(status_code=403, detail="Provisioning access denied")
+    return user, tenant
 
 
 # Sentinel wecom_user_id prefix used for password-mode AdminUser rows.

@@ -34,12 +34,19 @@ class Tenant(Base):
     __tablename__ = "tenants"
     __table_args__ = (
         UniqueConstraint("slug", name="uq_tenants_slug"),
+        CheckConstraint(
+            "lifecycle_status IN ('provisioning', 'active', 'suspended')",
+            name="ck_tenants_lifecycle_status",
+        ),
     )
 
     id = Column(String(36), primary_key=True)
     name = Column(String(255), nullable=False)
     slug = Column(String(128), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
+    lifecycle_status = Column(
+        String(16), nullable=False, default="active", server_default=text("'active'")
+    )
     onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -180,7 +187,34 @@ class WecomOrganizationClaim(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     confirmed_at = Column(DateTime(timezone=True), nullable=True)
     consumed_at = Column(DateTime(timezone=True), nullable=True)
+    provisioned_tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=True)
+    provisioning_session_id = Column(String(36), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ThirdPartyOrganizationBinding(Base):
+    """Authorized third-party app installation, separate from archive config."""
+
+    __tablename__ = "third_party_organization_bindings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_third_party_binding_tenant"),
+        UniqueConstraint("corp_id", name="uq_third_party_binding_corp"),
+        CheckConstraint(
+            "authorization_mode = 'admin'",
+            name="ck_third_party_binding_admin_mode",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    corp_id = Column(String(64), nullable=False)
+    agent_id = Column(String(64), nullable=True)
+    permanent_code_encrypted = Column(Text, nullable=False)
+    authorization_mode = Column(String(16), nullable=False, server_default=text("'admin'"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class RetentionConfig(Base):
@@ -353,6 +387,10 @@ class AdminSession(Base):
     __tablename__ = "admin_sessions"
     __table_args__ = (
         Index("ix_admin_sessions_expires_at", "expires_at"),
+        CheckConstraint(
+            "session_scope IN ('admin', 'provisioning')",
+            name="ck_admin_sessions_scope",
+        ),
     )
 
     id = Column(String(36), primary_key=True)
@@ -363,6 +401,9 @@ class AdminSession(Base):
         String(36), ForeignKey("tenants.id"), nullable=False, index=True
     )
     wecom_user_id = Column(String(64), nullable=False)
+    session_scope = Column(
+        String(16), nullable=False, default="admin", server_default=text("'admin'")
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

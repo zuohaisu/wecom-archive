@@ -98,7 +98,8 @@ CREATE TABLE tenant_wecom_configs (
 CREATE TABLE admin_sessions (
     id TEXT PRIMARY KEY, admin_user_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
     wecom_user_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TEXT NOT NULL, is_revoked INTEGER NOT NULL DEFAULT 0
+    expires_at TEXT NOT NULL, is_revoked INTEGER NOT NULL DEFAULT 0,
+    session_scope TEXT NOT NULL DEFAULT 'admin'
 );
 CREATE TABLE reachability_audit_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, public_id TEXT NOT NULL UNIQUE,
@@ -354,7 +355,7 @@ def test_router_count() -> None:
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
     # RND-344 adds the formal /dashboard HTML route.
-    assert route_count == 97
+    assert route_count == 100
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -375,6 +376,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/forgot-password",
             "/admin/login",
             "/admin/organization/confirm",
+            "/admin/provisioning",
+            "/admin/provisioning/settings",
             "/admin/media",
             "/admin/messages",
             "/admin/messages/{msgid}",
@@ -448,6 +451,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/tenants/usage",
             "/api/platform/tenants/{tenant_id}",
             "/api/platform/tenants/{tenant_id}/connectivity-check",
+            "/api/provisioning/status",
             "/api/search/contacts",
             "/api/search/messages",
             "/api/wecom/archive/events",
@@ -495,6 +499,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/forgot-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/login", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/organization/confirm", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/provisioning", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/provisioning/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/media", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages/{msgid}", frozenset({"GET"}), "None", "HTMLResponse"),
@@ -701,6 +707,7 @@ def test_route_snapshot_with_real_model_names() -> None:
             "TenantConnectivityCheckOut",
             "None",
         ),
+        ("/api/provisioning/status", frozenset({"GET"}), "dict", "None"),
         (
             "/api/search/contacts",
             frozenset({"GET"}),
