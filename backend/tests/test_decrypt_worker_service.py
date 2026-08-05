@@ -28,7 +28,7 @@ import inspect
 
 import pytest
 
-from app.db.models import ArchiveMessageRecipient, MessageRevocation
+from app.db.models import ArchiveMessageRecipient, ExternalContactRefreshTask, MessageRevocation
 from app.services import decrypt_worker as decrypt_worker_module
 from app.services.decrypt_isolation import IsolatedDecryptResult
 from app.services.decrypt_worker import DecryptCommitError, run_decrypt_once
@@ -191,6 +191,58 @@ def test_tenant_a_failures_never_mutate_tenant_b_committed_data(worker_db, rsa_k
     assert a_msg.decrypt_status == "failed"
     assert b_msg.decrypt_status == "success"
     assert b_msg.content_text == "already decrypted"
+
+
+def test_only_inbound_direct_external_messages_enqueue_contact_refresh(
+    worker_db, rsa_keys
+) -> None:
+    """Group and outbound traffic never become external-contact API work."""
+    ExternalContactRefreshTask.__table__.create(worker_db.bind)
+    priv, pub = rsa_keys
+    sdk = FakeWecomSdk()
+    _make_pending(worker_db, _TENANT_A, pub, "inbound-direct", seq=1)
+    _make_pending(worker_db, _TENANT_A, pub, "inbound-group", seq=2)
+    _make_pending(worker_db, _TENANT_A, pub, "outbound-direct", seq=3)
+    sdk.set_decrypt_response(
+        "inbound-direct",
+        {
+            "msgtype": "text",
+            "from": "wma-external",
+            "tolist": ["staff_a"],
+            "roomid": "",
+            "msgtime": 100,
+            "text": {"content": "hi"},
+        },
+    )
+    sdk.set_decrypt_response(
+        "inbound-group",
+        {
+            "msgtype": "text",
+            "from": "wma-external",
+            "tolist": ["staff_a"],
+            "roomid": "room-001",
+            "msgtime": 101,
+            "text": {"content": "hi"},
+        },
+    )
+    sdk.set_decrypt_response(
+        "outbound-direct",
+        {
+            "msgtype": "text",
+            "from": "staff_a",
+            "tolist": ["wma-external"],
+            "roomid": "",
+            "msgtime": 102,
+            "text": {"content": "hi"},
+        },
+    )
+
+    summary = run_decrypt_once(worker_db, _TENANT_A, "fake-lib", priv, _PUBKEY_VER, sdk=sdk)
+
+    task = worker_db.query(ExternalContactRefreshTask).one()
+    assert summary.external_contact_refresh_enqueued == 1
+    assert task.external_userid == "wma-external"
+    assert task.source == "inbound-direct-message"
 
 
 # ---------------------------------------------------------------------------

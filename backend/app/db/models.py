@@ -1262,6 +1262,53 @@ class ExternalContact(Base):
     )
 
 
+class ExternalContactRefreshTask(Base):
+    """Durable, coalesced external-contact metadata refresh request.
+
+    The task contains only the bounded external identifier needed to call the
+    WeCom API. It is intentionally separate from ``external_contacts`` so an
+    incoming direct message can request a lookup even when WeCom has not yet
+    made that user a readable external-contact relationship.
+    """
+
+    __tablename__ = "external_contact_refresh_tasks"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "external_userid",
+            name="uq_external_contact_refresh_tasks_tenant_external_userid",
+        ),
+        Index(
+            "ix_external_contact_refresh_tasks_tenant_ready",
+            "tenant_id",
+            "state",
+            "next_attempt_at",
+            "id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    external_userid = Column(String(64), nullable=False)
+    source = Column(String(32), nullable=False)
+    state = Column(String(16), nullable=False, server_default=text("'pending'"))
+    attempt_count = Column(Integer, nullable=False, server_default=text("0"))
+    next_attempt_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    last_error_class = Column(String(32), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class ExternalContactFollow(Base):
     """One tenant-scoped employee-to-external-contact follow relationship."""
 

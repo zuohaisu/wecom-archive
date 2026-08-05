@@ -139,38 +139,6 @@ _DECRYPT_SCRIPT = os.path.join(_SCRIPTS_DIR, "decrypt_wecom_messages_once.py")
 _REACHABILITY_AUTOMATION_SCRIPT = os.path.join(
     _SCRIPTS_DIR, "run_reachability_automation_once.py"
 )
-_EXTERNAL_CONTACT_SYNC_MODULE = "app.services.external_contact_sync"
-
-
-def _run_external_contact_reconciliation() -> None:
-    """Best-effort full identity reconciliation after timer or manual sync.
-
-    Callback events refresh one changed customer immediately.  Timer runs
-    remain the durable fallback, while a user-requested archive sync must
-    also refresh the directory so its contacts page and conversation labels
-    do not remain stale until the next timer.  This optional API never turns
-    a successful archive sync/decrypt run into a failure.
-    """
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-m", _EXTERNAL_CONTACT_SYNC_MODULE],
-            cwd=_BACKEND_DIR,
-            capture_output=False,
-            check=False,
-        )
-    except Exception:  # noqa: BLE001 -- best-effort identity reconciliation
-        print(
-            "[WARN] archive_worker external_contact_reconciliation status=error",
-            flush=True,
-        )
-        return
-    status = "finished" if proc.returncode == 0 else "failed"
-    print(
-        f"[INFO] archive_worker external_contact_reconciliation status={status}",
-        flush=True,
-    )
-
-
 def _run_best_effort_reachability_automation() -> None:
     """Run incremental diagnosis without changing archive-worker truth."""
     try:
@@ -267,8 +235,6 @@ def main() -> None:
             print(f"[INFO] archive_worker trigger_source={source} trigger=accepted", flush=True)
             _run_script(_SYNC_SCRIPT, "sync_wecom_archive_once.py")
             _run_script(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py")
-            if source in {"timer", "manual"}:
-                _run_external_contact_reconciliation()
             _run_best_effort_reachability_automation()
             completed = True
         finally:

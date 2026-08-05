@@ -33,6 +33,10 @@ from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
+from app.services.external_contact_refresh_trigger import (
+    ExternalContactRefreshDispatch,
+    enqueue_external_contact_refresh,
+)
 from app.message_type_registry import ParserStrategy, get_parser_strategy
 from app.revoke_reconciliation import (
     reconcile_pending_revocations,
@@ -79,6 +83,8 @@ class DecryptRunSummary:
     sigsegv: int = 0
     isolation_other: int = 0
     malformed_input: int = 0
+    external_contact_refresh_enqueued: int = 0
+    external_contact_refresh_ids: set[str] = field(default_factory=set, repr=False)
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +258,21 @@ def _normalise_fields(
         "sdkfileid": sdkfileid,
         "structured_content": structured_content,
     }
+
+
+def _is_inbound_direct_external_contact(sender: object, roomid: object) -> bool:
+    """Recognise a WeCom external-user candidate without touching the network.
+
+    Only direct inbound messages are eligible: groups are explicitly excluded
+    and a sent message's sender is an internal archive seat. The ``wm``/``wo``
+    prefixes cover WeCom external-user identifiers while avoiding arbitrary
+    internal archive identities becoming API work.
+    """
+    if not isinstance(sender, str) or not sender or len(sender) > 64:
+        return False
+    if isinstance(roomid, str) and roomid.strip():
+        return False
+    return sender.startswith(("wm", "wo"))
 
 
 def _upsert_recipients(
@@ -542,6 +563,9 @@ def run_decrypt_once(
         record.structured_content = normalised["structured_content"]
         record.decrypt_status = "success"
 
+        if _is_inbound_direct_external_contact(record.sender, record.roomid):
+            summary.external_contact_refresh_ids.add(record.sender)
+
         # Upsert recipient rows — inherit tenant_id from the parent message.
         # Non-fatal by design (a recipient-persistence failure must not
         # block decrypt success), but silently swallowing it here used to
@@ -588,6 +612,26 @@ def run_decrypt_once(
     # repair_missing_recipients above and the main query at the top of
     # this function.
     summary.revocations_reconciled = reconcile_pending_revocations(session, tenant_id)
+
+    # Persist coalesced refresh work in the same outer transaction as the
+    # successfully normalised messages. The caller signals the independent
+    # worker only after this commit; an unavailable queue never invalidates a
+    # successful archive decrypt run because the daily full reconciliation is
+    # the durable fallback.
+    if summary.external_contact_refresh_ids:
+        try:
+            with session.begin_nested():
+                for external_userid in summary.external_contact_refresh_ids:
+                    outcome = enqueue_external_contact_refresh(
+                        session,
+                        tenant_id,
+                        external_userid,
+                        source="inbound-direct-message",
+                    )
+                    if outcome is not ExternalContactRefreshDispatch.FAILED:
+                        summary.external_contact_refresh_enqueued += 1
+        except Exception:
+            summary.external_contact_refresh_enqueued = 0
 
     # A strict empty poll has no operator value. Keep one system event for a
     # non-empty batch, repair/reconciliation work, or any anomalous outcome.

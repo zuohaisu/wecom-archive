@@ -185,6 +185,8 @@ def _persist_external_contact_detail(
     detail: dict,
     tag_names: dict[str, str],
     interaction_stats: Optional[tuple[Optional[datetime], Optional[int]]] = None,
+    *,
+    update_interaction_stats: bool = True,
 ) -> tuple[bool, IdentitySyncResult]:
     """Write one full detail payload in the caller's transaction/savepoint."""
     existed = (
@@ -197,8 +199,10 @@ def _persist_external_contact_detail(
         is not None
     )
     values = _payload_values(detail, tag_names)
-    if interaction_stats is None:
+    if update_interaction_stats and interaction_stats is None:
         interaction_stats = _interaction_stats(session, tenant_id, external_userid)
+    if interaction_stats is None:
+        interaction_stats = (None, None)
     last_interaction_at, message_count = interaction_stats
     contact = upsert_external_contact(
         session,
@@ -206,6 +210,7 @@ def _persist_external_contact_detail(
         external_userid,
         last_interaction_at=last_interaction_at,
         message_count=message_count,
+        update_interaction_stats=update_interaction_stats,
         **values,
     )
     identity_result = sync_external_contact_identity(session, contact, detail)
@@ -218,6 +223,8 @@ def refresh_external_contact(
     corp_id: str,
     external_secret: str,
     external_userid: str,
+    *,
+    update_interaction_stats: bool = False,
 ) -> RefreshResult:
     """Fetch and persist one callback-targeted external contact.
 
@@ -245,6 +252,7 @@ def refresh_external_contact(
             clean_external_userid,
             detail,
             tag_names,
+            update_interaction_stats=update_interaction_stats,
         )
     return RefreshResult(
         found=True,
@@ -259,6 +267,8 @@ def sync_external_contacts(
     tenant_id: str,
     corp_id: str,
     external_secret: str,
+    *,
+    commit_every: Optional[int] = None,
 ) -> RunSummary:
     """Synchronize one tenant; callers provide credentials and transaction scope."""
     summary = RunSummary()
@@ -311,6 +321,12 @@ def sync_external_contacts(
         except Exception:  # noqa: BLE001 -- never log raw response/contact data
             summary.failed += 1
 
+        if commit_every and summary.total % commit_every == 0:
+            # Full reconciliation is intentionally resumable: each contact is
+            # idempotent, so a long first directory import should expose prior
+            # batches rather than hold one large transaction until the end.
+            session.commit()
+
     return summary
 
 
@@ -356,7 +372,13 @@ def main() -> int:
     try:
         with Session(engine) as session:
             tenant_id = _require_tenant_id(session, corp_id)
-            summary = sync_external_contacts(session, tenant_id, corp_id, external_secret)
+            summary = sync_external_contacts(
+                session,
+                tenant_id,
+                corp_id,
+                external_secret,
+                commit_every=100,
+            )
             session.commit()
     except Exception as exc:
         logger.error("External-contact sync failed: %s", type(exc).__name__)

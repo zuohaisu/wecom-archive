@@ -21,6 +21,8 @@ def upsert_external_contact(
     owner_wecom_userid: Optional[str],
     last_interaction_at: Optional[datetime],
     message_count: Optional[int],
+    *,
+    update_interaction_stats: bool = True,
 ) -> ExternalContact:
     """Create or update an external contact scoped to one tenant.
 
@@ -68,8 +70,9 @@ def upsert_external_contact(
         contact.source = source
     if contact.owner_wecom_userid != owner_wecom_userid:
         contact.owner_wecom_userid = owner_wecom_userid
-    if contact.last_interaction_at != last_interaction_at:
-        contact.last_interaction_at = last_interaction_at
-    if contact.message_count != message_count:
-        contact.message_count = message_count
+    if update_interaction_stats:
+        if contact.last_interaction_at != last_interaction_at:
+            contact.last_interaction_at = last_interaction_at
+        if contact.message_count != message_count:
+            contact.message_count = message_count
     return contact
