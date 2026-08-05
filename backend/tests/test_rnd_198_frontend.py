@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +24,9 @@ from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_js_source
 
 _REVIEW_CONSOLE_JS = review_console_js_source()
+_REVIEW_CONSOLE_TEMPLATE = (
+    Path(__file__).resolve().parents[1] / "app/web/templates/review_console.html"
+).read_text(encoding="utf-8")
 
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="node not available in this environment")
@@ -70,6 +74,7 @@ def _bundle() -> str:
         _extract(r"function renderNewsCard\(m\)\{.*?\n\}", "renderNewsCard()"),
         _extract(r"function renderMiniprogramCard\(m\)\{.*?\n\}", "renderMiniprogramCard()"),
         _extract(r"function sphfeedTypeLabel\(feedType\)\{.*?\n\}", "sphfeedTypeLabel()"),
+        _extract(r"function sphfeedThumbnailAccessUrl\(m\)\{.*?\n\}", "sphfeedThumbnailAccessUrl()"),
         _extract(r"function renderSphfeedCard\(m\)\{.*?\n\}", "renderSphfeedCard()"),
         # Archive Console v2 (design import): todo/vote/collect/meeting/
         # schedule/switch_corp (+ audio_archive/audio_doc, stubbed below)
@@ -351,7 +356,7 @@ def test_switch_corp_card_renders_corp_name() -> None:
     assert "Acme Inc." in html
 
 
-def test_sphfeed_card_renders_video_channel_metadata_without_a_player() -> None:
+def test_sphfeed_card_renders_share_card_metadata_and_explicitly_disables_playback() -> None:
     msg = _msg(
         "sphfeed", "structured", renderer_strategy="structured_card", normalized_type="sphfeed",
         display_label_key="messageType.sphfeed",
@@ -368,7 +373,57 @@ def test_sphfeed_card_renders_video_channel_metadata_without_a_player() -> None:
     assert "Travel Channel" in html
     assert "Video post" in html
     assert "A mountain video" in html
+    assert "Video Channel messages cannot be played" in html
+    assert "sphfeed-cover-placeholder" in html
     assert "<video" not in html
+    assert "rich-media" not in html
+
+
+def test_sphfeed_card_displays_only_a_trusted_server_thumbnail() -> None:
+    msg = _msg(
+        "sphfeed", "structured", renderer_strategy="structured_card", normalized_type="sphfeed",
+        display_label_key="messageType.sphfeed",
+        thumbnail_access_url="/api/conversations/room-1/messages/msg-1/media/access?variant=thumb",
+        structured_content={
+            "fields": {"feed_type": 4, "sph_name": "Travel Channel", "feed_desc": "A mountain video"}
+        },
+    )
+    html = _render(msg)
+    assert 'class="sphfeed-cover-img"' in html
+    assert 'src="/api/conversations/room-1/messages/msg-1/media/access?variant=thumb"' in html
+    assert "Thumbnail preview only" in html
+    assert "Video Channel messages cannot be played" in html
+    assert "<video" not in html
+
+
+def test_sphfeed_card_rejects_external_thumbnail_url() -> None:
+    msg = _msg(
+        "sphfeed", "structured", renderer_strategy="structured_card", normalized_type="sphfeed",
+        display_label_key="messageType.sphfeed",
+        thumbnail_access_url="https://untrusted.example/cover.jpg",
+        structured_content={"fields": {"feed_type": 2, "sph_name": "Channel", "feed_desc": "Post"}},
+    )
+    html = _render(msg)
+    assert "untrusted.example" not in html
+    assert "sphfeed-cover-placeholder" in html
+    assert "Video Channel messages cannot be played" in html
+
+
+def test_sphfeed_fallback_still_explains_playback_is_unavailable() -> None:
+    msg = _msg(
+        "sphfeed", "structured", renderer_strategy="structured_card", normalized_type="sphfeed",
+        display_label_key="messageType.sphfeed",
+    )
+    html = _render(msg)
+    assert "Video Channel messages cannot be played" in html
+    assert "<video" not in html
+
+
+def test_sphfeed_share_card_styles_have_no_play_affordance() -> None:
+    assert ".structured-card-sphfeed" in _REVIEW_CONSOLE_TEMPLATE
+    assert ".sphfeed-cover-placeholder" in _REVIEW_CONSOLE_TEMPLATE
+    assert ".sphfeed-playback-unavailable" in _REVIEW_CONSOLE_TEMPLATE
+    assert ".sphfeed-play-button" not in _REVIEW_CONSOLE_TEMPLATE
 
 
 def test_sphfeed_card_escapes_channel_metadata() -> None:

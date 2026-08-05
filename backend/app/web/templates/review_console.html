@@ -223,6 +223,26 @@ a{color:var(--link-color)}
 .structured-card-markdown ul{margin:.2rem 0 .2rem 1.1rem}
 .structured-card-markdown li{margin-bottom:.1rem}
 
+/* Video Channels archive card: modeled on a chat share card (cover, type,
+   source, description), but it intentionally has neither a play button nor
+   a click-through action. The archive protocol currently cannot prove either
+   capability. */
+.structured-card-sphfeed{max-width:340px;padding:0;border-color:#e7e9ef;box-shadow:0 1px 2px rgba(20,32,52,.04)}
+.structured-card-sphfeed .sc-hd{margin:0;border-radius:9px 9px 0 0;background:#fbfcfe}
+.sphfeed-cover{position:relative;height:142px;background:linear-gradient(135deg,#e8f4ff 0%,#f5f0ff 52%,#fff2e7 100%);overflow:hidden}
+.sphfeed-cover-img{display:block;width:100%;height:100%;object-fit:cover}
+.sphfeed-cover-placeholder{height:100%;display:flex;flex-direction:column;justify-content:center;gap:7px;padding:18px;color:#58708a;background:radial-gradient(circle at 78% 26%,rgba(22,119,255,.18),transparent 23%),radial-gradient(circle at 18% 80%,rgba(139,92,246,.15),transparent 28%)}
+.sphfeed-cover-placeholder span{font-size:12px;font-weight:600;letter-spacing:.04em}
+.sphfeed-cover-placeholder strong{font-size:24px;color:#324a64;letter-spacing:.01em}
+.sphfeed-cover-chip{position:absolute;right:10px;bottom:10px;padding:3px 8px;border-radius:999px;background:rgba(18,29,42,.7);color:#fff;font-size:11px;line-height:1.2}
+.sphfeed-body{padding:11px 12px 12px}
+.sphfeed-type-chip{display:inline-block;padding:2px 7px;margin-bottom:7px;border-radius:4px;background:#eef6ff;color:#2873b7;font-size:11px;line-height:1.35}
+.sphfeed-source{font-size:14px;font-weight:600;color:#263849;word-break:break-word;margin-bottom:5px}
+.structured-card-sphfeed .structured-card-desc{line-height:1.55;margin-bottom:8px;color:#586675}
+.sphfeed-thumbnail-note{font-size:11px;color:#8a96a3;margin:2px 0 7px}
+.sphfeed-playback-unavailable{display:flex;align-items:center;gap:5px;border-top:1px solid #edf0f4;padding-top:8px;color:#7d8792;font-size:11.5px;line-height:1.45}
+.sphfeed-playback-unavailable:before{content:'i';display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border:1px solid currentColor;border-radius:50%;font-size:10px;font-family:serif;font-weight:700;flex-shrink:0}
+
 /* Unified interactive/business card header — dot + type label + raw msgtype
    badge, shared by todo/vote/collect/meeting/schedule/switch_corp/
    audio_archive/audio_doc (see message-renderers.js's structuredCardHeader). */

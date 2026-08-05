@@ -70,7 +70,9 @@ function fmtCoord(n){return (typeof n==='number'&&!isNaN(n))?n.toFixed(6):'';}
 function renderStructuredFallback(m){
   var extra=(m.normalized_type==='audio_doc')
     ?I18N.t('card.audioDoc.playbackUnavailable')
-    :I18N.t('card.generic.unavailable');
+    :(m.normalized_type==='sphfeed')
+      ?I18N.t('card.sphfeed.playbackUnavailable')
+      :I18N.t('card.generic.unavailable');
   return '<div class="structured-card structured-card-fallback">'
     +'<div class="structured-card-type-label">'+esc(I18N.t(m.display_label_key))+'</div>'
     +'<div class="structured-card-degraded">'+esc(extra)+'</div>'
@@ -211,23 +213,43 @@ function sphfeedTypeLabel(feedType){
   if(feedType===9)return I18N.t('card.sphfeed.live');
   return I18N.t('card.sphfeed.unknown');
 }
+function sphfeedThumbnailAccessUrl(m){
+  // A Video Channels archive message currently has no documented cover URL.
+  // If a future backend obtains a generated thumbnail, accept only our own
+  // authenticated media-access route — never a URL from the archived raw
+  // payload, which is intentionally not sent to this UI.
+  var url=m&&m.thumbnail_access_url;
+  return (typeof url==='string'&&/^\/api\/conversations\/[^?#]+\/messages\/[^?#]+\/media\/access(?:[?#]|$)/.test(url))?url:null;
+}
 // WeCom's sphfeed payload has no playback URL or SDK media id.  This is a
-// faithful archive card (type, account and description), never a fake video
-// player or a link reconstructed from untrusted content.
+// faithful sharing-style archive card: thumbnail when the server has one,
+// type/account/description otherwise, but never a fake player or a link
+// reconstructed from untrusted content.
 function renderSphfeedCard(m){
   var f=m.structured_content&&m.structured_content.fields;
   if(!f)return renderStructuredFallback(m);
-  var title=f.sph_name||I18N.t('messageType.sphfeed');
+  var typeLabel=sphfeedTypeLabel(f.feed_type);
+  var thumbnail=sphfeedThumbnailAccessUrl(m);
   var html='<div class="structured-card structured-card-sphfeed">'
     +structuredCardHeader('messageType.sphfeed',m.msgtype,CARD_DOT_COLORS.sphfeed)
-    +'<div class="structured-card-title">'+esc(title)+'</div>'
-    +'<div class="structured-card-meta">'+esc(sphfeedTypeLabel(f.feed_type))+'</div>';
+    +'<div class="sphfeed-cover">';
+  if(thumbnail){
+    html+='<img class="sphfeed-cover-img" src="'+esc(thumbnail)+'" alt="'+esc(I18N.t('card.sphfeed.thumbnailAlt'))+'" loading="lazy" onerror="this.remove()">'
+      +'<span class="sphfeed-cover-chip">'+esc(typeLabel)+'</span>';
+  }else{
+    html+='<div class="sphfeed-cover-placeholder" aria-hidden="true"><span>'+esc(I18N.t('messageType.sphfeed'))+'</span><strong>'+esc(typeLabel)+'</strong></div>';
+  }
+  html+='</div><div class="sphfeed-body">'
+    +'<div class="sphfeed-type-chip">'+esc(typeLabel)+'</div>';
+  if(f.sph_name)html+='<div class="sphfeed-source">'+esc(I18N.t('card.sphfeed.source'))+esc(f.sph_name)+'</div>';
   if(f.feed_desc){
     html+='<div class="structured-card-desc">'+esc(f.feed_desc)+'</div>';
   }else{
     html+='<div class="structured-card-degraded">'+esc(I18N.t('card.sphfeed.empty'))+'</div>';
   }
-  html+='</div>';
+  if(thumbnail)html+='<div class="sphfeed-thumbnail-note">'+esc(I18N.t('card.sphfeed.thumbnailPreview'))+'</div>';
+  html+='<div class="sphfeed-playback-unavailable" role="status">'+esc(I18N.t('card.sphfeed.playbackUnavailable'))+'</div>'
+    +'</div></div>';
   return html;
 }
 // Archive Console v2 (Message Types spec, section 四 · 互动业务类): a
