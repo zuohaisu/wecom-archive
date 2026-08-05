@@ -264,6 +264,7 @@ def main() -> None:
                 private_key,
                 expected_pubkey_ver,
                 lib_path=lib_path,
+                corp_id=corp_id,
             )
         except DecryptCommitError as exc:
             print(f"[FAIL] Database commit failed: {exc}", flush=True)

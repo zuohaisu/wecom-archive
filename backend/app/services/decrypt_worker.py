@@ -46,6 +46,9 @@ from app.services.decrypt_isolation import (
     MalformedDecryptInput,
     decrypt_message_isolated,
 )
+from app.services.group_chat_metadata_refresh_trigger import (
+    dispatch_group_chat_metadata_refresh,
+)
 from app.structured_message_parser import parse_structured_content
 
 
@@ -426,6 +429,7 @@ def run_decrypt_once(
     expected_pubkey_ver: int,
     sdk=_default_sdk,
     lib_path: "str | None" = None,
+    corp_id: "str | None" = None,
 ) -> DecryptRunSummary:
     """Decrypt every pending/failed archive_messages row for *tenant_id*,
     run the recipient/revocation repair scans, and commit.
@@ -541,6 +545,17 @@ def run_decrypt_once(
         # full decrypted envelope) — additive, does not touch SF-1.
         record.structured_content = normalised["structured_content"]
         record.decrypt_status = "success"
+
+        # A customer-group lookup is an ancillary, bounded background task.
+        # It observes only the normalized room key and never delays, changes,
+        # or retries this archive/decrypt transaction.
+        if normalised["roomid"] and corp_id:
+            try:
+                dispatch_group_chat_metadata_refresh(
+                    tenant_id, corp_id, normalised["roomid"]
+                )
+            except Exception:  # noqa: BLE001 -- archive success is authoritative
+                pass
 
         # Upsert recipient rows — inherit tenant_id from the parent message.
         # Non-fatal by design (a recipient-persistence failure must not

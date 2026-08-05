@@ -112,6 +112,18 @@ CREATE TABLE reachability_audit_runs (
 );
 CREATE UNIQUE INDEX uq_reachability_audit_runs_tenant_checking
 ON reachability_audit_runs(tenant_id) WHERE status = 'checking';
+CREATE TABLE group_chat_metadata (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    roomid TEXT NOT NULL,
+    display_name TEXT,
+    source TEXT NOT NULL DEFAULT 'wecom_external_groupchat',
+    sync_status TEXT NOT NULL DEFAULT 'unresolved',
+    last_checked_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    UNIQUE(tenant_id, roomid)
+);
 """
 
 

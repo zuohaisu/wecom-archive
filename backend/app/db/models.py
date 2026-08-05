@@ -802,6 +802,37 @@ class ArchiveMessage(Base):
     )
 
 
+class GroupChatMetadata(Base):
+    """Tenant-scoped current metadata for an archived WeCom group chat.
+
+    ``roomid`` remains the immutable archive correlation key.  ``display_name``
+    is only a validated current name from the customer-group API; no message
+    payload, roster, or name history is retained here.
+    """
+
+    __tablename__ = "group_chat_metadata"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "roomid", name="uq_group_chat_metadata_tenant_roomid"
+        ),
+        Index("ix_group_chat_metadata_tenant_roomid", "tenant_id", "roomid"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    roomid = Column(String(64), nullable=False)
+    display_name = Column(Text, nullable=True)
+    source = Column(String(64), nullable=False, default="wecom_external_groupchat")
+    sync_status = Column(String(32), nullable=False, default="unresolved")
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ArchiveMessageRecipient(Base):
     """
     Per-receiver lookup rows derived from archive_messages.tolist.

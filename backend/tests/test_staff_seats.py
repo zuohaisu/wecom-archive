@@ -172,6 +172,18 @@ CREATE TABLE message_revocations (
     created_at TEXT,
     updated_at TEXT
 );
+CREATE TABLE group_chat_metadata (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    roomid TEXT NOT NULL,
+    display_name TEXT,
+    source TEXT NOT NULL DEFAULT 'wecom_external_groupchat',
+    sync_status TEXT NOT NULL DEFAULT 'unresolved',
+    last_checked_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    UNIQUE(tenant_id, roomid)
+);
 """
 # RND-158 Phase 2 QA round 7 (recovery note): media_files and
 # message_revocations added so the real GET /api/conversations/{id}/messages

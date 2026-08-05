@@ -29,6 +29,10 @@ function fetchTimelinePage(before, isInitial){
     .then(function(data){
       if(!data)return;
       if(timelineConvId!==requestConvId||timelineRequestGen!==gen)return;
+      if(data.room_display_name){
+        selConvName=data.room_display_name;
+        document.getElementById('timeline-header').textContent=I18N.t('console.timelineHeader')+' — '+data.room_display_name;
+      }
       timelineMsgs=before?data.messages.concat(timelineMsgs):data.messages;
       timelineHasOlder=data.pagination.has_older;
       timelineNextBefore=data.pagination.next_before;

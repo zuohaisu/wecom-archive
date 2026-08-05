@@ -74,6 +74,7 @@ def _session_with_two_tenants():
                 "tenant-b": [("staff_alice", "Mallory"), ("contact_eve", "Eve")],
             },
             "archive_message_id": {"tenant-a": [], "tenant-b": []},
+            "roomid": {"tenant-a": [], "tenant-b": []},
         }
     )
 
