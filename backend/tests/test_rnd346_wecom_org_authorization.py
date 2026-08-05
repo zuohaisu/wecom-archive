@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import json
+
+import httpx
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db.base import Base
+from app.db.models import (
+    AdminLoginIdentity,
+    AdminSession,
+    AdminUser,
+    Tenant,
+    TenantWecomConfig,
+    WecomAuthorizationAttempt,
+    WecomAuthorizationProof,
+)
+from app.db.session import get_db
+from app.main import create_app
+from app.services.wecom_org_authorization import (
+    AuthorizedOrganization,
+    OfficialWecomOrganizationAuthorizationProvider,
+    WecomAuthorizationError,
+    get_wecom_org_authorization_provider,
+)
+from app.settings import WecomThirdPartySettings
+
+
+class FakeProvider:
+    def __init__(self, *, mode: str = "admin"):
+        self.mode = mode
+        self.last_state = ""
+
+    def build_install_url(self, state: str) -> str:
+        self.last_state = state
+        return f"https://provider.invalid/install?state={state}"
+
+    def exchange(self, authorization_code: str) -> AuthorizedOrganization:
+        if authorization_code == "reject":
+            raise WecomAuthorizationError("rejected")
+        return AuthorizedOrganization(
+            corp_id="ww-sensitive-corp",
+            corp_name="Official Corp Name",
+            authorized_subject="management-admin",
+            agent_id="1000002",
+            permanent_code="sensitive-permanent-code",
+            authorization_mode=self.mode,
+        )
+
+
+def test_official_provider_uses_third_party_admin_list_http_contract():
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        requests.append(
+            {
+                "method": request.method,
+                "path": request.url.path,
+                "query": dict(request.url.params),
+                "body": body,
+            }
+        )
+        payloads = {
+            "/cgi-bin/service/get_suite_token": {
+                "errcode": 0,
+                "suite_access_token": "suite-token",
+            },
+            "/cgi-bin/service/v2/get_permanent_code": {
+                "errcode": 0,
+                "auth_corp_info": {"corpid": "ww-official", "corp_name": "Official Corp"},
+                "auth_user_info": {"userid": "management-admin"},
+                "permanent_code": "permanent-code",
+            },
+            "/cgi-bin/service/v2/get_auth_info": {
+                "errcode": 0,
+                "auth_info": {"agent": [{"agentid": 1000002, "auth_mode": 0}]},
+            },
+            "/cgi-bin/service/get_admin_list": {
+                "errcode": 0,
+                "admin": [{"userid": "management-admin", "auth_type": 1}],
+            },
+        }
+        return httpx.Response(200, json=payloads[request.url.path])
+
+    settings = WecomThirdPartySettings(
+        wecom_third_party_suite_id="suite-id",
+        wecom_third_party_suite_secret="suite-secret",
+        wecom_third_party_suite_ticket="suite-ticket",
+        wecom_third_party_callback_url="https://console.example.test/callback",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+        provider = OfficialWecomOrganizationAuthorizationProvider(settings, http_client)
+        organization = provider.exchange("authorization-code")
+
+    assert organization.agent_id == "1000002"
+    assert requests[-1] == {
+        "method": "POST",
+        "path": "/cgi-bin/service/get_admin_list",
+        "query": {"suite_access_token": "suite-token"},
+        "body": {"auth_corpid": "ww-official", "agentid": 1000002},
+    }
+    assert all(request["path"] != "/cgi-bin/agent/get_admin_list" for request in requests)
+    assert all(request["path"] != "/cgi-bin/service/get_corp_token" for request in requests)
+
+
+def _client(monkeypatch, provider: FakeProvider):
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Tenant.__table__,
+            TenantWecomConfig.__table__,
+            AdminUser.__table__,
+            AdminLoginIdentity.__table__,
+            AdminSession.__table__,
+            WecomAuthorizationAttempt.__table__,
+            WecomAuthorizationProof.__table__,
+        ],
+    )
+    factory = sessionmaker(bind=engine)
+    app = create_app()
+
+    def override_db():
+        db = factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_wecom_org_authorization_provider] = lambda: provider
+    return TestClient(app), factory
+
+
+def test_authorization_creates_only_short_lived_server_side_proof(monkeypatch):
+    provider = FakeProvider()
+    client, factory = _client(monkeypatch, provider)
+    started = client.get("/api/auth/wecom/third-party/install", follow_redirects=False)
+    assert started.status_code == 302
+    assert provider.last_state and provider.last_state in started.headers["location"]
+
+    finished = client.get(
+        "/api/auth/wecom/third-party/callback",
+        params={"code": "one-use-code", "state": provider.last_state},
+        follow_redirects=False,
+    )
+    assert finished.status_code == 302
+    cookie = finished.headers["set-cookie"]
+    assert "HttpOnly" in cookie and "SameSite=lax" in cookie
+    for secret in ("ww-sensitive-corp", "Official Corp Name", "management-admin", "sensitive-permanent-code"):
+        assert secret not in cookie
+        assert secret not in finished.headers["location"]
+
+    with factory() as db:
+        proof = db.query(WecomAuthorizationProof).one()
+        assert proof.corp_name == "Official Corp Name"
+        assert proof.permanent_code_encrypted != "sensitive-permanent-code"
+        assert db.query(Tenant).count() == 0
+        assert db.query(TenantWecomConfig).count() == 0
+        assert db.query(AdminUser).count() == 0
+        assert db.query(AdminLoginIdentity).count() == 0
+        assert db.query(AdminSession).count() == 0
+
+
+def test_state_is_single_use_and_replay_has_no_new_proof(monkeypatch):
+    provider = FakeProvider()
+    client, factory = _client(monkeypatch, provider)
+    client.get("/api/auth/wecom/third-party/install", follow_redirects=False)
+    params = {"code": "one-use-code", "state": provider.last_state}
+    assert client.get("/api/auth/wecom/third-party/callback", params=params, follow_redirects=False).status_code == 302
+    replay = client.get("/api/auth/wecom/third-party/callback", params=params, follow_redirects=False)
+    assert replay.headers["location"] == "/admin/login?error=auth_failed"
+    with factory() as db:
+        assert db.query(WecomAuthorizationAttempt).one().status == "consumed"
+        assert db.query(WecomAuthorizationProof).count() == 1
+
+
+def test_member_authorization_fails_closed_without_proof(monkeypatch):
+    provider = FakeProvider(mode="member")
+    client, factory = _client(monkeypatch, provider)
+    client.get("/api/auth/wecom/third-party/install", follow_redirects=False)
+    response = client.get(
+        "/api/auth/wecom/third-party/callback",
+        params={"code": "one-use-code", "state": provider.last_state},
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == "/admin/login?error=auth_failed"
+    with factory() as db:
+        assert db.query(WecomAuthorizationProof).count() == 0

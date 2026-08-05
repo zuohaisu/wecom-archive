@@ -129,6 +129,41 @@ class TenantWecomConfig(Base):
     )
 
 
+class WecomAuthorizationAttempt(Base):
+    """Server-side, one-use CSRF state for a third-party app installation."""
+
+    __tablename__ = "wecom_authorization_attempts"
+
+    id = Column(String(36), primary_key=True)
+    state_hash = Column(String(64), nullable=False, unique=True)
+    status = Column(String(16), nullable=False, server_default=text("'pending'"))
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class WecomAuthorizationProof(Base):
+    """Short-lived trusted organization evidence; never exposed to a client."""
+
+    __tablename__ = "wecom_authorization_proofs"
+    __table_args__ = (
+        CheckConstraint("authorization_mode = 'admin'", name="ck_wecom_auth_proof_admin_mode"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    browser_token_hash = Column(String(64), nullable=False, unique=True)
+    corp_id = Column(String(64), nullable=False)
+    corp_name = Column(String(255), nullable=False)
+    authorized_subject = Column(String(128), nullable=False)
+    agent_id = Column(String(64), nullable=True)
+    authorization_mode = Column(String(16), nullable=False)
+    permanent_code_encrypted = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False, server_default=text("'pending'"))
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class RetentionConfig(Base):
     """Per-tenant message retention policy (RND-318)."""
 

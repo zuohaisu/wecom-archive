@@ -354,7 +354,7 @@ def test_router_count() -> None:
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
     # RND-344 adds the formal /dashboard HTML route.
-    assert route_count == 92
+    assert route_count == 94
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -425,6 +425,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/auth/wecom/login",
             "/api/auth/wecom/qr/callback",
             "/api/auth/wecom/qr/login",
+            "/api/auth/wecom/third-party/callback",
+            "/api/auth/wecom/third-party/install",
             "/api/contacts",
             "/api/conversations",
             "/api/conversations/{conversation_id}/detail",
@@ -612,6 +614,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/auth/wecom/login", frozenset({"GET"}), "None", "None"),
         ("/api/auth/wecom/qr/callback", frozenset({"GET"}), "None", "None"),
         ("/api/auth/wecom/qr/login", frozenset({"GET"}), "None", "None"),
+        ("/api/auth/wecom/third-party/callback", frozenset({"GET"}), "None", "RedirectResponse"),
+        ("/api/auth/wecom/third-party/install", frozenset({"GET"}), "None", "RedirectResponse"),
         ("/api/contacts", frozenset({"GET"}), "list[ContactOut]", "None"),
         ("/api/conversations", frozenset({"GET"}), "list[ConversationOut]", "None"),
         (
