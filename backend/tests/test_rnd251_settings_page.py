@@ -29,6 +29,7 @@ def test_settings_page_requires_session_and_renders_group_navigation() -> None:
 
     assert response.status_code == 200
     assert script_response.status_code == 200
+    assert '<a class="side-nav-item active" href="/admin/settings" data-i18n="nav.settings" aria-current="page"></a>' in response.text
     assert 'class="settings-nav stack gap-2"' in response.text
     assert '/web/static/settings.js?v=' in response.text
     for section in ("general", "account", "third-party", "storage", "wecom", "advanced"):
@@ -94,5 +95,5 @@ def test_settings_template_has_no_template_engine_syntax() -> None:
 
     assert "{%" not in source
     assert "{{" not in source
-    rendered = render_template("settings", i18n_script="")
+    rendered = render_template("settings", i18n_script="", sidenav="")
     assert not re.search(r"__[A-Z0-9_]+__", rendered)

@@ -1,0 +1,20 @@
+.v-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center}
+.v-backdrop{position:absolute;inset:0;background:rgba(8,12,18,.86);backdrop-filter:blur(3px)}
+.v-close{position:absolute;top:16px;right:20px;z-index:2;width:40px;height:40px;border-radius:999px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:1.75rem;line-height:1;cursor:pointer}
+.v-close:hover,.v-nav:hover{background:rgba(255,255,255,.22)}
+.v-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:2;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:2rem;width:44px;height:44px;border-radius:50%;cursor:pointer}
+.v-prev{left:16px}.v-next{right:16px}
+.v-body{position:relative;z-index:1;max-width:90vw;max-height:88vh;display:flex;align-items:center;justify-content:center}
+.v-media{max-width:90vw;max-height:88vh;object-fit:contain;border-radius:6px;box-shadow:0 18px 60px rgba(0,0,0,.35)}
+.v-media-audio{width:min(520px,80vw);padding:24px;border-radius:12px;background:#fff}
+.v-file{width:min(440px,82vw);padding:28px;border-radius:12px;background:#fff;color:#1f2329;box-shadow:0 18px 60px rgba(0,0,0,.35);display:flex;align-items:center;gap:16px}
+.v-file-icon{width:48px;height:48px;border-radius:9px;background:#e8f1fd;color:#0958d9;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.v-file-copy{min-width:0;flex:1}.v-file-name{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.v-file-meta{font-size:11.5px;color:#8a8f99;margin-top:4px}
+.v-file-download{height:32px;padding:0 12px;border-radius:7px;background:#1677ff;color:#fff;display:inline-flex;align-items:center;text-decoration:none;font-size:12.5px;white-space:nowrap}
+.v-file-download:hover{background:#0958d9;color:#fff;text-decoration:none}
+.v-loading,.v-error{color:#fff;font-size:.9rem;padding:2rem}
+.v-chatrecord{background:#fff;border-radius:8px;padding:1rem 1.25rem;max-width:520px;max-height:80vh;overflow-y:auto}
+.v-chatrecord-title{font-weight:700;font-size:1rem;margin-bottom:.6rem}
+.v-chatrecord-node{border-bottom:1px solid #f0f0f0;padding:.5rem 0}.v-chatrecord-node:last-child{border-bottom:none}
+.v-chatrecord-sender{font-size:.78rem;font-weight:600;color:#555}.v-chatrecord-time{font-size:.7rem;color:#bbb;margin-left:.4rem}
+@media(max-width:640px){.v-nav{width:36px;height:36px}.v-prev{left:8px}.v-next{right:8px}.v-file{flex-wrap:wrap}.v-file-download{width:100%;justify-content:center}}

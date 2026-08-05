@@ -110,6 +110,7 @@ def test_list_filters_exact_tags_and_resolves_owner_display_names(client: TestCl
     assert response.status_code == 200
     payload = response.json()
     assert payload["total"] == 3
+    assert payload["available_tags"] == ["VIP", "VIP2026", "普通", "重点客户"]
     items = {item["external_userid"]: item for item in payload["items"]}
     assert items["external-vip"]["tags"] == ["VIP", "重点客户"]
     assert items["external-vip"]["owner_display_name"] == "张三"
@@ -151,6 +152,7 @@ def test_pagination_and_tenant_isolation(client: TestClient, db: Session) -> Non
     assert first_page["total"] == 2
     assert first_page["has_more"] is True
     assert [item["external_userid"] for item in first_page["items"]] == ["external-newest"]
+    assert "available_tags" in first_page
 
     second_page = client.get("/api/admin/external-contacts?offset=1&limit=1").json()
     assert second_page["has_more"] is False

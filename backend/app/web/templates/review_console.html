@@ -6,9 +6,10 @@
 <link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
 <link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
 <link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/console/media-viewer.css?v=__STATIC_VERSION__">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--bubble-self-bg:#cfe6fd;--bubble-self-text:#000;--bubble-other-bg:#fff;--bubble-other-text:#000;--link-color:#417ce8}
+:root{--bubble-self-bg:#cfe6fd;--bubble-self-text:#000;--bubble-other-bg:#fff;--bubble-other-text:#000;--link-color:#417ce8;--color-text-4:#8a8f99;--color-danger-fg:#cf1322;--text-xs:11.5px;--leading:1.5}
 body{font-family:system-ui,sans-serif;color:#1f2329;background:#e9ebef;height:100vh;overflow:hidden}
 a{color:var(--link-color)}
 
@@ -40,8 +41,8 @@ a{color:var(--link-color)}
 
 .top-bar{height:52px;flex-shrink:0;background:#fff;border-bottom:1px solid #eceff3;display:flex;align-items:center;gap:12px;padding:0 18px;color:#1f2329}
 .tz-note{font-size:11.5px;color:#8a8f99;white-space:nowrap}
-.sync-status{white-space:nowrap}
-.sync-status.sync-status-error{color:#d4436b}
+.sync-status{white-space:nowrap;color:var(--color-text-4);font-size:var(--text-xs);line-height:var(--leading);font-variant-numeric:tabular-nums}
+.sync-status.sync-status-error{color:var(--color-danger-fg)}
 .btn-sync-now{height:28px;padding:0 11px;border:1px solid #1677ff;border-radius:7px;background:#1677ff;color:#fff;cursor:pointer;font-size:12px;white-space:nowrap}
 .btn-sync-now:hover{background:#0958d9;border-color:#0958d9}
 .btn-sync-now:disabled{opacity:.58;cursor:not-allowed}
@@ -296,23 +297,6 @@ a{color:var(--link-color)}
 .composite-node-text{white-space:pre-wrap;word-break:break-word}
 .composite-node-meta{font-size:.7rem;color:#aaa;margin-bottom:.1rem}
 .composite-unknown{font-size:.78rem;color:#999;font-style:italic}
-
-.v-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center}
-.v-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.82)}
-.v-close{position:absolute;top:16px;right:20px;z-index:2;background:transparent;border:none;color:#fff;font-size:2rem;line-height:1;cursor:pointer}
-.v-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:2;background:rgba(255,255,255,.12);border:none;color:#fff;font-size:2rem;width:2.6rem;height:2.6rem;border-radius:50%;cursor:pointer}
-.v-prev{left:16px}
-.v-next{right:16px}
-.v-nav:hover{background:rgba(255,255,255,.25)}
-.v-body{position:relative;z-index:1;max-width:90vw;max-height:88vh;display:flex;align-items:center;justify-content:center}
-.v-media{max-width:90vw;max-height:88vh;object-fit:contain;border-radius:4px}
-.v-loading,.v-error{color:#fff;font-size:.9rem;padding:2rem}
-.v-chatrecord{background:#fff;border-radius:8px;padding:1rem 1.25rem;max-width:520px;max-height:80vh;overflow-y:auto}
-.v-chatrecord-title{font-weight:700;font-size:1rem;margin-bottom:.6rem}
-.v-chatrecord-node{border-bottom:1px solid #f0f0f0;padding:.5rem 0}
-.v-chatrecord-node:last-child{border-bottom:none}
-.v-chatrecord-sender{font-size:.78rem;font-weight:600;color:#555}
-.v-chatrecord-time{font-size:.7rem;color:#bbb;margin-left:.4rem}
 
 /* ------------------------------------------------------------------ */
 /* Right column: 会话信息 / 消息详情 panel                               */

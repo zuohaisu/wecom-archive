@@ -13,6 +13,7 @@
   var startRequest=false;
   var unloaded=false;
   var currentView={kind:'loading'};
+  var lastCompletedSnapshot=null;
 
   function text(key, values){
     var value=I18N.t(key);
@@ -97,14 +98,17 @@
       snapshot.reasons.forEach(function(reason){var item=append(reasonList,'li');append(item,'span','',text(reason.key));append(item,'strong','',String(reason.count));});
     }
   }
-  function actionButton(info){
-    var button=el('button','btn btn-primary',text(info.action));button.type='button';button.disabled=!!info.disabled||startRequest;
+  function actionButton(info,refreshing){
+    var button=el('button','btn btn-sm',text(refreshing?'diagnostics.checking':info.action));button.type='button';button.disabled=!!info.disabled||startRequest||refreshing;
     if(!button.disabled)button.addEventListener('click',startCheck);
     return button;
   }
-  function renderSnapshot(snapshot){
+  function renderSnapshot(snapshot,refreshing,refreshFailed){
     var root=document.getElementById('diag-root');if(!root)return;
     clear(root);root.setAttribute('aria-busy','false');
+    append(root,'p','diag-result-label',text(snapshot.complete?'diagnostics.latestResult':'diagnostics.currentStatus'));
+    if(refreshing){var refreshNote=append(root,'div','alert alert-neutral diag-refresh-note');append(refreshNote,'span','',text('diagnostics.refreshingWithPrevious'));}
+    if(refreshFailed){var failedNote=append(root,'div','alert alert-danger diag-refresh-note');append(failedNote,'span','',text('diagnostics.startRequestFailed'));}
     var info=stateInfo(snapshot);var card=append(root,'section','diag-health');card.setAttribute('data-state',snapshot.state);
     var head=append(card,'div','diag-health-head');append(head,'span','diag-state-icon',info.icon).setAttribute('aria-hidden','true');
     var copy=append(head,'div');append(copy,'h2','diag-health-title',text(info.title));append(copy,'p','diag-health-copy',text(info.copy,info.values));
@@ -112,7 +116,7 @@
     meta(metadata,'diagnostics.lastCompletedCheck',snapshot.complete?formatDate(snapshot.last_checked_at):text('diagnostics.noCompletedCheck'));
     meta(metadata,'diagnostics.checkScope',formatDate(snapshot.scope.from_at)+' – '+formatDate(snapshot.scope.to_at));
     meta(metadata,'diagnostics.checkedMessages',String(snapshot.counts.checked));
-    var actions=append(card,'div','diag-actions');actions.appendChild(actionButton(info));
+    var actions=append(card,'div','diag-actions');actions.appendChild(actionButton(info,refreshing));
     addDetails(card,snapshot);
   }
   function renderProblem(kind){
@@ -129,7 +133,7 @@
   }
   function render(){
     applyStaticI18n();
-    if(currentView.kind==='snapshot')renderSnapshot(currentView.snapshot);
+    if(currentView.kind==='snapshot')renderSnapshot(currentView.snapshot,currentView.refreshing,currentView.refreshFailed);
     else if(currentView.kind==='problem')renderProblem(currentView.problem);
     else renderLoading();
   }
@@ -141,7 +145,12 @@
     pollTimer=window.setTimeout(function(){pollTimer=null;pollAttempts+=1;loadLatest(true);},delay);
   }
   function receiveSnapshot(data,fromPoll){
-    var snapshot=normalise(data);currentView={kind:'snapshot',snapshot:snapshot};render();
+    var snapshot=normalise(data);
+    if(snapshot.complete)lastCompletedSnapshot=snapshot;
+    currentView=snapshot.state==='checking'&&lastCompletedSnapshot
+      ?{kind:'snapshot',snapshot:lastCompletedSnapshot,refreshing:true}
+      :{kind:'snapshot',snapshot:snapshot};
+    render();
     if(snapshot.state==='checking'){if(fromPoll||pollTimer===null)schedulePoll();}else stopPolling();
   }
   function loadLatest(fromPoll){
@@ -155,13 +164,13 @@
   }
   function startCheck(){
     if(startRequest)return;startRequest=true;stopPolling();
-    if(currentView.kind==='snapshot'){currentView.snapshot.state='checking';currentView.snapshot.complete=false;render();}
+    if(currentView.kind==='snapshot'&&currentView.snapshot.complete){lastCompletedSnapshot=currentView.snapshot;currentView={kind:'snapshot',snapshot:lastCompletedSnapshot,refreshing:true};render();}
     fetch(START_URL,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:'{}'}).then(function(response){
       if(response.status===409){loadLatest(true);return null;}
       if(response.status===401){currentView={kind:'problem',problem:'auth'};render();return null;}
       if(response.status===403){currentView={kind:'problem',problem:'forbidden'};render();return null;}
       if(!response.ok)throw new Error('start_failed');return response.json();
-    }).then(function(data){if(data){pollAttempts=0;receiveSnapshot(data,true);}}).catch(function(){currentView={kind:'problem',problem:'start'};render();}).finally(function(){startRequest=false;});
+    }).then(function(data){if(data){pollAttempts=0;receiveSnapshot(data,true);}}).catch(function(){currentView=lastCompletedSnapshot?{kind:'snapshot',snapshot:lastCompletedSnapshot,refreshFailed:true}:{kind:'problem',problem:'start'};render();}).finally(function(){startRequest=false;render();});
   }
   function applyStaticI18n(){
     document.documentElement.lang=I18N.getLocale();document.title=I18N.t('diagnostics.pageTitle');

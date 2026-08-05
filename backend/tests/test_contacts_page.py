@@ -93,6 +93,14 @@ def test_contacts_page_supports_identity_search() -> None:
     assert "params.set('q',q)" in source
 
 
+def test_contacts_page_uses_compact_filters_and_a_real_tag_select() -> None:
+    source = _TEMPLATE.read_text(encoding="utf-8")
+    assert 'class="toolbar toolbar-compact"' in source
+    assert '<select class="select" id="tag-filter"' in source
+    assert "renderTagOptions(data.available_tags)" in source
+    assert 'id="tag-filter" type="search"' not in source
+
+
 def test_contacts_page_has_detail_drawer_with_rnd170_identity_fields() -> None:
     """The drawer consumes the merged RND-170 contract: employee-scoped
     remarks, current nickname, and observed nickname history stay separate."""

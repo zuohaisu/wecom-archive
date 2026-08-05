@@ -58,6 +58,7 @@ class ExternalContactListPage(BaseModel):
     items: list[ExternalContactListItem]
     total: int
     has_more: bool
+    available_tags: list[str] = Field(default_factory=list)
 
 
 class ExternalContactDetail(ExternalContactListItem):

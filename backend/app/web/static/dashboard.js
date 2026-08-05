@@ -20,6 +20,11 @@
     Object.keys(values||{}).forEach(function(name){value=value.replace('{'+name+'}',String(values[name]));});
     return value;
   }
+  function applyStaticI18n(){
+    document.querySelectorAll('[data-i18n]').forEach(function(node){
+      node.textContent=t(node.getAttribute('data-i18n'));
+    });
+  }
   function el(tag, className, value){var node=document.createElement(tag);if(className)node.className=className;if(value!==undefined)node.textContent=value;return node;}
   function append(parent, tag, className, value){var node=el(tag,className,value);parent.appendChild(node);return node;}
   function clear(node){node.replaceChildren();}
@@ -131,5 +136,5 @@
   function load(){if(requestInFlight)return;requestInFlight=true;var root=document.getElementById(ROOT_ID);if(root){root.setAttribute('aria-busy','true');if(!lastData){clear(root);append(root,'p','dashboard-loading',t('dashboard.loading'));}}
     fetch('/api/admin/dashboard?range='+encodeURIComponent(String(RANGE_DAYS)),{credentials:'include'}).then(function(response){if(response.status===401){window.location='/admin/login';return null;}if(!response.ok)throw new Error('dashboard_load_failed');return response.json();}).then(function(data){if(data)render(normalise(data));}).catch(function(){renderFailure();}).finally(function(){requestInFlight=false;});
   }
-  I18N.onChange(function(){if(lastData)render(lastData);});load();
+  I18N.onChange(function(){applyStaticI18n();if(lastData)render(lastData);});applyStaticI18n();load();
 }());

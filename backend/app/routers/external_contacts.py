@@ -50,6 +50,16 @@ def _decode_tags(tags: Optional[str]) -> list[str]:
     return [value for value in values if isinstance(value, str)] if isinstance(values, list) else []
 
 
+def _available_tags(db: Session, tenant_id: str) -> list[str]:
+    """Return the tenant's complete, deduplicated tag catalog for filtering."""
+    values: set[str] = set()
+    for raw_tags in db.scalars(
+        select(ExternalContact.tags).where(ExternalContact.tenant_id == tenant_id)
+    ):
+        values.update(tag.strip() for tag in _decode_tags(raw_tags) if tag.strip())
+    return sorted(values, key=str.casefold)
+
+
 def _load_follow_remarks(
     db: Session, tenant_id: str, external_userids: set[str]
 ) -> dict[str, list[dict]]:
@@ -217,6 +227,7 @@ def list_external_contacts(
         ],
         total=total,
         has_more=offset + len(contacts) < total,
+        available_tags=_available_tags(db, tenant_id),
     )
 
 

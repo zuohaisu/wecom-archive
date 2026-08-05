@@ -72,6 +72,19 @@ def test_media_thumbnails_use_conversation_message_media_route_without_provider_
     assert not re.search(r"qiniu|QINIU_|qiniu\.com", source, re.IGNORECASE)
 
 
+def test_media_page_reuses_the_conversation_review_overlay_for_every_media_kind() -> None:
+    source = _TEMPLATE.read_text(encoding="utf-8")
+    viewer = (_BACKEND / "app" / "web" / "static" / "console" / "media-viewer.js").read_text(encoding="utf-8")
+    assert 'class="toolbar toolbar-compact"' in source
+    assert "/web/static/console/media-viewer.js" in source
+    assert "openViewer(state.items.map(viewerItem),index)" in source
+    assert "/media/access" in source
+    assert "item.kind==='video'" in viewer
+    assert "item.kind==='voice'" in viewer
+    assert "item.kind==='file'" in viewer
+    assert "target=\"_blank\"" not in source
+
+
 def test_media_i18n_keys_exist_in_all_locales_directly_under_own_anchor() -> None:
     source = _I18N.read_text(encoding="utf-8")
     blocks = re.findall(

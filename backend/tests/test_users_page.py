@@ -49,6 +49,7 @@ def test_users_page_uses_registered_active_users_sidenav_link() -> None:
 def test_users_page_fetches_real_api_and_exposes_all_user_fields() -> None:
     source = _TEMPLATE.read_text(encoding="utf-8")
 
+    assert 'class="toolbar toolbar-compact"' in source
     assert "fetch('/api/admin/users?'" in source
     for field in ("user.role", "user.status", "user.last_active_at", "user.msg_count_30d"):
         assert field in source

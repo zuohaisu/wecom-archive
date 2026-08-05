@@ -17,6 +17,33 @@ var viewerKeyHandlerBound=false;
 var viewerGen=0;
 var viewerFocusTrigger=null;
 
+function viewerEscape(value){
+  if(typeof esc==='function')return esc(value);
+  return value==null?'':String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function viewerFetchDescriptor(accessUrl){
+  if(typeof fetchDescriptorWithRecovery==='function')return fetchDescriptorWithRecovery(accessUrl);
+  return fetch(accessUrl,{credentials:'same-origin'}).then(function(response){
+    if(!response.ok){var error=new Error('media_access_failed');error.status=response.status;throw error;}
+    return response.json();
+  }).catch(function(error){if(typeof error.status!=='number')error.network=true;throw error;});
+}
+function viewerClassifyError(error){
+  if(typeof classifyMediaError==='function')return classifyMediaError(error);
+  if(error&&error.status===401)return 'auth';
+  if(error&&error.status===403)return 'forbidden';
+  if(error&&error.status===404)return 'missing';
+  if(error&&error.network)return 'network';
+  return 'error';
+}
+function viewerFormatBytes(value){
+  if(typeof fmtBytes==='function')return fmtBytes(value);
+  if(typeof value!=='number'||isNaN(value))return I18N.t('file.sizeUnknown');
+  var units=['B','KB','MB','GB'];var index=0;var amount=value;
+  while(amount>=1024&&index<units.length-1){amount/=1024;index++;}
+  return (index===0?String(amount):amount.toFixed(1))+' '+units[index];
+}
+
 // Registry of items the Viewer can page through for the CURRENT
 // renderTimeline() pass -- reset at the top of renderTimeline() (see
 // timeline.js), populated as each image/emotion/video element is rendered
@@ -43,9 +70,9 @@ function ensureViewerRoot(){
   root.setAttribute('aria-label',I18N.t('viewer.dialogLabel'));
   root.innerHTML=
     '<div class="v-backdrop" onclick="closeViewer()"></div>'
-    +'<button type="button" class="v-close" onclick="closeViewer()" aria-label="'+esc(I18N.t('viewer.close'))+'">&times;</button>'
-    +'<button type="button" class="v-nav v-prev" onclick="viewerShow(viewerIndex-1)" style="display:none" aria-label="'+esc(I18N.t('viewer.prev'))+'">&#8249;</button>'
-    +'<button type="button" class="v-nav v-next" onclick="viewerShow(viewerIndex+1)" style="display:none" aria-label="'+esc(I18N.t('viewer.next'))+'">&#8250;</button>'
+    +'<button type="button" class="v-close" onclick="closeViewer()" aria-label="'+viewerEscape(I18N.t('viewer.close'))+'">&times;</button>'
+    +'<button type="button" class="v-nav v-prev" onclick="viewerShow(viewerIndex-1)" style="display:none" aria-label="'+viewerEscape(I18N.t('viewer.prev'))+'">&#8249;</button>'
+    +'<button type="button" class="v-nav v-next" onclick="viewerShow(viewerIndex+1)" style="display:none" aria-label="'+viewerEscape(I18N.t('viewer.next'))+'">&#8250;</button>'
     +'<div class="v-body" id="rnd206-viewer-body"></div>';
   document.body.appendChild(root);
   if(!viewerKeyHandlerBound){
@@ -97,13 +124,15 @@ function restoreViewerFocus(){
     return;
   }
   if(typeof document==='undefined')return;
-  var fallback=document.getElementById('timeline-body');
+  var fallback=document.getElementById('timeline-body')||document.getElementById('media-grid');
   if(fallback&&typeof fallback.focus==='function')fallback.focus();
 }
 function closeViewer(){
   viewerGen++;
   var root=document.getElementById('rnd206-viewer');
   if(root)root.style.display='none';
+  var body=document.getElementById('rnd206-viewer-body');
+  if(body)body.innerHTML='';
   if(typeof document!=='undefined')document.body.style.overflow='';
   viewerItems=[];
   viewerIndex=-1;
@@ -124,7 +153,7 @@ function viewerShow(idx){
   root.querySelector('.v-next').style.display=(multi&&idx<viewerItems.length-1)?'block':'none';
   if(item.kind==='chatrecord'){
     body.innerHTML='<div class="v-chatrecord"><div class="v-chatrecord-title">'
-      +esc((item.node.fields&&item.node.fields.title)||I18N.t('chatrecord.title'))+'</div>'
+      +viewerEscape((item.node.fields&&item.node.fields.title)||I18N.t('chatrecord.title'))+'</div>'
       +renderCompositeChildren(item.node,item.depth||0)+'</div>';
     // RND-206 QA fix #3: viewer-mounted content (nested media inside a
     // chatrecord's expanded view) was never hydrated -- this is the exact
@@ -134,19 +163,28 @@ function viewerShow(idx){
     hydrateRichMedia(body);
     return;
   }
-  body.innerHTML='<div class="v-loading" role="status">'+esc(I18N.t('viewer.loading'))+'</div>';
-  fetchDescriptorWithRecovery(item.accessUrl).then(function(desc){
+  if(item.kind==='file'){
+    body.innerHTML='<div class="v-file"><span class="v-file-icon" aria-hidden="true">↧</span><div class="v-file-copy"><div class="v-file-name">'
+      +viewerEscape(item.label||I18N.t('file.fallbackName'))+'</div><div class="v-file-meta">'
+      +viewerEscape(item.mimeType||I18N.t('media.file'))+' · '+viewerEscape(viewerFormatBytes(item.sizeBytes))
+      +'</div></div><a class="v-file-download" href="'+viewerEscape(item.downloadUrl||'#')+'">'+viewerEscape(I18N.t('file.download'))+'</a></div>';
+    return;
+  }
+  body.innerHTML='<div class="v-loading" role="status">'+viewerEscape(I18N.t('viewer.loading'))+'</div>';
+  viewerFetchDescriptor(item.accessUrl).then(function(desc){
     if(gen!==viewerGen||viewerIndex!==idx)return;
     if(item.kind==='video'){
-      body.innerHTML='<video class="v-media" src="'+esc(desc.url)+'" controls playsinline></video>';
+      body.innerHTML='<video class="v-media" src="'+viewerEscape(desc.url)+'" controls playsinline autoplay></video>';
+    }else if(item.kind==='voice'){
+      body.innerHTML='<audio class="v-media-audio" src="'+viewerEscape(desc.url)+'" controls autoplay></audio>';
     }else{
-      body.innerHTML='<img class="v-media" src="'+esc(desc.url)+'" alt="'+esc(item.label||'')+'">';
+      body.innerHTML='<img class="v-media" src="'+viewerEscape(desc.url)+'" alt="'+viewerEscape(item.label||'')+'">';
     }
   }).catch(function(e){
     if(gen!==viewerGen||viewerIndex!==idx)return;
-    var errKind=classifyMediaError(e);
+    var errKind=viewerClassifyError(e);
     var key=errKind==='auth'?'viewer.unauthorized':errKind==='forbidden'?'media.error.forbidden'
       :errKind==='missing'?'viewer.missingMedia':errKind==='network'?'media.error.network':'viewer.error';
-    body.innerHTML='<div class="v-error" role="alert">'+esc(I18N.t(key))+'</div>';
+    body.innerHTML='<div class="v-error" role="alert">'+viewerEscape(I18N.t(key))+'</div>';
   });
 }
