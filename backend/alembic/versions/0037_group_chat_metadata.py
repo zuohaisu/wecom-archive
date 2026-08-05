@@ -1,7 +1,7 @@
 """Add tenant-scoped current WeCom group-chat metadata.
 
-Revision ID: 0036
-Revises: 0035
+Revision ID: 0037
+Revises: 0036
 Create Date: 2026-08-04
 """
 
@@ -10,8 +10,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0036"
-down_revision: Union[str, None] = "0035"
+revision: str = "0037"
+down_revision: Union[str, None] = "0036"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
