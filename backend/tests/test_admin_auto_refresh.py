@@ -1,20 +1,20 @@
 """
-Tests for RND-153 — auto-refresh and refresh status in the admin conversation UI.
+Regression tests for incremental updates in the admin conversation UI.
 
 Scope: `/admin/conversations` (the review console, embedded JS in
-_REVIEW_CONSOLE_HTML) only. Frontend polling against existing APIs — no
-websocket/SSE, no backend route changes, no auth changes, no schema changes.
+_REVIEW_CONSOLE_HTML) only. Data is refreshed after a sync-version change;
+there is no periodic browser refresh, websocket/SSE, backend route, auth, or
+schema change.
 
 Covers:
-  - Static presence of the refresh status label, countdown, and manual
-    refresh button in the rendered HTML.
+  - Absence of the old refresh status label, countdown, and manual refresh
+    button in the rendered HTML.
   - Absence of any websocket/SSE usage (guard against scope creep).
   - Real execution (under Node) of mergeMessagesByMsgid() — msgid-based
     dedupe + msgtime ordering — and isNearBottom() — the scroll guard that
-    decides whether auto-refresh may jump the viewport.
+    decides whether a sync-triggered refresh may jump the viewport.
   - renderConvList() still re-applies the .active class for the selected
-    conversation after a full re-render (needed so a periodic refresh does
-    not visually lose the current selection).
+    conversation after a full re-render.
   - RND-149 (Beijing time) and RND-150 (group participant overflow) contracts
     are undisturbed by this change.
 
@@ -50,14 +50,10 @@ def _extract(pattern: str, label: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_html_has_refresh_status_element() -> None:
-    assert 'id="refresh-status"' in _REVIEW_CONSOLE_HTML
-
-
-def test_html_has_manual_refresh_button() -> None:
-    assert 'id="btn-refresh"' in _REVIEW_CONSOLE_HTML
-    assert "refreshNow('manual')" in _REVIEW_CONSOLE_HTML
-    assert ">刷新<" in _REVIEW_CONSOLE_HTML
+def test_html_has_no_periodic_refresh_controls() -> None:
+    assert 'id="refresh-status"' not in _REVIEW_CONSOLE_HTML
+    assert 'id="btn-refresh"' not in _REVIEW_CONSOLE_HTML
+    assert "refreshNow('manual')" not in _REVIEW_CONSOLE_HTML
 
 
 def test_html_has_new_message_indicator() -> None:
@@ -66,18 +62,11 @@ def test_html_has_new_message_indicator() -> None:
     assert "scrollTimelineToBottom()" in _REVIEW_CONSOLE_HTML
 
 
-def test_js_has_countdown_and_last_refresh_labels() -> None:
-    assert "最近更新" in _REVIEW_CONSOLE_JS
-    assert "下次刷新" in _REVIEW_CONSOLE_JS
-    assert "秒后" in _REVIEW_CONSOLE_JS
-
-
-def test_js_has_polling_interval_and_countdown_logic() -> None:
-    assert "REFRESH_INTERVAL_SEC=30" in _REVIEW_CONSOLE_JS
-    assert "setInterval(tickRefreshCountdown,1000)" in _REVIEW_CONSOLE_JS
-    assert "function scheduleNextRefresh()" in _REVIEW_CONSOLE_JS
-    assert "function updateRefreshStatus()" in _REVIEW_CONSOLE_JS
-    assert "function refreshNow(reason)" in _REVIEW_CONSOLE_JS
+def test_js_has_no_periodic_browser_refresh_loop() -> None:
+    assert "REFRESH_INTERVAL_SEC" not in _REVIEW_CONSOLE_JS
+    assert "tickRefreshCountdown" not in _REVIEW_CONSOLE_JS
+    assert "function startAutoRefresh()" not in _REVIEW_CONSOLE_JS
+    assert "function refreshNow(reason)" not in _REVIEW_CONSOLE_JS
 
 
 def test_js_has_near_bottom_guard() -> None:
@@ -91,10 +80,11 @@ def test_js_has_msgid_based_merge_dedupe() -> None:
     )
 
 
-def test_js_pauses_polling_when_tab_hidden_and_resumes_when_visible() -> None:
-    assert "visibilitychange" in _REVIEW_CONSOLE_JS
-    assert "document.hidden" in _REVIEW_CONSOLE_JS
-    assert "refreshNow('visibility')" in _REVIEW_CONSOLE_JS
+def test_sync_button_is_right_of_search_and_adjacent_to_audit_mode() -> None:
+    search_index = _REVIEW_CONSOLE_HTML.index('id="search-bar"')
+    sync_index = _REVIEW_CONSOLE_HTML.index('id="btn-sync-now"')
+    audit_index = _REVIEW_CONSOLE_HTML.index('id="btn-audit-mode"')
+    assert search_index < sync_index < audit_index
 
 
 def test_no_websocket_or_sse_usage() -> None:

@@ -294,7 +294,7 @@ process.stdout.write(JSON.stringify(seen));
             {
                 "nav.staff": "员工",
                 "nav.logout": "退出登录",
-                "refresh.manual": "刷新",
+                "sync.now": "立即同步",
                 "history.noMore": "没有更多历史消息",
                 "media.image": "图片消息",
             },
@@ -304,7 +304,7 @@ process.stdout.write(JSON.stringify(seen));
             {
                 "nav.staff": "員工",
                 "nav.logout": "登出",
-                "refresh.manual": "重新整理",
+                "sync.now": "立即同步",
                 "history.noMore": "沒有更多歷史訊息",
                 "media.image": "圖片訊息",
             },
@@ -314,7 +314,7 @@ process.stdout.write(JSON.stringify(seen));
             {
                 "nav.staff": "Staff",
                 "nav.logout": "Logout",
-                "refresh.manual": "Refresh",
+                "sync.now": "Sync Now",
                 "history.noMore": "No more history",
                 "media.image": "Image message",
             },
@@ -335,8 +335,8 @@ process.stdout.write(JSON.stringify(result));
 
 
 # ---------------------------------------------------------------------------
-# UI coverage — settings entry exists on both pages, and RND-152/RND-153
-# labels still render, now going through i18n instead of hardcoded strings
+# UI coverage — settings entry exists on both pages and console labels render
+# through i18n instead of hardcoded strings.
 # ---------------------------------------------------------------------------
 
 

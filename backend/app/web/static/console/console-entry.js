@@ -47,7 +47,6 @@ function applyLocale(){
   }else if(!timelineConvId){
     document.getElementById('timeline-body').innerHTML='<div class="empty-state">'+I18N.t('console.selectConversation')+'</div>';
   }
-  updateRefreshStatus();
   // Console scripts load refresh.js before this entry file in production.
   // Keep the guard for isolated test harnesses that intentionally load only
   // console-entry.js to exercise locale rendering.
@@ -577,7 +576,5 @@ document.getElementById('search-input').addEventListener('keydown',function(e){
 applyLocale();
 loadCurrentUser();
 setMode('staff');
-lastRefreshAt=Date.now();
-updateRefreshStatus();
-startAutoRefresh();
+initializeSyncStatus();
 readFocusFromUrl();

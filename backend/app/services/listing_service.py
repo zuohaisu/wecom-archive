@@ -18,7 +18,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Optional, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.conversation_membership import (
@@ -420,9 +420,9 @@ def _fetch_compact_messages_for_entity(
     structured_content, sdkfileid, tolist, msgtype, decrypt_status,
     is_revoked, revoked_at, msgid, created_at) that made full ArchiveMessage
     ORM materialization the dominant cost in profiling (see RND-158 Phase 2
-    benchmark notes). content_text itself is still fetched in full (only
-    _build_conversation_list's final `[:200]` slice truncates it) — every
-    other heavy column is dropped from the projection.
+    benchmark notes). The SQL projection limits content_text to its first
+    200 characters, exactly the amount the response can expose; every other
+    heavy column is dropped from the projection.
 
     _fetch_messages_for_entity() itself is left untouched and unused after
     this change: it is kept because removing a function nothing calls is
@@ -447,22 +447,13 @@ def _fetch_compact_messages_for_entity(
     )
     group_rooms = {r[2] for r in seed_rows if _is_valid_roomid(r[2])}
 
-    final_ids: set[int] = set()
-    if group_rooms:
-        for row in (
-            db.query(ArchiveMessage.id)
-            .filter(
-                ArchiveMessage.roomid.in_(group_rooms),
-                ArchiveMessage.tenant_id == tenant_id,
-            )
-            .all()
-        ):
-            final_ids.add(row[0])
-
     direct_ids = {r[0] for r in seed_rows if not _is_valid_roomid(r[2])}
-    final_ids.update(direct_ids)
-
-    if not final_ids:
+    final_filters = []
+    if group_rooms:
+        final_filters.append(ArchiveMessage.roomid.in_(group_rooms))
+    if direct_ids:
+        final_filters.append(ArchiveMessage.id.in_(direct_ids))
+    if not final_filters:
         return []
 
     final_rows = (
@@ -471,11 +462,16 @@ def _fetch_compact_messages_for_entity(
             ArchiveMessage.sender,
             ArchiveMessage.roomid,
             ArchiveMessage.msgtime,
-            ArchiveMessage.content_text,
+            # The list response exposes only the first 200 characters of
+            # the latest message.  Truncate in SQL so a long archived body
+            # never crosses the DB/Python boundary just to be sliced below.
+            # SQLite and PostgreSQL both support the three-argument substr
+            # form and count text characters, matching Python's [:200].
+            func.substr(ArchiveMessage.content_text, 1, 200),
         )
         .filter(
-            ArchiveMessage.id.in_(final_ids),
             ArchiveMessage.tenant_id == tenant_id,
+            or_(*final_filters),
         )
         # RND-158 SQL ordering contract: identical ORDER BY msgtime ASC, id
         # ASC as _fetch_messages_for_entity's final query above — kept
@@ -572,9 +568,9 @@ def _build_conversation_list(
     order. This is enforced by only ever upgrading direct -> group below,
     never downgrading group -> direct once set, which is a commutative,
     order-independent reduction over the message list. This is
-    independent of latest-message selection: the (msgtime, id) sort below
-    still picks "latest" purely from data["msgs"], untouched by which
-    message set conversation_type.
+    independent of latest-message selection: the (msgtime, id) running max
+    below still picks "latest" purely from the messages in each bucket,
+    untouched by which message set conversation_type.
     """
     convs: dict[str, dict] = {}
     room_display_names = room_display_names or {}
@@ -598,7 +594,14 @@ def _build_conversation_list(
                 "roomid": msg.roomid if roomid else None,
                 "monitored_account_ids": set(),
                 "contact_ids": set(),
-                "msgs": [],
+                # Preserve only the running latest message and count.  The
+                # previous implementation retained every message in each
+                # bucket and sorted each bucket just to determine its latest
+                # row.  A max over the same (msgtime, id) key is equivalent,
+                # while keeping the list endpoint linear in its message set.
+                "latest": None,
+                "latest_sort_key": None,
+                "message_count": 0,
             }
         elif conv_type == "group" and convs[conv_id]["conversation_type"] == "direct":
             # Group-wins collision upgrade: a later-processed group-shaped
@@ -610,26 +613,20 @@ def _build_conversation_list(
 
         convs[conv_id]["monitored_account_ids"].update(staff_set)
         convs[conv_id]["contact_ids"].update(contact_set)
-        convs[conv_id]["msgs"].append(msg)
+        data = convs[conv_id]
+        message_sort_key = (msg.msgtime or 0, msg.id)
+        if data["latest_sort_key"] is None or message_sort_key > data["latest_sort_key"]:
+            data["latest"] = msg
+            data["latest_sort_key"] = message_sort_key
+        data["message_count"] += 1
 
     result = []
     for conv_id, data in convs.items():
-        # RND-158 tie-break fix: deterministic message recency contract —
-        # the "latest" message within a conversation is the one with the
-        # highest (msgtime, id) tuple, both descending. msgtime alone is
-        # not sufficient: multiple messages can share the same msgtime
-        # (same-second bulk sends, clock granularity, etc.), and without a
-        # secondary key the "latest" pick would depend on whatever order
-        # messages happened to arrive in `data["msgs"]` — itself a
-        # function of non-deterministic DB row order upstream. `id` (the
-        # ArchiveMessage integer primary key, non-null/unique/immutable,
-        # already present on every message object built by both the full
-        # ORM path and the compact-projection path) breaks ties
-        # deterministically and reproducibly. This Python-side sort is
-        # authoritative on its own — it does not rely on the incoming
-        # list already being DB-ordered.
-        msgs_sorted = sorted(data["msgs"], key=lambda m: (m.msgtime or 0, m.id))
-        latest = msgs_sorted[-1]
+        # Deterministic message recency contract: the running max above uses
+        # the same (msgtime, id) key the previous per-bucket sort used.
+        # `id` makes equal-timestamp messages reproducible without relying
+        # on incidental database row order.
+        latest = data["latest"]
 
         sids = sorted(data["monitored_account_ids"])
         cids = sorted(data["contact_ids"])
@@ -680,7 +677,7 @@ def _build_conversation_list(
                 "room_raw_id": room_raw_id,
                 "last_message_time": latest.msgtime,
                 "last_message_text": (latest.content_text or "")[:200],
-                "message_count": len(msgs_sorted),
+                "message_count": data["message_count"],
                 "latest_sender_id": latest_sender_id,
                 "latest_sender_raw_id": latest_sender_id,
                 "latest_sender_display_name": latest_sender_display_name,
@@ -706,7 +703,12 @@ def _build_conversation_list(
     return result
 
 
-def list_monitored_accounts(db: Session, tenant_id: str) -> list[MonitoredAccountOut]:
+def list_monitored_accounts(
+    db: Session,
+    tenant_id: str,
+    *,
+    include_conversation_count: bool = True,
+) -> list[MonitoredAccountOut]:
     """
     Return all WeCom archive seats (monitored accounts) for this tenant —
     both the currently active seat and historical seats with archived
@@ -733,6 +735,11 @@ def list_monitored_accounts(db: Session, tenant_id: str) -> list[MonitoredAccoun
     profiling), so a tenant with S seats issued ~7*S queries here. display_
     names is likewise scoped to just this tenant's staff_ids rather than
     loading every Contact row in the tenant.
+
+    The API's default preserves the complete summary response.  Callers that
+    do not render conversation counts (the initial review-console picker)
+    can explicitly skip that full archive aggregation and receive ``null``
+    for ``conversation_count`` instead.
     """
     staff_ids = _collect_staff_ids(db, tenant_id)
     if not staff_ids:
@@ -740,7 +747,11 @@ def list_monitored_accounts(db: Session, tenant_id: str) -> list[MonitoredAccoun
 
     display_names = _load_display_names_for_ids(db, tenant_id, staff_ids)
     latest_times = _batch_latest_own_participation_time(db, tenant_id, staff_ids)
-    conversation_counts = _batch_count_entity_conversations(db, tenant_id, staff_ids, staff_ids)
+    conversation_counts = (
+        _batch_count_entity_conversations(db, tenant_id, staff_ids, staff_ids)
+        if include_conversation_count
+        else {}
+    )
 
     seats: list[dict] = []
     for sid in staff_ids:
@@ -754,7 +765,9 @@ def list_monitored_accounts(db: Session, tenant_id: str) -> list[MonitoredAccoun
             {
                 "staff_id": sid,
                 "latest_message_time": latest_message_time,
-                "conversation_count": conversation_counts.get(sid, 0),
+                "conversation_count": (
+                    conversation_counts.get(sid, 0) if include_conversation_count else None
+                ),
             }
         )
 

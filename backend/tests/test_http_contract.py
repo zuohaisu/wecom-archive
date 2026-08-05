@@ -1165,24 +1165,17 @@ class TestFrontendBaseline:
         assert resp.status_code == 200
         assert resp.text.strip().lower().startswith("<!doctype html>")
 
-    def test_refresh_interval_present(self, authed_html_client: TestClient) -> None:
+    def test_periodic_browser_refresh_is_absent(self, authed_html_client: TestClient) -> None:
         resp = authed_html_client.get("/admin/conversations", follow_redirects=False)
         html = resp.text
-        if "refreshCountdownSec" in html or "setInterval(" in html:
-            return
-        # RND-216: review-console.js is now referenced via an external
-        # <script src="..."> instead of being inlined into the page — the
-        # auto-refresh code now lives there, so fetch it too before
-        # concluding the mechanism is missing.
-        # RND-217: review-console.js was further split into 8 modules under
-        # /web/static/console/ (console-state.js, refresh.js, ...), each its
-        # own <script src="..."> tag — fetch all of them and search across
-        # their combined content, since which one holds refresh.js's code is
-        # an implementation detail this test shouldn't hardcode.
+        # RND-216/RND-217: console code is loaded from ordered static modules,
+        # so inspect the real module sources rather than only the HTML shell.
         matches = re.findall(r'<script src="(/web/static/console/[^"]*\.js\?v=[^"]*)"></script>', html)
         assert matches, "review console module <script src> tags not found in page"
         js = "".join(authed_html_client.get(src).text for src in matches)
-        assert "refreshCountdownSec" in js or "setInterval(" in js, "auto-refresh not found"
+        assert "REFRESH_INTERVAL_SEC" not in js
+        assert "function startAutoRefresh()" not in js
+        assert "function refreshNow(reason)" not in js
 
     def test_unchanged_load_same_html(self, authed_html_client: TestClient) -> None:
         h1 = authed_html_client.get("/admin/conversations", follow_redirects=False).text

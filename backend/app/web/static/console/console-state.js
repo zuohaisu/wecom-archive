@@ -30,17 +30,12 @@ var timelineRequestGen=0;
 // unchanged refresh can skip the DOM rebuild entirely and preserve live
 // <video>/<audio> playback state instead of tearing it down and rebuilding.
 var lastRenderedTimelineSignature=null;
-var REFRESH_INTERVAL_SEC=30;
-var refreshCountdownSec=REFRESH_INTERVAL_SEC;
-var refreshTickTimer=null;
 var refreshInFlight=false;
-var refreshErrorText=null;
-var lastRefreshAt=null;
-// RND-211: only a successful archive-sync version change merits reloading
-// list/timeline data. Status polling itself is deliberately lightweight.
+// A sync version change merits reloading list/timeline data. There is no
+// periodic browser refresh; status polling runs only while a requested sync
+// is in progress.
 var syncStatus=null,syncInProgress=false,lastSeenSyncVersion=null;
 var syncStatusNotice=null,syncStatusPollTimer=null,syncStatusRequestInFlight=false;
-var syncStatusCountdownSec=0;
 function esc(s){
   return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

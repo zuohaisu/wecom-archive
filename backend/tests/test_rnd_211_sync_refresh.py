@@ -26,8 +26,10 @@ def test_auto_refresh_is_sync_version_aware() -> None:
     assert "syncInProgress" in _STATE_JS
     assert "function _recordSyncStatus(data)" in _REFRESH_JS
     assert "version!==lastSeenSyncVersion" in _REFRESH_JS
-    assert "if(reason==='manual'||versionChanged)return refreshData();" in _REFRESH_JS
     assert "if(versionChanged)refreshForSyncVersion();" in _REFRESH_JS
+    assert "function initializeSyncStatus()" in _REFRESH_JS
+    assert "function startAutoRefresh()" not in _REFRESH_JS
+    assert "REFRESH_INTERVAL_SEC" not in _STATE_JS
 
 
 def test_sync_i18n_keys_exist_in_all_locales() -> None:

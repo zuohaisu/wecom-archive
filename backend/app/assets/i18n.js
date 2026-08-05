@@ -70,12 +70,6 @@
         "history.failedToLoad": "历史消息加载失败",
         "history.retry": "重试",
 
-        "refresh.manual": "刷新",
-        "refresh.lastUpdated": "最近更新：",
-        "refresh.nextIn": "下次刷新：",
-        "refresh.secondsSuffix": " 秒后",
-        "refresh.paused": "已暂停（页面不可见）",
-        "refresh.failedPrefix": "刷新失败：",
         "refresh.newMessages": "有新消息",
 
         "sync.now": "立即同步",
@@ -545,12 +539,6 @@
         "history.failedToLoad": "歷史訊息載入失敗",
         "history.retry": "重試",
 
-        "refresh.manual": "重新整理",
-        "refresh.lastUpdated": "最近更新：",
-        "refresh.nextIn": "下次重新整理：",
-        "refresh.secondsSuffix": " 秒後",
-        "refresh.paused": "已暫停（頁面不可見）",
-        "refresh.failedPrefix": "重新整理失敗：",
         "refresh.newMessages": "有新訊息",
 
         "sync.now": "立即同步",
@@ -1020,12 +1008,6 @@
         "history.failedToLoad": "Failed to load history",
         "history.retry": "Retry",
 
-        "refresh.manual": "Refresh",
-        "refresh.lastUpdated": "Last updated: ",
-        "refresh.nextIn": "Next refresh: ",
-        "refresh.secondsSuffix": "s",
-        "refresh.paused": "Paused (tab hidden)",
-        "refresh.failedPrefix": "Refresh failed: ",
         "refresh.newMessages": "New messages",
 
         "sync.now": "Sync Now",

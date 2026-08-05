@@ -18,7 +18,10 @@ class MonitoredAccountOut(BaseModel):
     seat_status: str  # "active" | "history" | "unknown"
     is_active_archive_seat: bool
     latest_message_time: Optional[int] = None
-    conversation_count: int = 0
+    # The review console does not render this value on its initial member
+    # picker, so that latency-sensitive path may explicitly omit the costly
+    # aggregate.  The default API path still returns an integer.
+    conversation_count: Optional[int] = None
 
 
 class ContactOut(BaseModel):

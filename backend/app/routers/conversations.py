@@ -300,6 +300,13 @@ def _fetch_messages_for_entity(
 
 @router.get("/api/monitored-accounts", response_model=list[MonitoredAccountOut])
 def get_monitored_accounts(
+    include_conversation_count: bool = Query(
+        True,
+        description=(
+            "Whether to calculate the full conversation count for every monitored account. "
+            "The review-console picker sets this false because it does not display counts."
+        ),
+    ),
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
@@ -322,7 +329,11 @@ def get_monitored_accounts(
     Query/aggregation logic lives in app.services.listing_service (RND-219).
     """
     _, tenant_id = auth
-    return listing_service.list_monitored_accounts(db, tenant_id)
+    return listing_service.list_monitored_accounts(
+        db,
+        tenant_id,
+        include_conversation_count=include_conversation_count,
+    )
 
 
 @router.get("/api/contacts", response_model=list[ContactOut])

@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import ast
 import os
+from unittest.mock import patch
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -256,6 +257,34 @@ def test_list_monitored_accounts_ranks_active_first_and_counts_conversations() -
         db.close()
 
 
+def test_list_monitored_accounts_can_skip_unrendered_conversation_counts() -> None:
+    """The console picker must not scan every selected group solely for a
+    count it does not display; the complete-count API remains the default."""
+    db = _make_session()
+    try:
+        msg = _insert_message(db, sender="staff_a", msgtime=100, roomid="room_1")
+        _insert_recipient(db, msg.id, "contact_x")
+        _insert_contact(db, "staff_a", "Staff A")
+
+        with patch.object(
+            svc,
+            "_batch_count_entity_conversations",
+            side_effect=AssertionError("count aggregation must be skipped"),
+        ):
+            result = svc.list_monitored_accounts(
+                db,
+                _TENANT_A,
+                include_conversation_count=False,
+            )
+
+        assert len(result) == 1
+        assert result[0].staff_id == "staff_a"
+        assert result[0].latest_message_time == 100
+        assert result[0].conversation_count is None
+    finally:
+        db.close()
+
+
 def test_list_monitored_accounts_tenant_isolated() -> None:
     db = _make_session()
     try:
@@ -325,6 +354,71 @@ def test_list_contacts_tenant_isolated() -> None:
 # ---------------------------------------------------------------------------
 # list_conversations — ordering, group-wins, display names, tenant isolation
 # ---------------------------------------------------------------------------
+
+
+def test_compact_conversation_fetch_limits_message_preview_to_response_contract() -> None:
+    """A list row exposes at most 200 characters, so the compact query must
+    not materialize an arbitrarily long archived message body."""
+    db = _make_session()
+    try:
+        body = "消息" * 150
+        msg = _insert_message(db, sender="staff_a", msgtime=100, content_text=body)
+        _insert_recipient(db, msg.id, "contact_x")
+
+        messages = svc._fetch_compact_messages_for_entity(db, "staff_a", _TENANT_A)
+
+        assert len(messages) == 1
+        assert messages[0].content_text == body[:200]
+    finally:
+        db.close()
+
+
+def test_compact_conversation_fetch_expands_groups_without_a_full_id_round_trip() -> None:
+    """Group expansion should feed rooms straight into the final projection,
+    rather than first transferring every expanded message ID to Python and
+    sending the same ID set back in a second SQL ``IN`` query."""
+    db = _make_session()
+    try:
+        first = _insert_message(
+            db,
+            sender="staff_a",
+            roomid="room_1",
+            msgtime=100,
+            content_text="seed",
+        )
+        _insert_recipient(db, first.id, "contact_x")
+        for offset in range(1, 4):
+            _insert_message(
+                db,
+                sender="contact_x",
+                roomid="room_1",
+                msgtime=100 + offset,
+                content_text=f"expanded-{offset}",
+            )
+
+        statements: list[str] = []
+
+        def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+            statements.append(statement)
+
+        event.listen(db.get_bind(), "before_cursor_execute", capture)
+        try:
+            messages = svc._fetch_compact_messages_for_entity(db, "staff_a", _TENANT_A)
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", capture)
+
+        assert [message.content_text for message in messages] == [
+            "seed",
+            "expanded-1",
+            "expanded-2",
+            "expanded-3",
+        ]
+        # sender seed + recipient seed + seed shape + final room projection.
+        # The previous implementation issued a fifth query to load every
+        # expanded group message ID before issuing the final projection.
+        assert len(statements) == 4
+    finally:
+        db.close()
 
 
 def test_list_conversations_sorted_by_last_activity_desc() -> None:

@@ -40,13 +40,8 @@ a{color:var(--link-color)}
 
 .top-bar{height:52px;flex-shrink:0;background:#fff;border-bottom:1px solid #eceff3;display:flex;align-items:center;gap:12px;padding:0 18px;color:#1f2329}
 .tz-note{font-size:11.5px;color:#8a8f99;white-space:nowrap}
-.refresh-bar{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#8a8f99;flex-shrink:0}
-.refresh-status{white-space:nowrap}
-.refresh-status .refresh-status-error{color:#d4436b}
 .sync-status{white-space:nowrap}
 .sync-status.sync-status-error{color:#d4436b}
-.btn-refresh{height:28px;padding:0 11px;border:1px solid #e3e7ee;border-radius:7px;background:#fff;color:#3d4552;cursor:pointer;font-size:12px;white-space:nowrap}
-.btn-refresh:hover{background:#f6f8fb}
 .btn-sync-now{height:28px;padding:0 11px;border:1px solid #1677ff;border-radius:7px;background:#1677ff;color:#fff;cursor:pointer;font-size:12px;white-space:nowrap}
 .btn-sync-now:hover{background:#0958d9;border-color:#0958d9}
 .btn-sync-now:disabled{opacity:.58;cursor:not-allowed}
@@ -372,17 +367,13 @@ __SIDENAV__
 <div class="console-main">
   <div class="top-bar">
     <span class="tz-note" data-i18n="console.tzNote">时间均为北京时间 (UTC+8)</span>
-    <div class="refresh-bar">
-      <span id="refresh-status" class="refresh-status"></span>
-      <button class="btn-refresh" id="btn-refresh" onclick="refreshNow('manual')" data-i18n="refresh.manual">刷新</button>
-      <button class="btn-sync-now" id="btn-sync-now" onclick="syncNow()" data-i18n="sync.now">立即同步</button>
-      <span id="sync-status" class="sync-status" aria-live="polite"></span>
-    </div>
     <div class="search-bar" id="search-bar">
       <input type="text" id="search-input" placeholder="搜索联系人或聊天内容…" autocomplete="off">
       <span class="enter-hint" data-i18n="search.enterHintShort">↵ 结果页</span>
     </div>
     <div class="top-bar-actions">
+      <span id="sync-status" class="sync-status" aria-live="polite"></span>
+      <button class="btn-sync-now" id="btn-sync-now" onclick="syncNow()" data-i18n="sync.now">立即同步</button>
       <button type="button" class="btn-toggle" id="btn-audit-mode" onclick="toggleAuditMode()" data-i18n="console.auditMode">审阅模式</button>
       <button type="button" class="btn-toggle active" id="btn-panel-toggle" onclick="togglePanel()" data-i18n="console.detailPanel">详情面板</button>
     </div>

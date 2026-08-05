@@ -94,3 +94,39 @@ process.stdout.write(JSON.stringify({one:one,emptyMulti:emptyMulti,persisted:per
     assert out["stale"] is None
     assert out["storageDisabled"] is None
     assert out["contact"] is None
+
+
+def test_entity_request_starts_before_auth_me_and_restores_afterward() -> None:
+    """Initial member rendering must not wait for /api/auth/me; only the
+    tenant-and-user-scoped remembered selection needs that response."""
+    load_entity_list = _function("loadEntityList")
+    harness = r'''
+var mode='staff',selEntityId=null,lastEntityItems=null,currentTenantId=null,currentUserId=null;
+var entityRendered=false,autoSelections=0,fetchStarted=false,resolveAuth;
+var authMePromise=new Promise(function(resolve){resolveAuth=resolve;});
+var I18N={t:function(k){return k;}};
+function handleUnauth(){return false;}
+function renderEntityList(items){lastEntityItems=items;entityRendered=true;}
+function maybeAutoSelectEntity(items){autoSelections++;}
+var body={innerHTML:''};
+var document={getElementById:function(){return body;}};
+global.fetch=function(){fetchStarted=true;return Promise.resolve({json:function(){return Promise.resolve([{staff_id:'staff_a'}]);}});};
+''' + load_entity_list + r'''
+loadEntityList();
+setTimeout(function(){
+  var beforeAuth={fetchStarted:fetchStarted,entityRendered:entityRendered,autoSelections:autoSelections};
+  resolveAuth();
+  setTimeout(function(){
+    process.stdout.write(JSON.stringify({beforeAuth:beforeAuth,afterAuth:autoSelections}));
+  },0);
+},0);
+'''
+    result = run_node(harness)
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    assert out["beforeAuth"] == {
+        "fetchStarted": True,
+        "entityRendered": True,
+        "autoSelections": 0,
+    }
+    assert out["afterAuth"] == 1

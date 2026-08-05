@@ -53,10 +53,14 @@ scope exclusively from `admin_sessions.tenant_id`.
 
 | Method | Path | Query | Response |
 |--------|------|-------|----------|
-| `GET` | `/api/monitored-accounts` | none | Array of monitored-account summary objects |
+| `GET` | `/api/monitored-accounts` | `include_conversation_count` (default `true`) | Array of monitored-account summary objects |
 
 Monitored accounts are derived at query time from archive participants plus
 authenticated admin identities; there is no separate seat-roster table.
+When `include_conversation_count=false`, the response preserves the same
+member data but returns `conversation_count: null` rather than performing the
+archive-wide count aggregation. This is intended for UIs that do not display
+the count.
 
 ### Contacts
 

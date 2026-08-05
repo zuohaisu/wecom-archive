@@ -83,11 +83,6 @@ function refreshTimelineIfSelected(){
     applyTimelineRefresh(prevScrollTop,wasNearBottom,hasNew);
   });
 }
-function _refreshErrMsg(e){return(e&&e.message)?e.message:'refresh failed';}
-function setRefreshError(msg){
-  refreshErrorText=msg;
-  updateRefreshStatus();
-}
 function updateSyncStatus(){
   var el=document.getElementById('sync-status');
   var button=document.getElementById('btn-sync-now');
@@ -137,9 +132,10 @@ function pollSyncStatus(){
   return fetchSyncStatus().then(function(data){
     syncStatusRequestInFlight=false;
     return _recordSyncStatus(data);
-  }).catch(function(e){
+  }).catch(function(){
     syncStatusRequestInFlight=false;
-    setRefreshError(_refreshErrMsg(e));
+    syncStatusNotice='failed';
+    updateSyncStatus();
     return false;
   });
 }
@@ -158,52 +154,19 @@ function stopSyncStatusPolling(){
   clearInterval(syncStatusPollTimer);
   syncStatusPollTimer=null;
 }
-function updateRefreshStatus(){
-  var el=document.getElementById('refresh-status');
-  if(!el)return;
-  var lastStr=lastRefreshAt?fmtTime(lastRefreshAt):'—';
-  var html=I18N.t('refresh.lastUpdated')+esc(lastStr);
-  if(typeof document!=='undefined'&&document.hidden){
-    html+=' · '+I18N.t('refresh.paused');
-  }else{
-    html+=' · '+I18N.t('refresh.nextIn')+Math.max(refreshCountdownSec,0)+I18N.t('refresh.secondsSuffix');
-  }
-  if(refreshErrorText){
-    html+=' · <span class="refresh-status-error">'+I18N.t('refresh.failedPrefix')+esc(refreshErrorText)+'</span>';
-  }
-  el.innerHTML=html;
-}
-function scheduleNextRefresh(){
-  refreshCountdownSec=REFRESH_INTERVAL_SEC;
-  updateRefreshStatus();
-}
 function refreshData(){
-  var tasks=[refreshEntityList().catch(function(e){setRefreshError(_refreshErrMsg(e));})];
-  if(selEntityId)tasks.push(refreshConversationList().catch(function(e){setRefreshError(_refreshErrMsg(e));}));
-  if(timelineConvId)tasks.push(refreshTimelineIfSelected().catch(function(e){setRefreshError(_refreshErrMsg(e));}));
+  var tasks=[refreshEntityList().catch(function(){})];
+  if(selEntityId)tasks.push(refreshConversationList().catch(function(){}));
+  if(timelineConvId)tasks.push(refreshTimelineIfSelected().catch(function(){}));
   return Promise.all(tasks);
 }
 function finishRefresh(){
   refreshInFlight=false;
-  lastRefreshAt=Date.now();
-  scheduleNextRefresh();
 }
 function refreshForSyncVersion(){
   if(refreshInFlight)return;
   refreshInFlight=true;
-  setRefreshError(null);
   refreshData().then(finishRefresh,finishRefresh);
-}
-function refreshNow(reason){
-  if(refreshInFlight)return;
-  refreshInFlight=true;
-  setRefreshError(null);
-  // Manual refresh preserves the existing full-refresh behaviour. Interval
-  // and visibility refreshes fetch only sync status until its version moves.
-  pollSyncStatus().then(function(versionChanged){
-    if(reason==='manual'||versionChanged)return refreshData();
-    return null;
-  }).then(finishRefresh,finishRefresh);
 }
 function syncNow(){
   if(syncInProgress)return;
@@ -230,34 +193,8 @@ function syncNow(){
     updateSyncStatus();
   });
 }
-function tickRefreshCountdown(){
-  if(document.hidden)return;
-  refreshCountdownSec--;
-  if(refreshCountdownSec<=0){
-    refreshNow('interval');
-    return;
-  }
-  syncStatusCountdownSec--;
-  if(syncStatusCountdownSec<=0){
-    syncStatusCountdownSec=5;
-    pollSyncStatus().then(function(versionChanged){
-      if(versionChanged)refreshForSyncVersion();
-    });
-  }
-  updateRefreshStatus();
-}
-function startAutoRefresh(){
-  if(refreshTickTimer)clearInterval(refreshTickTimer);
-  syncStatusCountdownSec=0;
+function initializeSyncStatus(){
   pollSyncStatus().then(function(versionChanged){
     if(versionChanged)refreshForSyncVersion();
-  });
-  refreshTickTimer=setInterval(tickRefreshCountdown,1000);
-  document.addEventListener('visibilitychange',function(){
-    if(document.hidden){
-      updateRefreshStatus();
-    }else{
-      refreshNow('visibility');
-    }
   });
 }

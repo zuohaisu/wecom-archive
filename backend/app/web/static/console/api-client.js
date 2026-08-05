@@ -33,12 +33,28 @@ function fetchSyncStatus(){
 // lastEntityItems is stale (whatever the PREVIOUS mode last loaded, or
 // null) until this promise resolves.
 function loadEntityList(){
-  var url=mode==='staff'?'/api/monitored-accounts':'/api/contacts';
+  var requestMode=mode;
+  // The console does not render conversation_count in its member picker.
+  // Avoid making page entry wait for an archive-wide count aggregation that
+  // the user cannot see.
+  var url=requestMode==='staff'?'/api/monitored-accounts?include_conversation_count=false':'/api/contacts';
   document.getElementById('entity-body').innerHTML='<div class="loading">'+I18N.t('console.loading')+'</div>';
-  // RND-323: wait for /api/auth/me so the storage key is fully isolated.
-  var pre=(typeof authMePromise!=='undefined'&&authMePromise)?authMePromise:null;
-  var chain=pre?pre.then(function(){return fetch(url);}):fetch(url);
-  return chain.then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(items){if(items)renderEntityList(items);})
+  // Do not serialize the member-list request behind /api/auth/me.  The
+  // server independently authenticates this request; auth/me is only
+  // needed later to read the tenant-and-user-scoped remembered selection.
+  var authReady=(typeof authMePromise!=='undefined'&&authMePromise)?authMePromise:null;
+  return fetch(url).then(function(r){if(handleUnauth(r))return null;return r.json();}).then(function(items){
+    if(!items||mode!==requestMode)return;
+    renderEntityList(items);
+    // If the list wins the race, render it now and restore a persisted
+    // multi-seat choice after the identity key becomes available.  A sole
+    // staff seat is already selected immediately by renderEntityList().
+    if(requestMode==='staff'&&authReady){
+      authReady.then(function(){
+        if(mode===requestMode&&!selEntityId&&lastEntityItems===items)maybeAutoSelectEntity(items);
+      });
+    }
+  })
     .catch(function(){document.getElementById('entity-body').innerHTML='<div class="error-msg">'+I18N.t('console.failedToLoadEntities')+'</div>';});
 }
 function loadConversations(entityId){
