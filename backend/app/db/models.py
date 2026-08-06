@@ -34,12 +34,19 @@ class Tenant(Base):
     __tablename__ = "tenants"
     __table_args__ = (
         UniqueConstraint("slug", name="uq_tenants_slug"),
+        CheckConstraint(
+            "lifecycle_status IN ('provisioning', 'active', 'suspended')",
+            name="ck_tenants_lifecycle_status",
+        ),
     )
 
     id = Column(String(36), primary_key=True)
     name = Column(String(255), nullable=False)
     slug = Column(String(128), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
+    lifecycle_status = Column(
+        String(16), nullable=False, default="active", server_default=text("'active'")
+    )
     onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -126,6 +133,87 @@ class TenantWecomConfig(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class WecomAuthorizationAttempt(Base):
+    """Server-side, one-use CSRF state for a third-party app installation."""
+
+    __tablename__ = "wecom_authorization_attempts"
+
+    id = Column(String(36), primary_key=True)
+    state_hash = Column(String(64), nullable=False, unique=True)
+    status = Column(String(16), nullable=False, server_default=text("'pending'"))
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class WecomAuthorizationProof(Base):
+    """Short-lived trusted organization evidence; never exposed to a client."""
+
+    __tablename__ = "wecom_authorization_proofs"
+    __table_args__ = (
+        CheckConstraint("authorization_mode = 'admin'", name="ck_wecom_auth_proof_admin_mode"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    browser_token_hash = Column(String(64), nullable=False, unique=True)
+    corp_id = Column(String(64), nullable=False)
+    corp_name = Column(String(255), nullable=False)
+    authorized_subject = Column(String(128), nullable=False)
+    agent_id = Column(String(64), nullable=True)
+    authorization_mode = Column(String(16), nullable=False)
+    permanent_code_encrypted = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False, server_default=text("'pending'"))
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class WecomOrganizationClaim(Base):
+    """Browser-bound, minimal handoff from trusted proof to provisioning."""
+
+    __tablename__ = "wecom_organization_claims"
+
+    id = Column(String(36), primary_key=True)
+    public_ref_hash = Column(String(64), nullable=False, unique=True)
+    corp_id = Column(String(64), nullable=False)
+    corp_name = Column(String(255), nullable=False)
+    authorized_subject = Column(String(128), nullable=False)
+    agent_id = Column(String(64), nullable=True)
+    permanent_code_encrypted = Column(Text, nullable=False)
+    state = Column(String(16), nullable=False, server_default=text("'pending'"))
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    consumed_at = Column(DateTime(timezone=True), nullable=True)
+    provisioned_tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=True)
+    provisioning_session_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ThirdPartyOrganizationBinding(Base):
+    """Authorized third-party app installation, separate from archive config."""
+
+    __tablename__ = "third_party_organization_bindings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_third_party_binding_tenant"),
+        UniqueConstraint("corp_id", name="uq_third_party_binding_corp"),
+        CheckConstraint(
+            "authorization_mode = 'admin'",
+            name="ck_third_party_binding_admin_mode",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    corp_id = Column(String(64), nullable=False)
+    agent_id = Column(String(64), nullable=True)
+    permanent_code_encrypted = Column(Text, nullable=False)
+    authorization_mode = Column(String(16), nullable=False, server_default=text("'admin'"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -299,6 +387,10 @@ class AdminSession(Base):
     __tablename__ = "admin_sessions"
     __table_args__ = (
         Index("ix_admin_sessions_expires_at", "expires_at"),
+        CheckConstraint(
+            "session_scope IN ('admin', 'provisioning')",
+            name="ck_admin_sessions_scope",
+        ),
     )
 
     id = Column(String(36), primary_key=True)
@@ -309,6 +401,9 @@ class AdminSession(Base):
         String(36), ForeignKey("tenants.id"), nullable=False, index=True
     )
     wecom_user_id = Column(String(64), nullable=False)
+    session_scope = Column(
+        String(16), nullable=False, default="admin", server_default=text("'admin'")
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

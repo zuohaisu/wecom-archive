@@ -98,6 +98,14 @@ _ERROR_MESSAGES: dict[str, tuple[str, str]] = {
     "user_inactive": ("login.error.userInactive", "您的企业微信账号已停用，请联系管理员。"),
     "access_pending": ("login.error.accessPending", "您的访问申请正在等待管理员授权。"),
     "config_error": ("login.error.configError", "服务器配置错误，请联系管理员。"),
+    "organization_not_found": (
+        "login.error.organizationNotFound",
+        "组织不存在，请先创建组织。",
+    ),
+    "organization_exists": (
+        "login.error.organizationExists",
+        "该组织已存在，请使用已有组织登录。",
+    ),
 }
 
 # The QR iframe is only useful once WeCom OAuth is actually configured —
@@ -261,7 +269,11 @@ def _wecom_qr_section() -> str:
     )
 
 
-def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
+def _login_page(
+    mode: str = "wecom",
+    error: Optional[str] = None,
+    organization_action: str = "",
+) -> str:
     """Builds the mode-specific body injected into templates/login.html via
     render_template — the shell (design-system stylesheet, aside marketing
     copy, language switcher, i18n bootstrap) lives in the template; only the
@@ -303,6 +315,7 @@ def _login_page(mode: str = "wecom", error: Optional[str] = None) -> str:
     <a class="btn-link" href="/admin/forgot-password" data-i18n="login.forgotPassword">忘记密码</a>
   </p>
   {error_html}
+  {organization_action}
   {qr_section}
   <p class="field-help mt-2" style="text-align:center" data-i18n="login.footerPassword">临时管理员登录 — 企业微信登录即将上线</p>
 <script>
@@ -358,6 +371,7 @@ function doLogin(e){{
   </a>
   {qr_section}
   {error_html}
+  {organization_action}
   <p class="field-help mt-2" data-i18n="login.footerWecom">仅限企业内部员工访问</p>"""
 
     return render_template("login", i18n_script=I18N_SCRIPT_TAG, login_body=login_body)
@@ -400,12 +414,38 @@ def admin_login_page(
             )
             .first()
         )
-        if session:
+        if session and session.session_scope == "admin":
             return RedirectResponse("/dashboard", status_code=302)
+        if session and session.session_scope == "provisioning":
+            tenant_status = (
+                db.query(Tenant.lifecycle_status)
+                .filter(Tenant.id == session.tenant_id)
+                .scalar()
+            )
+            if tenant_status == "provisioning":
+                return RedirectResponse("/admin/provisioning", status_code=302)
 
     mode = get_auth_mode()
     safe_error = error if error in _ERROR_MESSAGES else (error and "auth_failed")
-    return HTMLResponse(content=_login_page(mode=mode, error=safe_error))
+    organization_action = ""
+    if safe_error == "organization_not_found":
+        from app.services.wecom_organization_claims import CLAIM_COOKIE, get_browser_claim
+
+        if get_browser_claim(db, request.cookies.get(CLAIM_COOKIE), states=("pending",)) is not None:
+            organization_action = (
+                '<a class="btn btn-primary btn-block mt-4" '
+                'href="/admin/organization/confirm" '
+                'data-i18n="login.createOrganization">创建组织</a>'
+            )
+        else:
+            safe_error = "auth_failed"
+    return HTMLResponse(
+        content=_login_page(
+            mode=mode,
+            error=safe_error,
+            organization_action=organization_action,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1468,6 +1508,7 @@ def _resolve_session_user(request: Request, db: Session) -> Optional[AdminUser]:
             AdminSession.id == session_id,
             AdminSession.expires_at > now,
             AdminSession.is_revoked.is_(False),
+            AdminSession.session_scope == "admin",
         )
         .first()
     )

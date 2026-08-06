@@ -53,6 +53,7 @@ class AuditAction:
     PLATFORM_TENANT_ACCESSED = "platform.tenant_accessed"
     PLATFORM_TENANT_ACTIVATED = "platform.tenant_activated"
     PLATFORM_TENANT_DEACTIVATED = "platform.tenant_deactivated"
+    ORGANIZATION_PROVISIONED = "organization.provisioned"
     DECRYPT_COMPLETED = "decrypt.completed"
     RETENTION_MESSAGES_LOCKED = "retention.messages_locked"
 
@@ -102,6 +103,7 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.PLATFORM_TENANT_ACCESSED: (AuditCategory.SECURITY, AuditObjectType.TENANT),
     AuditAction.PLATFORM_TENANT_ACTIVATED: (AuditCategory.SECURITY, AuditObjectType.TENANT),
     AuditAction.PLATFORM_TENANT_DEACTIVATED: (AuditCategory.SECURITY, AuditObjectType.TENANT),
+    AuditAction.ORGANIZATION_PROVISIONED: (AuditCategory.ACCOUNT, AuditObjectType.TENANT),
     AuditAction.DECRYPT_COMPLETED: (AuditCategory.SYSTEM, AuditObjectType.KEY_VERSION),
     AuditAction.RETENTION_MESSAGES_LOCKED: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
 }

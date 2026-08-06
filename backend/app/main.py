@@ -25,6 +25,7 @@ from app.routers.messages import router as messages_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.platform import router as platform_router
 from app.routers.platform_access import router as platform_access_router
+from app.routers.provisioning import router as provisioning_router
 from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.reachability_checks import router as reachability_checks_router
 from app.routers.reachability_findings import router as reachability_findings_router
@@ -35,6 +36,7 @@ from app.routers.sync import router as sync_router
 from app.routers.users import users_router
 from app.routers.web import router as web_router
 from app.routers.wecom_events import router as wecom_events_router
+from app.routers.wecom_org_authorization import router as wecom_org_authorization_router
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,7 @@ class _RedactOAuthCallbackQueryFilter(logging.Filter):
 
     _REDACT_PREFIXES = (
         "/api/auth/wecom/callback?",
+        "/api/auth/wecom/third-party/callback?",
         "/api/wecom/archive/events?",
     )
 
@@ -129,6 +132,7 @@ def create_app() -> FastAPI:
     app.include_router(media_library_router, prefix="/api/admin")
     app.include_router(external_contacts_router, prefix="/api/admin")
     app.include_router(wecom_events_router)
+    app.include_router(wecom_org_authorization_router)
     app.include_router(admin_users_page_router)
     app.include_router(admin_audit_page_router)
     app.include_router(admin_media_page_router)
@@ -142,6 +146,7 @@ def create_app() -> FastAPI:
     app.include_router(onboarding_router)
     app.include_router(platform_router, prefix="/api/platform")
     app.include_router(platform_access_router, prefix="/api/platform")
+    app.include_router(provisioning_router)
 
     @app.get("/health/live")
     def health_live():

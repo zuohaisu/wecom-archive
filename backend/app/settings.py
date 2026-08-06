@@ -82,6 +82,19 @@ def get_wecom_oauth_settings() -> WecomOAuthSettings:
     return WecomOAuthSettings()
 
 
+class WecomThirdPartySettings(BaseSettings):
+    """Credentials and callback for the isolated third-party install flow."""
+
+    wecom_third_party_suite_id: str = ""
+    wecom_third_party_suite_secret: str = ""
+    wecom_third_party_suite_ticket: str = ""
+    wecom_third_party_callback_url: str = ""
+
+
+def get_wecom_third_party_settings() -> WecomThirdPartySettings:
+    return WecomThirdPartySettings()
+
+
 class WecomCallbackSettings(BaseSettings):
     wecom_callback_token: str = ""
     wecom_callback_encoding_aes_key: str = ""
