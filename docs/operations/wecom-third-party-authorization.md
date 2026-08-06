@@ -1,6 +1,6 @@
 # 企业微信第三方企业授权运维说明
 
-本流程与现有自建应用登录完全隔离。配置以下环境变量后，访问
+本流程与现有自建应用登录完全隔离。只有以下配置均已就绪，才可访问
 `/api/auth/wecom/third-party/install` 开始安装：
 
 - `WECOM_THIRD_PARTY_SUITE_ID`
@@ -9,16 +9,87 @@
 - `WECOM_THIRD_PARTY_CALLBACK_URL`
 - `FIELD_ENCRYPTION_KEY`
 
-回调地址必须精确指向 `/api/auth/wecom/third-party/callback`，反向代理也必须对该路径的
+`WECOM_THIRD_PARTY_CALLBACK_URL` 必须精确指向
+`/api/auth/wecom/third-party/callback`；它是**用户授权码回调**，反向代理必须对该路径的
 query string 做脱敏。服务只接受管理员授权模式，并再次确认安装主体在应用管理员列表中
 拥有管理权限；成员授权会失败关闭，不能成为首位 Owner。
 
+## suite_ticket 生命周期（生产启用门禁）
+
+企业微信会每 10 分钟向服务商应用的**指令回调 URL**推送新的 `suite_ticket`；每个 ticket
+实际有效期为 30 分钟，且应始终使用最近收到的值。该 URL 与上述用户授权码回调 URL
+是两个不同的地址，绝不能将 `/api/auth/wecom/third-party/callback` 配置为指令回调。
+官方说明：[推送 suite_ticket](https://developer.work.weixin.qq.com/document/path/90628)。
+
+当前 RND-345 实现只从进程环境读取 `WECOM_THIRD_PARTY_SUITE_TICKET`，尚未实现指令
+回调接收和自动更新。因此静态环境变量只能用于受控的非生产验证，**不能作为生产自助创建
+组织的启用方案**；手工刷新不能满足 10 分钟更新、30 分钟有效期的要求。
+
+生产启用前必须单独交付以下方案：
+
+1. 使用独立 HTTPS 指令回调路径，完成企业微信 URL 验证、签名验证和 AES 解密；不得复用
+   单企业会话存档事件回调配置。
+2. 仅接受本服务商 `suite_id` 的 `suite_ticket` 事件；禁止记录请求体、ticket、suite token
+   或解密后的事件内容。
+3. 将最新 ticket 按 `suite_id` 加密、原子持久化，并记录不含敏感值的接收时间；授权服务从
+   该安全存储读取，不再依赖进程环境中的静态 ticket。
+4. ticket 超过 20 分钟未刷新时告警，达到 30 分钟时拒绝发起新的授权；同时按企业微信要求
+   有界缓存 2 小时有效的 `suite_access_token`。
+5. 为回调鉴权、重复推送、过期拒绝、加密存储、无敏感日志和 ticket 失效告警补齐自动化测试，
+   再以非生产企业完成端到端验证。
+
+## FIELD_ENCRYPTION_KEY 配置前只读核查
+
+`FIELD_ENCRYPTION_KEY` 不是可随意替换的开关。若已有使用它加密的数据，设置新的未知 key
+会使相应值无法解密；`SETTINGS_ENCRYPTION_KEY` 是另一套配置中心密钥，不在本核查范围内。
+在生成或写入该 key 前，运维只能运行不返回任何凭证内容的计数查询：
+
+```sql
+SELECT 'tenant_wecom_configs' AS store, count(*) AS encrypted_rows
+  FROM tenant_wecom_configs
+ WHERE app_secret LIKE 'gAAAAA%'
+    OR COALESCE(private_key_encrypted, '') LIKE 'gAAAAA%'
+UNION ALL
+SELECT 'wecom_authorization_proofs', count(*)
+  FROM wecom_authorization_proofs
+ WHERE permanent_code_encrypted LIKE 'gAAAAA%'
+UNION ALL
+SELECT 'wecom_organization_claims', count(*)
+  FROM wecom_organization_claims
+ WHERE permanent_code_encrypted LIKE 'gAAAAA%'
+UNION ALL
+SELECT 'third_party_organization_bindings', count(*)
+  FROM third_party_organization_bindings
+ WHERE permanent_code_encrypted LIKE 'gAAAAA%';
+```
+
+若 `KEY_PROVIDER=kms_envelope`，还须只读统计 `key_versions.private_key_path LIKE 'gAAAAA%'`。
+任一计数非零时，停止配置并从受控密钥系统确认现有 key；禁止通过查询、日志或导出取得明文。
+所有计数均为零后，才可为新功能生成并安全注入新的 Fernet key。
+
+## 非生产端到端验收
+
+仅在 ticket 已在受控非生产环境中更新、且不使用康冠生产 CorpID 时执行：
+
+1. 请求 install URL，确认得到跳转企业微信的 302，而非 500；配置故障应跳转
+   `login?error=config_error`。
+2. 用测试企业的应用管理管理员完成授权，确认授权码回调只产生短时 proof/claim，不暴露
+   CorpID、用户标识或授权凭据。
+3. 确认官方企业名称并创建组织，确认浏览器只进入 `/admin/provisioning`。
+4. 在激活前验证 dashboard、归档、同步、导出和邀请均失败关闭，只允许等待页、配置准备页和
+   状态接口；平台激活后才允许进入正常控制台。
+5. 全程检查应用和反向代理日志，确认不包含 code、state、ticket、token、permanent code、
+   CorpID 或 UserID。
+
 当前开发者登记应用实测前的上线门禁：使用非生产测试企业完成一次安装、确认授权模式为
-管理员授权、确认回调与应用管理员列表权限，再允许开启入口。现有康冠生产企业无需作为
+管理员授权、确认两个回调的地址与权限，再允许开启入口。现有康冠生产企业无需作为
 “第二家企业”重复创建；如仅验证同一 CorpID，系统应走安全冲突分支而不是新建租户。
 
 排障时只能记录粗粒度错误类型。禁止记录授权 code、state、suite ticket、suite token、
 permanent code、CorpID、UserID 或完整回调 URL。
+
+配置不完整或字段加密密钥缺失/无效时，install 与授权码 callback 均安全跳转至
+`/admin/login?error=config_error`，且不创建或消费授权状态、proof、组织或用户数据。
 
 自助创建完成后租户保持 `provisioning` 且 `is_active=false`。其会话只能访问
 `/admin/provisioning`、`/admin/provisioning/settings` 与 `/api/provisioning/status`；归档、

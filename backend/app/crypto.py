@@ -37,6 +37,11 @@ def _fernet() -> Fernet:
         ) from exc
 
 
+def validate_field_encryption_configuration() -> None:
+    """Fail closed unless the configured Fernet key can be initialized."""
+    _fernet()
+
+
 def encrypt_value(plain: str) -> str:
     """Encrypt a text field using the configured Fernet key.
 
