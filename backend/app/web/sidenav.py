@@ -50,7 +50,7 @@ def render_sidenav(active_id: str, registered_paths: Iterable[str]) -> str:
     out = [
         '<nav class="side-nav">',
         '  <div class="side-nav-brand">',
-        '    <img class="side-nav-logo" src="/web/static/brand/icon-tile.svg" alt="康冠时代" width="24" height="24">',
+        '    <img class="side-nav-logo" src="/web/static/brand/icon-tile-24.svg" alt="康冠时代" width="24" height="24">',
         '    <div class="side-nav-title" data-i18n="app.subtitle">对话审阅控制台</div>',
         '  </div>',
         '  <div class="side-nav-scroll">',
