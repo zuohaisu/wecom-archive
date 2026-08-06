@@ -317,7 +317,6 @@ def _login_page(
   {error_html}
   {organization_action}
   {qr_section}
-  <p class="field-help mt-2" style="text-align:center" data-i18n="login.footerPassword">临时管理员登录 — 企业微信登录即将上线</p>
 <script>
 function doLogin(e){{
   e.preventDefault();

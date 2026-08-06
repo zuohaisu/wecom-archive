@@ -311,6 +311,8 @@ def test_login_page_shows_password_form_in_password_mode(client) -> None:
     assert "doLogin" in body or "password/login" in body
     # Must NOT show WeCom button in password mode.
     assert "wecom/login" not in body
+    assert "login.footerPassword" not in body
+    assert "临时管理员登录" not in body
 
 
 def test_login_page_shows_wecom_button_in_wecom_mode(client) -> None:
