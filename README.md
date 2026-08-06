@@ -1,12 +1,19 @@
-# WeCom Archive
+# Crowntime WeCom Archive
 
-A self-hosted archive and review console for WeCom conversation data. It
-retrieves archive records through the WeCom Conversation Archive API, decrypts
-and stores them, and gives authorized administrators a web-based review
-console.
+A complete self-hosted archive and review console for WeCom conversation
+data — not an SDK wrapper. It retrieves archive records through the WeCom
+Conversation Archive API, decrypts and stores them, and gives authorized
+administrators a full web-based review console with search, media access,
+export approval, and audit logging.
+
+Crowntime WeCom Archive is an open-source product of 深圳康冠时代科技有限公司
+(Crowntime). The source here is complete and self-hostable under the AGPL-3.0;
+a managed cloud service is offered separately for teams that would rather not
+run it themselves.
 
 > This is an independent project. “WeCom” and “企业微信” are trademarks of
-> Tencent and are used here only to describe compatibility.
+> Tencent and are used here only to describe compatibility. This software is
+> not affiliated with or endorsed by Tencent.
 
 ## Features
 
@@ -85,6 +92,30 @@ After startup, use `http://127.0.0.1:8035/health` for the health check and
 load non-production sample records with `python scripts/mock_ingest.py` from
 `backend/`.
 
+## Running tests
+
+Install the development dependencies on top of the runtime set, then run
+the suite from the repository root:
+
+```bash
+python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+make test
+```
+
+Most of the suite is offline: it builds its own SQLite engines and uses a
+fake WeCom SDK, so neither PostgreSQL, the proprietary SDK, nor live
+credentials are needed. Tests that genuinely require PostgreSQL skip
+themselves when `DATABASE_URL` is unset — a run with skips reported is
+the expected local result, not a failure.
+
+To exercise the PostgreSQL-only tests as well, point `DATABASE_URL` at a
+disposable database (never a production one) and run `alembic upgrade
+head` from `backend/` first.
+
+`make verify` runs the full developer acceptance chain — lint on the
+current diff, type check, build, then tests. Pull requests run the same
+gates through [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
 ## Configuration and deployment
 
 Keep secrets only in an ignored `.env` file; do not replace placeholder values
@@ -113,17 +144,22 @@ their own terms.
 
 ## Contributing
 
-Contributions are welcome, but every external contributor must sign the
-[Contributor License Agreement](CLA.md) before a pull request can be accepted.
-The signing mechanism will be published separately; before submitting a PR,
-ask the project maintainers for signing instructions through the repository.
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) — it
+covers the development setup, why you do not need the proprietary WeCom SDK
+to contribute, and the checks a pull request has to pass.
 
-Please also read the [security policy](SECURITY.md) before reporting a
-vulnerability.
+Every external contributor must sign the
+[Contributor License Agreement](CLA.md) before a pull request can be accepted.
+The signing mechanism is not yet automated; ask the maintainers for signing
+instructions through the repository before submitting.
+
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md). Please
+read the [security policy](SECURITY.md) before reporting a vulnerability —
+those must not be filed as public issues.
 
 ## Settings configuration center
 
-{{PRODUCT_NAME}} lets a self-hosted administrator manage supported deployment
+Crowntime WeCom Archive lets a self-hosted administrator manage supported deployment
 settings in the Settings UI. The UI is not a secret store by itself: protect
 its database and the encryption key as deployment secrets.
 

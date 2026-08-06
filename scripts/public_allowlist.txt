@@ -1,0 +1,95 @@
+# Public snapshot allowlist — the definitive list of what reaches the
+# open-source repository.
+#
+# ALLOWLIST, NOT A DENYLIST. This is deliberate. A denylist fails open: add
+# a new internal directory, forget to exclude it, and it ships. This fails
+# closed — anything not named here simply never leaves the private repo.
+# The cost is that a genuinely new public path must be added by hand, which
+# is the trade we want.
+#
+# Each line is a git pathspec (file or directory) resolved against tracked
+# files only, so untracked local scratch files can never leak in.
+# Blank lines and # comments are ignored.
+#
+# Consumed by scripts/export_public_snapshot.sh (`make public-snapshot`).
+
+# ── Application ─────────────────────────────────────────────────────
+backend/app
+backend/tests
+backend/alembic
+backend/scripts
+backend/alembic.ini
+backend/requirements.txt
+backend/requirements-dev.txt
+
+# ── Deployment reference ────────────────────────────────────────────
+# Sanitized on export (real hostnames and the private repo's deploy path
+# are rewritten to placeholders — see SANITIZERS in the export script).
+# deploy_server.sh and scripts/tests ship together on purpose: the test
+# workflow shellchecks the former and runs the latter's bats suite, so
+# dropping either one turns the public repo's CI red on arrival.
+deploy/systemd
+scripts/deploy_server.sh
+scripts/backup_once.sh
+scripts/disk_usage_check.sh
+scripts/run_with_escalating_timeout.py
+scripts/tests
+
+# ── TLS renewal tooling ─────────────────────────────────────────────
+# Included despite being peripheral to the product: the root Makefile has
+# four targets driving it (ssl-lint / ssl-test / ssl-dry-run /
+# ssl-verify-systemd) and deploy/systemd/qiniu-ssl-renew@.service invokes
+# it. Excluding it would ship dangling make targets and a systemd unit
+# pointing at a script that does not exist.
+ssl-renew
+
+# ── Documentation ───────────────────────────────────────────────────
+# Only the reference docs. Runbooks, defect post-mortems, research notes,
+# internal process docs, and the AI-collaboration docs stay private.
+docs/API.md
+docs/ARCHITECTURE.md
+docs/DATA_MODEL.md
+docs/DEPLOYMENT.md
+docs/adr
+
+# ── Repository root ─────────────────────────────────────────────────
+README.md
+LICENSE
+SECURITY.md
+CLA.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+Makefile
+pyproject.toml
+.gitignore
+.env.example
+
+# ── CI ──────────────────────────────────────────────────────────────
+# ci.yml + test.yml only. deploy.yml is deliberately absent: it carries
+# the production deploy path, host, and secret names, and a public fork
+# has nothing to deploy to.
+.github/workflows/ci.yml
+.github/workflows/test.yml
+
+# ── Awaiting a decision from Haisu ──────────────────────────────────
+# Uncomment to include. Currently excluded, with the reasoning:
+#
+# static_site/company_homepage
+#   The company site is being rebuilt (Crowntime as the company, this
+#   product as one of its open-source offerings), and a corporate
+#   homepage inside the source repo reads as a marketing funnel rather
+#   than a project. Deploy it separately.
+#
+# docs/CONVERSATION_REVIEW_CONSOLE_PRD.md
+#   Useful for contributors, but needs a read-through first to confirm it
+#   carries no commercial roadmap.
+#
+# backend/app/routers/provisioning.py
+# backend/app/routers/platform_access.py
+# backend/app/routers/wecom_org_authorization.py
+# backend/app/routers/onboarding.py
+#   The RND-345 self-service org provisioning path. Publishing gives away
+#   the managed-cloud onboarding flow; withholding it means maintaining a
+#   fork. NOTE: these are currently reachable from app.main, so excluding
+#   them requires unregistering their routers or the public app will fail
+#   to import. Product decision, not a mechanical one.

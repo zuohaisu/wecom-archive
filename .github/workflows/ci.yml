@@ -1,0 +1,29 @@
+name: CI
+
+# Pull-request quality gate.
+#
+# Before this workflow existed the only CI was "Deploy to Production",
+# which triggers on push to main — so a contributor's pull request ran no
+# tests at all and a regression could only be caught after it had already
+# merged. This runs the same gates the deploy pipeline runs, via the
+# shared reusable workflow in test.yml.
+#
+# Deliberately NO paths-ignore: once this check is marked required in
+# branch protection, a skipped run never reports a status and a docs-only
+# pull request would sit blocked forever. Running the suite on every pull
+# request costs a few CI minutes and removes that failure mode.
+
+on:
+  pull_request:
+    branches:
+      - main
+
+# A new push to the same pull request supersedes the previous run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test Suite
+    uses: ./.github/workflows/test.yml

@@ -1,0 +1,208 @@
+name: Test Suite
+
+# Reusable test workflow — the single definition of this repository's
+# quality gates. Called by:
+#   * ci.yml      on every pull request (contributor-facing gate)
+#   * deploy.yml  before the production deploy job
+#
+# Kept as ONE definition on purpose: a duplicated gate list drifts, and a
+# PR gate that silently stops matching the deploy gate gives contributors
+# false assurance — exactly the gap the open-source readiness audit
+# flagged (no PR gate at all, deploy-only CI).
+#
+# Uses no secrets: every step runs against the disposable Postgres
+# service below, never production. That is what makes it safe to run on
+# pull requests from forks.
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    name: CI Test Suite
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: wecom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install system test dependencies and ffmpeg
+        # shellcheck ships preinstalled on the ubuntu-latest runner image;
+        # --no-install-recommends skips ffmpeg's optional hardware-accel
+        # (VA-API/VDPAU/mesa) and audio-backend (PulseAudio/JACK/pocketsphinx)
+        # packages, which a headless CI transcode test never touches.
+        run: sudo apt-get update -qq && sudo apt-get install -yqq --no-install-recommends bats ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          python -m ruff --version
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "CI"
+          git config user.email "ci@localhost"
+        # Required by test_makefile_lint_diff.py which runs git commit
+
+      # ── Gate 1: compile check ──────────────────────────────────
+      - name: "[GATE] Compile-check Python code"
+        run: |
+          cd backend
+          echo "=== app ==="
+          python -m compileall -q app \
+            || { echo "::error ::Compile failed in app/"; exit 1; }
+          echo "=== scripts ==="
+          python -m compileall -q scripts \
+            || { echo "::error ::Compile failed in scripts/"; exit 1; }
+          echo "=== tests ==="
+          python -m compileall -q tests \
+            || { echo "::error ::Compile failed in tests/"; exit 1; }
+          echo "Compile check passed."
+
+      # ── Gate 2: app import check ───────────────────────────────
+      - name: "[GATE] App import check"
+        run: |
+          cd backend
+          python -c "
+          import os
+          os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
+          from app.main import app
+          print(f'App import successful ({len(app.routes)} routes)')
+          "
+
+      # ── Gate 3: deploy script safety (RND-227 P0-G) ────────────
+      # Runs the REAL scripts/deploy_server.sh end to end against mocked
+      # git/python/systemctl/curl (scripts/tests/test_helper/mock_*.sh) —
+      # never a real server. Was previously only run locally by hand;
+      # QA round 1 flagged that as a gap (a regression here could land
+      # on main undetected until an actual production deploy failed).
+      - name: "[GATE] Shellcheck deploy scripts"
+        run: shellcheck scripts/deploy_server.sh scripts/tests/test_helper/*.sh
+
+      - name: "[GATE] deploy_server.sh integration tests (bats)"
+        run: bats scripts/tests/deploy_server.bats
+
+      # ── Round 1: offline / SQLite-compatible tests ─────────────
+      - name: "Offline / SQLite-compatible tests"
+        run: |
+          cd backend
+          echo "=========================================="
+          echo "  Offline & SQLite-compatible Tests"
+          echo "  (no PostgreSQL required)"
+          echo "=========================================="
+          echo ""
+          python -m pytest tests/ -q -rs \
+            --tb=short \
+            --durations=10 \
+            -p no:warnings
+          echo ""
+          echo "Offline/SQLite tests passed."
+        env:
+          BACKEND_PY: python
+        # DATABASE_URL intentionally unset:
+        #   - SQLite & mock tests create their own engines
+        #   - PG-only tests self-skip: _postgres_reachable() checks a
+        #     Unix-socket PG that does not exist on the runner
+        #   - tenant_foundation & auth DB tests self-skip:
+        #     _DB_AVAILABLE is False when DATABASE_URL is unset
+
+      # ── Round 2: PostgreSQL-specific tests ─────────────────────
+      - name: "[GATE] Run database migrations (alembic upgrade head)"
+        run: |
+          cd backend
+          alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/wecom_test
+
+      # RND-227 P0-F: schema-drift gate. Must run AFTER upgrade head (a
+      # pending-migrations problem and an ORM/DB drift problem are
+      # different failures — this isolates the second one) and BEFORE
+      # the test suite, so a drifting model fails fast instead of
+      # masquerading as a random downstream test failure. Uses the same
+      # disposable CI Postgres service as every other PG-gated step
+      # here — never production.
+      - name: "[GATE] Alembic schema-drift check (ORM metadata vs migrations)"
+        run: |
+          cd backend
+          python -m alembic check
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/wecom_test
+
+      - name: "PostgreSQL-specific tests"
+        run: |
+          cd backend
+          echo "=========================================="
+          echo "  PostgreSQL-Specific Tests"
+          echo "  (live PostgreSQL service required)"
+          echo "=========================================="
+
+          echo ""
+          echo "--- Migration tests ---"
+          python -m pytest \
+            tests/test_revoke_association_migration.py \
+            tests/test_media_storage_backend_migration.py \
+            tests/test_message_revocations_integrity_migration.py \
+            tests/test_message_revocations_tenant_integrity.py \
+            tests/test_check_message_revocations_integrity.py \
+            -rs -v --tb=short --durations=5
+
+          echo ""
+          echo "--- RND-227 revision verification + readiness endpoint (live DB) ---"
+          python -m pytest \
+            tests/test_verify_alembic_head.py \
+            tests/test_readiness_health_endpoint.py \
+            -rs -v --tb=short --durations=5
+
+          echo ""
+          echo "--- Revoke concurrency test ---"
+          python -m pytest \
+            tests/test_revoke_concurrency.py \
+            -rs -v --tb=short --durations=5
+
+          echo ""
+          echo "--- Tenant foundation (live DB) ---"
+          python -m pytest \
+            tests/test_tenant_foundation.py \
+            -rs -v --tb=short
+
+          echo ""
+          echo "--- Auth (live DB) ---"
+          python -m pytest \
+            tests/test_auth.py \
+            -k "test_session_cookie_validates_against_db" \
+            -rs -v --tb=short
+
+          echo ""
+          echo "PostgreSQL tests passed."
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/wecom_test
+          RND201_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
+          RND174_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
+

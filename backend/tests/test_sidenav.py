@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import require_html_session
@@ -18,6 +19,13 @@ _DESIGN_TARGET = _BACKEND / "app" / "web" / "static" / "design-system.css"
 
 
 def test_design_system_is_a_new_copy_of_the_design_source() -> None:
+    # design/ holds the design system's authoring source and is not part of
+    # the public snapshot (see scripts/public_allowlist.txt), so this
+    # drift check has only one side to compare against there. Skipping
+    # keeps the open-source CI green without weakening anything: in the
+    # repository that owns both files the assertion still runs.
+    if not _DESIGN_SOURCE.exists():
+        pytest.skip("design source not present (public snapshot)")
     assert _DESIGN_TARGET.read_bytes() == _DESIGN_SOURCE.read_bytes()
 
 

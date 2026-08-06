@@ -157,6 +157,34 @@ test:
 verify: lint-diff typecheck build test
 	@echo "verify: OK"
 
+## Build the public open-source snapshot into build/public-snapshot.
+##
+## This repository ships under a two-repository model: everything internal
+## (Linear ticket files, agent automation, design sources, roadmaps) stays
+## here, and only the paths named in scripts/public_allowlist.txt reach the
+## public repo. The export script copies that allowlist, rewrites real
+## hostnames and deploy paths to placeholders, then runs a leak gate that
+## aborts on anything that must never ship.
+##
+## Writes a directory and nothing else — it never commits or pushes.
+## Review the result by hand before publishing it.
+public-snapshot:
+	./scripts/export_public_snapshot.sh
+	@echo "public-snapshot: OK"
+
+## Prove the exported snapshot is a working repository, not just a
+## well-filtered pile of files: import the app and run its whole test
+## suite from inside build/public-snapshot. Catches an allowlist that
+## dropped something the code or the tests actually need — the failure
+## mode that would otherwise surface as red CI on the public repo's very
+## first push.
+public-verify: public-snapshot
+	cd build/public-snapshot/backend && \
+		DATABASE_URL='sqlite:///:memory:' $(BACKEND_PY) -c \
+			"from app.main import app; assert len(app.routes) > 0"
+	cd build/public-snapshot/backend && $(BACKEND_PY) -m pytest tests -q -p no:warnings
+	@echo "public-verify: OK"
+
 ## Shellcheck + shfmt over every ssl-renew script, plus a Python syntax
 ## check over qiniu_helper.py and its tests. Fails non-zero on any finding.
 ssl-lint:

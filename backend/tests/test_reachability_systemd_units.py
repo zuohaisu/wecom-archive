@@ -1,6 +1,8 @@
 """Static deployment contracts for the RND-339 one-shot reconciliation."""
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = ROOT / "deploy/systemd/wecom-archive-reachability-check.service"
 TIMER = ROOT / "deploy/systemd/wecom-archive-reachability-check.timer"
@@ -31,6 +33,12 @@ def test_timer_is_daily_persistent_and_has_human_approved_offset() -> None:
 
 
 def test_runbook_has_required_operations_and_no_secret() -> None:
+    # Operational runbooks stay private (see scripts/public_allowlist.txt);
+    # the systemd units above ship, the runbook describing how this team
+    # operates them does not. The unit-level contracts in this module still
+    # run everywhere — only this doc check has nothing to read.
+    if not RUNBOOK.exists():
+        pytest.skip("runbook not present (public snapshot)")
     text = RUNBOOK.read_text()
     for heading in ("Installation", "Observe", "Manual", "Local safe", "Failure", "Rollback"):
         assert heading in text

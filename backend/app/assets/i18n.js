@@ -30,7 +30,7 @@
         "nav.language": "语言",
         "nav.messages": "消息记录",
         "nav.usageAnalytics": "用量分析",
-        "nav.dashboard": "会话存档总览",
+        "nav.dashboard": "总览",
         "nav.group.overview": "总览",
         "nav.logout": "退出登录",
 
@@ -583,7 +583,7 @@
         "nav.language": "語言",
         "nav.messages": "訊息記錄",
         "nav.usageAnalytics": "用量分析",
-        "nav.dashboard": "會話封存總覽",
+        "nav.dashboard": "總覽",
         "nav.group.overview": "總覽",
         "nav.logout": "登出",
 
@@ -1136,7 +1136,7 @@
         "nav.language": "Language",
         "nav.messages": "Messages",
         "nav.usageAnalytics": "Usage analytics",
-        "nav.dashboard": "Archive overview",
+        "nav.dashboard": "Overview",
         "nav.group.overview": "Overview",
         "nav.logout": "Logout",
 

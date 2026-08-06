@@ -784,11 +784,21 @@ class ArchiveMessage(Base):
     encrypt_chat_msg) are always retained so decryption can be re-run after a
     key rotation.  decrypt_status tracks whether decryption has been attempted:
       pending  — row inserted but decryption not yet run
-      success  — decrypted_payload is populated
-      failed   — decryption failed; decrypted_payload is null
+      success  — decryption succeeded
+      failed   — decryption failed
 
-    content_text holds the plain-text body extracted from decrypted_payload and
-    is indexed for full-text search via a GIN tsvector index.
+    decrypted_payload is ALWAYS NULL, in every decrypt_status. Nothing in
+    the application ever assigns to it: the decrypt worker extracts the
+    fields the console needs (content_text, msgtype, sender, ...) and
+    persists those, and the RND-197 reparse path writes structured_content
+    only. This is the SF-1 data minimization contract — the full decrypted
+    envelope is deliberately never persisted, so a database dump cannot
+    yield it. If you need another field, extract it into its own column;
+    do not "fix" this one by populating it.
+
+    content_text holds the plain-text body extracted from the decrypted
+    envelope in memory, and is indexed for full-text search via a GIN
+    tsvector index.
     """
 
     __tablename__ = "archive_messages"

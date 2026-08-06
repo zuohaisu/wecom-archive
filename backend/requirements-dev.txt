@@ -1,0 +1,17 @@
+# Development and test dependencies.
+#
+# Install on top of the runtime set:
+#     python -m pip install -r requirements.txt -r requirements-dev.txt
+#
+# Why this file exists: `make test` invokes pytest, but pytest was never
+# declared anywhere — a fresh clone that followed the README installed
+# requirements.txt only and then failed with ModuleNotFoundError on the
+# first `make test`. CI papered over it with an ad-hoc `pip install
+# pytest` step; that step now installs this file instead, so the local
+# and CI toolchains come from one declared source.
+#
+# Ruff is intentionally NOT here: it is pinned in requirements.txt
+# because the Makefile lint targets resolve it through the repo .venv and
+# treat it as part of the baseline toolchain, not an optional extra.
+
+pytest==8.4.2
