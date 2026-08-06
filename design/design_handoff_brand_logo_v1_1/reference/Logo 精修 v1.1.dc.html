@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/crowntime-wecom-archive-design-system-7f4bbcf2-3932-445b-9c45-8e2941c153e0/styles.css">
+<script src="_ds/crowntime-wecom-archive-design-system-7f4bbcf2-3932-445b-9c45-8e2941c153e0/_ds_bundle.js"></script>
+<style>
+  body{background:var(--color-canvas)}
+  a{color:var(--color-link)}
+  a:hover{color:var(--color-link-hover)}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:var(--color-canvas);padding:32px 24px 72px;font-family:var(--font-sans);color:var(--color-text)">
+<div style="max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:32px">
+
+  <div style="display:flex;align-items:flex-start;gap:24px">
+    <div style="min-width:0">
+      <div style="font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-5);font-weight:600;margin-bottom:6px">Brand · Logo refinement</div>
+      <h1 style="font-size:26px;font-weight:600;letter-spacing:-.01em;margin-bottom:8px">康冠时代标志 · 精修 v1.1</h1>
+      <p style="font-size:13px;color:var(--color-text-3);line-height:1.65;max-width:62em">在 v1.0 矢量稿基础上的一轮精修：只动字距、基线、画布边界与小尺寸表现，并把整套资产的几何与 Crowntime WeCom Archive 设计系统的实际使用尺寸对齐。图形三元素的比例与位置、组合关系、康冠蓝与墨色都没有改动。</p>
+    </div>
+    <div style="margin-left:auto;flex-shrink:0;display:flex;gap:8px;align-items:center">
+      <span class="badge badge-info">v1.1</span>
+      <span class="badge">2026-08-06</span>
+    </div>
+  </div>
+
+  <div class="alert alert-neutral" style="align-items:flex-start">
+    <span style="flex-shrink:0;font-weight:600;color:var(--color-text-3)">未改动</span>
+    <span>图形标三元素几何（斜率 1:3、22×32 方块、24 宽斜柱）· 组合关系（图形 + 康冠时代 + CROWN TIME）· Crown Blue <span class="mono">#1F5CC4</span> / Ink <span class="mono">#1D2733</span> · 思源黑体轮廓字形。注册证形态与商标显著性不受影响。</span>
+  </div>
+
+  <div class="section">
+    <div class="section-hd"><h2>一、总览</h2><span class="hint">横版主标识，同一显示比例（2 倍）</span></div>
+    <div class="card">
+      <div class="card-bd" style="display:flex;flex-direction:column;gap:20px">
+
+        <div style="display:flex;align-items:center;gap:20px">
+          <div style="width:64px;flex-shrink:0"><span class="badge">v1.0</span></div>
+          <div style="background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:16px 20px">
+            <img src="uploads/brand/logo/svg/logo-horizontal.svg" width="550" height="192" alt="v1.0 横版">
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:20px">
+          <div style="width:64px;flex-shrink:0"><span class="badge badge-info">v1.1</span></div>
+          <div style="background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:16px 20px">
+            <img src="brand-v1.1/logo/svg/logo-horizontal.svg" width="547.2" height="192" alt="v1.1 横版">
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:20px">
+          <div style="width:64px;flex-shrink:0"><span class="badge">叠影</span></div>
+          <div style="background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:16px 20px">
+            <div style="position:relative;width:550px;height:192px">
+              <img src="uploads/brand/logo/svg/logo-horizontal-mono.svg" width="550" height="192" alt="v1.0 叠影底层" style="position:absolute;left:0;top:0;opacity:.28">
+              <img src="brand-v1.1/logo/svg/logo-horizontal.svg" width="547.2" height="192" alt="v1.1 叠影上层" style="position:absolute;left:0;top:0;mix-blend-mode:multiply">
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="card-ft">灰色为 v1.0，蓝色为 v1.1。位移集中在「冠」的下沉、「时」「代」的字距收匀，以及拉丁行右端补齐。</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-hd"><h2>二、修正清单</h2><span class="hint">单位为标志坐标单位，标志总高 96 单位</span></div>
+    <div class="alert" style="margin-bottom:12px">
+      <span class="alert-ico">i</span>
+      <span><strong>三处修正是同一个根因。</strong>v1.0 的字符是按「墨迹顶端」对齐排布的，而不是按基线。汉字「冠」因此比其他三字高出 2.04 单位；拉丁字母 C、O 的圆形外伸被当成对齐误差，被下压 0.32 单位。</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table table-fixed">
+        <colgroup><col style="width:38px"><col style="width:150px"><col><col><col style="width:170px"></colgroup>
+        <thead><tr><th></th><th>项目</th><th>v1.0</th><th>v1.1</th><th>影响</th></tr></thead>
+        <tbody>
+          <tr><td class="cell-id">01</td><td class="cell-primary">汉字纵向对齐</td><td>按墨迹顶端对齐，「冠」高出 <span class="mono">2.04</span></td><td>四字回到同一基线 <span class="mono">y=47.02</span></td><td>底线齐整，字不再飘</td></tr>
+          <tr><td class="cell-id">02</td><td class="cell-primary">汉字字距</td><td>墨距 <span class="mono">9.10 / 8.84 / 10.82</span></td><td>均化为 <span class="mono">9.59</span>，行宽不变</td><td>「时 代」不再散开</td></tr>
+          <tr><td class="cell-id">03</td><td class="cell-primary">拉丁行基线</td><td>C、O 被下压 <span class="mono">0.32</span></td><td>同一基线，恢复圆字母外伸</td><td>C、O 回到正常光学位置</td></tr>
+          <tr><td class="cell-id">04</td><td class="cell-primary">双行右缘</td><td>拉丁行比汉字行短 <span class="mono">2.40</span></td><td>每字距 +<span class="mono">0.30</span>，两行齐左齐右</td><td>组合成为一个规整矩形</td></tr>
+          <tr><td class="cell-id">05</td><td class="cell-primary">画布边界</td><td>viewBox 右侧空 <span class="mono">1.40</span>；竖版底部裁掉 <span class="mono">0.86</span></td><td>裁到实际墨迹：<span class="mono">273.6×96</span> / <span class="mono">171.6×190</span></td><td>设 height 即得准确宽度</td></tr>
+          <tr><td class="cell-id">06</td><td class="cell-primary">斜率一致性</td><td>favicon、tile 的斜边是 <span class="mono">1:3.56</span>，主标是 <span class="mono">1:3</span></td><td>全套统一 <span class="mono">1:3</span></td><td>各资产同一几何</td></tr>
+          <tr><td class="cell-id">07</td><td class="cell-primary">24px 瓦片</td><td>缩到 24px 时左侧间隙仅 <span class="mono">0.6px</span>；SVG 圆角 5.25px 与 <span class="mono">--radius-md</span> 7px 冲突</td><td>新增 <span class="mono">icon-tile-24.svg</span>：按 24px 像素网格重画，圆角取 <span class="mono">--radius-md</span></td><td>侧栏 24px 处清晰、圆角一致</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-hd"><h2>三、细节对照</h2><span class="hint">局部放大，左 v1.0 / 右 v1.1</span></div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+
+      <div class="card">
+        <div class="card-hd"><span class="cell-id">01</span><h3>汉字回到同一基线</h3><div class="right"><span class="hint">4 倍</span></div></div>
+        <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="position:relative;width:420px;max-width:100%;height:208px;overflow:hidden;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+              <img src="uploads/brand/logo/svg/logo-horizontal.svg" width="1100" height="384" alt="v1.0 基线放大" style="position:absolute;left:-560px;top:-32px">
+              <sc-if value="{{ guides }}" hint-placeholder-val="{{ true }}">
+                <div style="position:absolute;left:0;right:0;top:170px;height:0;border-top:1px dashed var(--color-danger-fg)"></div>
+                <div style="position:absolute;left:28px;right:0;top:161px;height:0;border-top:1px solid var(--color-danger-fg)"></div>
+                <div style="position:absolute;left:150px;top:176px;font-size:11px;color:var(--color-danger-fg);font-weight:600;background:rgba(255,255,255,.92);padding:1px 5px;border-radius:3px">「冠」底端高出 2.04</div>
+              </sc-if>
+            </div>
+            <div style="font-size:11.5px;color:var(--color-text-4);margin-top:8px">v1.0：「冠」的墨迹底端离基线还有 2.04</div>
+          </div>
+          <div>
+            <div style="position:relative;width:420px;max-width:100%;height:208px;overflow:hidden;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+              <img src="brand-v1.1/logo/svg/logo-horizontal.svg" width="1094.4" height="384" alt="v1.1 基线放大" style="position:absolute;left:-560px;top:-32px">
+              <sc-if value="{{ guides }}" hint-placeholder-val="{{ true }}">
+                <div style="position:absolute;left:0;right:0;top:170px;height:0;border-top:1px dashed var(--color-success-fg)"></div>
+                <div style="position:absolute;left:14px;top:176px;font-size:11px;color:var(--color-success-fg);font-weight:600">同一基线</div>
+              </sc-if>
+            </div>
+            <div style="font-size:11.5px;color:var(--color-text-4);margin-top:8px">v1.1：四字共用字体自身的基线，底端落差 ≤0.64</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd"><span class="cell-id">02</span><h3>汉字字距均化</h3><div class="right"><span class="hint">3 倍 · 蓝条为墨距</span></div></div>
+        <div class="card-bd" style="display:flex;gap:24px;align-items:flex-start">
+          <div style="display:flex;flex-direction:column;gap:16px">
+          <div>
+            <div style="position:relative;width:540px;max-width:100%;height:150px;overflow:hidden;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+              <img src="uploads/brand/logo/svg/logo-horizontal.svg" width="825" height="288" alt="v1.0 字距" style="position:absolute;left:-294px;top:-30px">
+              <sc-if value="{{ guides }}" hint-placeholder-val="{{ true }}">
+                <div style="position:absolute;left:119.73px;top:0;width:27.3px;height:150px;background:rgba(207,19,34,.14);border-left:1px solid rgba(207,19,34,.5);border-right:1px solid rgba(207,19,34,.5)"></div>
+                <div style="position:absolute;left:255.57px;top:0;width:26.49px;height:150px;background:rgba(207,19,34,.14);border-left:1px solid rgba(207,19,34,.5);border-right:1px solid rgba(207,19,34,.5)"></div>
+                <div style="position:absolute;left:384.75px;top:0;width:32.46px;height:150px;background:rgba(207,19,34,.14);border-left:1px solid rgba(207,19,34,.5);border-right:1px solid rgba(207,19,34,.5)"></div>
+                <div style="position:absolute;left:119.73px;top:126px;width:27.3px;text-align:center;font-size:11px;font-weight:600;color:var(--color-danger-fg)">9.10</div>
+                <div style="position:absolute;left:255.57px;top:126px;width:26.49px;text-align:center;font-size:11px;font-weight:600;color:var(--color-danger-fg)">8.84</div>
+                <div style="position:absolute;left:384.75px;top:126px;width:32.46px;text-align:center;font-size:11px;font-weight:600;color:var(--color-danger-fg)">10.82</div>
+              </sc-if>
+            </div>
+            <div style="font-size:11.5px;color:var(--color-text-4);margin-top:8px">v1.0：最宽与最窄的墨距差 1.98，「时代」之间明显松</div>
+          </div>
+          <div>
+            <div style="position:relative;width:540px;max-width:100%;height:150px;overflow:hidden;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+              <img src="brand-v1.1/logo/svg/logo-horizontal.svg" width="820.8" height="288" alt="v1.1 字距" style="position:absolute;left:-294px;top:-30px">
+              <sc-if value="{{ guides }}" hint-placeholder-val="{{ true }}">
+                <div style="position:absolute;left:119.73px;top:0;width:28.77px;height:150px;background:rgba(35,120,4,.14);border-left:1px solid rgba(35,120,4,.5);border-right:1px solid rgba(35,120,4,.5)"></div>
+                <div style="position:absolute;left:257.01px;top:0;width:28.74px;height:150px;background:rgba(35,120,4,.14);border-left:1px solid rgba(35,120,4,.5);border-right:1px solid rgba(35,120,4,.5)"></div>
+                <div style="position:absolute;left:388.44px;top:0;width:28.77px;height:150px;background:rgba(35,120,4,.14);border-left:1px solid rgba(35,120,4,.5);border-right:1px solid rgba(35,120,4,.5)"></div>
+                <div style="position:absolute;left:119.73px;top:126px;width:28.77px;text-align:center;font-size:11px;font-weight:600;color:var(--color-success-fg)">9.59</div>
+                <div style="position:absolute;left:257.01px;top:126px;width:28.74px;text-align:center;font-size:11px;font-weight:600;color:var(--color-success-fg)">9.58</div>
+                <div style="position:absolute;left:388.44px;top:126px;width:28.77px;text-align:center;font-size:11px;font-weight:600;color:var(--color-success-fg)">9.59</div>
+              </sc-if>
+            </div>
+            <div style="font-size:11.5px;color:var(--color-text-4);margin-top:8px">v1.1：三处墨距等宽，四字总宽 171.60 与 v1.0 完全一致</div>
+          </div>
+          </div>
+          <div style="font-size:12.5px;color:var(--color-text-3);line-height:1.7;flex:1;min-width:200px">
+            <p style="margin-bottom:10px">汉字是等宽字身，但四个字的墨迹宽度并不相同（<span class="mono">35.91 / 36.17 / 34.21 / 36.55</span>），按字身均分就会留下看得见的疏密差。</p>
+            <p>v1.1 改为按墨迹等距：把 28.76 的总间距平分三份。四字总宽与 v1.0 完全相同，组合关系不受影响。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd"><span class="cell-id">04</span><h3>两行齐右</h3><div class="right"><span class="hint">5 倍 · 右端「代」与「E」</span></div></div>
+        <div class="card-bd" style="display:flex;gap:24px;align-items:flex-start">
+          <div style="display:flex;gap:16px">
+            <div>
+              <div style="position:relative;width:110px;height:380px;overflow:hidden;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+                <img src="uploads/brand/logo/svg/logo-horizontal.svg" width="1375" height="480" alt="v1.0 右缘" style="position:absolute;left:-1270px;top:-60px">
+                <sc-if value="{{ guides }}" hint-placeholder-val="{{ true }}">
+                  <div style="position:absolute;left:98px;top:0;bottom:0;width:0;border-left:1px dashed var(--color-danger-fg)"></div>
+                  <div style="position:absolute;left:86px;top:300px;width:12px;height:0;border-top:1px solid var(--color-danger-fg)"></div>
+                  <div style="position:absolute;left:8px;top:306px;font-size:11px;font-weight:600;color:var(--color-danger-fg)">短 2.40</div>
+                </sc-if>
+              </div>
+              <div style="font-size:11.5px;color:var(--color-text-4);margin-top:8px;width:110px">v1.0</div>
+            </div>
+            <div>
+              <div style="position:relative;width:110px;height:380px;overflow:hidden;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+                <img src="brand-v1.1/logo/svg/logo-horizontal.svg" width="1368" height="480" alt="v1.1 右缘" style="position:absolute;left:-1270px;top:-60px">
+                <sc-if value="{{ guides }}" hint-placeholder-val="{{ true }}">
+                  <div style="position:absolute;left:98px;top:0;bottom:0;width:0;border-left:1px dashed var(--color-success-fg)"></div>
+                  <div style="position:absolute;left:8px;top:306px;font-size:11px;font-weight:600;color:var(--color-success-fg)">齐右</div>
+                </sc-if>
+              </div>
+              <div style="font-size:11.5px;color:var(--color-text-4);margin-top:8px;width:110px">v1.1</div>
+            </div>
+          </div>
+          <div style="font-size:12.5px;color:var(--color-text-3);line-height:1.7;max-width:34em">
+            <p style="margin-bottom:10px">CROWN TIME 原本比「康冠时代」窄 2.40，右端悬空。v1.1 把这 2.40 平均加到 8 个字距上（每处 +0.30），保留字体自身的字偶关系，只让两行首尾对齐。</p>
+            <p>结果：整个文字块成为 <span class="mono">171.60 × 67.53</span> 的规整矩形，横排、居中、右对齐三种用法都不再需要人工微调。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd"><span class="cell-id">05</span><h3>竖版画布裁到实际墨迹</h3><div class="right"><span class="hint">6 倍 · 竖版左下角「C」</span></div></div>
+        <div class="card-bd" style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+          <div>
+            <div style="position:relative;width:300px;height:144px;overflow:hidden;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+              <img src="uploads/brand/logo/svg/logo-stacked.svg" width="1362" height="1134" alt="v1.0 竖版底部" style="position:absolute;left:-138.42px;top:-996px">
+              <sc-if value="{{ guides }}" hint-placeholder-val="{{ true }}">
+                <div style="position:absolute;left:0;right:0;bottom:6px;height:0;border-top:1px dashed var(--color-danger-fg)"></div>
+                <div style="position:absolute;right:6px;bottom:10px;font-size:11px;font-weight:600;color:var(--color-danger-fg);background:rgba(255,255,255,.92);padding:1px 5px;border-radius:3px">画布底 · 裁掉 0.86</div>
+              </sc-if>
+            </div>
+            <div style="font-size:11.5px;color:var(--color-text-4);margin-top:8px">v1.0：C、O 的圆底被 viewBox 切平</div>
+          </div>
+          <div>
+            <div style="position:relative;width:300px;height:144px;overflow:hidden;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+              <img src="brand-v1.1/logo/svg/logo-stacked.svg" width="1029.6" height="1140" alt="v1.1 竖版底部" style="position:absolute;left:24px;top:-996px">
+              <sc-if value="{{ guides }}" hint-placeholder-val="{{ true }}">
+                <div style="position:absolute;left:0;right:0;bottom:0;height:0;border-top:1px dashed var(--color-success-fg)"></div>
+                <div style="position:absolute;right:6px;bottom:4px;font-size:11px;font-weight:600;color:var(--color-success-fg);background:rgba(255,255,255,.92);padding:1px 5px;border-radius:3px">画布底 = 墨迹底</div>
+              </sc-if>
+            </div>
+            <div style="font-size:11.5px;color:var(--color-text-4);margin-top:8px">v1.1：圆底完整，且左右两行都与画布齐边</div>
+          </div>
+          <div style="font-size:12.5px;color:var(--color-text-3);line-height:1.7;flex:1;min-width:240px">
+            v1.1 竖版同时重建了中轴：图形标、汉字行、拉丁行三者共用一条中线（<span class="mono">171.6 / 2</span>），v1.0 三者相差 0.5–1.1。净空区仍按「方块边长 x」在版式里给，不再烘进文件。
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-hd"><h2>四、放到产品里</h2><span class="hint">按设计系统的真实尺寸截取 · 放大视图为 24px / 16px 真实栅格</span></div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+
+      <div class="card">
+        <div class="card-hd"><h3>侧栏品牌区 · 24px 瓦片</h3><div class="right"><span class="hint">.sidenav-brand / .sidenav-logo</span></div></div>
+        <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+          <div>
+            <div style="width:212px;background:var(--color-surface-nav);border:1px solid var(--color-border-strong);border-radius:var(--radius-lg);overflow:hidden">
+              <div class="sidenav-brand"><img class="sidenav-logo" src="cmp/tile-v10-24.png" alt="v1.0 24px" width="24" height="24"><div class="sidenav-title">会话存档控制台</div></div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:flex-end;margin-top:14px">
+              <div>
+                <div style="width:96px;height:96px;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm);overflow:hidden;position:relative">
+                  <img src="cmp/tile-v10-24.png" width="96" height="96" alt="v1.0 24px 放大" style="image-rendering:pixelated;display:block">
+                  <sc-if value="{{ pixelGrid }}" hint-placeholder-val="{{ true }}">
+                    <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,rgba(15,23,42,.14) 0 1px,transparent 1px 4px),repeating-linear-gradient(90deg,rgba(15,23,42,.14) 0 1px,transparent 1px 4px)"></div>
+                  </sc-if>
+                </div>
+                <div style="font-size:11px;color:var(--color-text-4);margin-top:6px">24px 实际栅格 ×4</div>
+              </div>
+              <div style="font-size:11.5px;color:var(--color-danger-fg);line-height:1.6;padding-bottom:22px">左侧间隙 0.6px，糊成一块<br>SVG 圆角 5.25px，与外层 7px 裁切不同心</div>
+            </div>
+            <div style="font-size:11.5px;color:var(--color-text-4);margin-top:10px">v1.0 · icon-tile.svg</div>
+          </div>
+          <div>
+            <div style="width:212px;background:var(--color-surface-nav);border:1px solid var(--color-border-strong);border-radius:var(--radius-lg);overflow:hidden">
+              <div class="sidenav-brand"><img class="sidenav-logo" src="cmp/tile-v11-24.png" alt="v1.1 24px" width="24" height="24"><div class="sidenav-title">会话存档控制台</div></div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:flex-end;margin-top:14px">
+              <div>
+                <div style="width:96px;height:96px;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm);overflow:hidden;position:relative">
+                  <img src="cmp/tile-v11-24.png" width="96" height="96" alt="v1.1 24px 放大" style="image-rendering:pixelated;display:block">
+                  <sc-if value="{{ pixelGrid }}" hint-placeholder-val="{{ true }}">
+                    <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,rgba(15,23,42,.14) 0 1px,transparent 1px 4px),repeating-linear-gradient(90deg,rgba(15,23,42,.14) 0 1px,transparent 1px 4px)"></div>
+                  </sc-if>
+                </div>
+                <div style="font-size:11px;color:var(--color-text-4);margin-top:6px">24px 实际栅格 ×4</div>
+              </div>
+              <div style="font-size:11.5px;color:var(--color-success-fg);line-height:1.6;padding-bottom:22px">间隙 1px / 2px，三元素分得开<br>圆角 = <span class="mono">--radius-md</span> 7px，与系统一致</div>
+            </div>
+            <div style="font-size:11.5px;color:var(--color-text-4);margin-top:10px">v1.1 · icon-tile-24.svg（新增，专供 20–28px 的 UI 槽位）</div>
+          </div>
+        </div>
+        <div class="card-ft">主标图形（logo-icon.svg）和 App 图标（icon-tile.svg）的几何都没有动；24px 版只是把边缘落到像素线上，等同于字体的 hinting。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd"><h3>浏览器标签 · 16px</h3><div class="right"><span class="hint">favicon.svg</span></div></div>
+        <div class="card-bd" style="display:flex;gap:32px;align-items:flex-end;flex-wrap:wrap">
+          <div style="display:flex;gap:16px;align-items:flex-end">
+            <div>
+              <div style="display:flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:6px 10px">
+                <img src="cmp/fav-v10-16.png" width="16" height="16" alt="v1.0 favicon">
+                <span style="font-size:12px;color:var(--color-text-3)">会话存档控制台</span>
+              </div>
+              <div style="width:128px;height:128px;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm);margin-top:12px;position:relative;overflow:hidden">
+                <img src="cmp/fav-v10-16.png" width="128" height="128" alt="v1.0 favicon 放大" style="image-rendering:pixelated;display:block">
+                <sc-if value="{{ pixelGrid }}" hint-placeholder-val="{{ true }}">
+                  <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,rgba(15,23,42,.14) 0 1px,transparent 1px 8px),repeating-linear-gradient(90deg,rgba(15,23,42,.14) 0 1px,transparent 1px 8px)"></div>
+                </sc-if>
+              </div>
+              <div style="font-size:11.5px;color:var(--color-text-4);margin-top:6px">v1.0 · 斜边 1:3.56</div>
+            </div>
+            <div>
+              <div style="display:flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:6px 10px">
+                <img src="cmp/fav-v11-16.png" width="16" height="16" alt="v1.1 favicon">
+                <span style="font-size:12px;color:var(--color-text-3)">会话存档控制台</span>
+              </div>
+              <div style="width:128px;height:128px;background:#fff;border:1px solid var(--color-border);border-radius:var(--radius-sm);margin-top:12px;position:relative;overflow:hidden">
+                <img src="cmp/fav-v11-16.png" width="128" height="128" alt="v1.1 favicon 放大" style="image-rendering:pixelated;display:block">
+                <sc-if value="{{ pixelGrid }}" hint-placeholder-val="{{ true }}">
+                  <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,rgba(15,23,42,.14) 0 1px,transparent 1px 8px),repeating-linear-gradient(90deg,rgba(15,23,42,.14) 0 1px,transparent 1px 8px)"></div>
+                </sc-if>
+              </div>
+              <div style="font-size:11.5px;color:var(--color-text-4);margin-top:6px">v1.1 · 斜边回到 1:3</div>
+            </div>
+          </div>
+          <div style="font-size:12.5px;color:var(--color-text-3);line-height:1.7;flex:1;min-width:260px">
+            16px 的间隙加宽在 v1.0 就做对了，只是斜柱的斜率被顺手改成了 1:3.56，和主标不是同一个形。v1.1 保留加宽的间隙、把斜率改回 1:3，16px 的观感几乎不变，但全套资产回到同一几何。
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd"><h3>深色平面 · 反白横版</h3><div class="right"><span class="hint">.admin-bar / Blue 900 页脚</span></div></div>
+        <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
+          <div class="admin-bar" style="border-radius:var(--radius-lg)">
+            <img src="brand-v1.1/logo/svg/logo-horizontal-reverse.svg" height="18" alt="反白横版" style="display:block">
+            <span style="color:var(--color-admin-bar-muted);font-size:12.5px">平台控制台</span>
+            <div class="right"><span class="badge">超管</span></div>
+          </div>
+          <div style="background:#0B2453;border-radius:var(--radius-lg);padding:24px 28px;display:flex;align-items:center;gap:20px">
+            <img src="brand-v1.1/logo/svg/logo-horizontal-reverse.svg" height="28" alt="反白横版 页脚" style="display:block">
+            <span style="color:rgba(255,255,255,.62);font-size:12.5px;line-height:1.7">© 2026 深圳前海康冠时代科技有限公司<br>康冠时代<sup style="font-size:9px">®</sup> 为本公司注册商标</span>
+          </div>
+        </div>
+        <div class="card-ft">反白版与彩色版同源同坐标，v1.1 的字距、基线修正在三个色版里一致。</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-hd"><h2>五、与设计系统主色的关系</h2><span class="hint">待拍板 · 不影响本次交付</span></div>
+    <div class="card">
+      <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+        <div>
+          <div style="height:72px;border-radius:var(--radius-lg);background:#1677ff;display:flex;align-items:flex-end;padding:10px 14px;color:#fff;font-size:12.5px;font-weight:600">设计系统 --color-primary</div>
+          <div class="kv" style="margin-top:14px">
+            <dt>HEX</dt><dd class="mono">#1677ff</dd>
+            <dt>白底对比度</dt><dd>4.10:1 · 正文文字不过 AA</dd>
+            <dt>来源</dt><dd>控制台既有实现</dd>
+          </div>
+        </div>
+        <div>
+          <div style="height:72px;border-radius:var(--radius-lg);background:#1F5CC4;display:flex;align-items:flex-end;padding:10px 14px;color:#fff;font-size:12.5px;font-weight:600">Crown Blue 500</div>
+          <div class="kv" style="margin-top:14px">
+            <dt>HEX</dt><dd class="mono">#1F5CC4</dd>
+            <dt>白底对比度</dt><dd>6.20:1 · 过 AA</dd>
+            <dt>来源</dt><dd>品牌主色 / 标志本体</dd>
+          </div>
+        </div>
+      </div>
+      <div class="card-ft" style="line-height:1.7">
+        两个蓝同时出现在一条顶栏里会互相打架。BRAND.md §6.4 已经建议把产品主色迁到 Crown Blue 500/600，这一轮不动标志颜色，只把结论摆出来：迁移是一次变量替换（<span class="mono">--color-primary</span> / <span class="mono">--color-primary-hover</span>），且顺带把链接文字的对比度从 4.10 提到 6.20。需要您拍板。
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-hd"><h2>六、交付文件</h2><span class="hint">brand-v1.1/ · 与 v1.0 目录结构一致</span></div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>文件</th><th>尺寸</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">logo/svg/logo-horizontal.svg</td><td class="mono">273.6×96</td><td>主标识（官网、文档、深色以外的一切场合）</td></tr>
+          <tr><td class="mono">logo/svg/logo-horizontal-mono.svg</td><td class="mono">273.6×96</td><td>单色黑 · 合同、资质、传真</td></tr>
+          <tr><td class="mono">logo/svg/logo-horizontal-reverse.svg</td><td class="mono">273.6×96</td><td>反白 · 深色顶栏与页脚</td></tr>
+          <tr><td class="mono">logo/svg/logo-stacked[-mono|-reverse].svg</td><td class="mono">171.6×190</td><td>竖版 · 登录页、启动页、名片</td></tr>
+          <tr><td class="mono">logo/svg/logo-icon[-mono|-reverse].svg</td><td class="mono">80×96</td><td>图形标 · 头像、水印、pinned tab</td></tr>
+          <tr><td class="mono">logo/svg/logo-icon-small.svg</td><td class="mono">82×96</td><td>图形标小尺寸版（间隙加宽，≤32px 用）</td></tr>
+          <tr><td class="mono">favicon/favicon.svg</td><td class="mono">96×96</td><td>现代浏览器矢量图标</td></tr>
+          <tr><td class="mono">favicon/icon-tile.svg</td><td class="mono">96×96</td><td>App 图标底板（iOS 圆角比例）</td></tr>
+          <tr><td class="mono">favicon/icon-tile-24.svg</td><td class="mono">96×96</td><td class="cell-primary">新增 · 20–28px UI 槽位（侧栏品牌区）</td></tr>
+          <tr><td class="mono">favicon/favicon-16/32/48.png · apple-touch-icon.png · icon-192/512.png</td><td>—</td><td>位图图标全套（已按新矢量重出）</td></tr>
+          <tr><td class="mono">logo/png/*-1x|2x|4x|8x.png</td><td>—</td><td>各版位图（文件名用 <span class="mono">-2x</span> 代替 <span class="mono">@2x</span>）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="alert alert-warning" style="margin-top:12px">
+      <span class="alert-ico">!</span>
+      <span><strong>两件事需要另外处理。</strong>一、<span class="mono">favicon.ico</span> 需要用 ICO 打包工具从新的 16/32/48 PNG 重新生成（浏览器兜底用，本环境不产 ICO）。二、BRAND.md 里「注册证有效期至 2026-11-13」的续展提醒仍然有效，距到期不足 4 个月。</span>
+    </div>
+  </div>
+
+</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showGuides&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;评审辅助&quot;},&quot;pixelGrid&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;评审辅助&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;评审辅助&quot;}}">
+class Component extends DCLogic {
+  componentDidMount(){ this.applyTheme(); }
+  componentDidUpdate(){ this.applyTheme(); }
+  applyTheme(){
+    const t = this.props.theme || 'light';
+    if (t === 'dark') document.documentElement.dataset.theme = 'dark';
+    else document.documentElement.removeAttribute('data-theme');
+  }
+  renderVals(){
+    return {
+      guides: this.props.showGuides ?? true,
+      pixelGrid: this.props.pixelGrid ?? true
+    };
+  }
+}
+</script>
+</body>
+</html>
