@@ -273,9 +273,12 @@ def test_any_failure_rolls_back_tenant_owner_session_binding_and_audit(monkeypat
 
 
 def test_migration_maps_existing_lifecycle_and_worker_remains_single_corp():
-    migration = Path("backend/alembic/versions/0040_rnd348_self_service_provisioning.py").read_text()
+    backend_root = Path(__file__).resolve().parents[1]
+    migration = (
+        backend_root / "alembic/versions/0040_rnd348_self_service_provisioning.py"
+    ).read_text()
     assert "CASE WHEN is_active THEN 'active' ELSE 'suspended' END" in migration
     assert "'provisioning', 'active', 'suspended'" in migration
-    worker = Path("backend/scripts/sync_wecom_archive_once.py").read_text()
+    worker = (backend_root / "scripts/sync_wecom_archive_once.py").read_text()
     assert "WECOM_CORP_ID" in worker
     assert "ThirdPartyOrganizationBinding" not in worker
