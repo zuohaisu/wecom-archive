@@ -28,11 +28,9 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.main import create_app
+from app.routers import wecom_org_authorization
 from app.services.organization_provisioning import provision_organization
-from app.services.wecom_org_authorization import (
-    AuthorizedOrganization,
-    get_wecom_org_authorization_provider,
-)
+from app.services.wecom_org_authorization import AuthorizedOrganization
 
 
 @compiles(JSONB, "sqlite")
@@ -86,7 +84,11 @@ def _setup(monkeypatch):
             yield db
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_wecom_org_authorization_provider] = lambda: provider
+    monkeypatch.setattr(
+        wecom_org_authorization,
+        "get_wecom_org_authorization_provider",
+        lambda: provider,
+    )
     return TestClient(app), factory, provider
 
 

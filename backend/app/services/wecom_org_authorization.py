@@ -57,7 +57,6 @@ class OfficialWecomOrganizationAuthorizationProvider:
 
     def __init__(self, settings: WecomThirdPartySettings, client: httpx.Client | None = None):
         self.settings = settings
-        self.client = client or httpx.Client(timeout=10.0)
         required = (
             settings.wecom_third_party_suite_id,
             settings.wecom_third_party_suite_secret,
@@ -66,6 +65,7 @@ class OfficialWecomOrganizationAuthorizationProvider:
         )
         if not all(value.strip() for value in required):
             raise WecomAuthorizationError("WeCom third-party authorization is not configured")
+        self.client = client or httpx.Client(timeout=10.0)
 
     def _post(self, path: str, *, params: dict, body: dict) -> dict:
         try:

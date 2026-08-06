@@ -10,6 +10,10 @@ from html import escape
 from sqlalchemy.orm import Session
 
 from app.auth import SESSION_COOKIE, _is_production
+from app.crypto import (
+    FieldEncryptionConfigurationError,
+    validate_field_encryption_configuration,
+)
 from app.db.session import get_db
 from app.services.wecom_org_authorization import (
     WecomAuthorizationError,
@@ -36,14 +40,20 @@ from app.web import render_template
 router = APIRouter()
 
 
+def _get_configured_provider() -> WecomOrganizationAuthorizationProvider:
+    """Resolve all configuration before either route writes authorization state."""
+    validate_field_encryption_configuration()
+    return get_wecom_org_authorization_provider()
+
+
 @router.get("/api/auth/wecom/third-party/install", response_class=RedirectResponse)
 def start_wecom_organization_authorization(
     db: Session = Depends(get_db),
-    provider: WecomOrganizationAuthorizationProvider = Depends(get_wecom_org_authorization_provider),
 ) -> RedirectResponse:
     try:
+        provider = _get_configured_provider()
         return RedirectResponse(begin_authorization(db, provider), status_code=302)
-    except WecomAuthorizationError:
+    except (FieldEncryptionConfigurationError, WecomAuthorizationError):
         db.rollback()
         return RedirectResponse("/admin/login?error=config_error", status_code=302)
 
@@ -53,13 +63,21 @@ def finish_wecom_organization_authorization(
     code: Annotated[str, Query(min_length=1)],
     state: Annotated[str, Query(min_length=1)],
     db: Session = Depends(get_db),
-    provider: WecomOrganizationAuthorizationProvider = Depends(get_wecom_org_authorization_provider),
 ) -> RedirectResponse:
+    try:
+        provider = _get_configured_provider()
+    except (FieldEncryptionConfigurationError, WecomAuthorizationError):
+        db.rollback()
+        return RedirectResponse("/admin/login?error=config_error", status_code=302)
+
     try:
         browser_token = complete_authorization(
             db, provider, state=state, authorization_code=code
         )
         claim_ref = create_claim_from_proof(db, browser_token)
+    except FieldEncryptionConfigurationError:
+        db.rollback()
+        return RedirectResponse("/admin/login?error=config_error", status_code=302)
     except OrganizationAlreadyExists:
         db.rollback()
         return RedirectResponse("/admin/login?error=organization_exists", status_code=302)

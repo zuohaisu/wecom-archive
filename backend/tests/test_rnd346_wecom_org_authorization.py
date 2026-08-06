@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -22,11 +23,11 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.main import create_app
+from app.routers import wecom_org_authorization
 from app.services.wecom_org_authorization import (
     AuthorizedOrganization,
     OfficialWecomOrganizationAuthorizationProvider,
     WecomAuthorizationError,
-    get_wecom_org_authorization_provider,
 )
 from app.settings import WecomThirdPartySettings
 
@@ -109,7 +110,7 @@ def test_official_provider_uses_third_party_admin_list_http_contract():
     assert all(request["path"] != "/cgi-bin/service/get_corp_token" for request in requests)
 
 
-def _client(monkeypatch, provider: FakeProvider):
+def _client(monkeypatch, provider: FakeProvider | None = None):
     monkeypatch.setenv("FIELD_ENCRYPTION_KEY", Fernet.generate_key().decode())
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -138,8 +139,100 @@ def _client(monkeypatch, provider: FakeProvider):
             db.close()
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_wecom_org_authorization_provider] = lambda: provider
+    if provider is not None:
+        monkeypatch.setattr(
+            wecom_org_authorization,
+            "get_wecom_org_authorization_provider",
+            lambda: provider,
+        )
     return TestClient(app), factory
+
+
+def test_unconfigured_provider_redirects_without_writing_authorization_data(monkeypatch):
+    for setting in (
+        "WECOM_THIRD_PARTY_SUITE_ID",
+        "WECOM_THIRD_PARTY_SUITE_SECRET",
+        "WECOM_THIRD_PARTY_SUITE_TICKET",
+        "WECOM_THIRD_PARTY_CALLBACK_URL",
+    ):
+        monkeypatch.delenv(setting, raising=False)
+    client, factory = _client(monkeypatch, provider=None)
+
+    install = client.get("/api/auth/wecom/third-party/install", follow_redirects=False)
+    callback = client.get(
+        "/api/auth/wecom/third-party/callback",
+        params={"code": "one-use-code", "state": "valid-looking-state"},
+        follow_redirects=False,
+    )
+
+    for response in (install, callback):
+        assert response.status_code == 302
+        assert response.headers["location"] == "/admin/login?error=config_error"
+    with factory() as db:
+        assert db.query(WecomAuthorizationAttempt).count() == 0
+        assert db.query(WecomAuthorizationProof).count() == 0
+        assert db.query(Tenant).count() == 0
+        assert db.query(TenantWecomConfig).count() == 0
+        assert db.query(AdminUser).count() == 0
+        assert db.query(AdminLoginIdentity).count() == 0
+        assert db.query(AdminSession).count() == 0
+
+
+@pytest.mark.parametrize("field_key", [None, "not-a-valid-fernet-key"])
+def test_install_rejects_invalid_field_encryption_config_without_writing_state(
+    monkeypatch, field_key
+):
+    provider = FakeProvider()
+    client, factory = _client(monkeypatch, provider)
+    if field_key is None:
+        monkeypatch.delenv("FIELD_ENCRYPTION_KEY")
+    else:
+        monkeypatch.setenv("FIELD_ENCRYPTION_KEY", field_key)
+
+    response = client.get("/api/auth/wecom/third-party/install", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/admin/login?error=config_error"
+    assert provider.last_state == ""
+    with factory() as db:
+        assert db.query(WecomAuthorizationAttempt).count() == 0
+        assert db.query(WecomAuthorizationProof).count() == 0
+        assert db.query(Tenant).count() == 0
+        assert db.query(TenantWecomConfig).count() == 0
+        assert db.query(AdminUser).count() == 0
+        assert db.query(AdminLoginIdentity).count() == 0
+        assert db.query(AdminSession).count() == 0
+
+
+@pytest.mark.parametrize("field_key", [None, "not-a-valid-fernet-key"])
+def test_callback_rejects_invalid_field_encryption_config_without_consuming_state(
+    monkeypatch, field_key
+):
+    provider = FakeProvider()
+    client, factory = _client(monkeypatch, provider)
+    started = client.get("/api/auth/wecom/third-party/install", follow_redirects=False)
+    assert started.status_code == 302
+    if field_key is None:
+        monkeypatch.delenv("FIELD_ENCRYPTION_KEY")
+    else:
+        monkeypatch.setenv("FIELD_ENCRYPTION_KEY", field_key)
+
+    callback = client.get(
+        "/api/auth/wecom/third-party/callback",
+        params={"code": "one-use-code", "state": provider.last_state},
+        follow_redirects=False,
+    )
+
+    assert callback.status_code == 302
+    assert callback.headers["location"] == "/admin/login?error=config_error"
+    with factory() as db:
+        assert db.query(WecomAuthorizationAttempt).one().status == "pending"
+        assert db.query(WecomAuthorizationProof).count() == 0
+        assert db.query(Tenant).count() == 0
+        assert db.query(TenantWecomConfig).count() == 0
+        assert db.query(AdminUser).count() == 0
+        assert db.query(AdminLoginIdentity).count() == 0
+        assert db.query(AdminSession).count() == 0
 
 
 def test_authorization_creates_only_short_lived_server_side_proof(monkeypatch):
