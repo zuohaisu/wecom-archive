@@ -128,6 +128,10 @@ repository contains worker units and deployment guidance; the web-service unit,
 reverse-proxy configuration, and TLS certificates are operator-managed. See
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full deployment procedure.
 
+## Releases
+
+- [v1.0.0 — the first complete product baseline](docs/releases/v1.0.0.md)
+
 ## FAQ
 
 **Why do sync or decryption commands fail without the SDK?** The archive
