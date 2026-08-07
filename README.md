@@ -1,15 +1,21 @@
 # Crowntime WeCom Archive
 
-A complete self-hosted archive and review console for WeCom conversation
-data — not an SDK wrapper. It retrieves archive records through the WeCom
-Conversation Archive API, decrypts and stores them, and gives authorized
-administrators a full web-based review console with search, media access,
-export approval, and audit logging.
+A complete archive and review console for WeCom conversation data — not an
+SDK wrapper. It retrieves archive records through the WeCom Conversation
+Archive API, decrypts and stores them, and gives authorized administrators a
+full web-based review console with search, media access, export approval, and
+audit logging.
 
-Crowntime WeCom Archive is an open-source product of 深圳康冠时代科技有限公司
-(Crowntime). The source here is complete and self-hostable under the AGPL-3.0;
-a managed cloud service is offered separately for teams that would rather not
-run it themselves.
+Crowntime WeCom Archive is a proprietary product of 深圳康冠时代科技有限公司
+(Crowntime), **operated as a hosted service**. It is not open source, and no
+self-hosting or on-premises license is offered. This repository is private and
+its contents are confidential.
+
+> **This README is internal documentation.** The setup instructions below are
+> for developing and operating the service ourselves, not a customer-facing
+> installation guide. For the product strategy behind that, see
+> [ADR-0003](docs/adr/0003-product-strategy-hosted-only.md) and the
+> [first-10-customers roadmap](deliverables/roadmap-first-10-customers-2026-08-07.md).
 
 > This is an independent project. “WeCom” and “企业微信” are trademarks of
 > Tencent and are used here only to describe compatibility. This software is
@@ -142,28 +148,23 @@ it from Tencent, place it outside version control (the ignored
 
 ## License
 
-This project is licensed under the [GNU Affero General Public License v3.0](LICENSE)
-(AGPL-3.0). Third-party components, including the WeCom SDK, remain subject to
+Proprietary and confidential — see [LICENSE](LICENSE). All rights reserved by
+深圳康冠时代科技有限公司. Third-party components, including Tencent's WeCom SDK
+and the open-source dependencies in the requirements files, remain subject to
 their own terms.
 
-## Contributing
+## Development
 
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) — it
-covers the development setup, why you do not need the proprietary WeCom SDK
-to contribute, and the checks a pull request has to pass.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the development setup, the
+acceptance chain a pull request has to pass, and the codebase invariants worth
+knowing before you change anything.
 
-Every external contributor must sign the
-[Contributor License Agreement](CLA.md) before a pull request can be accepted.
-The signing mechanism is not yet automated; ask the maintainers for signing
-instructions through the repository before submitting.
-
-Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md). Please
-read the [security policy](SECURITY.md) before reporting a vulnerability —
-those must not be filed as public issues.
+Security issues follow [SECURITY.md](SECURITY.md) and must never be filed in a
+normal issue.
 
 ## Settings configuration center
 
-Crowntime WeCom Archive lets a self-hosted administrator manage supported deployment
+Crowntime WeCom Archive lets an administrator manage supported deployment
 settings in the Settings UI. The UI is not a secret store by itself: protect
 its database and the encryption key as deployment secrets.
 

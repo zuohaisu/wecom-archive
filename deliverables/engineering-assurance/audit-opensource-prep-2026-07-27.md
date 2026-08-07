@@ -1,3 +1,10 @@
+> ⚠️ **已失效（2026-08-07）**：开源发布决策已取消，见
+> [ADR-0003](../../docs/adr/0003-product-strategy-hosted-only.md)。
+> 本审计中「开源合规」类发现（LICENSE / CLA / CONTRIBUTING / CODE_OF_CONDUCT 等）不再适用；
+> 其中与安全、密钥、数据最小化相关的发现仍然有效，且在托管模式下更重要。
+
+---
+
 # 365 企微会话存档（Crowntime WeCom Archive）· 开源前综合审计报告
 
 **日期**：2026-07-27
