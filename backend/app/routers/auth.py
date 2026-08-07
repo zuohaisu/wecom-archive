@@ -1081,7 +1081,11 @@ def wecom_qr_login():
         f"&agentid={agent_id}"
         f"&redirect_uri={redirect_uri}"
         f"&state={state}"
-        "&self_redirect=true"
+        # WeCom owns the cross-origin QR page, so it must promote the
+        # post-confirmation callback to the top window.  Keeping the
+        # callback in this iframe strands the visible page on /admin/login
+        # even after the session was created (GitHub #29).
+        "&self_redirect=false"
     )
     logger.info("wecom_qr_login: auth started")
     return RedirectResponse(qr_connect_url, status_code=302)
@@ -1432,12 +1436,12 @@ def wecom_callback(
 def _break_out_of_qr_frame(redirect: RedirectResponse) -> HTMLResponse:
     """Turn the shared flow's 302 into a top-window navigation.
 
-    The QR iframe uses WeCom's self_redirect=true, so the post-scan redirect
-    lands *inside* the 300x400 frame. Left as a 302, the whole admin console
-    would render in that box while the top window sat on the login page. A
-    cross-origin frame cannot retarget the top window without a user
-    gesture, but by this point the frame is back on our own origin, so
-    window.top is same-origin and writable.
+    The QR URL asks WeCom to redirect the top window directly. This response
+    remains a defence-in-depth fallback for clients/provider behaviour that
+    still lands the callback inside the 300x400 frame: by this point the
+    frame is back on our own origin, so window.top is same-origin and
+    writable. When the callback is already top-level, the same script simply
+    replaces the current page.
 
     Only the response envelope changes: identity verification, employee
     status, tenant binding, the session row and every cookie attribute

@@ -187,14 +187,20 @@ def _set_wecom_env(monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_DOMAIN", "admin.example.test")
 
 
-def test_qr_login_redirects_to_qrconnect_and_login_page_has_i18n(client, monkeypatch) -> None:
+def test_qr_login_redirects_top_window_after_scan_and_login_page_has_i18n(
+    client, monkeypatch
+) -> None:
     _set_wecom_env(monkeypatch)
     response = client.get("/api/auth/wecom/qr/login", follow_redirects=False)
     assert response.status_code == 302
     location = response.headers["location"]
     assert "open.work.weixin.qq.com/wwopen/sso/qrConnect" in location
     assert "state=" in location
-    assert "self_redirect=true" in location
+    # WeCom defines false as redirecting the top window after confirmation;
+    # true keeps the callback inside the QR iframe and leaves the visible
+    # login page stranded (GitHub #29).
+    assert "self_redirect=false" in location
+    assert "self_redirect=true" not in location
 
     page = client.get("/admin/login")
     assert 'data-i18n="login.qrTitle"' in page.text
