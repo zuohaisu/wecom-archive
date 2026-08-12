@@ -5,8 +5,9 @@
 
 - `WECOM_THIRD_PARTY_SUITE_ID`
 - `WECOM_THIRD_PARTY_SUITE_SECRET`
-- `WECOM_THIRD_PARTY_SUITE_TICKET`
 - `WECOM_THIRD_PARTY_CALLBACK_URL`
+- `WECOM_THIRD_PARTY_INSTRUCTION_TOKEN`
+- `WECOM_THIRD_PARTY_INSTRUCTION_ENCODING_AES_KEY`
 - `FIELD_ENCRYPTION_KEY`
 
 `WECOM_THIRD_PARTY_CALLBACK_URL` 必须精确指向
@@ -14,29 +15,53 @@
 query string 做脱敏。服务只接受管理员授权模式，并再次确认安装主体在应用管理员列表中
 拥有管理权限；成员授权会失败关闭，不能成为首位 Owner。
 
-## suite_ticket 生命周期（生产启用门禁）
+## suite_ticket 生命周期
 
 企业微信会每 10 分钟向服务商应用的**指令回调 URL**推送新的 `suite_ticket`；每个 ticket
 实际有效期为 30 分钟，且应始终使用最近收到的值。该 URL 与上述用户授权码回调 URL
 是两个不同的地址，绝不能将 `/api/auth/wecom/third-party/callback` 配置为指令回调。
 官方说明：[推送 suite_ticket](https://developer.work.weixin.qq.com/document/path/90628)。
 
-当前 RND-345 实现只从进程环境读取 `WECOM_THIRD_PARTY_SUITE_TICKET`，尚未实现指令
-回调接收和自动更新。因此静态环境变量只能用于受控的非生产验证，**不能作为生产自助创建
-组织的启用方案**；手工刷新不能满足 10 分钟更新、30 分钟有效期的要求。
+RND-350 提供独立 HTTPS 指令回调：
 
-生产启用前必须单独交付以下方案：
+`/api/wecom/third-party/instructions`
 
-1. 使用独立 HTTPS 指令回调路径，完成企业微信 URL 验证、签名验证和 AES 解密；不得复用
-   单企业会话存档事件回调配置。
-2. 仅接受本服务商 `suite_id` 的 `suite_ticket` 事件；禁止记录请求体、ticket、suite token
-   或解密后的事件内容。
-3. 将最新 ticket 按 `suite_id` 加密、原子持久化，并记录不含敏感值的接收时间；授权服务从
-   该安全存储读取，不再依赖进程环境中的静态 ticket。
-4. ticket 超过 20 分钟未刷新时告警，达到 30 分钟时拒绝发起新的授权；同时按企业微信要求
-   有界缓存 2 小时有效的 `suite_access_token`。
-5. 为回调鉴权、重复推送、过期拒绝、加密存储、无敏感日志和 ticket 失效告警补齐自动化测试，
-   再以非生产企业完成端到端验证。
+该路径同时支持企业微信的 GET URL 验证和 POST 加密指令。它使用独立的
+`WECOM_THIRD_PARTY_INSTRUCTION_TOKEN` 与
+`WECOM_THIRD_PARTY_INSTRUCTION_ENCODING_AES_KEY`，不得复用 OAuth 回调或
+`/api/wecom/archive/events` 的 Token/AESKey。反向代理访问日志必须对完整 query string
+脱敏。
+
+服务只接受配置 `suite_id` 的 `suite_ticket` 指令，校验签名、请求时间、AES 信封中的
+receiver id、明文 `SuiteId` 和事件时间。ticket 按 `suite_id` 在
+`wecom_suite_ticket_states` 中以 Fernet 密文原子保存；相同或更旧事件不会覆盖较新的权威
+记录。`WECOM_THIRD_PARTY_SUITE_TICKET` 已废止，禁止把 ticket 放入环境、日志、Linear、
+聊天或截图。
+
+授权服务只读取数据库中的最新 ticket：
+
+- 小于 20 分钟：`fresh`；
+- 20 分钟起：`warning`，运维应告警；
+- 30 分钟起：`expired`，新的 install/OAuth 流程失败关闭；
+- `suite_access_token` 按 `suite_id` 单飞刷新并最多缓存 2 小时，提前 5 分钟刷新；刷新失败
+  只能临时使用尚未过期的缓存，绝不使用已过期 token。
+
+平台管理员可只读检查
+`GET /api/platform/wecom/third-party/suite-ticket-status`。响应仅包含是否接收、
+`fresh|warning|expired|missing|unconfigured`、最后接收时间、年龄和告警布尔值，并带
+`Cache-Control: no-store`；不包含 suite id、ticket、token、secret、hash 或前后缀。
+
+### 部署与回滚
+
+1. 发布前运行 `alembic upgrade head`，确认 `alembic heads` 只有 `0045` 且
+   `alembic check` 无 drift。
+2. 保持第三方自助入口关闭，先配置非生产独立指令回调；确认 GET 验证通过并收到至少一次
+   `fresh` ticket 后，再执行 RND-351/352 的非生产授权验收。
+3. 回滚应用前先关闭 install 入口。若需要 schema 回滚，执行 downgrade 到 `0044` 会删除
+   `wecom_suite_ticket_states`；这不会删除组织、Payment、Subscription 或归档数据，但恢复
+   后必须等待企业微信推送新 ticket，不能从日志或环境恢复旧值。
+4. 任一异常只记录固定结果类型与时间。禁止记录请求体、解密 XML、ticket、suite token、
+   suite secret、CorpID、UserID 或完整回调 URL。
 
 ## FIELD_ENCRYPTION_KEY 配置前只读核查
 

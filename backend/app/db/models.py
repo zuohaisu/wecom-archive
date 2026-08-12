@@ -471,6 +471,30 @@ class WecomAuthorizationAttempt(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class WecomSuiteTicketState(Base):
+    """Encrypted, authoritative latest suite_ticket for one provider suite."""
+
+    __tablename__ = "wecom_suite_ticket_states"
+    __table_args__ = (
+        CheckConstraint(
+            "source_timestamp > 0",
+            name="ck_wecom_suite_ticket_source_timestamp_positive",
+        ),
+    )
+
+    suite_id = Column(String(128), primary_key=True)
+    ticket_encrypted = Column(Text, nullable=False)
+    ticket_digest = Column(String(64), nullable=False)
+    source_timestamp = Column(BigInteger, nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class WecomAuthorizationProof(Base):
     """Short-lived trusted organization evidence; never exposed to a client."""
 

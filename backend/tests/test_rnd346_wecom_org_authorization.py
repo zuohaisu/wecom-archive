@@ -20,6 +20,7 @@ from app.db.models import (
     WecomAuthorizationAttempt,
     WecomAuthorizationProof,
     WecomOrganizationClaim,
+    WecomSuiteTicketState,
 )
 from app.db.session import get_db
 from app.main import create_app
@@ -27,8 +28,10 @@ from app.routers import wecom_org_authorization
 from app.services.wecom_org_authorization import (
     AuthorizedOrganization,
     OfficialWecomOrganizationAuthorizationProvider,
+    SuiteAccessTokenCache,
     WecomAuthorizationError,
 )
+from app.services.wecom_suite_ticket import store_suite_ticket
 from app.settings import WecomThirdPartySettings
 
 
@@ -54,7 +57,9 @@ class FakeProvider:
         )
 
 
-def test_official_provider_uses_third_party_admin_list_http_contract():
+def test_official_provider_uses_third_party_admin_list_http_contract(monkeypatch):
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("WECOM_THIRD_PARTY_SUITE_TICKET", "obsolete-static-ticket")
     requests: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -69,8 +74,8 @@ def test_official_provider_uses_third_party_admin_list_http_contract():
         )
         payloads = {
             "/cgi-bin/service/get_suite_token": {
-                "errcode": 0,
                 "suite_access_token": "suite-token",
+                "expires_in": 7200,
             },
             "/cgi-bin/service/v2/get_permanent_code": {
                 "errcode": 0,
@@ -92,14 +97,32 @@ def test_official_provider_uses_third_party_admin_list_http_contract():
     settings = WecomThirdPartySettings(
         wecom_third_party_suite_id="suite-id",
         wecom_third_party_suite_secret="suite-secret",
-        wecom_third_party_suite_ticket="suite-ticket",
         wecom_third_party_callback_url="https://console.example.test/callback",
     )
-    with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        provider = OfficialWecomOrganizationAuthorizationProvider(settings, http_client)
-        organization = provider.exchange("authorization-code")
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine, tables=[WecomSuiteTicketState.__table__])
+    factory = sessionmaker(bind=engine)
+    with factory() as db:
+        store_suite_ticket(
+            db,
+            suite_id="suite-id",
+            ticket="suite-ticket",
+            source_timestamp=1,
+        )
+        with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+            provider = OfficialWecomOrganizationAuthorizationProvider(
+                settings,
+                db,
+                http_client,
+                SuiteAccessTokenCache(),
+            )
+            organization = provider.exchange("authorization-code")
 
     assert organization.agent_id == "1000002"
+    assert requests[0]["body"]["suite_ticket"] == "suite-ticket"
+    assert "obsolete-static-ticket" not in json.dumps(requests)
     assert requests[-1] == {
         "method": "POST",
         "path": "/cgi-bin/service/get_admin_list",
@@ -126,6 +149,7 @@ def _client(monkeypatch, provider: FakeProvider | None = None):
             WecomAuthorizationAttempt.__table__,
             WecomAuthorizationProof.__table__,
             WecomOrganizationClaim.__table__,
+            WecomSuiteTicketState.__table__,
         ],
     )
     factory = sessionmaker(bind=engine)
@@ -143,7 +167,7 @@ def _client(monkeypatch, provider: FakeProvider | None = None):
         monkeypatch.setattr(
             wecom_org_authorization,
             "get_wecom_org_authorization_provider",
-            lambda: provider,
+            lambda _db: provider,
         )
     return TestClient(app), factory
 
@@ -152,7 +176,6 @@ def test_unconfigured_provider_redirects_without_writing_authorization_data(monk
     for setting in (
         "WECOM_THIRD_PARTY_SUITE_ID",
         "WECOM_THIRD_PARTY_SUITE_SECRET",
-        "WECOM_THIRD_PARTY_SUITE_TICKET",
         "WECOM_THIRD_PARTY_CALLBACK_URL",
     ):
         monkeypatch.delenv(setting, raising=False)
@@ -176,6 +199,25 @@ def test_unconfigured_provider_redirects_without_writing_authorization_data(monk
         assert db.query(AdminUser).count() == 0
         assert db.query(AdminLoginIdentity).count() == 0
         assert db.query(AdminSession).count() == 0
+
+
+def test_persisted_fresh_ticket_is_required_before_install_writes_state(monkeypatch):
+    monkeypatch.setenv("WECOM_THIRD_PARTY_SUITE_ID", "suite-id")
+    monkeypatch.setenv("WECOM_THIRD_PARTY_SUITE_SECRET", "suite-secret")
+    monkeypatch.setenv(
+        "WECOM_THIRD_PARTY_CALLBACK_URL",
+        "https://console.example.test/api/auth/wecom/third-party/callback",
+    )
+    monkeypatch.setenv("WECOM_THIRD_PARTY_SUITE_TICKET", "obsolete-static-ticket")
+    client, factory = _client(monkeypatch, provider=None)
+
+    response = client.get("/api/auth/wecom/third-party/install", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/admin/login?error=config_error"
+    with factory() as db:
+        assert db.query(WecomAuthorizationAttempt).count() == 0
+        assert db.query(WecomSuiteTicketState).count() == 0
 
 
 @pytest.mark.parametrize("field_key", [None, "not-a-valid-fernet-key"])

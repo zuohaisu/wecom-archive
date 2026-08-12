@@ -82,7 +82,7 @@ def _setup(monkeypatch):
     monkeypatch.setattr(
         wecom_org_authorization,
         "get_wecom_org_authorization_provider",
-        lambda: provider,
+        lambda _db: provider,
     )
     return TestClient(app), factory, provider
 

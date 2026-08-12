@@ -354,8 +354,8 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    # RND-378 adds the owner subscription overview API.
-    assert route_count == 111
+    # RND-350 adds provider instruction GET/POST and the admin-only status API.
+    assert route_count == 114
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -461,11 +461,13 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/tenants/usage",
             "/api/platform/tenants/{tenant_id}",
             "/api/platform/tenants/{tenant_id}/connectivity-check",
+            "/api/platform/wecom/third-party/suite-ticket-status",
             "/api/payments/wechat/notify",
             "/api/provisioning/status",
             "/api/search/contacts",
             "/api/search/messages",
             "/api/wecom/archive/events",
+            "/api/wecom/third-party/instructions",
             "/docs",
             "/docs/oauth2-redirect",
             "/health",
@@ -753,6 +755,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "TenantConnectivityCheckOut",
             "None",
         ),
+        (
+            "/api/platform/wecom/third-party/suite-ticket-status",
+            frozenset({"GET"}),
+            "None",
+            "None",
+        ),
         ("/api/payments/wechat/notify", frozenset({"POST"}), "None", "None"),
         ("/api/provisioning/status", frozenset({"GET"}), "dict", "None"),
         (
@@ -769,6 +777,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ),
         ("/api/wecom/archive/events", frozenset({"GET"}), "None", "None"),
         ("/api/wecom/archive/events", frozenset({"POST"}), "None", "None"),
+        ("/api/wecom/third-party/instructions", frozenset({"GET"}), "None", "None"),
+        ("/api/wecom/third-party/instructions", frozenset({"POST"}), "None", "None"),
         ("/health", frozenset({"GET"}), "None", "None"),
         ("/health/live", frozenset({"GET"}), "None", "None"),
         ("/health/ready", frozenset({"GET"}), "None", "None"),

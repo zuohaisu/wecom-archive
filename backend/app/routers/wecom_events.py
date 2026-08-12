@@ -7,16 +7,9 @@ POST /api/wecom/archive/events  — Verified/decrypted event dispatch to archive
 
 from __future__ import annotations
 
-import base64
-import binascii
-import hashlib
-import hmac
 import logging
-import re
-import struct
 from xml.etree import ElementTree
 
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
@@ -27,6 +20,15 @@ from app.services.archive_worker_trigger import (
     ArchiveWorkerDispatch,
     dispatch_archive_worker,
 )
+from app.services.wecom_callback_crypto import (
+    CallbackConfigurationError as _CallbackConfigurationError,
+    CallbackInputError as _CallbackInputError,
+    decode_aes_key as _decode_aes_key,
+    decrypt_envelope as _decrypt_echostr,
+    extract_encrypt as _extract_encrypt,
+    parse_plaintext_envelope as _parse_wecom_plaintext,
+    verify_signature as _verify_signature,
+)
 from app.services.external_contact_refresh_trigger import (
     dispatch_external_contact_refresh,
 )
@@ -35,21 +37,6 @@ from app.settings import get_wecom_callback_settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Request-controlled callback failures are deliberately separate from server
-# configuration failures.  The public endpoint must never turn malformed
-# ciphertext, padding, envelopes, or XML into a 500 response.
-class _CallbackInputError(ValueError):
-    pass
-
-
-class _CallbackConfigurationError(ValueError):
-    pass
-
-
-# WeCom specifies its PKCS#7 padding block size as 32 bytes, even though
-# AES-CBC ciphertext itself must remain aligned to AES's 16-byte block size.
-_WECOM_PKCS7_BLOCK_SIZE = 32
 
 _REJECTION_REASONS = frozenset(
     {
@@ -66,93 +53,6 @@ def _log_rejected(reason: str) -> None:
     """Emit a searchable fixed event without request or configuration data."""
     assert reason in _REJECTION_REASONS
     logger.info("wecom_callback rejected reason=%s", reason)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _sha1(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
-
-
-def _verify_signature(
-    token: str, timestamp: str, nonce: str, payload: str, msg_signature: str
-) -> bool:
-    """Sort token, timestamp, nonce, payload; SHA1; compare to msg_signature."""
-    parts = sorted([token, timestamp, nonce, payload])
-    computed = _sha1("".join(parts))
-    return hmac.compare_digest(computed, msg_signature)
-
-
-def _decode_aes_key(encoded_key: str) -> bytes:
-    """Decode the configured 43-char base64 AES key into its 32 raw bytes."""
-    if len(encoded_key) != 43:
-        raise _CallbackConfigurationError
-    try:
-        raw = base64.b64decode(encoded_key + "=", validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise _CallbackConfigurationError from exc
-    if len(raw) != 32:
-        raise _CallbackConfigurationError
-    return raw
-
-
-def _decrypt_echostr(echostr_b64: str, aes_key: bytes) -> bytes:
-    """Decrypt request ciphertext and normalize all input failures safely."""
-    try:
-        ciphertext = base64.b64decode(echostr_b64, validate=True)
-        if not ciphertext or len(ciphertext) % (algorithms.AES.block_size // 8):
-            raise _CallbackInputError
-        cipher = Cipher(algorithms.AES(aes_key), modes.CBC(aes_key[:16]))
-        decryptor = cipher.decryptor()
-        plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-    except (binascii.Error, ValueError) as exc:
-        raise _CallbackInputError from exc
-
-    pad_len = plaintext[-1]
-    if pad_len < 1 or pad_len > _WECOM_PKCS7_BLOCK_SIZE:
-        raise _CallbackInputError
-    if plaintext[-pad_len:] != bytes([pad_len]) * pad_len:
-        raise _CallbackInputError
-    return plaintext[:-pad_len]
-
-
-def _parse_wecom_plaintext(plaintext: bytes) -> tuple[bytes, str]:
-    """Parse a request-controlled WeCom plaintext envelope."""
-    if len(plaintext) < 20:
-        raise _CallbackInputError
-    msg_len = struct.unpack("!I", plaintext[16:20])[0]
-    if 20 + msg_len > len(plaintext):
-        raise _CallbackInputError
-    msg = plaintext[20 : 20 + msg_len]
-    try:
-        corp_id = plaintext[20 + msg_len :].decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise _CallbackInputError from exc
-    return msg, corp_id
-
-
-def _extract_encrypt(xml_body: bytes) -> str | None:
-    """Extract a UTF-8 CDATA Encrypt value, rejecting malformed request bytes."""
-    if b"<!DOCTYPE" in xml_body.upper():
-        raise _CallbackInputError
-    try:
-        ElementTree.fromstring(xml_body)
-    except (ElementTree.ParseError, UnicodeDecodeError, ValueError) as exc:
-        raise _CallbackInputError from exc
-    match = re.search(
-        rb"<Encrypt>\s*<!\[CDATA\[(.*?)\]\]>\s*</Encrypt>",
-        xml_body,
-        re.DOTALL,
-    )
-    if not match:
-        return None
-    try:
-        return match.group(1).decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise _CallbackInputError from exc
 
 
 def _parse_external_contact_change_event(message: bytes) -> str | None:

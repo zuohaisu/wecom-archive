@@ -40,10 +40,10 @@ from app.web import render_template
 router = APIRouter()
 
 
-def _get_configured_provider() -> WecomOrganizationAuthorizationProvider:
+def _get_configured_provider(db: Session) -> WecomOrganizationAuthorizationProvider:
     """Resolve all configuration before either route writes authorization state."""
     validate_field_encryption_configuration()
-    return get_wecom_org_authorization_provider()
+    return get_wecom_org_authorization_provider(db)
 
 
 @router.get("/api/auth/wecom/third-party/install", response_class=RedirectResponse)
@@ -51,7 +51,7 @@ def start_wecom_organization_authorization(
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     try:
-        provider = _get_configured_provider()
+        provider = _get_configured_provider(db)
         return RedirectResponse(begin_authorization(db, provider), status_code=302)
     except (FieldEncryptionConfigurationError, WecomAuthorizationError):
         db.rollback()
@@ -65,7 +65,7 @@ def finish_wecom_organization_authorization(
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     try:
-        provider = _get_configured_provider()
+        provider = _get_configured_provider(db)
     except (FieldEncryptionConfigurationError, WecomAuthorizationError):
         db.rollback()
         return RedirectResponse("/admin/login?error=config_error", status_code=302)

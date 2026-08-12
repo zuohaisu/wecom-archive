@@ -38,6 +38,7 @@ from app.routers.users import users_router
 from app.routers.web import router as web_router
 from app.routers.wecom_events import router as wecom_events_router
 from app.routers.wecom_org_authorization import router as wecom_org_authorization_router
+from app.routers.wecom_provider_instructions import router as wecom_provider_instructions_router
 from app.services.wechat_pay import validate_wechat_pay_configuration_if_enabled
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ class _RedactOAuthCallbackQueryFilter(logging.Filter):
         "/api/auth/wecom/callback?",
         "/api/auth/wecom/third-party/callback?",
         "/api/wecom/archive/events?",
+        "/api/wecom/third-party/instructions?",
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -137,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(external_contacts_router, prefix="/api/admin")
     app.include_router(wecom_events_router)
     app.include_router(wecom_org_authorization_router)
+    app.include_router(wecom_provider_instructions_router)
     app.include_router(admin_users_page_router)
     app.include_router(admin_audit_page_router)
     app.include_router(admin_media_page_router)
