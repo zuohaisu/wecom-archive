@@ -31,9 +31,10 @@ def test_design_system_is_a_new_copy_of_the_design_source() -> None:
 
 def test_navigation_omits_unimplemented_review_tasks_and_export_records() -> None:
     items = [item for group in NAV for item in group["items"]]
-    assert len(items) == 9
+    assert len(items) == 10
     assert {item["id"] for item in items} == {
         "dashboard",
+        "billing",
         "review",
         "search",
         "messages",

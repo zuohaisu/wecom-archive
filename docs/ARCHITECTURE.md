@@ -39,6 +39,7 @@ It is **not** a public-facing product. Access is restricted to employees authent
 │  │  media_files · sync_states · contacts                      │  │
 │  │  tenants · tenant_wecom_configs                            │  │
 │  │  admin_users · admin_sessions                              │  │
+│  │  billing_plans · subscriptions · payment_orders/events     │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐   │
@@ -76,6 +77,7 @@ It is **not** a public-facing product. Access is restricted to employees authent
 | Admin UI — Diagnostics | Server-rendered HTML + JS | ✅ Message reachability audit (RND-180) |
 | Auth — WeCom OAuth | WeCom OAuth 2.0 (`snsapi_base`) | ✅ RND-110 |
 | Auth — Password fallback | PBKDF2 + env vars | ✅ RND-112 |
+| Billing — annual purchase | Provider-neutral orders + WeChat Pay API v3 Native | ✅ Implemented locally (RND-380); production enablement remains gated by RND-390 |
 
 ---
 
@@ -146,6 +148,28 @@ PostgreSQL → tenant-scoped queries (WHERE tenant_id = ?)
          ▼
 JSON response → rendered as HTML (client-side JS)
 ```
+
+### 3.4 Annual-plan purchase (write)
+
+```text
+Owner browser → POST /api/billing/orders (plan code + idempotency key)
+              → server reads authoritative price/term/entitlements
+              → WeChat Pay API v3 Native → signed response → code_url
+              → GET .../qr → server-generated PNG (raw URL not returned)
+
+WeChat Pay → POST /api/payments/wechat/notify (raw signed body)
+           → public-key signature + freshness verification
+           → AES-GCM resource decrypt + merchant/order/amount checks
+           → payment_events replay record + paid order state
+           → provider-neutral subscription activation/renewal
+           → subscriptions + history + audit committed atomically
+```
+
+The payment provider boundary exposes create/query/close/verified-event
+operations and contains no subscription policy. The order service is the only
+bridge from a trusted payment fact to subscription activation. This keeps a
+future Alipay adapter possible without changing entitlement authority; no
+Alipay adapter is implemented by RND-380.
 
 Media files are served via the authenticated API route (`GET /api/conversations/{id}/messages/{msgid}/media`), which performs tenant authorization before resolving any media storage provider. The provider used to serve a given row is resolved from that row's own `storage_backend`/`storage_ref` columns (RND-174), not from the deployment-wide default write provider — so local and Qiniu-backed rows can coexist safely in the same deployment (see §5).
 

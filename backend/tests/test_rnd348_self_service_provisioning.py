@@ -157,12 +157,13 @@ def test_provisioning_session_can_only_reach_waiting_and_settings_surface(monkey
     assert login.headers["location"] == "/admin/provisioning"
     assert client.get("/admin/provisioning").status_code == 200
     assert client.get("/admin/provisioning/settings").status_code == 200
+    assert client.get("/admin/billing").status_code == 200
     status = client.get("/api/provisioning/status")
     assert status.status_code == 200
     assert status.json() == {
         "lifecycle_status": "provisioning",
         "archive_enabled": False,
-        "allowed_actions": ["view_status", "view_settings"],
+        "allowed_actions": ["view_status", "purchase_plan", "view_settings"],
     }
     assert client.get("/api/admin/settings").status_code == 401
     assert client.get("/api/admin/sync-status").status_code == 401

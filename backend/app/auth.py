@@ -594,5 +594,63 @@ def get_provisioning_user(
     return user, tenant
 
 
+@dataclass(frozen=True)
+class BillingOwnerContext:
+    user_id: str
+    tenant_id: str
+    lifecycle_status: str
+    session_scope: str
+
+
+def get_billing_owner(
+    session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
+    db: Session = Depends(get_db),
+) -> BillingOwnerContext:
+    """Authorize an owner for purchase during provisioning or normal use."""
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    now = datetime.now(timezone.utc)
+    try:
+        session = (
+            db.query(AdminSession)
+            .filter(
+                AdminSession.id == session_id,
+                AdminSession.expires_at > now,
+                AdminSession.is_revoked.is_(False),
+                AdminSession.session_scope.in_(("admin", "provisioning")),
+            )
+            .first()
+        )
+        if session is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
+        tenant = db.query(Tenant).filter(Tenant.id == session.tenant_id).first()
+        expected_lifecycle = (
+            "provisioning" if session.session_scope == "provisioning" else "active"
+        )
+        if (
+            user is None
+            or user.status != "active"
+            or user.role != "owner"
+            or user.tenant_id != session.tenant_id
+            or tenant is None
+            or tenant.lifecycle_status != expected_lifecycle
+        ):
+            raise HTTPException(status_code=403, detail="Billing access denied")
+        context = BillingOwnerContext(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            lifecycle_status=tenant.lifecycle_status,
+            session_scope=session.session_scope,
+        )
+        db.rollback()
+        return context
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("get_billing_owner: lookup failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+
 # Sentinel wecom_user_id prefix used for password-mode AdminUser rows.
 PASSWORD_MODE_WECOM_PREFIX = "__pwd__"

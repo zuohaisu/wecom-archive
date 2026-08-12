@@ -11,6 +11,7 @@ NAV = (
         "group_key": "nav.group.overview",
         "items": (
             {"id": "dashboard", "key": "nav.dashboard", "path": "/dashboard"},
+            {"id": "billing", "key": "nav.billing", "path": "/admin/billing"},
         ),
     },
     {

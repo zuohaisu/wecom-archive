@@ -10,25 +10,19 @@ from app.web import render_template
 router = APIRouter()
 
 
-def _page(title: str, heading: str, body: str) -> HTMLResponse:
-    return HTMLResponse(
-        render_template(
-            "provisioning",
-            page_title=title,
-            heading=heading,
-            body=body,
-        )
-    )
-
-
 @router.get("/admin/provisioning", response_class=HTMLResponse)
 def provisioning_waiting(
     _context: tuple[AdminUser, Tenant] = Depends(get_provisioning_user),
 ) -> HTMLResponse:
-    return _page(
-        "组织配置中",
-        "组织已创建，正在配置",
-        "归档功能尚未启用。完成企业微信会话存档配置和运维验证后，平台管理员才能激活组织。",
+    return HTMLResponse(
+        render_template(
+            "provisioning",
+            page_title="组织配置中",
+            heading="组织已创建",
+            body="请先购买年度套餐，再继续完成企业微信会话存档配置。归档功能会在配置和自动检查通过后启用。",
+            primary_href="/admin/billing",
+            primary_label="购买年度套餐",
+        )
     )
 
 
@@ -36,10 +30,15 @@ def provisioning_waiting(
 def provisioning_settings(
     _context: tuple[AdminUser, Tenant] = Depends(get_provisioning_user),
 ) -> HTMLResponse:
-    return _page(
-        "配置准备",
-        "配置准备",
-        "请等待平台管理员完成会话存档凭证、回调和连通性验证。当前页面不会启动归档任务。",
+    return HTMLResponse(
+        render_template(
+            "provisioning",
+            page_title="配置准备",
+            heading="配置准备",
+            body="购买套餐后，请按页面指引自行完成企业微信会话存档配置。自动检查通过前不会启动归档任务。",
+            primary_href="/admin/billing",
+            primary_label="查看年度套餐",
+        )
     )
 
 
@@ -50,5 +49,5 @@ def provisioning_status(
     return {
         "lifecycle_status": "provisioning",
         "archive_enabled": False,
-        "allowed_actions": ["view_status", "view_settings"],
+        "allowed_actions": ["view_status", "purchase_plan", "view_settings"],
     }

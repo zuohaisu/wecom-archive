@@ -354,8 +354,8 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    # RND-344 adds the formal /dashboard HTML route.
-    assert route_count == 100
+    # RND-380 adds the owner billing page and eight payment API routes.
+    assert route_count == 109
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -370,6 +370,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/dashboard",
             "/admin/analytics",
             "/admin/audit-logs",
+            "/admin/billing",
             "/admin/conversations",
             "/admin/contacts",
             "/admin/diagnostics/reachability",
@@ -433,6 +434,13 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/auth/wecom/third-party/install",
             "/api/auth/wecom/organization-claim/cancel",
             "/api/auth/wecom/organization-claim/confirm",
+            "/api/billing/orders",
+            "/api/billing/orders/latest",
+            "/api/billing/orders/{order_id}",
+            "/api/billing/orders/{order_id}/close",
+            "/api/billing/orders/{order_id}/qr",
+            "/api/billing/orders/{order_id}/refresh",
+            "/api/billing/plan",
             "/api/contacts",
             "/api/conversations",
             "/api/conversations/{conversation_id}/detail",
@@ -451,6 +459,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/tenants/usage",
             "/api/platform/tenants/{tenant_id}",
             "/api/platform/tenants/{tenant_id}/connectivity-check",
+            "/api/payments/wechat/notify",
             "/api/provisioning/status",
             "/api/search/contacts",
             "/api/search/messages",
@@ -493,6 +502,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/dashboard", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/analytics", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/audit-logs", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/billing", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/conversations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/contacts", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
@@ -628,6 +638,28 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/auth/wecom/third-party/install", frozenset({"GET"}), "None", "RedirectResponse"),
         ("/api/auth/wecom/organization-claim/cancel", frozenset({"POST"}), "None", "RedirectResponse"),
         ("/api/auth/wecom/organization-claim/confirm", frozenset({"POST"}), "None", "RedirectResponse"),
+        ("/api/billing/plan", frozenset({"GET"}), "BillingPlanOut", "None"),
+        ("/api/billing/orders/latest", frozenset({"GET"}), "", "None"),
+        (
+            "/api/billing/orders/{order_id}",
+            frozenset({"GET"}),
+            "PaymentOrderOut",
+            "None",
+        ),
+        ("/api/billing/orders", frozenset({"POST"}), "PaymentOrderOut", "None"),
+        ("/api/billing/orders/{order_id}/qr", frozenset({"GET"}), "None", "None"),
+        (
+            "/api/billing/orders/{order_id}/refresh",
+            frozenset({"POST"}),
+            "PaymentOrderOut",
+            "None",
+        ),
+        (
+            "/api/billing/orders/{order_id}/close",
+            frozenset({"POST"}),
+            "PaymentOrderOut",
+            "None",
+        ),
         ("/api/contacts", frozenset({"GET"}), "list[ContactOut]", "None"),
         ("/api/conversations", frozenset({"GET"}), "list[ConversationOut]", "None"),
         (
@@ -707,6 +739,7 @@ def test_route_snapshot_with_real_model_names() -> None:
             "TenantConnectivityCheckOut",
             "None",
         ),
+        ("/api/payments/wechat/notify", frozenset({"POST"}), "None", "None"),
         ("/api/provisioning/status", frozenset({"GET"}), "dict", "None"),
         (
             "/api/search/contacts",

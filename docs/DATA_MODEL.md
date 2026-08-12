@@ -174,6 +174,30 @@ subscription, immutable history snapshot, activation result and audit row are
 committed atomically; a domain failure records only a coarse failure code in a
 separate recovery transaction.
 
+### `payment_orders`
+
+One tenant-scoped, provider-neutral purchase intent. The row snapshots the
+server plan code/name/amount/currency used when the provider order was created;
+the browser cannot supply or alter those commercial fields. Uniqueness on
+`(tenant_id, idempotency_key_hash)` makes browser retries stable, while
+provider order and transaction references are unique within a provider.
+
+The state machine is `creating` → `pending` → `succeeded`, with terminal
+`closed`/`failed` outcomes and a recoverable `paid_activation_pending` bridge
+when payment is proven but the subscription transaction must be retried. A
+successful row references exactly one `subscription_activations` result.
+The raw Native `code_url` is stored only until payment/closure and is served to
+the authenticated browser solely as a server-generated PNG QR.
+
+### `payment_events`
+
+Minimal durable evidence for a verified callback or active query. Each
+`(provider, provider_event_id)` is unique. The row stores provider/order/
+transaction references, event type, source, occurrence time and a SHA-256
+payload hash; it does not retain raw notification bodies, encrypted resources,
+keys or payer details. Reusing an event ID with a different hash, order or
+transaction fails closed as a replay conflict.
+
 ---
 
 ## Archive Tables

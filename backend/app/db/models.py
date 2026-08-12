@@ -272,6 +272,115 @@ class SubscriptionActivation(Base):
     )
 
 
+class PaymentOrder(Base):
+    """Provider-neutral, server-authoritative annual-plan purchase order."""
+
+    __tablename__ = "payment_orders"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_order_ref",
+            name="uq_payment_orders_provider_ref",
+        ),
+        UniqueConstraint(
+            "provider",
+            "provider_transaction_id",
+            name="uq_payment_orders_provider_transaction",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "idempotency_key_hash",
+            name="uq_payment_orders_tenant_idempotency",
+        ),
+        CheckConstraint("amount_cents > 0", name="ck_payment_orders_amount"),
+        CheckConstraint("length(currency) = 3", name="ck_payment_orders_currency"),
+        CheckConstraint(
+            "status IN ('creating', 'pending', 'paid_activation_pending', "
+            "'succeeded', 'closed', 'failed')",
+            name="ck_payment_orders_status",
+        ),
+        CheckConstraint("created_at < expires_at", name="ck_payment_orders_expiry"),
+        CheckConstraint(
+            "status NOT IN ('paid_activation_pending', 'succeeded') OR ("
+            "paid_at IS NOT NULL AND provider_transaction_id IS NOT NULL)",
+            name="ck_payment_orders_paid_result",
+        ),
+        CheckConstraint(
+            "status != 'succeeded' OR ("
+            "activation_id IS NOT NULL AND activated_at IS NOT NULL)",
+            name="ck_payment_orders_activation_result",
+        ),
+        CheckConstraint(
+            "status != 'failed' OR failure_code IS NOT NULL",
+            name="ck_payment_orders_failed_code",
+        ),
+        Index("ix_payment_orders_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    plan_id = Column(String(36), ForeignKey("billing_plans.id"), nullable=False)
+    plan_code = Column(String(64), nullable=False)
+    plan_name = Column(String(128), nullable=False)
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False)
+    provider = Column(String(32), nullable=False)
+    provider_order_ref = Column(String(64), nullable=False)
+    provider_transaction_id = Column(String(64), nullable=True)
+    provider_state = Column(String(32), nullable=True)
+    status = Column(String(32), nullable=False, server_default=text("'creating'"))
+    checkout_url = Column(Text, nullable=True)
+    idempotency_key_hash = Column(String(64), nullable=False)
+    activation_id = Column(
+        String(36), ForeignKey("subscription_activations.id"), nullable=True
+    )
+    failure_code = Column(String(32), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class PaymentEvent(Base):
+    """Minimal durable evidence for one verified provider payment fact."""
+
+    __tablename__ = "payment_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "provider_event_id", name="uq_payment_events_provider_event"
+        ),
+        CheckConstraint(
+            "source IN ('callback', 'query')", name="ck_payment_events_source"
+        ),
+        CheckConstraint(
+            "length(payload_hash) = 64", name="ck_payment_events_payload_hash"
+        ),
+        Index("ix_payment_events_order_created", "order_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    order_id = Column(String(36), ForeignKey("payment_orders.id"), nullable=False)
+    provider = Column(String(32), nullable=False)
+    provider_event_id = Column(String(128), nullable=False)
+    provider_transaction_id = Column(String(64), nullable=False)
+    event_type = Column(String(32), nullable=False)
+    source = Column(String(16), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class TenantWecomConfig(Base):
     """Per-tenant WeCom app credentials. One row per tenant for MVP.
 

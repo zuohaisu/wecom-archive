@@ -10,6 +10,7 @@ alembic==1.14.0
 httpx>=0.24.0
 qiniu==7.18.0
 Pillow==11.1.0
+qrcode==8.2
 openpyxl==3.1.5
 reportlab==5.0.0
 # Repository lint baseline; Makefile invokes this through the repo .venv.

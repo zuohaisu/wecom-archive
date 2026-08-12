@@ -13,6 +13,7 @@ from app.routers.admin_media_page import router as admin_media_page_router
 from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
+from app.routers.billing import router as billing_router
 from app.routers.conversations import router as conversations_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.export_approval import router as export_approval_router
@@ -37,6 +38,7 @@ from app.routers.users import users_router
 from app.routers.web import router as web_router
 from app.routers.wecom_events import router as wecom_events_router
 from app.routers.wecom_org_authorization import router as wecom_org_authorization_router
+from app.services.wechat_pay import validate_wechat_pay_configuration_if_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,7 @@ def create_app() -> FastAPI:
     instance. Kept as a factory (RND-223) rather than a module-level side
     effect so tests/tooling can construct an independent app instance; the
     module-level `app` below is what `uvicorn app.main:app` actually serves."""
+    validate_wechat_pay_configuration_if_enabled()
     app = FastAPI(title="Crowntime WeCom Archive")
     # RND-187: guarantees Cache-Control: no-store on every response (success or
     # error, any status code) for the media access descriptor endpoint — see
@@ -118,6 +121,7 @@ def create_app() -> FastAPI:
     # response-side middleware rather than a header set inside the route.
     app.add_middleware(MediaAccessNoStoreMiddleware)
     app.include_router(auth_router)
+    app.include_router(billing_router)
     app.include_router(conversations_router)
     app.include_router(media_router)
     app.include_router(reachability_audit_router)

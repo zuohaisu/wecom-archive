@@ -175,3 +175,21 @@ class SettingsEncryptionSettings(BaseSettings):
 
 def get_settings_encryption_settings() -> SettingsEncryptionSettings:
     return SettingsEncryptionSettings()
+
+
+class WechatPaySettings(BaseSettings):
+    """WeChat Pay v3 Native configuration; values are never cached."""
+
+    wechat_pay_enabled: str = "false"
+    wechat_pay_app_id: str = ""
+    wechat_pay_mch_id: str = ""
+    wechat_pay_merchant_serial_no: str = ""
+    wechat_pay_merchant_private_key: str = ""
+    wechat_pay_api_v3_key: str = ""
+    wechat_pay_public_key_id: str = ""
+    wechat_pay_public_key: str = ""
+    wechat_pay_notify_url: str = ""
+
+
+def get_wechat_pay_settings() -> WechatPaySettings:
+    return WechatPaySettings()
