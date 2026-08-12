@@ -22,6 +22,19 @@ class CreatePaymentOrderIn(BaseModel):
     plan_code: str
 
 
+class StorageCapacityOut(BaseModel):
+    plan_code: Optional[str]
+    subscription_status: str
+    quota_bytes: int
+    used_bytes: Optional[int]
+    remaining_bytes: Optional[int]
+    utilization_basis_points: Optional[int]
+    state: str
+    usage_status: str
+    can_accept_new_media: bool
+    measured_at: datetime
+
+
 class PaymentOrderOut(BaseModel):
     order_id: str
     plan_code: str

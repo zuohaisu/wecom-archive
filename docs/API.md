@@ -58,6 +58,7 @@ Tenant identity always comes from that session.
 |--------|------|---------|
 | `GET` | `/admin/billing` | Owner purchase/status page |
 | `GET` | `/api/billing/plan` | Server-authoritative annual plan and payment availability |
+| `GET` | `/api/billing/capacity` | Live tenant-scoped quota, downloaded-byte usage, remaining bytes and capacity state |
 | `GET` | `/api/billing/orders/latest` | Latest tenant order or `null` |
 | `POST` | `/api/billing/orders` | Create/idempotently replay a Native QR order; requires `Idempotency-Key` |
 | `GET` | `/api/billing/orders/{order_id}` | Tenant-scoped order and activation state |
@@ -84,6 +85,13 @@ WeChat Pay Native is a one-time annual purchase, not an automatic debit
 agreement. The payer may choose only the funding methods offered by WeChat for
 that transaction; the product does not promise a specific bank-card option.
 Tencent's Conversation Archive service fee remains separate.
+
+`GET /api/billing/capacity` measures only this tenant's successfully downloaded
+`media_files` bytes and joins that fact to the effective subscription quota.
+States are `normal`, `warning_80`, `warning_90`, `full`, `over_limit`, and
+`unavailable`. Missing/inactive subscription or unavailable usage never grants
+write capacity. `measured_at` is the server measurement time; the response is
+not a browser estimate.
 
 ---
 

@@ -16,6 +16,32 @@ from sqlalchemy.orm import Session
 from app.db.models import MediaFile, Tenant, TenantStorageDaily
 
 
+def upsert_tenant_storage_daily(
+    db: Session,
+    *,
+    tenant_id: str,
+    usage_date: date,
+    used_bytes: int,
+) -> TenantStorageDaily:
+    """Write one measured tenant total through the rollup's sole boundary."""
+    row = db.execute(
+        select(TenantStorageDaily).where(
+            TenantStorageDaily.tenant_id == tenant_id,
+            TenantStorageDaily.usage_date == usage_date,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = TenantStorageDaily(
+            tenant_id=tenant_id,
+            usage_date=usage_date,
+            used_bytes=used_bytes,
+        )
+        db.add(row)
+    else:
+        row.used_bytes = used_bytes
+    return row
+
+
 def refresh_tenant_storage_daily(
     db: Session,
     usage_date: Optional[date] = None,
@@ -42,22 +68,12 @@ def refresh_tenant_storage_daily(
                 )
             ).scalar_one()
         )
-        row = db.execute(
-            select(TenantStorageDaily).where(
-                TenantStorageDaily.tenant_id == current_tenant_id,
-                TenantStorageDaily.usage_date == rollup_date,
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            db.add(
-                TenantStorageDaily(
-                    tenant_id=current_tenant_id,
-                    usage_date=rollup_date,
-                    used_bytes=used_bytes,
-                )
-            )
-        else:
-            row.used_bytes = used_bytes
+        upsert_tenant_storage_daily(
+            db,
+            tenant_id=current_tenant_id,
+            usage_date=rollup_date,
+            used_bytes=used_bytes,
+        )
         written += 1
 
     db.flush()

@@ -30,6 +30,8 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | `archive_messages` | Core message store — encrypted envelope + decrypted payload |
 | `archive_message_recipients` | Per-receiver lookup rows derived from `tolist` |
 | `media_files` | Download state for media attachments (tenant-scoped via `UNIQUE(tenant_id, sdkfileid)`) |
+| `media_quota_blocks` | Durable exact-size capacity denials for retryable media downloads |
+| `tenant_storage_daily` | Server-maintained daily downloaded-media byte rollup per tenant |
 | `contacts` | Lightweight WeCom user identity cache |
 | `external_contacts` | Tenant-scoped external-contact compatibility/profile record |
 | `external_contact_follows` | Employee-scoped external-contact remarks and follow state |
@@ -319,13 +321,32 @@ Tracks the download and storage state for each media attachment. One row per `(t
 | `local_path` | text | storage reference; resolved through `MediaStorageProvider` |
 | `oss_key` | text | OSS object key (Phase 2, reserved) |
 | `file_size` | bigint | bytes; null until downloaded |
-| `download_status` | varchar(16) | `pending` \| `downloaded` \| `failed` |
+| `download_status` | varchar(16) | `pending` \| `downloaded` \| `failed` \| `quota_blocked` |
 | `created_at` | timestamptz | row insert time |
 | `updated_at` | timestamptz | last status change |
 
 Indexes:
 - Unique on `(tenant_id, sdkfileid)`
 - B-tree on `archive_message_id`
+
+`quota_blocked` is not a download failure and is eligible on every normal media
+worker reconciliation without `--retry`. The message row and SDK reference are
+retained. Once capacity becomes available, the same candidate can complete and
+the block fact is removed atomically with the downloaded state.
+
+### `media_quota_blocks`
+
+One optional row per `media_files` row while a server capacity gate denies the
+exact downloaded payload. It records tenant, observed payload bytes, denial
+reason (`quota_exceeded`, `subscription_inactive`, or `usage_unavailable`) and
+timestamps. It contains no provider payload and cascades with the media row.
+
+### `tenant_storage_daily`
+
+One row per `(tenant_id, usage_date)`. `used_bytes` is a materialized operational
+rollup, maintained by the storage-capacity service from the authoritative sum
+of `media_files.file_size` where `download_status='downloaded'`. The live sum,
+not a client value or stale rollup, is used for every write decision.
 
 ---
 

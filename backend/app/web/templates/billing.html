@@ -7,7 +7,7 @@
 <link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <style>
-.billing-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--space-5);align-items:start}.plan-price{font-size:var(--text-4xl);font-weight:var(--weight-bold);line-height:1}.plan-price small{font-size:var(--text-base);color:var(--color-text-4);font-weight:var(--weight-medium)}.plan-facts{list-style:none;display:grid;gap:var(--space-2);margin-top:var(--space-5)}.plan-facts li{padding-left:20px;position:relative;color:var(--color-text-2)}.plan-facts li:before{content:'✓';position:absolute;left:0;color:var(--color-success-fg);font-weight:var(--weight-bold)}.checkout{text-align:center}.checkout-qr{width:256px;height:256px;max-width:100%;object-fit:contain;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:#fff;padding:8px}.checkout-placeholder{height:256px;display:flex;align-items:center;justify-content:center;border:1px dashed var(--color-border-strong);border-radius:var(--radius-lg);color:var(--color-text-4);padding:var(--space-5)}.billing-status{margin:var(--space-4) 0}.order-meta{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;text-align:left;font-size:var(--text-sm);margin-top:var(--space-4)}.order-meta dt{color:var(--color-text-4)}.order-meta dd{color:var(--color-text-2);word-break:break-word}.billing-actions{display:flex;gap:var(--space-2);justify-content:center;flex-wrap:wrap;margin-top:var(--space-4)}.billing-error{margin-bottom:var(--space-4)}@media(max-width:850px){.billing-grid{grid-template-columns:1fr}.checkout-card{order:-1}}@media(max-width:640px){.side-nav{display:none}.page{padding:var(--space-4)}}
+.billing-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--space-5);align-items:start}.plan-price{font-size:var(--text-4xl);font-weight:var(--weight-bold);line-height:1}.plan-price small{font-size:var(--text-base);color:var(--color-text-4);font-weight:var(--weight-medium)}.plan-facts{list-style:none;display:grid;gap:var(--space-2);margin-top:var(--space-5)}.plan-facts li{padding-left:20px;position:relative;color:var(--color-text-2)}.plan-facts li:before{content:'✓';position:absolute;left:0;color:var(--color-success-fg);font-weight:var(--weight-bold)}.checkout{text-align:center}.checkout-qr{width:256px;height:256px;max-width:100%;object-fit:contain;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:#fff;padding:8px}.checkout-placeholder{height:256px;display:flex;align-items:center;justify-content:center;border:1px dashed var(--color-border-strong);border-radius:var(--radius-lg);color:var(--color-text-4);padding:var(--space-5)}.billing-status{margin:var(--space-4) 0}.order-meta{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;text-align:left;font-size:var(--text-sm);margin-top:var(--space-4)}.order-meta dt{color:var(--color-text-4)}.order-meta dd{color:var(--color-text-2);word-break:break-word}.billing-actions{display:flex;gap:var(--space-2);justify-content:center;flex-wrap:wrap;margin-top:var(--space-4)}.billing-error{margin-bottom:var(--space-4)}.capacity-card{margin-top:var(--space-5)}.capacity-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-4)}.capacity-value{display:block;font-size:var(--text-2xl);font-weight:var(--weight-semibold);margin-top:4px}.capacity-label{color:var(--color-text-4);font-size:var(--text-sm)}.capacity-state{margin-top:var(--space-4)}.capacity-measured{margin-top:var(--space-2);color:var(--color-text-4);font-size:var(--text-xs)}@media(max-width:850px){.billing-grid{grid-template-columns:1fr}.checkout-card{order:-1}}@media(max-width:640px){.side-nav{display:none}.page{padding:var(--space-4)}.capacity-facts{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -54,6 +54,18 @@ __SIDENAV__
         </div>
       </section>
     </div>
+    <section class="card capacity-card" aria-labelledby="capacity-title">
+      <div class="card-hd"><h2 id="capacity-title" data-i18n="billing.capacityTitle">存储容量</h2></div>
+      <div class="card-bd">
+        <div class="capacity-facts">
+          <div><span class="capacity-label" data-i18n="billing.capacityQuota">套餐额度</span><strong id="capacity-quota" class="capacity-value">—</strong></div>
+          <div><span class="capacity-label" data-i18n="billing.capacityUsed">当前已用</span><strong id="capacity-used" class="capacity-value">—</strong></div>
+          <div><span class="capacity-label" data-i18n="billing.capacityRemaining">剩余容量</span><strong id="capacity-remaining" class="capacity-value">—</strong></div>
+        </div>
+        <div id="capacity-state" class="alert alert-neutral capacity-state" role="status" aria-live="polite" data-i18n="billing.capacity.unavailable">容量数据暂不可用，系统会阻止无法安全判断的新增媒体写入。</div>
+        <div id="capacity-measured" class="capacity-measured"></div>
+      </div>
+    </section>
   </main>
 </div>
 </div>

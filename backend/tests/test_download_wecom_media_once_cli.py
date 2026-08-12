@@ -20,10 +20,11 @@ Run (from backend/):
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from app.db.models import MediaFile
+from app.db.models import BillingPlan, MediaFile, Subscription
 from sqlalchemy.orm import Session
 
 from tests.fakes import (
@@ -46,6 +47,33 @@ def test_main_downloads_candidate_and_prints_expected_summary(
     with Session(engine) as db:
         insert_tenant(db, _TENANT_A)
         insert_tenant_wecom_config(db, _TENANT_A, "corp1")
+        now = datetime.now(timezone.utc)
+        db.add_all(
+            [
+                BillingPlan(
+                    id="rnd385-cli-plan",
+                    code="rnd385_cli_plan",
+                    display_name="RND-385 CLI plan",
+                    is_active=True,
+                    amount_cents=9900,
+                    currency="CNY",
+                    billing_period_months=12,
+                    storage_quota_bytes=5 * 1024**3,
+                ),
+                Subscription(
+                    id="rnd385-cli-subscription",
+                    tenant_id=_TENANT_A,
+                    plan_id="rnd385-cli-plan",
+                    status="active",
+                    starts_at=now - timedelta(days=1),
+                    ends_at=now + timedelta(days=365),
+                    source="test",
+                    renewal_count=0,
+                    revision=1,
+                ),
+            ]
+        )
+        db.commit()
         insert_archive_message(
             db,
             tenant_id=_TENANT_A,

@@ -26,6 +26,19 @@ import pytest
 from app.qiniu_storage import QiniuStorageProvider
 
 
+@pytest.fixture(autouse=True)
+def _allow_capacity_for_pre_rnd385_worker_contracts(monkeypatch):
+    """These provider tests predate billing and isolate Qiniu semantics."""
+    monkeypatch.setattr(
+        "app.services.media_worker.check_storage_write",
+        lambda *_args, **_kwargs: SimpleNamespace(reason="allowed"),
+    )
+    monkeypatch.setattr(
+        "app.services.media_worker.refresh_tenant_storage_daily",
+        lambda *_args, **_kwargs: 1,
+    )
+
+
 class _FakeInfo:
     def __init__(self, status_code: int):
         self.status_code = status_code

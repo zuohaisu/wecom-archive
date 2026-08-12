@@ -36,7 +36,8 @@ It is **not** a public-facing product. Access is restricted to employees authent
 │  ┌──────▼───────────────────▼────────────────────────────────┐  │
 │  │               PostgreSQL (primary store)                   │  │
 │  │  archive_messages · archive_message_recipients             │  │
-│  │  media_files · sync_states · contacts                      │  │
+│  │  media_files · media_quota_blocks · tenant_storage_daily   │  │
+│  │  sync_states · contacts                                    │  │
 │  │  tenants · tenant_wecom_configs                            │  │
 │  │  admin_users · admin_sessions                              │  │
 │  │  billing_plans · subscriptions · payment_orders/events     │  │
@@ -122,9 +123,10 @@ download_wecom_media_once.py (same unified pipeline: app/media_download.py —
   ├── Acquires its own file lock (MEDIA_DOWNLOAD_LOCK_PATH)
   ├── Selects candidate messages (archive-complete: recent/newest-first;
   │   timer: --since-hours 72 --newest-first --retry --limit 20)
-  ├── Downloads via WeCom SDK → .part file
-  ├── Validates bytes (magic-byte detection, per-type category)
-  └── Publishes → media_files row updated to download_status='downloaded'
+  ├── Downloads via WeCom SDK and validates exact payload bytes
+  ├── Locks tenant; measures downloaded bytes + active plan quota
+  ├── Denied → durable quota_blocked fact; no provider write, no message loss
+  └── Allowed → provider publish + media/rollup update in the lock transaction
 
 [systemd reconciliation: OnCalendar=*:15/30] ──► same media entrypoint
 ```
@@ -170,6 +172,20 @@ operations and contains no subscription policy. The order service is the only
 bridge from a trusted payment fact to subscription activation. This keeps a
 future Alipay adapter possible without changing entitlement authority; no
 Alipay adapter is implemented by RND-380.
+
+### 3.5 Storage-capacity authority and write gate
+
+`storage_capacity.py` is the single policy boundary. It combines the effective
+RND-376 subscription quota with the live tenant-scoped sum of successfully
+downloaded media bytes. The browser reads this through
+`GET /api/billing/capacity`; it never computes or authorizes capacity.
+
+The worker first receives and validates the complete payload in memory, so the
+gate uses exact bytes. It then holds a PostgreSQL row lock on the tenant from
+measurement through provider publication, `media_files` persistence and daily
+rollup refresh. Concurrent workers therefore cannot spend the same remaining
+bytes. Unknown usage and inactive entitlement fail closed. Capacity denial is
+a durable, retryable state, separate from SDK/provider failures.
 
 Media files are served via the authenticated API route (`GET /api/conversations/{id}/messages/{msgid}/media`), which performs tenant authorization before resolving any media storage provider. The provider used to serve a given row is resolved from that row's own `storage_backend`/`storage_ref` columns (RND-174), not from the deployment-wide default write provider — so local and Qiniu-backed rows can coexist safely in the same deployment (see §5).
 

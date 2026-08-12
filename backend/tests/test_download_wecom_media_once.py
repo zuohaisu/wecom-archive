@@ -149,6 +149,25 @@ def test_build_candidate_query_image_retry_includes_failed_but_never_downloaded(
     assert "'downloaded'" not in sql
 
 
+def test_build_candidate_query_resumes_quota_blocked_without_retry_flag() -> None:
+    from app.media_download import build_candidate_query
+
+    engine = create_engine("sqlite:///:memory:")
+    with RealSession(engine) as session:
+        sql = _compiled_sql(
+            build_candidate_query(
+                session,
+                "tenant-a",
+                frozenset({"voice"}),
+                retry=False,
+            )
+        )
+
+    assert "'pending'" in sql
+    assert "'quota_blocked'" in sql
+    assert "'failed'" not in sql
+
+
 # ---------------------------------------------------------------------------
 # is_downloaded_media_file_stale — generic servability predicate
 # ---------------------------------------------------------------------------
@@ -1239,6 +1258,38 @@ def test_select_nested_media_candidates_includes_pending_regardless_of_retry(tmp
     assert len(item_candidates) == 1
 
 
+def test_select_nested_media_candidates_includes_quota_blocked_without_retry(tmp_path) -> None:
+    from app.db.models import MediaFile
+    from app.media_download import select_nested_media_candidates
+
+    engine = _make_sqlite_engine(tmp_path, "nested-quota-blocked.db")
+    session = RealSession(engine)
+    _insert_nested_message(
+        session,
+        1,
+        "mixed",
+        [{"path": "0", "type": "image", "sdkfileid": "sdk-quota-blocked"}],
+    )
+    session.add(
+        MediaFile(
+            sdkfileid="sdk-quota-blocked",
+            archive_message_id=1,
+            tenant_id="tenant-a",
+            download_status="quota_blocked",
+        )
+    )
+    session.commit()
+
+    item_candidates, _total = select_nested_media_candidates(
+        session,
+        "tenant-a",
+        limit=10,
+        retry=False,
+    )
+    assert len(item_candidates) == 1
+    assert item_candidates[0][1]["sdkfileid"] == "sdk-quota-blocked"
+
+
 def test_select_nested_media_candidates_respects_since_ms(tmp_path) -> None:
     from app.db.models import ArchiveMessage
     from app.media_download import select_nested_media_candidates
@@ -1549,3 +1600,14 @@ def test_count_only_reports_nested_candidates_without_writes(tmp_path, monkeypat
     assert "nested_candidate_messages_scanned: 1" in captured.out
     assert "nested_candidate_items_selected: 2" in captured.out
     assert session.query(MediaFile).count() == 0
+@pytest.fixture(autouse=True)
+def _allow_capacity_for_pre_rnd385_worker_contracts(monkeypatch):
+    """Legacy worker tests isolate media semantics, not billing fixtures."""
+    monkeypatch.setattr(
+        "app.services.media_worker.check_storage_write",
+        lambda *_args, **_kwargs: SimpleNamespace(reason="allowed"),
+    )
+    monkeypatch.setattr(
+        "app.services.media_worker.refresh_tenant_storage_daily",
+        lambda *_args, **_kwargs: 1,
+    )

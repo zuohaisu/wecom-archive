@@ -22,6 +22,7 @@ from app.schemas.billing import (
     BillingPlanOut,
     CreatePaymentOrderIn,
     PaymentOrderOut,
+    StorageCapacityOut,
 )
 from app.services.entitlements import ANNUAL_PLAN_CODE, UNLIMITED_SEATS
 from app.services.payment_orders import (
@@ -40,6 +41,7 @@ from app.services.payment_orders import (
     query_and_reconcile_order,
 )
 from app.services.payment_provider import PaymentProvider
+from app.services.storage_capacity import measure_storage_capacity
 from app.services.wechat_pay import (
     WechatPayConfigurationError,
     WechatPayProtocolError,
@@ -146,6 +148,29 @@ def billing_plan(
         unlimited_seats=unlimited is not None,
         tencent_archive_fee_separate=True,
         payment_enabled=payment_enabled,
+    )
+
+
+@router.get("/api/billing/capacity", response_model=StorageCapacityOut)
+def billing_capacity(
+    context: BillingOwnerContext = Depends(get_billing_owner),
+    db: Session = Depends(get_db),
+) -> StorageCapacityOut:
+    # Serialize the first daily-rollup insert with media writers and other
+    # owner reads; the endpoint commits immediately after this measurement.
+    snapshot = measure_storage_capacity(db, context.tenant_id, lock_tenant=True)
+    db.commit()
+    return StorageCapacityOut(
+        plan_code=snapshot.plan_code,
+        subscription_status=snapshot.subscription_status,
+        quota_bytes=snapshot.quota_bytes,
+        used_bytes=snapshot.used_bytes,
+        remaining_bytes=snapshot.remaining_bytes,
+        utilization_basis_points=snapshot.utilization_basis_points,
+        state=snapshot.state,
+        usage_status=snapshot.usage_status,
+        can_accept_new_media=snapshot.can_accept_new_media,
+        measured_at=snapshot.measured_at,
     )
 
 

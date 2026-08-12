@@ -1423,6 +1423,37 @@ class MediaFile(Base):
     )
 
 
+class MediaQuotaBlock(Base):
+    """Durable capacity denial separate from stored-media truth (RND-385)."""
+
+    __tablename__ = "media_quota_blocks"
+    __table_args__ = (
+        CheckConstraint("observed_bytes > 0", name="ck_media_quota_blocks_bytes"),
+        CheckConstraint(
+            "reason IN ('quota_exceeded', 'subscription_inactive', "
+            "'usage_unavailable')",
+            name="ck_media_quota_blocks_reason",
+        ),
+        Index("ix_media_quota_blocks_tenant_blocked", "tenant_id", "blocked_at"),
+    )
+
+    media_file_id = Column(
+        Integer,
+        ForeignKey("media_files.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    observed_bytes = Column(BigInteger, nullable=False)
+    reason = Column(String(32), nullable=False)
+    blocked_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class TenantStorageDaily(Base):
     """Daily materialized media-byte total for one tenant (RND-331).
 

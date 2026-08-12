@@ -42,16 +42,20 @@ _persist_download_outcome below.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.db.models import MediaQuotaBlock
 from app.media_download import (
     build_candidate_query,
     download_one,
     get_or_reset_media_file,
 )
 from app.media_storage import MediaStorageProvider
+from app.services.storage_capacity import check_storage_write
+from app.services.tenant_storage_rollup import refresh_tenant_storage_daily
 from app.thumbnail_pipeline import maybe_generate_after_download
 from app.voice_playback_pipeline import (
     maybe_generate_after_download as maybe_generate_voice_playback_after_download,
@@ -66,9 +70,11 @@ class MediaDownloadSummary:
     skipped: int = 0
     downloaded: int = 0
     failed: int = 0
+    quota_blocked: int = 0
     reason_counts: dict = field(default_factory=dict)
     nested_downloaded: int = 0
     nested_failed: int = 0
+    nested_quota_blocked: int = 0
     nested_reason_counts: dict = field(default_factory=dict)
 
 
@@ -87,8 +93,10 @@ def _persist_download_outcome(
     file_type: str,
     downloaded: int,
     failed: int,
+    quota_blocked: int,
     reason_counts: dict,
-) -> tuple[int, int]:
+    track_quota: bool,
+) -> tuple[int, int, int]:
     """Persist one download_one() outcome onto its media_files row and
     return the updated (downloaded, failed) counters.
 
@@ -107,6 +115,17 @@ def _persist_download_outcome(
             media_file.local_path = detail if write_backend_name == "local" else None
             media_file.file_size = file_size
             media_file.oss_key = None
+            if track_quota and getattr(media_file, "_was_quota_blocked", False):
+                quota_block = session.get(MediaQuotaBlock, media_file.id)
+                if quota_block is not None:
+                    session.delete(quota_block)
+            # Same byte definition as the capacity API/gate, updated in the
+            # media row's transaction before the tenant lock is released.
+            if track_quota:
+                refresh_tenant_storage_daily(
+                    session,
+                    tenant_id=media_file.tenant_id,
+                )
             session.commit()
             # RND-207: generate a list thumbnail for the freshly-downloaded
             # image, co-located in the same backend. Fully isolated — a
@@ -117,21 +136,46 @@ def _persist_download_outcome(
             maybe_generate_voice_playback_after_download(
                 session, storage_provider, media_file
             )
-            return downloaded + 1, failed
+            return downloaded + 1, failed, quota_blocked
+        if outcome == "quota_blocked":
+            media_file.download_status = "quota_blocked"
+            media_file.local_path = None
+            media_file.storage_backend = None
+            media_file.storage_ref = None
+            media_file.file_size = None
+            media_file.oss_key = None
+            quota_block = session.get(MediaQuotaBlock, media_file.id)
+            if quota_block is None:
+                quota_block = MediaQuotaBlock(media_file_id=media_file.id)
+                session.add(quota_block)
+            quota_block.tenant_id = media_file.tenant_id
+            quota_block.observed_bytes = file_size
+            quota_block.reason = detail
+            quota_block.blocked_at = datetime.now(timezone.utc)
+            session.commit()
+            reason_counts[detail or "usage_unavailable"] = (
+                reason_counts.get(detail or "usage_unavailable", 0) + 1
+            )
+            return downloaded, failed, quota_blocked + 1
         media_file.download_status = "failed"
         media_file.local_path = None
         media_file.storage_backend = None
         media_file.storage_ref = None
+        media_file.file_size = None
         media_file.oss_key = None
+        if track_quota and getattr(media_file, "_was_quota_blocked", False):
+            quota_block = session.get(MediaQuotaBlock, media_file.id)
+            if quota_block is not None:
+                session.delete(quota_block)
         session.commit()
         reason_counts[detail or "unknown"] = reason_counts.get(detail or "unknown", 0) + 1
-        return downloaded, failed + 1
+        return downloaded, failed + 1, quota_blocked
     except Exception:  # noqa: BLE001 -- persistence boundary must safely count every DB failure
         session.rollback()
         if outcome == "downloaded" and detail:
             _safe_delete_after_commit_failure(storage_provider, detail)
         reason_counts["db_commit_error"] = reason_counts.get("db_commit_error", 0) + 1
-        return downloaded, failed + 1
+        return downloaded, failed + 1, quota_blocked
 
 
 def _safe_delete_after_commit_failure(storage_provider: MediaStorageProvider, storage_ref: str) -> None:
@@ -156,6 +200,7 @@ def download_media_candidates(
     nested_item_candidates: list,
     before_attempt=None,
     record_attempt: bool = False,
+    enforce_quota: bool = False,
 ) -> MediaDownloadSummary:
     """Download every candidate and nested item, persisting each outcome.
 
@@ -169,6 +214,15 @@ def download_media_candidates(
     counted them before this extraction.
     """
     summary = MediaDownloadSummary()
+
+    def server_quota_gate(incoming_bytes: int) -> str:
+        return check_storage_write(
+            session,
+            tenant_id,
+            incoming_bytes,
+        ).reason
+
+    quota_gate = server_quota_gate if enforce_quota else None
 
     for msg in candidates:
         media_file = get_or_reset_media_file(
@@ -191,11 +245,20 @@ def download_media_candidates(
 
         summary.attempted += 1
         outcome, detail, file_size = download_one(
-            lib, handle, storage_provider, tenant_id, msg.id, msg.msgtype, msg.sdkfileid, timeout
+            lib,
+            handle,
+            storage_provider,
+            tenant_id,
+            msg.id,
+            msg.msgtype,
+            msg.sdkfileid,
+            timeout,
+            quota_gate=quota_gate,
         )
-        summary.downloaded, summary.failed = _persist_download_outcome(
+        summary.downloaded, summary.failed, summary.quota_blocked = _persist_download_outcome(
             session, storage_provider, media_file, outcome, detail, file_size,
-            write_backend_name, msg.msgtype, summary.downloaded, summary.failed, summary.reason_counts,
+            write_backend_name, msg.msgtype, summary.downloaded, summary.failed,
+            summary.quota_blocked, summary.reason_counts, enforce_quota,
         )
 
     for msg, ref in nested_item_candidates:
@@ -220,12 +283,16 @@ def download_media_candidates(
         summary.attempted += 1
         outcome, detail, file_size = download_one(
             lib, handle, storage_provider, tenant_id, msg.id, ref["type"], ref["sdkfileid"],
-            timeout, item_key=ref["path"],
+            timeout, item_key=ref["path"], quota_gate=quota_gate,
         )
-        summary.nested_downloaded, summary.nested_failed = _persist_download_outcome(
+        (
+            summary.nested_downloaded,
+            summary.nested_failed,
+            summary.nested_quota_blocked,
+        ) = _persist_download_outcome(
             session, storage_provider, media_file, outcome, detail, file_size,
             write_backend_name, ref["type"], summary.nested_downloaded, summary.nested_failed,
-            summary.nested_reason_counts,
+            summary.nested_quota_blocked, summary.nested_reason_counts, enforce_quota,
         )
 
     return summary

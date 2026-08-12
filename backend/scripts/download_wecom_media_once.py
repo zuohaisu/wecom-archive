@@ -220,7 +220,7 @@ def _require_tenant_id(session: Session, corp_id: str) -> str:
             session.query(TenantWecomConfig)
             .filter(
                 TenantWecomConfig.corp_id == corp_id,
-                TenantWecomConfig.is_active == True,
+                TenantWecomConfig.is_active.is_(True),
             )
             .first()
         )
@@ -642,6 +642,7 @@ def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
             candidates,
             nested_item_candidates,
             record_attempt=True,
+            enforce_quota=True,
         )
 
         try:
@@ -651,6 +652,7 @@ def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
 
         succeeded = summary.downloaded + summary.nested_downloaded
         failed = summary.failed + summary.nested_failed
+        quota_blocked = summary.quota_blocked + summary.nested_quota_blocked
         retryable = _remaining_retryable_count(
             session, tenant_id, selected_sdkfileids, retry_count
         )
@@ -658,17 +660,23 @@ def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
         print(
             f"[INFO] media_worker trigger_source={args.trigger_source} "
             f"trigger=completed attempted={summary.attempted} succeeded={succeeded} "
-            f"failed={failed} retryable={retryable} skipped={skipped}",
+            f"failed={failed} quota_blocked={quota_blocked} "
+            f"retryable={retryable} skipped={skipped}",
             flush=True,
         )
         print(f"[INFO] downloaded: {summary.downloaded}", flush=True)
         print(f"[INFO] failed: {summary.failed}", flush=True)
+        print(f"[INFO] quota_blocked: {summary.quota_blocked}", flush=True)
         if summary.reason_counts:
             diag = ", ".join(f"{k}={v}" for k, v in sorted(summary.reason_counts.items()))
             print(f"[INFO] failed_reasons: {diag}", flush=True)
         if not args.skip_nested:
             print(f"[INFO] nested_downloaded: {summary.nested_downloaded}", flush=True)
             print(f"[INFO] nested_failed: {summary.nested_failed}", flush=True)
+            print(
+                f"[INFO] nested_quota_blocked: {summary.nested_quota_blocked}",
+                flush=True,
+            )
             if summary.nested_reason_counts:
                 nested_diag = ", ".join(
                     f"{k}={v}" for k, v in sorted(summary.nested_reason_counts.items())

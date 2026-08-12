@@ -242,7 +242,42 @@ def install_fake_sdk(monkeypatch: pytest.MonkeyPatch, fake: FakeWecomSdk, module
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT, slug TEXT, is_active INTEGER,
+    lifecycle_status TEXT NOT NULL DEFAULT 'active',
+    onboarding_completed_at TEXT,
     created_at TEXT, updated_at TEXT
+);
+CREATE TABLE billing_plans (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    billing_period_months INTEGER NOT NULL,
+    storage_quota_bytes INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE plan_entitlements (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    capability TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(plan_id, capability)
+);
+CREATE TABLE subscriptions (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL UNIQUE,
+    plan_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    starts_at DATETIME NOT NULL,
+    ends_at DATETIME NOT NULL,
+    source TEXT NOT NULL,
+    renewal_count INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE tenant_wecom_configs (
     id TEXT PRIMARY KEY,
@@ -342,6 +377,23 @@ CREATE TABLE media_files (
     created_at TEXT,
     updated_at TEXT,
     UNIQUE(tenant_id, sdkfileid)
+);
+CREATE TABLE media_quota_blocks (
+    media_file_id INTEGER PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    observed_bytes INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    blocked_at DATETIME NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE tenant_storage_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    usage_date DATE NOT NULL,
+    used_bytes INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id, usage_date)
 );
 """
 

@@ -110,6 +110,16 @@ retain normal owner-session authentication. Enabling production payments is a
 separate RND-390 operational gate; committing this implementation does not
 authorize live merchant traffic.
 
+**Capacity enforcement (RND-385).** After migration `0044`, every production
+media-worker invocation enforces the active subscription's storage quota before
+writing to either local storage or Qiniu. A denied payload is recorded as
+`quota_blocked` plus a `media_quota_blocks` fact and is retried by normal timer
+runs; operators do not need to add `--retry`. Do not bypass the versioned
+`download_wecom_media_once.py` entrypoint with direct internal calls. Monitor
+`quota_blocked` counts in worker output and use the owner billing page or
+`GET /api/billing/capacity` for the same server-measured state. Missing or
+inactive subscription fails closed by design.
+
 ---
 
 ## 4. Main Web Service

@@ -17,6 +17,7 @@ from app.db.models import (
     AdminUser,
     AuditLog,
     BillingPlan,
+    MediaFile,
     PaymentEvent,
     PaymentOrder,
     PlanEntitlement,
@@ -24,6 +25,7 @@ from app.db.models import (
     SubscriptionActivation,
     SubscriptionHistory,
     Tenant,
+    TenantStorageDaily,
 )
 from app.db.session import get_db
 from app.main import create_app
@@ -94,6 +96,8 @@ def _tables():
         AdminUser.__table__,
         AdminSession.__table__,
         AuditLog.__table__,
+        MediaFile.__table__,
+        TenantStorageDaily.__table__,
     ]
 
 
@@ -304,6 +308,77 @@ def test_signed_provider_callback_needs_no_browser_session_and_activates_once(
         assert db.query(AuditLog).count() == 1
 
 
+def test_capacity_is_unavailable_before_payment_then_uses_activated_plan_without_tenant_leak(
+    monkeypatch,
+) -> None:
+    base, factory, provider = _setup(monkeypatch)
+    owner = _client_with_session(base, "session-provisioning")
+    other = _client_with_session(base, "session-other")
+    before = owner.get("/api/billing/capacity")
+    assert before.status_code == 200
+    assert before.json() | {"measured_at": None} == {
+        "plan_code": None,
+        "subscription_status": "not_subscribed",
+        "quota_bytes": 0,
+        "used_bytes": 0,
+        "remaining_bytes": 0,
+        "utilization_basis_points": None,
+        "state": "unavailable",
+        "usage_status": "available",
+        "can_accept_new_media": False,
+        "measured_at": None,
+    }
+
+    created = _create(owner).json()
+    with factory() as db:
+        order = db.get(PaymentOrder, created["order_id"])
+        db.add(
+            MediaFile(
+                id=380,
+                sdkfileid="other-tenant-media",
+                archive_message_id=380,
+                tenant_id="tenant-other",
+                download_status="downloaded",
+                file_size=4 * 1024**3,
+            )
+        )
+        db.commit()
+        provider.notification = TrustedPaymentEvent(
+            provider="wechat_pay",
+            provider_event_id="capacity-api-rnd385",
+            provider_order_ref=order.provider_order_ref,
+            provider_transaction_id="42000000000000000000000385",
+            event_type="payment_succeeded",
+            app_id=provider.app_id,
+            merchant_id=provider.merchant_id,
+            state="SUCCESS",
+            amount_cents=9900,
+            currency="CNY",
+            succeeded_at=NOW,
+            payload_hash="b" * 64,
+            source="callback",
+        )
+    assert (
+        base.post(
+            "/api/payments/wechat/notify",
+            content=b'{"encrypted":"opaque"}',
+            headers={"Content-Type": "application/json"},
+        ).status_code
+        == 204
+    )
+
+    after = owner.get("/api/billing/capacity").json()
+    assert after["plan_code"] == ANNUAL_PLAN_CODE
+    assert after["subscription_status"] == "active"
+    assert after["quota_bytes"] == 5 * 1024**3
+    assert after["used_bytes"] == 0
+    assert after["remaining_bytes"] == 5 * 1024**3
+    assert after["utilization_basis_points"] == 0
+    assert after["state"] == "normal"
+    assert after["can_accept_new_media"] is True
+    assert other.get("/api/billing/capacity").json()["used_bytes"] == 4 * 1024**3
+
+
 def test_order_status_and_qr_are_tenant_scoped_and_owner_only(monkeypatch) -> None:
     base, _factory, _provider = _setup(monkeypatch)
     provisioning = _client_with_session(base, "session-provisioning")
@@ -315,6 +390,7 @@ def test_order_status_and_qr_are_tenant_scoped_and_owner_only(monkeypatch) -> No
     assert other.get(f"/api/billing/orders/{order_id}/qr").status_code == 404
     assert admin.get("/admin/billing").status_code == 403
     assert admin.get("/api/billing/plan").status_code == 403
+    assert admin.get("/api/billing/capacity").status_code == 403
     assert base.get("/admin/billing").status_code == 401
 
 
@@ -327,6 +403,9 @@ def test_page_and_javascript_expose_precise_states_without_raw_checkout_material
     script = (
         Path(billing.__file__).parents[1] / "web/static/billing.js"
     ).read_text()
+    translations = (
+        Path(billing.__file__).parents[1] / "assets/i18n.js"
+    ).read_text()
 
     for state in (
         "pending",
@@ -337,6 +416,9 @@ def test_page_and_javascript_expose_precise_states_without_raw_checkout_material
     ):
         assert f"billing.status.{state}" in page or state in script
     assert "/api/billing/orders/" in script
+    assert "/api/billing/capacity" in script
+    assert "warning_90" in script
+    assert "billing.capacity.warning_90" in translations
     assert "/refresh" in script
     assert "weixin://" not in page
     assert "checkout_url" not in script

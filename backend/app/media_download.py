@@ -34,6 +34,7 @@ tool — see that constant's own guard) via _KEY_CATEGORY_OVERRIDES below.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from sqlalchemy import and_, or_
@@ -158,7 +159,13 @@ def build_candidate_query(
             ArchiveMessage.sdkfileid != "",
         )
     )
-    eligible_statuses = ["pending", "failed"] if retry else ["pending"]
+    # quota_blocked is a capacity hold, not an SDK/provider failure. It stays
+    # eligible without --retry so a later renewal/cleanup can resume it.
+    eligible_statuses = (
+        ["pending", "failed", "quota_blocked"]
+        if retry
+        else ["pending", "quota_blocked"]
+    )
     query = query.filter(
         or_(MediaFile.id.is_(None), MediaFile.download_status.in_(eligible_statuses))
     )
@@ -405,10 +412,10 @@ def select_nested_media_candidates(
     item_candidates is a flat list of (message, ref) pairs — one entry per
     still-eligible nested media item, up to `limit` items (not messages: a
     single mixed message with 5 images contributes up to 5 entries).
-    "Eligible" mirrors build_candidate_query's own pending/failed
+    "Eligible" mirrors build_candidate_query's own pending/failed/quota-blocked
     semantics exactly: a sdkfileid with no media_files row yet, or an
-    existing "pending" row, is always eligible; an existing "failed" row
-    is eligible only when retry=True; a "downloaded" row is never
+    existing "pending" or "quota_blocked" row, is always eligible; an
+    existing "failed" row is eligible only when retry=True; a "downloaded" row is never
     eligible. Computed in Python since it must be checked per nested
     sdkfileid, not per message.
 
@@ -521,7 +528,7 @@ def get_or_reset_media_file(
     record_attempt: bool = False,
 ) -> MediaFile | None:
     """Return the media_files row for (tenant_id, sdkfileid), creating it
-    (or resetting an existing pending/failed/stale-downloaded row) to
+    (or resetting an existing pending/failed/quota-blocked/stale-downloaded row) to
     download_status="pending" before an attempt begins. When
     ``record_attempt`` is true, increment ``download_attempts`` in this same
     pre-download commit so a restart cannot reset the durable retry budget.
@@ -552,11 +559,13 @@ def get_or_reset_media_file(
         session.add(row)
         session.commit()
         session.refresh(row)
+        row._was_quota_blocked = False
         return row
 
     if row.archive_message_id != archive_message_id:
         return None
 
+    was_quota_blocked = row.download_status == "quota_blocked"
     row.download_status = "pending"
     if record_attempt:
         row.download_attempts = int(row.download_attempts or 0) + 1
@@ -569,6 +578,7 @@ def get_or_reset_media_file(
     row.playback_status = "not_applicable"
     session.commit()
     session.refresh(row)
+    row._was_quota_blocked = was_quota_blocked
     return row
 
 
@@ -587,6 +597,7 @@ def download_one(
     sdkfileid: str,
     timeout: int,
     item_key: str | None = None,
+    quota_gate: Callable[[int], str] | None = None,
 ) -> tuple[str, str | None, int | None]:
     """Download one message's media.
 
@@ -599,12 +610,11 @@ def download_one(
     msgtype and has no entry for either composite type. None (default)
     preserves existing non-composite callers unchanged.
 
-    Returns (outcome, detail, file_size): outcome is "downloaded" or
-    "failed"; detail is the final storage reference (string) when
-    downloaded, or a short internal diagnostic tag (never an
-    identifier/path/payload fragment) when failed; file_size is the exact
-    byte length of the downloaded payload (len(data)) on success, else
-    None.
+    Returns (outcome, detail, file_size): outcome is "downloaded", "failed"
+    or "quota_blocked". The optional server-owned quota gate runs after the
+    exact payload length is known and before any local/cloud write. It returns
+    "allowed" or a sanitized denial reason; blocked payload bytes are not
+    published, while their exact length is returned for durable retry state.
 
     file_size is computed from the in-memory payload *before* upload, not
     by a post-publish remote provider.size_bytes() stat call — the caller
@@ -652,6 +662,11 @@ def download_one(
         if not data:
             detail = "empty_payload"
             return outcome, detail, file_size
+
+        if quota_gate is not None:
+            quota_reason = quota_gate(len(data))
+            if quota_reason != "allowed":
+                return "quota_blocked", quota_reason, len(data)
 
         try:
             part_ref = provider.save_bytes(part_ref, data)
