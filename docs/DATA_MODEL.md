@@ -24,6 +24,7 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | `plan_entitlements` | Normalized boolean capabilities attached to a plan |
 | `subscriptions` | One authoritative current subscription per tenant |
 | `subscription_history` | Append-only snapshots of subscription assignments |
+| `subscription_activations` | Idempotent paid activation/renewal attempts and results |
 | `key_versions` | Registry mapping WeCom `publickey_ver` to a private key path or alias |
 | `sync_states` | Cursor tracking — last successfully synced `seq` per tenant+corp |
 | `archive_messages` | Core message store — encrypted envelope + decrypted payload |
@@ -160,6 +161,18 @@ and monotonically increasing revision. Application code has no update/delete
 path for these rows. RND-384 builds payment idempotency and renewal transactions
 on this primitive; RND-385 consumes `get_storage_quota()` for the actual storage
 write gate.
+
+### `subscription_activations`
+
+One durable row per provider-neutral `(source, idempotency-key hash)`. Raw
+idempotency keys are never persisted. A command fingerprint prevents a key
+from being replayed against another tenant, plan or trusted payment time.
+
+`pending` and `failed` rows are retryable. An `applied` row stores the exact
+subscription revision and paid term returned to all later replays. The current
+subscription, immutable history snapshot, activation result and audit row are
+committed atomically; a domain failure records only a coarse failure code in a
+separate recovery transaction.
 
 ---
 

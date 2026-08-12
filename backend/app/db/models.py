@@ -202,6 +202,76 @@ class SubscriptionHistory(Base):
     )
 
 
+class SubscriptionActivation(Base):
+    """Durable, provider-neutral idempotency record for paid activations."""
+
+    __tablename__ = "subscription_activations"
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "idempotency_key_hash",
+            name="uq_subscription_activations_source_key",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'applied', 'failed')",
+            name="ck_subscription_activations_status",
+        ),
+        CheckConstraint(
+            "activation_kind IS NULL OR activation_kind IN ('activation', 'renewal')",
+            name="ck_subscription_activations_kind",
+        ),
+        CheckConstraint(
+            "subscription_revision IS NULL OR subscription_revision >= 1",
+            name="ck_subscription_activations_revision",
+        ),
+        CheckConstraint(
+            "applied_renewal_count IS NULL OR applied_renewal_count >= 0",
+            name="ck_subscription_activations_renewal_count",
+        ),
+        CheckConstraint(
+            "status != 'failed' OR failure_code IS NOT NULL",
+            name="ck_subscription_activations_failed_code",
+        ),
+        CheckConstraint(
+            "status != 'applied' OR ("
+            "subscription_id IS NOT NULL AND subscription_revision IS NOT NULL AND "
+            "applied_renewal_count IS NOT NULL AND "
+            "activation_kind IS NOT NULL AND applied_starts_at IS NOT NULL AND "
+            "applied_ends_at IS NOT NULL AND applied_at IS NOT NULL)",
+            name="ck_subscription_activations_applied_result",
+        ),
+        Index("ix_subscription_activations_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    plan_code = Column(String(64), nullable=False)
+    source = Column(String(32), nullable=False)
+    idempotency_key_hash = Column(String(64), nullable=False)
+    command_hash = Column(String(64), nullable=False)
+    trusted_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String(16), nullable=False, server_default=text("'pending'"))
+    failure_code = Column(String(32), nullable=True)
+    subscription_id = Column(
+        String(36), ForeignKey("subscriptions.id"), nullable=True
+    )
+    subscription_revision = Column(Integer, nullable=True)
+    applied_renewal_count = Column(Integer, nullable=True)
+    activation_kind = Column(String(16), nullable=True)
+    applied_starts_at = Column(DateTime(timezone=True), nullable=True)
+    applied_ends_at = Column(DateTime(timezone=True), nullable=True)
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class TenantWecomConfig(Base):
     """Per-tenant WeCom app credentials. One row per tenant for MVP.
 
