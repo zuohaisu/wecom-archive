@@ -30,7 +30,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.main import create_app
 from app.routers import billing
-from app.services.entitlements import ANNUAL_PLAN_CODE, UNLIMITED_SEATS
+from app.services.entitlements import ANNUAL_PLAN_CODE, ARCHIVE_ACCESS, UNLIMITED_SEATS
 from app.services.payment_provider import (
     CheckoutArtifact,
     PaymentQueryResult,
@@ -139,6 +139,12 @@ def _setup(monkeypatch):
                     id="rnd380-unlimited",
                     plan_id=PLAN_ID,
                     capability=UNLIMITED_SEATS,
+                    is_enabled=True,
+                ),
+                PlanEntitlement(
+                    id="rnd378-archive",
+                    plan_id=PLAN_ID,
+                    capability=ARCHIVE_ACCESS,
                     is_enabled=True,
                 ),
                 AdminUser(
@@ -315,6 +321,7 @@ def test_capacity_is_unavailable_before_payment_then_uses_activated_plan_without
     owner = _client_with_session(base, "session-provisioning")
     other = _client_with_session(base, "session-other")
     before = owner.get("/api/billing/capacity")
+    subscription_before = owner.get("/api/billing/subscription")
     assert before.status_code == 200
     assert before.json() | {"measured_at": None} == {
         "plan_code": None,
@@ -328,6 +335,10 @@ def test_capacity_is_unavailable_before_payment_then_uses_activated_plan_without
         "can_accept_new_media": False,
         "measured_at": None,
     }
+    assert subscription_before.status_code == 200
+    assert subscription_before.json()["display_state"] == "unavailable"
+    assert subscription_before.json()["unavailable_reason"] == "no_subscription"
+    assert subscription_before.json()["is_entitled"] is False
 
     created = _create(owner).json()
     with factory() as db:
@@ -368,6 +379,7 @@ def test_capacity_is_unavailable_before_payment_then_uses_activated_plan_without
     )
 
     after = owner.get("/api/billing/capacity").json()
+    subscription_after = owner.get("/api/billing/subscription").json()
     assert after["plan_code"] == ANNUAL_PLAN_CODE
     assert after["subscription_status"] == "active"
     assert after["quota_bytes"] == 5 * 1024**3
@@ -376,7 +388,15 @@ def test_capacity_is_unavailable_before_payment_then_uses_activated_plan_without
     assert after["utilization_basis_points"] == 0
     assert after["state"] == "normal"
     assert after["can_accept_new_media"] is True
+    assert subscription_after["plan_code"] == ANNUAL_PLAN_CODE
+    assert subscription_after["plan_name"] == "年度基础套餐"
+    assert subscription_after["display_state"] == "paid_active"
+    assert subscription_after["is_entitled"] is True
+    assert subscription_after["starts_at"] is not None
+    assert subscription_after["ends_at"] is not None
+    assert subscription_after["entitlements"] == [ARCHIVE_ACCESS, UNLIMITED_SEATS]
     assert other.get("/api/billing/capacity").json()["used_bytes"] == 4 * 1024**3
+    assert other.get("/api/billing/subscription").json()["plan_code"] is None
 
 
 def test_order_status_and_qr_are_tenant_scoped_and_owner_only(monkeypatch) -> None:
@@ -391,7 +411,36 @@ def test_order_status_and_qr_are_tenant_scoped_and_owner_only(monkeypatch) -> No
     assert admin.get("/admin/billing").status_code == 403
     assert admin.get("/api/billing/plan").status_code == 403
     assert admin.get("/api/billing/capacity").status_code == 403
+    assert admin.get("/api/billing/subscription").status_code == 403
     assert base.get("/admin/billing").status_code == 401
+    assert base.get("/api/billing/subscription").status_code == 401
+
+
+def test_browser_asserted_quota_or_entitlements_cannot_activate_subscription(
+    monkeypatch,
+) -> None:
+    base, _factory, _provider = _setup(monkeypatch)
+    owner = _client_with_session(base, "session-provisioning")
+    created = owner.post(
+        "/api/billing/orders",
+        headers={"Idempotency-Key": "rnd378-browser-tamper"},
+        json={
+            "plan_code": ANNUAL_PLAN_CODE,
+            "storage_quota_bytes": 999 * 1024**3,
+            "entitlements": ["platform_admin", "unlimited_storage"],
+            "status": "active",
+        },
+    )
+
+    assert created.status_code == 201
+    overview = owner.get("/api/billing/subscription").json()
+    assert overview["is_entitled"] is False
+    assert overview["plan_code"] is None
+    assert overview["entitlements"] == []
+    assert owner.post(
+        "/api/billing/subscription",
+        json={"status": "active", "entitlements": ["platform_admin"]},
+    ).status_code == 405
 
 
 def test_page_and_javascript_expose_precise_states_without_raw_checkout_material(
@@ -417,8 +466,11 @@ def test_page_and_javascript_expose_precise_states_without_raw_checkout_material
         assert f"billing.status.{state}" in page or state in script
     assert "/api/billing/orders/" in script
     assert "/api/billing/capacity" in script
+    assert "/api/billing/subscription" in script
     assert "warning_90" in script
     assert "billing.capacity.warning_90" in translations
+    assert "billing.subscription.state.expiring_soon" in translations
+    assert "billing.purchaseOrRenewAmount" in translations
     assert "/refresh" in script
     assert "weixin://" not in page
     assert "checkout_url" not in script

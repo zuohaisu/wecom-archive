@@ -58,6 +58,7 @@ Tenant identity always comes from that session.
 |--------|------|---------|
 | `GET` | `/admin/billing` | Owner purchase/status page |
 | `GET` | `/api/billing/plan` | Server-authoritative annual plan and payment availability |
+| `GET` | `/api/billing/subscription` | Current tenant plan, effective dates, entitlements and explicit customer-facing state |
 | `GET` | `/api/billing/capacity` | Live tenant-scoped quota, downloaded-byte usage, remaining bytes and capacity state |
 | `GET` | `/api/billing/orders/latest` | Latest tenant order or `null` |
 | `POST` | `/api/billing/orders` | Create/idempotently replay a Native QR order; requires `Idempotency-Key` |
@@ -92,6 +93,13 @@ States are `normal`, `warning_80`, `warning_90`, `full`, `over_limit`, and
 `unavailable`. Missing/inactive subscription or unavailable usage never grants
 write capacity. `measured_at` is the server measurement time; the response is
 not a browser estimate.
+
+`GET /api/billing/subscription` has no tenant, status, quota, or entitlement
+input. It derives all fields from the authenticated owner's tenant and the
+RND-376 authority. Customer-facing states are `trial`, `paid_active`,
+`expiring_soon` (30-day server-time window), `expired`, `canceled`, and
+`unavailable`; inactive states include a machine-readable reason so the page
+can explain why access is unavailable and direct the owner to purchase/renew.
 
 ---
 

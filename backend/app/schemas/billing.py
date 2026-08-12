@@ -35,6 +35,21 @@ class StorageCapacityOut(BaseModel):
     measured_at: datetime
 
 
+class SubscriptionOverviewOut(BaseModel):
+    plan_code: Optional[str]
+    plan_name: Optional[str]
+    stored_status: Optional[str]
+    effective_status: str
+    display_state: str
+    unavailable_reason: Optional[str]
+    is_entitled: bool
+    starts_at: Optional[datetime]
+    ends_at: Optional[datetime]
+    entitlements: list[str]
+    renewal_count: int
+    measured_at: datetime
+
+
 class PaymentOrderOut(BaseModel):
     order_id: str
     plan_code: str

@@ -23,6 +23,7 @@ from app.schemas.billing import (
     CreatePaymentOrderIn,
     PaymentOrderOut,
     StorageCapacityOut,
+    SubscriptionOverviewOut,
 )
 from app.services.entitlements import ANNUAL_PLAN_CODE, UNLIMITED_SEATS
 from app.services.payment_orders import (
@@ -42,6 +43,7 @@ from app.services.payment_orders import (
 )
 from app.services.payment_provider import PaymentProvider
 from app.services.storage_capacity import measure_storage_capacity
+from app.services.subscription_overview import get_subscription_overview
 from app.services.wechat_pay import (
     WechatPayConfigurationError,
     WechatPayProtocolError,
@@ -171,6 +173,28 @@ def billing_capacity(
         usage_status=snapshot.usage_status,
         can_accept_new_media=snapshot.can_accept_new_media,
         measured_at=snapshot.measured_at,
+    )
+
+
+@router.get("/api/billing/subscription", response_model=SubscriptionOverviewOut)
+def billing_subscription(
+    context: BillingOwnerContext = Depends(get_billing_owner),
+    db: Session = Depends(get_db),
+) -> SubscriptionOverviewOut:
+    overview = get_subscription_overview(db, context.tenant_id)
+    return SubscriptionOverviewOut(
+        plan_code=overview.plan_code,
+        plan_name=overview.plan_name,
+        stored_status=overview.stored_status,
+        effective_status=overview.effective_status,
+        display_state=overview.display_state,
+        unavailable_reason=overview.unavailable_reason,
+        is_entitled=overview.is_entitled,
+        starts_at=overview.starts_at,
+        ends_at=overview.ends_at,
+        entitlements=list(overview.entitlements),
+        renewal_count=overview.renewal_count,
+        measured_at=overview.measured_at,
     )
 
 

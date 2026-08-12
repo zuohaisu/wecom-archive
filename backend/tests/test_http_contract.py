@@ -354,8 +354,8 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    # RND-385 adds the owner storage-capacity fact API.
-    assert route_count == 110
+    # RND-378 adds the owner subscription overview API.
+    assert route_count == 111
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -436,6 +436,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/auth/wecom/organization-claim/confirm",
             "/api/billing/orders",
             "/api/billing/capacity",
+            "/api/billing/subscription",
             "/api/billing/orders/latest",
             "/api/billing/orders/{order_id}",
             "/api/billing/orders/{order_id}/close",
@@ -644,6 +645,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/billing/capacity",
             frozenset({"GET"}),
             "StorageCapacityOut",
+            "None",
+        ),
+        (
+            "/api/billing/subscription",
+            frozenset({"GET"}),
+            "SubscriptionOverviewOut",
             "None",
         ),
         ("/api/billing/orders/latest", frozenset({"GET"}), "", "None"),

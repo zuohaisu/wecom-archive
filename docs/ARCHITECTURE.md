@@ -187,6 +187,12 @@ rollup refresh. Concurrent workers therefore cannot spend the same remaining
 bytes. Unknown usage and inactive entitlement fail closed. Capacity denial is
 a durable, retryable state, separate from SDK/provider failures.
 
+The same owner page reads current plan, dates, and entitlement names through
+`GET /api/billing/subscription`. Its trial/paid/expiring/expired/canceled/
+unavailable presentation state is classified from server time and the same
+RND-376 subscription summary used by permission checks. Browser-supplied
+status, quota, or entitlement claims therefore cannot change access.
+
 Media files are served via the authenticated API route (`GET /api/conversations/{id}/messages/{msgid}/media`), which performs tenant authorization before resolving any media storage provider. The provider used to serve a given row is resolved from that row's own `storage_backend`/`storage_ref` columns (RND-174), not from the deployment-wide default write provider — so local and Qiniu-backed rows can coexist safely in the same deployment (see §5).
 
 ---
