@@ -59,6 +59,149 @@ class Tenant(Base):
     )
 
 
+class BillingPlan(Base):
+    """Server-authoritative commercial plan definition (RND-376)."""
+
+    __tablename__ = "billing_plans"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_billing_plans_code"),
+        CheckConstraint("amount_cents >= 0", name="ck_billing_plans_amount"),
+        CheckConstraint("length(currency) = 3", name="ck_billing_plans_currency"),
+        CheckConstraint(
+            "billing_period_months > 0",
+            name="ck_billing_plans_period_months",
+        ),
+        CheckConstraint(
+            "storage_quota_bytes >= 0",
+            name="ck_billing_plans_storage_quota",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    code = Column(String(64), nullable=False)
+    display_name = Column(String(128), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False)
+    billing_period_months = Column(Integer, nullable=False)
+    storage_quota_bytes = Column(BigInteger, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class PlanEntitlement(Base):
+    """Normalized boolean capability attached to a billing plan."""
+
+    __tablename__ = "plan_entitlements"
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id",
+            "capability",
+            name="uq_plan_entitlements_plan_capability",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    plan_id = Column(
+        String(36),
+        ForeignKey("billing_plans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    capability = Column(String(64), nullable=False)
+    is_enabled = Column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Subscription(Base):
+    """The single authoritative current subscription for one tenant."""
+
+    __tablename__ = "subscriptions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_subscriptions_tenant"),
+        CheckConstraint(
+            "status IN ('trial', 'active', 'past_due', 'expired', 'canceled')",
+            name="ck_subscriptions_status",
+        ),
+        CheckConstraint("starts_at < ends_at", name="ck_subscriptions_date_range"),
+        CheckConstraint("renewal_count >= 0", name="ck_subscriptions_renewal_count"),
+        CheckConstraint("revision >= 1", name="ck_subscriptions_revision"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id"), nullable=False, index=False
+    )
+    plan_id = Column(String(36), ForeignKey("billing_plans.id"), nullable=False)
+    status = Column(String(16), nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    source = Column(String(32), nullable=False)
+    renewal_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    revision = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class SubscriptionHistory(Base):
+    """Append-only snapshot for every authoritative subscription assignment."""
+
+    __tablename__ = "subscription_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "revision",
+            name="uq_subscription_history_revision",
+        ),
+        CheckConstraint(
+            "status IN ('trial', 'active', 'past_due', 'expired', 'canceled')",
+            name="ck_subscription_history_status",
+        ),
+        CheckConstraint(
+            "starts_at < ends_at", name="ck_subscription_history_date_range"
+        ),
+        CheckConstraint(
+            "renewal_count >= 0", name="ck_subscription_history_renewal_count"
+        ),
+        CheckConstraint("revision >= 1", name="ck_subscription_history_revision"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    subscription_id = Column(
+        String(36), ForeignKey("subscriptions.id"), nullable=False
+    )
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False, index=True)
+    plan_id = Column(String(36), ForeignKey("billing_plans.id"), nullable=False)
+    status = Column(String(16), nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    source = Column(String(32), nullable=False)
+    renewal_count = Column(Integer, nullable=False)
+    revision = Column(Integer, nullable=False)
+    change_kind = Column(String(32), nullable=False)
+    recorded_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class TenantWecomConfig(Base):
     """Per-tenant WeCom app credentials. One row per tenant for MVP.
 

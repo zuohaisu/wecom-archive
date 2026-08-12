@@ -3,7 +3,8 @@
 PostgreSQL schema for storing WeCom conversation archive messages and tenant
 management infrastructure for future SaaS use.
 
-Related issues: RND-75 (initial schema), RND-111 (tenant foundation), RND-156 (multi-tenant), RND-184 (corp ID uniqueness).
+Related issues: RND-75 (initial schema), RND-111 (tenant foundation), RND-156
+(multi-tenant), RND-184 (corp ID uniqueness), RND-376 (billing authority).
 
 ---
 
@@ -19,6 +20,10 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | `tenant_wecom_configs` | Per-tenant WeCom app credentials |
 | `admin_users` | WeCom employees who have authenticated |
 | `admin_sessions` | Active login sessions |
+| `billing_plans` | Server-authoritative price, period and storage quota |
+| `plan_entitlements` | Normalized boolean capabilities attached to a plan |
+| `subscriptions` | One authoritative current subscription per tenant |
+| `subscription_history` | Append-only snapshots of subscription assignments |
 | `key_versions` | Registry mapping WeCom `publickey_ver` to a private key path or alias |
 | `sync_states` | Cursor tracking — last successfully synced `seq` per tenant+corp |
 | `archive_messages` | Core message store — encrypted envelope + decrypted payload |
@@ -116,6 +121,45 @@ Indexes: B-tree on `expires_at` (used by session validation and cleanup queries)
 
 Cleanup: `DELETE FROM admin_sessions WHERE expires_at < NOW() - INTERVAL '1 day'`
 (scheduled cleanup, **not yet automated** — technical debt).
+
+---
+
+## Billing Authority Tables
+
+RND-376 establishes the only source of commercial access truth. Existing
+tenants are not silently enrolled by the migration: a trusted domain service
+must assign a subscription before any entitlement is granted.
+
+### `billing_plans`
+
+The first seeded row is immutable by code: `annual_base_cny_99`, CNY 99.00,
+12 calendar months, 5 GiB storage and unlimited seats. Price and quota are
+stored as integer cents/bytes; no client value participates in access checks.
+
+### `plan_entitlements`
+
+One normalized row per enabled boolean capability. The annual base plan starts
+with `archive_access` and `unlimited_seats`. Storage quota is a numeric plan
+field and is read through the same entitlement service.
+
+### `subscriptions`
+
+There is exactly one row per tenant (`UNIQUE(tenant_id)`). It is the mutable
+current projection, with status, effective range, source, renewal count and
+revision. Only `trial` and `active` inside the half-open interval
+`[starts_at, ends_at)` grant capabilities. `past_due`, `expired`, `canceled`,
+future-start and missing subscriptions fail closed.
+
+An inactive plan cannot be newly assigned. It does not retroactively remove an
+already purchased term; reads continue to honor that term until its own end.
+
+### `subscription_history`
+
+Every authoritative assignment appends a full snapshot keyed by subscription
+and monotonically increasing revision. Application code has no update/delete
+path for these rows. RND-384 builds payment idempotency and renewal transactions
+on this primitive; RND-385 consumes `get_storage_quota()` for the actual storage
+write gate.
 
 ---
 
