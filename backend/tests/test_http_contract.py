@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, Generator, get_args
+from typing import Any, Generator, Union, get_args, get_origin
 from unittest.mock import MagicMock
 
 import pytest
@@ -152,9 +152,14 @@ def _snapshot_response_model(route: Any) -> str:
     rm = getattr(route, "response_model", None)
     if rm is None:
         return "None"
+    origin = get_origin(rm)
+    args = get_args(rm)
+    if origin is Union and len(args) == 2 and type(None) in args:
+        value_type = next(arg for arg in args if arg is not type(None))
+        value_name = getattr(value_type, "__name__", str(value_type))
+        return f"Optional[{value_name}]"
     name = getattr(rm, "__name__", "")
     if name in ("list", "List"):
-        args = get_args(rm)
         if args:
             return f"list[{args[0].__name__}]"
         return "list"
@@ -516,8 +521,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/billing", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/conversations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/contacts", frozenset({"GET"}), "None", "HTMLResponse"),
-            ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
-            ("/admin/exports", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/exports", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/forgot-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/login", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/organization/confirm", frozenset({"GET"}), "None", "HTMLResponse"),
@@ -535,23 +540,23 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/dashboard", frozenset({"GET"}), "DashboardOut", "None"),
         ("/api/admin/export/approve", frozenset({"POST"}), "None", "None"),
         ("/api/admin/export/execute", frozenset({"POST"}), "None", "None"),
-            ("/api/admin/export/record", frozenset({"POST"}), "None", "None"),
-            ("/api/admin/exports/jobs", frozenset({"GET"}), "None", "None"),
-            (
-                "/api/admin/exports/jobs/{job_id}",
-                frozenset({"GET"}),
-                "None",
-                "None",
-            ),
-            (
-                "/api/admin/exports/jobs/{job_id}/download",
-                frozenset({"GET"}),
-                "None",
-                "None",
-            ),
-            ("/api/admin/exports/media", frozenset({"POST"}), "None", "None"),
-            ("/api/admin/exports/quota", frozenset({"GET"}), "None", "None"),
-            ("/api/admin/exports/text", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/export/record", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/exports/jobs", frozenset({"GET"}), "None", "None"),
+        (
+            "/api/admin/exports/jobs/{job_id}",
+            frozenset({"GET"}),
+            "None",
+            "None",
+        ),
+        (
+            "/api/admin/exports/jobs/{job_id}/download",
+            frozenset({"GET"}),
+            "None",
+            "None",
+        ),
+        ("/api/admin/exports/media", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/exports/quota", frozenset({"GET"}), "None", "None"),
+        ("/api/admin/exports/text", frozenset({"POST"}), "None", "None"),
         (
             "/api/admin/external-contacts",
             frozenset({"GET"}),
@@ -679,7 +684,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "SubscriptionOverviewOut",
             "None",
         ),
-        ("/api/billing/orders/latest", frozenset({"GET"}), "", "None"),
+        (
+            "/api/billing/orders/latest",
+            frozenset({"GET"}),
+            "Optional[PaymentOrderOut]",
+            "None",
+        ),
         (
             "/api/billing/orders/{order_id}",
             frozenset({"GET"}),
