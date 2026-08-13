@@ -3,6 +3,9 @@
 > 用途：把「365 企微会话存档」项目移植 Ticket Autopilot 后、首个完整波次（R1，11 张票落地）中暴露的失败模式，整理成可回流 `AI-Operations` 上游的知识。
 > 证据来源：本轮 **7 次 `BLOCKED_NEEDS_HUMAN`**、**1 次 QA FAIL（含错误 remedy）**、**1 次 CI hotfix 提交**（`fea4c94`），均有 git / Linear 实证。
 > 标注 **[可移植]** 的条目适用于任何用 Autopilot 的项目；标注 **[本项目]** 的是实例知识，回流时应改写为「这一类」而非照抄。
+> 流程沿革：本文保留 2026-07-29~30 的共享工作树历史证据；项目自 2026-08-14
+> 起改用非 `main` worktree/分支与 PR merge。一票一个 commit；同 Epic 多票可在同一
+> worktree 串行交付，并行票用不同 worktree，F7 的未提交改动混票风险由此消除。
 
 ---
 

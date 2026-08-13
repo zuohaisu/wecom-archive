@@ -1,14 +1,11 @@
 name: Test Suite
 
 # Reusable test workflow — the single definition of this repository's
-# quality gates. Called by:
-#   * ci.yml      on every pull request (contributor-facing gate)
-#   * deploy.yml  before the production deploy job
+# quality gates. Called by ci.yml for every pull request and merge-group
+# candidate. deploy.yml is intentionally CD-only.
 #
-# Kept as ONE definition on purpose: a duplicated gate list drifts, and a
-# PR gate that silently stops matching the deploy gate gives contributors
-# false assurance — exactly the gap the open-source readiness audit
-# flagged (no PR gate at all, deploy-only CI).
+# Kept separate from the event wrapper so the complete required gate remains
+# one reviewable unit and can be reused without duplicating steps.
 #
 # Uses no secrets: every step runs against the disposable Postgres
 # service below, never production. That is what makes it safe to run on
@@ -16,6 +13,9 @@ name: Test Suite
 
 on:
   workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -205,4 +205,3 @@ jobs:
           DATABASE_URL: postgresql://test:test@localhost:5432/wecom_test
           RND201_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
           RND174_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
-

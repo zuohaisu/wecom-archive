@@ -1,12 +1,11 @@
 name: CI
 
-# Pull-request quality gate.
+# Pull-request and merge-queue quality gate.
 #
-# Before this workflow existed the only CI was "Deploy to Production",
-# which triggers on push to main — so a contributor's pull request ran no
-# tests at all and a regression could only be caught after it had already
-# merged. This runs the same gates the deploy pipeline runs, via the
-# shared reusable workflow in test.yml.
+# This is the only workflow that runs the repository's full CI suite. The
+# maintainer must treat this check as a mandatory merge gate; deploy.yml is
+# intentionally CD-only and does not repeat the full suite after merge. Enable
+# an enforced required check when the repository plan supports it.
 #
 # Deliberately NO paths-ignore: once this check is marked required in
 # branch protection, a skipped run never reports a status and a docs-only
@@ -17,10 +16,19 @@ on:
   pull_request:
     branches:
       - main
+  # Required when GitHub Merge Queue is enabled. Without it the queue waits
+  # forever for a required check that never starts.
+  merge_group:
+    types:
+      - checks_requested
 
-# A new push to the same pull request supersedes the previous run.
+permissions:
+  contents: read
+
+# A new push to the same pull request supersedes the previous run. Merge-group
+# refs are unique, so queued candidates do not cancel one another.
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

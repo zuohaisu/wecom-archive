@@ -31,7 +31,8 @@ Versioned in this repository:
 | Media unit | `deploy/systemd/wecom-archive-media-download.service` | One-shot generic media worker (image/voice/video/file/emotion/nested media) |
 | Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Pending/retryable reconciliation every 30 minutes by default (`:15`, `:45`) |
 | Export worker unit/timer | `deploy/systemd/wecom-export-jobs.{service,timer}` | Generate queued ZIPs, retry email delivery, and delete seven-day artifacts every five minutes |
-| GitHub Actions workflow | `.github/workflows/deploy.yml` | CI tests + migration + schema-drift gate, then triggers deploy script on `main` push (see §7) |
+| GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
+| GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
 
 Not versioned in this repository:
 
@@ -281,14 +282,15 @@ previously-working deployment.
 
 ```mermaid
 flowchart TD
-    A[Push to main] --> B["CI: compile check, import check,\nshellcheck + bats, SQLite/offline tests"]
+    A[Pull request to main] --> B["Required CI: compile check, import check,\nshellcheck + bats, SQLite/offline tests"]
     B --> C["CI: alembic upgrade head\n(test Postgres)"]
-    C -->|fails| CI_FAIL[["CI FAILS — deploy job never runs"]]
+    C -->|fails| CI_FAIL[["CI FAILS — merge is blocked"]]
     C --> D["CI: alembic check\n(schema-drift gate)"]
     D -->|drift detected| CI_FAIL
     D --> E["CI: PostgreSQL + SQLite test suites"]
     E -->|fails| CI_FAIL
-    E --> F_LOCK["deploy job (GH concurrency-serialized):\nSSH to ECS, flock deploy.lock\n(non-blocking) -- BEFORE any checkout"]
+    E --> MERGE["Human review + merge to protected main"]
+    MERGE --> F_LOCK["CD deploy job (GH concurrency-serialized):\nSSH to ECS, flock deploy.lock\n(non-blocking) -- BEFORE any checkout"]
     F_LOCK -->|already held| FAILLOCK[["Deploy FAILS immediately —\nanother deploy in progress,\nnothing pulled, nothing touched"]]
     F_LOCK --> F0["same SSH session, lock still held:\nclean-tree guard, checkout EXPECTED_SHA=github.sha\n-- in the WORKFLOW itself, not deploy_server.sh"]
     F0 -->|non-fast-forward / dirty tree| FAIL0[["Deploy FAILS —\nnothing pulled, nothing touched"]]
@@ -347,22 +349,23 @@ dependencies are installed and the code compiles, and strictly *before*
 the service is ever restarted.
 
 CI separately runs `alembic upgrade head` against a disposable test
-Postgres (`.github/workflows/deploy.yml`) — that is a **pre-deploy gate**
-on push to `main` (does this migration even apply cleanly, does the ORM
-match it; this workflow triggers on `push`, not `pull_request`, so it is
-not a pre-*merge* check), not a substitute for the production run.
-Production data is never touched by CI.
+Postgres (`.github/workflows/test.yml`, called by `.github/workflows/ci.yml`).
+This is a required **pre-merge gate** on the pull request or merge-group
+candidate: it proves that the migration applies cleanly and that ORM metadata
+matches it. It is not a substitute for the production run, and production data
+is never touched by CI.
 
-**Deploying exactly what CI tested.** The `deploy` job passes
+**Deploying the exact merged SHA.** Required PR/merge-group CI validates the
+candidate that is allowed to enter protected `main`. After merge, the `deploy`
+job passes
 `EXPECTED_SHA=${{ github.sha }}` into the SSH step's script (§7.1), which
 checks out that exact commit (fast-forward only — refuses and exits
 non-zero otherwise) instead of a floating `git pull --ff-only origin
 main`, then invokes the just-checked-out `deploy_server.sh` in the same
 session. This closes a real race: without SHA pinning, if a second push
 lands on `main` while this deploy's SSH step is still starting up,
-`git pull` would silently deploy that second, not-necessarily-CI-
-passed-by-this-run commit instead of the one this workflow run actually
-tested. `deploy_server.sh` also carries its own EXPECTED_SHA-aware
+`git pull` would silently deploy that second commit instead of the one that
+triggered this CD run. `deploy_server.sh` also carries its own EXPECTED_SHA-aware
 fetch/checkout, reached only for direct/manual invocation (when
 `EXPECTED_SHA` is set but the caller has not already checked it out) —
 `EXPECTED_SHA` unset entirely (e.g. the documented manual first-run with
@@ -378,7 +381,7 @@ invocation could start:
    deploy.
 2. A non-blocking `flock` on `$DEPLOY_STATE_DIR/deploy.lock` is
    defense-in-depth for anything GitHub Actions' own concurrency group
-   cannot see — a manual SSH run overlapping a CI-triggered one, for
+   cannot see — a manual SSH run overlapping a CD-triggered one, for
    example. **The lock is acquired before the checkout, not inside
    `deploy_server.sh` after it**: the workflow's inline SSH script (§7.1)
    takes this same lock itself, on fd 9, *before* its own clean-tree
@@ -589,8 +592,8 @@ treated the rename's own exit status as irrelevant, which could report
 
 ### 7.7 CI schema-drift gate
 
-`.github/workflows/deploy.yml`, in the `test` job, against the
-job's disposable `postgres:16` service container (never production):
+`.github/workflows/test.yml`, called by `.github/workflows/ci.yml`, runs against
+its disposable `postgres:16` service container (never production):
 
 1. `alembic upgrade head` — fails the build if a migration doesn't apply
    cleanly against a fresh database.
@@ -606,7 +609,14 @@ job's disposable `postgres:16` service container (never production):
    run as before, plus `tests/test_verify_alembic_head.py` and
    `tests/test_readiness_health_endpoint.py`'s live-Postgres cases.
 
-The `deploy` job only runs if `test` passes, and only on `main`.
+The maintainer treats the CI result as a required merge condition. The CD
+workflow then runs only for the merged `main` push and intentionally does not
+repeat the full CI suite. On the current private-repository plan this is a
+single-maintainer operational control, not a platform-enforced branch rule;
+direct pushes are prohibited. Enable enforced branch protection before adding
+another maintainer. Deployment-specific compile, production migration,
+revision verification, readiness, public health, serialization, and rollback
+gates remain in `deploy_server.sh`.
 
 ### 7.8 Operational troubleshooting
 
