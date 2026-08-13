@@ -43,6 +43,16 @@ class AuditAction:
     USER_ACCESS_REQUEST_ACCOUNT_CREATED = "user.access_request_account_created"
     USER_PASSWORD_RESET_INITIATED = "user.password_reset_initiated"
     CONFIG_CHANGED = "config.changed"
+    BRANDING_LOGO_UPLOADED = "branding.logo_uploaded"
+    BRANDING_LOGO_RESTORED = "branding.logo_restored"
+    BRANDING_FAVICON_UPLOADED = "branding.favicon_uploaded"
+    BRANDING_FAVICON_RESTORED = "branding.favicon_restored"
+    BRANDING_DOMAIN_CONFIGURED = "branding.domain_configured"
+    BRANDING_DOMAIN_VERIFIED = "branding.domain_verified"
+    BRANDING_DOMAIN_ENABLED = "branding.domain_enabled"
+    BRANDING_DOMAIN_DISABLED = "branding.domain_disabled"
+    BRANDING_DOMAIN_UNBOUND = "branding.domain_unbound"
+    BRANDING_CERTIFICATE_STATUS_UPDATED = "branding.certificate_status_updated"
     RETENTION_CONFIG_CHANGED = "retention.config_changed"
     RETENTION_CONFIG_LOCKED = "retention.config_locked"
     EXPORT_APPROVAL_GRANTED = "export.approval_granted"
@@ -100,6 +110,16 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.USER_ACCESS_REQUEST_ACCOUNT_CREATED: (AuditCategory.ACCOUNT, AuditObjectType.ACCESS_REQUEST),
     AuditAction.USER_PASSWORD_RESET_INITIATED: (AuditCategory.ACCOUNT, AuditObjectType.USER),
     AuditAction.CONFIG_CHANGED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_LOGO_UPLOADED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_LOGO_RESTORED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_FAVICON_UPLOADED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_FAVICON_RESTORED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_DOMAIN_CONFIGURED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_DOMAIN_VERIFIED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_DOMAIN_ENABLED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_DOMAIN_DISABLED: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_DOMAIN_UNBOUND: (AuditCategory.CONFIGURATION, AuditObjectType.TENANT_CONFIG),
+    AuditAction.BRANDING_CERTIFICATE_STATUS_UPDATED: (AuditCategory.SYSTEM, AuditObjectType.TENANT_CONFIG),
     AuditAction.RETENTION_CONFIG_CHANGED: (AuditCategory.CONFIGURATION, AuditObjectType.RETENTION_CONFIG),
     AuditAction.RETENTION_CONFIG_LOCKED: (AuditCategory.CONFIGURATION, AuditObjectType.RETENTION_CONFIG),
     AuditAction.EXPORT_APPROVAL_GRANTED: (AuditCategory.DATA_ACCESS, AuditObjectType.EXPORT_APPROVAL_TOKEN),

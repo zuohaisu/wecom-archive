@@ -359,8 +359,8 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    # Platform operations adds one HTML surface and six platform-only APIs.
-    assert route_count == 128
+    # RND-259 branding and the platform-operations surface register 144 routes together.
+    assert route_count == 144
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -455,6 +455,14 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/billing/orders/{order_id}/qr",
             "/api/billing/orders/{order_id}/refresh",
             "/api/billing/plan",
+            "/api/branding",
+            "/api/branding/logo",
+            "/api/branding/favicon",
+            "/api/branding/manifest.webmanifest",
+            "/api/branding/domain",
+            "/api/branding/domain/verify",
+            "/api/branding/domain/enable",
+            "/api/branding/domain/disable",
             "/api/contacts",
             "/api/conversations",
             "/api/conversations/{conversation_id}/detail",
@@ -469,6 +477,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/onboarding/complete",
             "/api/onboarding/status",
             "/api/platform/content-access-requests",
+            "/api/platform/branding/domains",
+            "/api/platform/branding/domain-metrics",
             "/api/platform/operations/dashboard",
             "/api/platform/operations/tenants",
             "/api/platform/operations/tenants/{tenant_id}",
@@ -479,6 +489,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/tenants/usage",
             "/api/platform/tenants/{tenant_id}",
             "/api/platform/tenants/{tenant_id}/connectivity-check",
+            "/api/platform/tenants/{tenant_id}/branding/certificate-status",
             "/api/platform/wecom/third-party/suite-ticket-status",
             "/api/payments/wechat/notify",
             "/api/provisioning/status",
@@ -718,6 +729,19 @@ def test_route_snapshot_with_real_model_names() -> None:
             "PaymentOrderOut",
             "None",
         ),
+        ("/api/branding", frozenset({"GET"}), "BrandingStatusOut", "None"),
+        ("/api/branding/logo", frozenset({"GET"}), "None", "None"),
+        ("/api/branding/favicon", frozenset({"GET"}), "None", "None"),
+        ("/api/branding/manifest.webmanifest", frozenset({"GET"}), "None", "None"),
+        ("/api/branding/logo", frozenset({"PUT"}), "BrandingStatusOut", "None"),
+        ("/api/branding/logo", frozenset({"DELETE"}), "BrandingStatusOut", "None"),
+        ("/api/branding/favicon", frozenset({"PUT"}), "BrandingStatusOut", "None"),
+        ("/api/branding/favicon", frozenset({"DELETE"}), "BrandingStatusOut", "None"),
+        ("/api/branding/domain", frozenset({"POST"}), "None", "None"),
+        ("/api/branding/domain/verify", frozenset({"POST"}), "BrandingStatusOut", "None"),
+        ("/api/branding/domain/enable", frozenset({"POST"}), "BrandingStatusOut", "None"),
+        ("/api/branding/domain/disable", frozenset({"POST"}), "BrandingStatusOut", "None"),
+        ("/api/branding/domain", frozenset({"DELETE"}), "BrandingStatusOut", "None"),
         ("/api/contacts", frozenset({"GET"}), "list[ContactOut]", "None"),
         ("/api/conversations", frozenset({"GET"}), "list[ConversationOut]", "None"),
         (
@@ -770,6 +794,18 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/platform/content-access-requests",
             frozenset({"POST"}),
             "ContentAccessRequestOut",
+            "None",
+        ),
+        (
+            "/api/platform/branding/domains",
+            frozenset({"GET"}),
+            "list[ManagedBrandingDomainOut]",
+            "None",
+        ),
+        (
+            "/api/platform/branding/domain-metrics",
+            frozenset({"GET"}),
+            "BrandingDomainMetricsOut",
             "None",
         ),
         (
@@ -831,6 +867,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/platform/tenants/{tenant_id}/connectivity-check",
             frozenset({"POST"}),
             "TenantConnectivityCheckOut",
+            "None",
+        ),
+        (
+            "/api/platform/tenants/{tenant_id}/branding/certificate-status",
+            frozenset({"POST"}),
+            "BrandingStatusOut",
             "None",
         ),
         (

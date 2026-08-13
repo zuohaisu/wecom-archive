@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -48,6 +49,79 @@ class Tenant(Base):
         String(16), nullable=False, default="active", server_default=text("'active'")
     )
     onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class TenantBranding(Base):
+    """One tenant-scoped paid white-label configuration (RND-259).
+
+    Image bytes stay on this tenant-owned row instead of in a shared public
+    object namespace.  ``custom_domain`` is globally unique and is only
+    served after the application-level entitlement, verification, certificate
+    and Host gates all pass.
+    """
+
+    __tablename__ = "tenant_branding"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_tenant_branding_tenant"),
+        UniqueConstraint("custom_domain", name="uq_tenant_branding_custom_domain"),
+        CheckConstraint(
+            "domain_state IS NULL OR domain_state IN "
+            "('pending_verification', 'verified', 'active')",
+            name="ck_tenant_branding_domain_state",
+        ),
+        CheckConstraint(
+            "certificate_status IN ('not_requested', 'pending', 'issued', 'failed', 'expired')",
+            name="ck_tenant_branding_certificate_status",
+        ),
+        CheckConstraint(
+            "(logo_content IS NULL) = (logo_mime_type IS NULL)",
+            name="ck_tenant_branding_logo_pair",
+        ),
+        CheckConstraint(
+            "(favicon_content IS NULL) = (favicon_mime_type IS NULL)",
+            name="ck_tenant_branding_favicon_pair",
+        ),
+        Index("ix_tenant_branding_custom_domain", "custom_domain"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    logo_content = Column(LargeBinary, nullable=True)
+    logo_mime_type = Column(String(32), nullable=True)
+    logo_updated_at = Column(DateTime(timezone=True), nullable=True)
+    favicon_content = Column(LargeBinary, nullable=True)
+    favicon_mime_type = Column(String(32), nullable=True)
+    favicon_updated_at = Column(DateTime(timezone=True), nullable=True)
+    custom_domain = Column(String(253), nullable=True)
+    domain_state = Column(String(32), nullable=True)
+    domain_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Hash only.  Raw TXT values are returned once to the tenant administrator
+    # and never retained, logged, placed in audit detail, or returned later.
+    verification_token_hash = Column(String(64), nullable=True)
+    verification_requested_at = Column(DateTime(timezone=True), nullable=True)
+    verification_verified_at = Column(DateTime(timezone=True), nullable=True)
+    domain_last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    certificate_status = Column(
+        String(32), nullable=False, default="not_requested", server_default=text("'not_requested'")
+    )
+    certificate_expires_at = Column(DateTime(timezone=True), nullable=True)
+    certificate_last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    # Coarse controller/DNS code only; never store raw provider errors, keys,
+    # certificate material, or ownership-token values.
+    domain_failure_code = Column(String(64), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

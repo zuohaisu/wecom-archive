@@ -4,11 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>设置</title>
-<link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
-<link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
-<link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
-<link rel="mask-icon" href="/web/static/brand/logo-icon-mono.svg?v=__STATIC_VERSION__" color="#1F5CC4">
-<link rel="manifest" href="/web/static/site.webmanifest?v=__STATIC_VERSION__">
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="apple-touch-icon" href="/api/branding/favicon">
+<link rel="manifest" href="/api/branding/manifest.webmanifest">
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <style>
 .settings-layout{display:flex;align-items:flex-start;gap:var(--space-5)}
@@ -20,6 +18,10 @@
 .set-label h3{font-size:var(--text-md);margin-bottom:2px}
 .set-label p{font-size:var(--text-xs);color:var(--color-text-4);line-height:var(--leading-loose)}
 .set-ctl{flex:1;min-width:0;max-width:420px}
+.branding-state{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);margin-bottom:var(--space-4)}
+.branding-state div{padding:var(--space-3);border:1px solid var(--color-border);border-radius:var(--radius-md);font-size:var(--text-sm)}
+.branding-state dt{color:var(--color-text-4);font-size:var(--text-xs);margin-bottom:3px}.branding-state dd{margin:0;overflow-wrap:anywhere}
+.branding-token{white-space:pre-wrap;overflow-wrap:anywhere}
 @media (max-width:900px){.page{padding:var(--space-4)}}
 @media (max-width:720px){.settings-layout{flex-direction:column}.settings-nav{position:static;width:100%;flex-direction:row;flex-wrap:wrap}.settings-nav-item{width:auto}}
 @media (max-width:640px){.side-nav{display:none}.set-row{flex-direction:column}.set-label{width:auto}.set-ctl{width:100%}}
@@ -42,6 +44,7 @@ __SIDENAV__
   <div class="settings-layout">
     <nav class="settings-nav stack gap-2" aria-label="设置分组" role="tablist">
       <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-general" data-settings-section="general" data-i18n="settings.group.general">通用</button>
+      <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-branding" data-settings-section="branding">品牌</button>
       <button class="btn btn-ghost settings-nav-item active" type="button" role="tab" aria-selected="true" aria-controls="settings-section-account" data-settings-section="account">账号</button>
       <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-third-party" data-settings-section="third-party" data-i18n="settings.group.thirdParty">第三方</button>
       <button class="btn btn-ghost settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-section-storage" data-settings-section="storage" data-i18n="settings.group.storage">存储</button>
@@ -88,6 +91,33 @@ __SIDENAV__
     </div>
   </section>
       </div>
+      <section id="settings-section-branding" class="settings-section" role="tabpanel" aria-label="品牌" hidden>
+        <div class="card">
+          <div class="card-hd"><h2>品牌与访问域名</h2></div>
+          <div class="card-bd">
+            <p id="branding-upgrade" class="alert alert-warning" hidden>当前套餐不包含品牌或自有域名能力。<a href="/admin/billing">查看升级方案</a></p>
+            <div class="branding-state" aria-live="polite">
+              <div><dt>Logo</dt><dd id="branding-logo-state">加载中…</dd></div>
+              <div><dt>Favicon</dt><dd id="branding-favicon-state">加载中…</dd></div>
+              <div><dt>主访问域名</dt><dd id="branding-domain-state">加载中…</dd></div>
+              <div><dt>TLS 证书</dt><dd id="branding-certificate-state">加载中…</dd></div>
+            </div>
+            <p id="branding-message" class="field-help" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+        <section class="card mt-4">
+          <div class="card-hd"><h2>企业 Logo</h2></div>
+          <div class="set-row"><div class="set-label"><h3>上传或替换 Logo</h3><p>仅 PNG、JPEG 或 WebP；最大 2 MB，最长边 4096 像素。系统会验证真实格式并重新编码。</p></div><div class="set-ctl"><img id="branding-logo-preview" src="/api/branding/logo" alt="当前品牌标识" style="max-height:64px;max-width:260px;margin-bottom:10px;display:block" onerror="this.style.display='none'"><input id="branding-logo-input" class="input" type="file" accept="image/png,image/jpeg,image/webp"><div class="row gap-2 mt-2"><button id="branding-logo-upload" class="btn btn-primary" type="button">保存 Logo</button><button id="branding-logo-reset" class="btn" type="button">恢复平台默认</button></div></div></div>
+        </section>
+        <section class="card mt-4">
+          <div class="card-hd"><h2>Favicon（可选）</h2></div>
+          <div class="set-row"><div class="set-label"><h3>浏览器标签图标</h3><p>不上传时自动使用平台默认图标。支持 PNG、JPEG、WebP 或 ICO；最大 1 MB。</p></div><div class="set-ctl"><input id="branding-favicon-input" class="input" type="file" accept="image/png,image/jpeg,image/webp,image/x-icon"><div class="row gap-2 mt-2"><button id="branding-favicon-upload" class="btn btn-primary" type="button">保存 Favicon</button><button id="branding-favicon-reset" class="btn" type="button">恢复平台默认</button></div></div></div>
+        </section>
+        <section class="card mt-4">
+          <div class="card-hd"><h2>自有访问域名</h2></div>
+          <div class="set-row"><div class="set-label"><h3>绑定完整主机名</h3><p>例如 <code>archive.example.com</code>。完成 TXT 验证和平台 TLS 签发前，域名不会对外提供服务。</p></div><div class="set-ctl"><input id="branding-domain-input" class="input" type="text" inputmode="url" autocomplete="off" placeholder="archive.example.com"><div class="row gap-2 mt-2"><button id="branding-domain-save" class="btn btn-primary" type="button">保存并生成验证记录</button><button id="branding-domain-verify" class="btn" type="button">检查 DNS 验证</button></div><div class="row gap-2 mt-2"><button id="branding-domain-enable" class="btn btn-primary" type="button">启用已签发域名</button><button id="branding-domain-disable" class="btn" type="button">停用自有域名</button><button id="branding-domain-unbind" class="btn btn-danger" type="button">解绑</button></div><pre id="branding-verification" class="branding-token" hidden></pre></div></div>
+        </section>
+      </section>
       <section id="settings-section-third-party" class="settings-section" role="tabpanel" aria-label="第三方" hidden>
         <div class="card"><div class="card-hd"><h2 data-i18n="settings.group.thirdParty">第三方</h2></div><div class="card-bd"><p class="field-help">配置项加载中…</p></div></div>
       </section>
@@ -105,6 +135,7 @@ __SIDENAV__
 </main>
 </div></div>
 <script src="/web/static/settings.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/branding.js?v=__STATIC_VERSION__"></script>
 <script>
 (function () {
   var form = document.getElementById('change-password-form');
