@@ -359,8 +359,8 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    # RND-350 adds provider instruction GET/POST and the admin-only status API.
-    assert route_count == 121
+    # Platform operations adds one HTML surface and six platform-only APIs.
+    assert route_count == 128
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -469,6 +469,12 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/onboarding/complete",
             "/api/onboarding/status",
             "/api/platform/content-access-requests",
+            "/api/platform/operations/dashboard",
+            "/api/platform/operations/tenants",
+            "/api/platform/operations/tenants/{tenant_id}",
+            "/api/platform/operations/tenants/{tenant_id}/financial-transactions",
+            "/api/platform/operations/tenants/{tenant_id}/service",
+            "/api/platform/operations/tenants/{tenant_id}/subscription",
             "/api/platform/tenants",
             "/api/platform/tenants/usage",
             "/api/platform/tenants/{tenant_id}",
@@ -486,6 +492,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/health/live",
             "/health/ready",
             "/openapi.json",
+            "/platform/operations",
             "/redoc",
         ]
     )
@@ -536,6 +543,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/settings/init", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/operations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         ("/api/admin/dashboard", frozenset({"GET"}), "DashboardOut", "None"),
         ("/api/admin/export/approve", frozenset({"POST"}), "None", "None"),
@@ -762,6 +770,42 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/platform/content-access-requests",
             frozenset({"POST"}),
             "ContentAccessRequestOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/dashboard",
+            frozenset({"GET"}),
+            "PlatformOperationsDashboardOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/tenants",
+            frozenset({"GET"}),
+            "TenantOperationsListOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/tenants/{tenant_id}",
+            frozenset({"GET"}),
+            "TenantOperationsDetailOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/tenants/{tenant_id}/service",
+            frozenset({"PATCH"}),
+            "TenantServiceStatusOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/tenants/{tenant_id}/subscription",
+            frozenset({"PUT"}),
+            "ManualSubscriptionOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/tenants/{tenant_id}/financial-transactions",
+            frozenset({"POST"}),
+            "ManualFinancialTransactionOut",
             "None",
         ),
         ("/api/platform/tenants", frozenset({"POST"}), "TenantProvisionOut", "None"),
