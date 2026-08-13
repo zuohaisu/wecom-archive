@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import get_current_user
 from app.db.base import Base
-from app.db.models import AdminUser, ExportJob, Tenant
+from app.db.models import AdminUser, ExportJob, ExportMonthlyUsage, Tenant
 from app.db.session import get_db
 from app.main import create_app
 from app.media_storage import MediaObjectNotFound
@@ -41,6 +41,7 @@ def _factory():
             Tenant.__table__,
             AdminUser.__table__,
             ExportJob.__table__,
+            ExportMonthlyUsage.__table__,
         ],
     )
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -60,7 +61,9 @@ def _factory():
     return factory
 
 
-def test_export_api_is_owner_only() -> None:
+def test_export_api_is_owner_only_and_quota_is_server_derived(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     factory = _factory()
     app = create_app()
 
@@ -72,7 +75,19 @@ def test_export_api_is_owner_only() -> None:
     member = SimpleNamespace(id="member", role="admin", email="member@example.com")
     app.dependency_overrides[get_current_user] = lambda: (member, "tenant-a")
     with TestClient(app) as client:
-        assert client.get("/api/admin/exports/jobs").status_code == 403
+        assert client.get("/api/admin/exports/quota").status_code == 403
+
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_FROM", "archive@example.com")
+    owner = SimpleNamespace(id="owner-a", role="owner", email="owner@example.com")
+    app.dependency_overrides[get_current_user] = lambda: (owner, "tenant-a")
+    with TestClient(app) as client:
+        response = client.get("/api/admin/exports/quota")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["text"]["remaining"] == body["text"]["limit"] == 10
+    assert body["media_zip"]["remaining"] == body["media_zip"]["limit"] == 1
+    assert body["notification_email_hint"] == "o***@example.com"
 
 
 def test_zip_contains_original_bytes_and_safe_manifest_only(

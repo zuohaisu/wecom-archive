@@ -1,4 +1,4 @@
-"""Owner-facing data portability API for RND-360."""
+"""Owner-facing data portability API for RND-360 and RND-393."""
 
 from __future__ import annotations
 
@@ -30,6 +30,12 @@ from app.services.export_jobs import (
     create_media_export_job,
     export_job_view,
     export_storage_reference_is_valid,
+)
+from app.services.export_quota import (
+    ExportQuotaBucket,
+    ExportQuotaExceeded,
+    consume_export_quota,
+    get_export_quota_summary,
 )
 from app.services.export_service import ExportTooLargeError, generate_export
 
@@ -113,6 +119,30 @@ def text_export_params(req: TextExportRequest) -> dict:
     }
 
 
+def _bucket_json(bucket: ExportQuotaBucket) -> dict:
+    return {
+        "type": bucket.export_type,
+        "limit": bucket.limit,
+        "used": bucket.used,
+        "remaining": bucket.remaining,
+    }
+
+
+def _quota_http_error(error: ExportQuotaExceeded) -> HTTPException:
+    bucket = error.bucket
+    return HTTPException(
+        status_code=429,
+        detail={
+            "code": "export_quota_exceeded",
+            "export_type": bucket.export_type,
+            "limit": bucket.limit,
+            "used": bucket.used,
+            "remaining": bucket.remaining,
+            "resets_at": bucket.resets_at.isoformat(),
+        },
+    )
+
+
 def _approval_ref(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -122,9 +152,33 @@ def _owner_email(user: AdminUser) -> str | None:
     return candidate if "@" in candidate and not candidate.startswith("@") else None
 
 
+def _masked_email(value: str | None) -> str | None:
+    if not value:
+        return None
+    local, domain = value.split("@", 1)
+    return f"{local[:1]}***@{domain}"
+
+
 def _notification_delivery_ready(user: AdminUser) -> bool:
     settings = get_email_settings()
     return bool(_owner_email(user) and settings.smtp_host and settings.smtp_from)
+
+
+@router.get("/quota")
+def get_export_quota(
+    auth: tuple[AdminUser, str] = Depends(require_role("owner")),
+    db: Session = Depends(get_db),
+):
+    user, tenant_id = auth
+    summary = get_export_quota_summary(db, tenant_id)
+    return {
+        "period_start": summary.period_start,
+        "resets_at": summary.resets_at,
+        "text": _bucket_json(summary.text),
+        "media_zip": _bucket_json(summary.media_zip),
+        "notification_email_configured": _notification_delivery_ready(user),
+        "notification_email_hint": _masked_email(_owner_email(user)),
+    }
 
 
 @router.post("/text")
@@ -143,6 +197,7 @@ def export_text(
             admin_user_id=user.id,
             tenant_id=tenant_id,
         )
+        consume_export_quota(db, tenant_id, "text")
         result = generate_export(
             db,
             tenant_id,
@@ -165,6 +220,9 @@ def export_text(
     except ExportNotApprovedError as error:
         db.rollback()
         raise HTTPException(status_code=403, detail=str(error))
+    except ExportQuotaExceeded as error:
+        db.rollback()
+        raise _quota_http_error(error)
     except ExportTooLargeError as error:
         db.rollback()
         raise HTTPException(status_code=413, detail=str(error))
@@ -202,6 +260,7 @@ def request_media_export(
             admin_user_id=user.id,
             tenant_id=tenant_id,
         )
+        consume_export_quota(db, tenant_id, "media_zip")
         job = create_media_export_job(
             db,
             tenant_id=tenant_id,
@@ -233,6 +292,9 @@ def request_media_export(
     except ExportNotApprovedError as error:
         db.rollback()
         raise HTTPException(status_code=403, detail=str(error))
+    except ExportQuotaExceeded as error:
+        db.rollback()
+        raise _quota_http_error(error)
     except Exception:
         db.rollback()
         raise HTTPException(status_code=503, detail="export_request_failed")

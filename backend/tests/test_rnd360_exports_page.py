@@ -1,4 +1,4 @@
-"""RND-360 shared export-center frontend contract."""
+"""RND-360/RND-393 shared export-center frontend contract."""
 
 from pathlib import Path
 
@@ -11,24 +11,29 @@ from app.main import create_app
 REPO = Path(__file__).resolve().parents[2]
 
 
-def test_export_center_renders_export_forms_and_job_table() -> None:
+def test_export_center_renders_real_quota_forms_and_job_table() -> None:
     app = create_app()
     app.dependency_overrides[require_html_session] = lambda: "tenant-a"
     with TestClient(app) as client:
         response = client.get("/admin/exports")
 
     assert response.status_code == 200
+    assert 'id="text-quota"' in response.text
+    assert 'id="media-quota"' in response.text
     assert 'id="text-export-form"' in response.text
     assert 'id="media-export-form"' in response.text
     assert 'id="export-jobs"' in response.text
     assert "/web/static/exports.js?" in response.text
 
 
-def test_export_frontend_uses_real_apis_without_foreground_polling() -> None:
+def test_export_frontend_uses_server_authority_without_foreground_polling() -> None:
     script = (REPO / "backend/app/web/static/exports.js").read_text()
+    assert "/api/admin/exports/quota" in script
     assert "/api/admin/exports/text" in script
     assert "/api/admin/exports/media" in script
     assert "/api/admin/exports/jobs" in script
+    assert "quota.text.remaining<=0" in script
+    assert "quota.media_zip.remaining<=0" in script
     assert "setInterval" not in script
 
 

@@ -7,7 +7,7 @@
 <link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <style>
-.export-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-5);align-items:start}.export-form{display:grid;gap:var(--space-4)}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3)}.form-field{display:grid;gap:6px}.form-field-full{grid-column:1/-1}.export-actions{display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap}.export-note{color:var(--color-text-3);font-size:var(--text-sm);line-height:1.6}.jobs-empty{padding:var(--space-6);text-align:center;color:var(--color-text-4)}.job-actions{white-space:nowrap}.job-highlight td{background:var(--color-info-bg)}@media(max-width:900px){.export-grid{grid-template-columns:1fr}.side-nav{display:none}.page{padding:var(--space-4)}}@media(max-width:620px){.form-grid{grid-template-columns:1fr}.form-field-full{grid-column:auto}.table-wrap{overflow-x:auto}}
+.export-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-5);align-items:start}.quota-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4)}.quota-value{display:block;font-size:var(--text-3xl);font-weight:var(--weight-semibold);margin-top:4px}.export-form{display:grid;gap:var(--space-4)}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3)}.form-field{display:grid;gap:6px}.form-field-full{grid-column:1/-1}.export-actions{display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap}.export-note{color:var(--color-text-3);font-size:var(--text-sm);line-height:1.6}.jobs-empty{padding:var(--space-6);text-align:center;color:var(--color-text-4)}.job-actions{white-space:nowrap}.job-highlight td{background:var(--color-info-bg)}@media(max-width:900px){.export-grid,.quota-grid{grid-template-columns:1fr}.side-nav{display:none}.page{padding:var(--space-4)}}@media(max-width:620px){.form-grid{grid-template-columns:1fr}.form-field-full{grid-column:auto}.table-wrap{overflow-x:auto}}
 </style>
 </head>
 <body>
@@ -21,9 +21,17 @@ __SIDENAV__
     <div id="exports-error" class="alert alert-danger" role="alert" hidden></div>
     <div id="exports-success" class="alert alert-success" role="status" hidden></div>
 
+    <section class="card mb-5" aria-labelledby="quota-title">
+      <div class="card-hd"><h2 id="quota-title" data-i18n="exports.quotaTitle">本月免费导出额度</h2><span id="quota-reset" class="field-help"></span></div>
+      <div class="card-bd quota-grid">
+        <div><span data-i18n="exports.textQuota">文本 PDF / Excel</span><strong id="text-quota" class="quota-value">—</strong></div>
+        <div><span data-i18n="exports.mediaQuota">全量多媒体 ZIP</span><strong id="media-quota" class="quota-value">—</strong></div>
+      </div>
+    </section>
+
     <div class="export-grid mb-5">
       <section class="card" aria-labelledby="text-export-title">
-        <div class="card-hd"><h2 id="text-export-title" data-i18n="exports.textTitle">文本记录导出</h2></div>
+        <div class="card-hd"><h2 id="text-export-title" data-i18n="exports.textTitle">文本记录导出</h2><span class="badge badge-info" data-i18n="exports.textLimit">每月 10 次</span></div>
         <div class="card-bd">
           <form id="text-export-form" class="export-form">
             <div class="form-grid">
@@ -42,7 +50,7 @@ __SIDENAV__
       </section>
 
       <section class="card" aria-labelledby="media-export-title">
-        <div class="card-hd"><h2 id="media-export-title" data-i18n="exports.mediaTitle">全量多媒体 ZIP</h2></div>
+        <div class="card-hd"><h2 id="media-export-title" data-i18n="exports.mediaTitle">全量多媒体 ZIP</h2><span class="badge badge-warning" data-i18n="exports.mediaLimit">每月 1 次</span></div>
         <div class="card-bd">
           <form id="media-export-form" class="export-form">
             <div class="alert alert-warning"><span class="alert-ico">!</span><span data-i18n="exports.mediaWarning">任务会打包本组织全部已归档原始媒体。生成后发送通知邮件，文件保留 7 天，之后自动删除。</span></div>

@@ -355,7 +355,7 @@ def test_router_count() -> None:
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
     # RND-350 adds provider instruction GET/POST and the admin-only status API.
-    assert route_count == 120
+    assert route_count == 121
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -400,6 +400,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/exports/jobs/{job_id}",
             "/api/admin/exports/jobs/{job_id}/download",
             "/api/admin/exports/media",
+            "/api/admin/exports/quota",
             "/api/admin/exports/text",
             "/api/admin/external-contacts",
             "/api/admin/external-contacts/{external_userid}",
@@ -549,6 +550,7 @@ def test_route_snapshot_with_real_model_names() -> None:
                 "None",
             ),
             ("/api/admin/exports/media", frozenset({"POST"}), "None", "None"),
+            ("/api/admin/exports/quota", frozenset({"GET"}), "None", "None"),
             ("/api/admin/exports/text", frozenset({"POST"}), "None", "None"),
         (
             "/api/admin/external-contacts",

@@ -416,7 +416,7 @@ source queries include `WHERE archive_messages.tenant_id = <tenant_id>`.
 
 ---
 
-## Export jobs (RND-360)
+## Export jobs and monthly quotas (RND-360 / RND-393)
 
 ### `export_jobs`
 
@@ -431,7 +431,17 @@ time plus seven days and is never extended by notification retry. Notification
 state and attempts are independent of generation so email retry cannot
 regenerate the archive.
 
-Migration `0046` creates this table and its queue/expiry indexes.
+### `export_monthly_usage`
+
+The unique key `(tenant_id, period_start, export_type)` stores the accepted
+request count for one Asia/Shanghai natural month. `export_type` is `text` or
+`media_zip`. The quota service locks the stable parent `tenants` row before it
+reads or creates a counter, which serializes concurrent first-use requests as
+well as later increments. The frontend only displays these server values; it
+is not an authorization source.
+
+Migrations `0046` and `0047` create these tables and their queue/expiry/period
+indexes.
 
 ## Migration
 
@@ -521,4 +531,4 @@ The WeCom SDK returns an encrypted envelope JSON object containing both `encrypt
 
 ---
 
-_Last updated: 2026-08-13 — RND-360 export delivery_
+_Last updated: 2026-08-13 — RND-360 / RND-393 export delivery_

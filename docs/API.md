@@ -267,14 +267,15 @@ constructs a Qiniu/CDN URL itself.
 ## 5. Data Export APIs
 
 All export routes are tenant-scoped and require the `owner` role. The browser
-never supplies `tenant_id`. Every accepted export writes the existing export
-audit record; password confirmation is obtained
+never supplies `tenant_id`. Every accepted export consumes a server-side quota
+and writes the existing export audit record; password confirmation is obtained
 through `POST /api/admin/export/approve` and is bound to the canonical request
 parameters.
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/admin/exports` | Shared export center used by review, search and customer-detail pages |
+| `GET` | `/api/admin/exports/quota` | Current natural-month counters and Asia/Shanghai reset time |
 | `POST` | `/api/admin/exports/text` | Generate a bounded PDF or Excel file synchronously |
 | `POST` | `/api/admin/exports/media` | Accept one asynchronous tenant-wide original-media ZIP job |
 | `GET` | `/api/admin/exports/jobs` | Latest 20 media export jobs for the authenticated tenant |
@@ -284,7 +285,10 @@ parameters.
 Text scope supports one or more of `roomid` (group room or derived
 `direct__...` conversation ID), `participant_id`, public WeCom `message_ids`,
 and a paired `start_ms`/`end_ms`. The synchronous limit is 50,000 rows. The
-synchronous limit is 50,000 rows.
+monthly limits are 10 text exports and 1 full-media ZIP per tenant. The quota
+check and consumption run in the same transaction as text generation or media
+job acceptance; validation failures roll back, while an accepted asynchronous
+job keeps its consumed allowance even if later generation fails.
 
 Media jobs move through `queued`, `processing`, `ready`, `failed`, and
 `expired`. A ready ZIP contains tenant-owned downloaded originals plus

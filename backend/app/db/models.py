@@ -1034,6 +1034,48 @@ class ExportJob(Base):
     )
 
 
+# —— RND-393 年度套餐月度导出配额 ——
+class ExportMonthlyUsage(Base):
+    """Authoritative per-tenant usage count for one calendar month."""
+
+    __tablename__ = "export_monthly_usage"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "period_start",
+            "export_type",
+            name="uq_export_monthly_usage_period_type",
+        ),
+        CheckConstraint(
+            "export_type IN ('text', 'media_zip')",
+            name="ck_export_monthly_usage_type",
+        ),
+        CheckConstraint("used_count >= 0", name="ck_export_monthly_usage_count"),
+        Index(
+            "ix_export_monthly_usage_tenant_period",
+            "tenant_id",
+            "period_start",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    period_start = Column(Date, nullable=False)
+    export_type = Column(String(24), nullable=False)
+    used_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class KeyVersion(Base):
     """Maps WeCom publickey_ver to the private key used for decryption."""
 
