@@ -570,7 +570,7 @@ def test_login_marketing_and_legal_copy_all_use_i18n_keys(mode: str) -> None:
                 "login.pageTitle": "登录 — Crowntime WeCom Archive",
                 "login.heroTitle": "登录会话存档控制台",
                 "login.timezoneNote": "时间均为北京时间 (UTC+8)",
-                "login.brandSlotPlaceholder": "白标插槽 · 租户可上传自有标识（后续能力，当前为占位）",
+                "login.brandSlotPlaceholder": "企业品牌标识由管理员在“设置 / 品牌”中管理。",
                 "login.point1Title": "合规留存",
                 "login.point2Title": "可追溯审阅",
                 "login.point3Title": "最小授权",
@@ -583,7 +583,7 @@ def test_login_marketing_and_legal_copy_all_use_i18n_keys(mode: str) -> None:
                 "login.pageTitle": "登入 — Crowntime WeCom Archive",
                 "login.heroTitle": "登入會話存檔控制台",
                 "login.timezoneNote": "時間均為北京時間 (UTC+8)",
-                "login.brandSlotPlaceholder": "白標插槽 · 租戶可上傳自有標識（後續能力，當前為佔位）",
+                "login.brandSlotPlaceholder": "企業品牌標識由管理員在「設定 / 品牌」中管理。",
                 "login.point1Title": "合規留存",
                 "login.point2Title": "可追溯審閱",
                 "login.point3Title": "最小授權",
@@ -596,10 +596,7 @@ def test_login_marketing_and_legal_copy_all_use_i18n_keys(mode: str) -> None:
                 "login.pageTitle": "Login — Crowntime WeCom Archive",
                 "login.heroTitle": "Log in to the Conversation Archive Console",
                 "login.timezoneNote": "All times shown in Beijing Time (UTC+8)",
-                "login.brandSlotPlaceholder": (
-                    "White-label slot · tenants will be able to upload their "
-                    "own logo (upcoming capability, placeholder for now)"
-                ),
+                "login.brandSlotPlaceholder": "Organization brand assets are managed by an administrator in Settings / Branding.",
                 "login.point1Title": "Compliance retention",
                 "login.point2Title": "Traceable review",
                 "login.point3Title": "Least privilege",

@@ -14,6 +14,7 @@ from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.billing import router as billing_router
+from app.routers.branding import router as branding_router
 from app.routers.conversations import router as conversations_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.export_approval import router as export_approval_router
@@ -40,6 +41,7 @@ from app.routers.web import router as web_router
 from app.routers.wecom_events import router as wecom_events_router
 from app.routers.wecom_org_authorization import router as wecom_org_authorization_router
 from app.routers.wecom_provider_instructions import router as wecom_provider_instructions_router
+from app.services.branding import BrandingHostMiddleware
 from app.services.wechat_pay import validate_wechat_pay_configuration_if_enabled
 
 logger = logging.getLogger(__name__)
@@ -123,7 +125,9 @@ def create_app() -> FastAPI:
     # MediaAccessNoStoreMiddleware's docstring for why this must be a
     # response-side middleware rather than a header set inside the route.
     app.add_middleware(MediaAccessNoStoreMiddleware)
+    app.add_middleware(BrandingHostMiddleware)
     app.include_router(auth_router)
+    app.include_router(branding_router)
     app.include_router(billing_router)
     app.include_router(conversations_router)
     app.include_router(media_router)

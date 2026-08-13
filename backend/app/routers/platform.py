@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta, timezone
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,9 +10,21 @@ from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import get_wecom_token, require_platform_admin
-from app.db.models import AdminSession, DuplicateCorpIdError, Tenant, TenantWecomConfig
+from app.db.models import (
+    AdminSession,
+    DuplicateCorpIdError,
+    Tenant,
+    TenantBranding,
+    TenantWecomConfig,
+)
 from app.db.session import get_db
 from app.routers.auth import _create_pending_invite
+from app.schemas.branding import (
+    BrandingDomainMetricsOut,
+    BrandingStatusOut,
+    CertificateStatusIn,
+    ManagedBrandingDomainOut,
+)
 from app.schemas.tenant_provision import (
     TenantListItemOut,
     TenantConnectivityCheckOut,
@@ -22,6 +35,13 @@ from app.schemas.tenant_provision import (
     TenantStatusUpdateOut,
     TenantUsageItemOut,
     TenantUsageListOut,
+)
+from app.services.branding import (
+    BrandingValidationError,
+    DomainStateError,
+    branding_status,
+    record_certificate_status,
+    utc_now,
 )
 from app.services.usageservice import (
     count_messages,
@@ -205,6 +225,130 @@ def update_tenant_status(
         tenant_is_active=tenant.is_active,
         updated_at=tenant.updated_at,
     )
+
+
+@router.get(
+    "/branding/domains",
+    response_model=list[ManagedBrandingDomainOut],
+)
+def list_managed_branding_domains(
+    _platform_admin=Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> list[ManagedBrandingDomainOut]:
+    """List non-secret custom-domain work for the managed TLS controller."""
+    rows = (
+        db.query(TenantBranding)
+        .join(Tenant, Tenant.id == TenantBranding.tenant_id)
+        .filter(
+            Tenant.is_active.is_(True),
+            TenantBranding.custom_domain.isnot(None),
+            TenantBranding.domain_state.in_(("verified", "active")),
+        )
+        .order_by(TenantBranding.certificate_expires_at)
+        .all()
+    )
+    return [
+        ManagedBrandingDomainOut(
+            tenant_id=row.tenant_id,
+            hostname=row.custom_domain,
+            domain_state=row.domain_state,
+            domain_enabled=row.domain_enabled,
+            certificate_status=row.certificate_status,
+            certificate_expires_at=row.certificate_expires_at,
+            certificate_last_checked_at=row.certificate_last_checked_at,
+        )
+        for row in rows
+    ]
+
+
+@router.get(
+    "/branding/domain-metrics",
+    response_model=BrandingDomainMetricsOut,
+)
+def managed_branding_domain_metrics(
+    _platform_admin=Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> BrandingDomainMetricsOut:
+    """Return aggregate lifecycle counters without DNS values or certificate material."""
+    now = utc_now()
+    rows = (
+        db.query(TenantBranding)
+        .join(Tenant, Tenant.id == TenantBranding.tenant_id)
+        .filter(Tenant.is_active.is_(True), TenantBranding.custom_domain.isnot(None))
+        .all()
+    )
+    normalized_expiries = {
+        row.id: (
+            row.certificate_expires_at.replace(tzinfo=timezone.utc)
+            if row.certificate_expires_at is not None and row.certificate_expires_at.tzinfo is None
+            else row.certificate_expires_at
+        )
+        for row in rows
+    }
+    invalid_bindings = 0
+    for row in rows:
+        expires_at = normalized_expiries[row.id]
+        valid = (
+            row.domain_state == "active"
+            and row.domain_enabled
+            and row.certificate_status == "issued"
+            and expires_at is not None
+            and expires_at > now
+        )
+        if row.domain_enabled and not valid:
+            invalid_bindings += 1
+    return BrandingDomainMetricsOut(
+        pending_verification_count=sum(row.domain_state == "pending_verification" for row in rows),
+        pending_certificate_count=sum(row.certificate_status == "pending" for row in rows),
+        certificates_expiring_30_days_count=sum(
+            row.certificate_status == "issued"
+            and normalized_expiries[row.id] is not None
+            and now < normalized_expiries[row.id] <= now + timedelta(days=30)
+            for row in rows
+        ),
+        certificate_failure_count=sum(row.certificate_status in {"failed", "expired"} for row in rows),
+        invalid_binding_count=invalid_bindings,
+    )
+
+
+@router.post(
+    "/tenants/{tenant_id}/branding/certificate-status",
+    response_model=BrandingStatusOut,
+)
+def report_tenant_branding_certificate_status(
+    tenant_id: str,
+    payload: CertificateStatusIn,
+    platform_admin=Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> BrandingStatusOut:
+    """Receive a coarse lifecycle report from the trusted managed TLS edge.
+
+    Tenant administrators cannot call this route and no certificate, private
+    key, challenge token, provider response, or topology is accepted/stored.
+    The caller is expected to be the platform's certificate controller after
+    it has issued/renewed/deployed the certificate at the edge.
+    """
+    try:
+        config = record_certificate_status(
+            db,
+            tenant_id,
+            status=payload.status,
+            expires_at=payload.expires_at,
+            failure_code=payload.failure_code,
+        )
+    except (BrandingValidationError, DomainStateError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    write_audit(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=None,
+        action=AuditAction.BRANDING_CERTIFICATE_STATUS_UPDATED,
+        object_type=AuditObjectType.TENANT_CONFIG,
+        object_id=config.id,
+        detail={"status": payload.status, "platform_admin_id": platform_admin.id},
+    )
+    db.commit()
+    return BrandingStatusOut(**branding_status(db, tenant_id))
 
 
 _INVALID_CREDENTIAL_ERRCODES = {"40001", "40013", "40125"}

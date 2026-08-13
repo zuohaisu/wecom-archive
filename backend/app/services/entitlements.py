@@ -25,6 +25,11 @@ from app.db.models import (
 ANNUAL_PLAN_CODE = "annual_base_cny_99"
 ARCHIVE_ACCESS = "archive_access"
 UNLIMITED_SEATS = "unlimited_seats"
+# RND-259 paid white-label capabilities.  Plans/add-ons grant these through
+# the existing normalized plan_entitlements table; no browser claim can grant
+# either capability.
+CUSTOM_BRANDING = "custom_branding"
+CUSTOM_DOMAIN = "custom_domain"
 ENTITLED_STATUSES = frozenset({"trial", "active"})
 SUBSCRIPTION_STATUSES = frozenset(
     {"trial", "active", "past_due", "expired", "canceled"}

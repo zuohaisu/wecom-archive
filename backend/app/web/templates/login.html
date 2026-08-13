@@ -4,11 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title data-i18n="login.pageTitle">登录 — Crowntime WeCom Archive</title>
-<link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
-<link rel="icon" href="/web/static/brand/favicon.ico?v=__STATIC_VERSION__" sizes="any">
-<link rel="apple-touch-icon" href="/web/static/brand/apple-touch-icon.png?v=__STATIC_VERSION__">
-<link rel="mask-icon" href="/web/static/brand/logo-icon-mono.svg?v=__STATIC_VERSION__" color="#1F5CC4">
-<link rel="manifest" href="/web/static/site.webmanifest?v=__STATIC_VERSION__">
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="apple-touch-icon" href="/api/branding/favicon">
+<link rel="manifest" href="/api/branding/manifest.webmanifest">
 <link rel="stylesheet" href="/web/static/styles.css?v=__STATIC_VERSION__">
 <style>
 .auth-aside-mark{display:flex;align-items:center;gap:12px}
@@ -43,8 +41,8 @@
 <div class="auth">
   <aside class="auth-aside">
     <div>
-      <div class="auth-aside-mark"><img src="/web/static/brand/logo-horizontal.svg?v=__STATIC_VERSION__" alt="康冠时代"></div>
-      <div class="brand-slot" data-i18n="login.brandSlotPlaceholder">白标插槽 · 租户可上传自有标识（后续能力，当前为占位）</div>
+      <div class="auth-aside-mark"><img src="/api/branding/logo" alt="品牌标识" onerror="this.onerror=null;this.src='/web/static/brand/logo-horizontal.svg'"></div>
+      <div class="brand-slot" data-i18n="login.brandSlotPlaceholder">企业品牌标识由管理员在“设置 / 品牌”中管理。</div>
     </div>
     <div class="auth-points">
       <div class="auth-point"><span class="n">1</span><div><h3 data-i18n="login.point1Title">合规留存</h3><p data-i18n="login.point1Body">企业微信会话按授权范围拉取、解密并长期归档，保留时间与范围可配置。</p></div></div>

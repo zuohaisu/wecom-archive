@@ -17,6 +17,7 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | Table | Purpose |
 |---|---|
 | `tenants` | Top-level tenant entity; one default row for MVP |
+| `tenant_branding` | Tenant-isolated paid Logo/Favicon and one managed custom-domain lifecycle |
 | `tenant_wecom_configs` | Per-tenant WeCom app credentials |
 | `admin_users` | WeCom employees who have authenticated |
 | `admin_sessions` | Active login sessions |
@@ -59,6 +60,27 @@ Top-level tenant entity. MVP: one default row with
 Indexes: unique on `slug`.
 
 ---
+
+### `tenant_branding`
+
+One optional row per tenant, created only when a tenant starts configuring paid
+white-label controls. Image bytes live in this tenant-owned database row rather
+than a shared public object namespace. The raw DNS TXT token is never stored:
+only its SHA-256 digest is retained until ownership verification completes.
+
+| Column group | Notes |
+|---|---|
+| Logo / Favicon | Nullable `*_content` + MIME pairs. No configured favicon is valid and falls back to the platform default. |
+| `custom_domain` | Nullable, globally unique canonical hostname. Only one primary host is supported. |
+| Verification | State and timestamps plus `verification_token_hash`; no raw token, private key or DNS provider response. |
+| Certificate | Coarse `not_requested` / `pending` / `issued` / `failed` / `expired` lifecycle, expiry/check timestamps and fixed failure code only. |
+| `domain_enabled` | Tenant administrator's explicit enable flag. Routing additionally requires verified state, issued/unexpired TLS, tenant active and current `custom_domain` entitlement. |
+
+The row remains after a plan downgrade/expiry so that a later eligible
+subscription can recover configuration. Read-time entitlement checks stop the
+assets and custom host immediately; configuration data is not silently deleted.
+See [custom-branding-operations.md](custom-branding-operations.md) for the
+managed-edge and callback boundary.
 
 ### `tenant_wecom_configs`
 
