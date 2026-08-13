@@ -64,8 +64,11 @@ class AuditAction:
     PLATFORM_TENANT_ACTIVATED = "platform.tenant_activated"
     PLATFORM_TENANT_DEACTIVATED = "platform.tenant_deactivated"
     ORGANIZATION_PROVISIONED = "organization.provisioned"
+    SUBSCRIPTION_TRIAL_STARTED = "subscription.trial_started"
     SUBSCRIPTION_ACTIVATED = "subscription.activated"
     SUBSCRIPTION_RENEWED = "subscription.renewed"
+    PLATFORM_SUBSCRIPTION_UPDATED = "platform.subscription_updated"
+    PLATFORM_MANUAL_FINANCIAL_TRANSACTION_RECORDED = "platform.manual_financial_transaction_recorded"
     DECRYPT_COMPLETED = "decrypt.completed"
     RETENTION_MESSAGES_LOCKED = "retention.messages_locked"
 
@@ -83,6 +86,7 @@ class AuditObjectType:
     KEY_VERSION = "key_version"
     ACCESS_REQUEST = "access_request"
     SUBSCRIPTION = "subscription"
+    FINANCIAL_TRANSACTION = "manual_financial_transaction"
 
 
 # The catalogue is intentionally application-level: category is computed for
@@ -127,8 +131,14 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.PLATFORM_TENANT_ACTIVATED: (AuditCategory.SECURITY, AuditObjectType.TENANT),
     AuditAction.PLATFORM_TENANT_DEACTIVATED: (AuditCategory.SECURITY, AuditObjectType.TENANT),
     AuditAction.ORGANIZATION_PROVISIONED: (AuditCategory.ACCOUNT, AuditObjectType.TENANT),
+    AuditAction.SUBSCRIPTION_TRIAL_STARTED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.SUBSCRIPTION_ACTIVATED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.SUBSCRIPTION_RENEWED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
+    AuditAction.PLATFORM_SUBSCRIPTION_UPDATED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
+    AuditAction.PLATFORM_MANUAL_FINANCIAL_TRANSACTION_RECORDED: (
+        AuditCategory.ACCOUNT,
+        AuditObjectType.FINANCIAL_TRANSACTION,
+    ),
     AuditAction.DECRYPT_COMPLETED: (AuditCategory.SYSTEM, AuditObjectType.KEY_VERSION),
     AuditAction.RETENTION_MESSAGES_LOCKED: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
 }

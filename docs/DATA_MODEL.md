@@ -26,6 +26,7 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | `subscriptions` | One authoritative current subscription per tenant |
 | `subscription_history` | Append-only snapshots of subscription assignments |
 | `subscription_activations` | Idempotent paid activation/renewal attempts and results |
+| `manual_financial_transactions` | Platform-recorded manual receipts and refunds, separate from provider facts |
 | `key_versions` | Registry mapping WeCom `publickey_ver` to a private key path or alias |
 | `sync_states` | Cursor tracking — last successfully synced `seq` per tenant+corp |
 | `archive_messages` | Core message store — encrypted envelope + decrypted payload |
@@ -221,6 +222,16 @@ transaction references, event type, source, occurrence time and a SHA-256
 payload hash; it does not retain raw notification bodies, encrypted resources,
 keys or payer details. Reusing an event ID with a different hash, order or
 transaction fails closed as a replay conflict.
+
+### `manual_financial_transactions`
+
+An internal platform administrator can record a CNY receipt or refund for a
+tenant when collection happens outside the payment provider. These entries are
+kept separate from verified provider payment facts and never activate, renew,
+or otherwise change a subscription. Each row captures a positive amount, date,
+optional operator reference/note, and the recording platform administrator.
+The associated immutable audit row records the operator, tenant, type and
+amount without copying the free-form reference or note.
 
 ---
 

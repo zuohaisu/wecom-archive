@@ -28,6 +28,7 @@ from app.routers.messages import router as messages_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.platform import router as platform_router
 from app.routers.platform_access import router as platform_access_router
+from app.routers.platform_operations import router as platform_operations_router
 from app.routers.provisioning import router as provisioning_router
 from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.reachability_checks import router as reachability_checks_router
@@ -159,6 +160,7 @@ def create_app() -> FastAPI:
     app.include_router(onboarding_router)
     app.include_router(platform_router, prefix="/api/platform")
     app.include_router(platform_access_router, prefix="/api/platform")
+    app.include_router(platform_operations_router)
     app.include_router(provisioning_router)
 
     @app.get("/health/live")

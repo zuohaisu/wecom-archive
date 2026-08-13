@@ -11,7 +11,6 @@
 <style>
 .auth-aside-mark{display:flex;align-items:center;gap:12px}
 .auth-aside-mark img{height:30px;width:auto}
-.brand-slot{margin-top:var(--space-6);border:1px dashed var(--color-border-strong);border-radius:var(--radius-lg);padding:var(--space-3) var(--space-4);font-size:var(--text-xs);color:var(--color-text-5);font-family:var(--font-mono);max-width:320px}
 .auth-points{display:flex;flex-direction:column;gap:var(--space-4);max-width:380px}
 .auth-point{display:flex;gap:var(--space-3);align-items:flex-start}
 .auth-point .n{width:20px;height:20px;border-radius:var(--radius-sm);background:var(--color-primary-soft);color:var(--color-primary-hover);font-size:var(--text-2xs);font-weight:var(--weight-bold);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
@@ -41,8 +40,7 @@
 <div class="auth">
   <aside class="auth-aside">
     <div>
-      <div class="auth-aside-mark"><img src="/api/branding/logo" alt="品牌标识" onerror="this.onerror=null;this.src='/web/static/brand/logo-horizontal.svg'"></div>
-      <div class="brand-slot" data-i18n="login.brandSlotPlaceholder">企业品牌标识由管理员在“设置 / 品牌”中管理。</div>
+      <div class="auth-aside-mark"><img src="/api/branding/logo" alt="品牌标识" onerror="this.onerror=null;this.src='/web/static/brand/logo-horizontal.svg?v=__STATIC_VERSION__'"></div>
     </div>
     <div class="auth-points">
       <div class="auth-point"><span class="n">1</span><div><h3 data-i18n="login.point1Title">合规留存</h3><p data-i18n="login.point1Body">企业微信会话按授权范围拉取、解密并长期归档，保留时间与范围可配置。</p></div></div>

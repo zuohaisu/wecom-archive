@@ -9,6 +9,8 @@
 - Linear URL：<url>
 - 优先级：<priority>｜风险等级：**<R0|R1|R2|R3>**
 - 所属波次：<R1 · 前端快赢四页 | ...>
+- 交付 worktree/branch：<名称；可为本票专用，或同 Epic 串行交付容器>
+- 同一交付 PR 的其他工单：<无 | RND-...；只列相关工单>
 
 ## [Goal check]
 本工作推进「<闭环阶段>」阶段，证据 = <可测量证据>。
@@ -73,6 +75,8 @@
 - [ ] 只改了本工单拥有的文件（`git status` 自证）
 - [ ] 产出 QA Summary（格式见 `DEV_AGENT_RULES.md` 的 QA Rules）
 - [ ] **未 commit、未 push**（等 Haisu 批准）
+- [ ] 当前位于已分配的交付 worktree/分支，且分支不是 `main`
+- [ ] working tree 只含本票未提交改动；更早的同 Epic 工单已各自形成获批 commit
 
 ## 风险与回滚（Risk & rollback）
 - 风险：<可能坏什么>
@@ -80,7 +84,8 @@
 
 ## 人工点位（Human touchpoints）
 - **Trigger**：Haisu / PM 将 RND-<N> 置 In Progress（本提示词即启动信号）。
-- **Gate**：Haisu 审阅后批准 commit（agent 不得自行 commit）。
+- **Gate**：Haisu 审阅后批准本票的唯一 commit，以及交付分支 push / 创建或更新 PR
+  （agent 不得自行执行）。
 - **Escalation**：2 轮修复后仍 FAIL，或遇到需要产品决策的歧义 → `BLOCKED_NEEDS_HUMAN`，附上下文，**不要猜**。
 
 ## 开发 agent 执行指引（步骤）
@@ -90,8 +95,14 @@
 4. 输出 QA Summary + `git status`（证明只动了自己的文件），**不要 commit**。
 
 ## 硬性约束（来自 DEV_AGENT_RULES.md）
-- 不 commit、不 push `origin/main`、不建分支、不改 git 历史。
-- 不改 CI/CD 配置、不改部署设置、不改 `.gitignore`。
+- 在已分配的非 `main` 交付 worktree/分支工作；它可以服务本票，也可以串行服务同
+  Epic 多票。开始本票前，上一票必须已完成 QA 并形成获批 commit；不得让多票未提交
+  diff 共存。未经批准不 commit/push，不另建分支、不改 git 历史；任何情况下都不得
+  直接 commit/push `main`。
+- 一票有且只有一个最终 commit，单个 commit 不得混入其他工单；多票 PR 必须保留
+  各票 commit，禁止 squash 成一个 commit。
+- 除非本工单 In scope 明确列出且 Haisu 已批准，否则不改 CI/CD 配置、部署设置或
+  `.gitignore`；批准修改仓库配置不等于批准生产操作。
 - 不碰生产数据 / 密钥；凭证只从环境变量读，不写进代码、文档、测试、脚本。
 - 不扩大 Scope：只做 In scope；新想法记录到 PR 说明或新工单，绝不隐式加入。
 - 复用优先，最小正确改动优先于大范围重构。
