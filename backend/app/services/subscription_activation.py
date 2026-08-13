@@ -306,7 +306,7 @@ def activate_or_renew_subscription(
             )
             if (
                 current is not None
-                and current.status == "active"
+                and current.status in {"trial", "active"}
                 and _stored_utc(current.starts_at) <= normalized.trusted_at
                 and _stored_utc(current.ends_at) > normalized.trusted_at
             ):
