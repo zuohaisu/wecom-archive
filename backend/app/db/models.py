@@ -350,6 +350,51 @@ class PaymentOrder(Base):
     )
 
 
+class ManualFinancialTransaction(Base):
+    """Platform-recorded receipt or refund, separate from provider payment facts.
+
+    Provider-confirmed receipts stay in ``payment_orders``. This table records
+    only an operator's manual collection/refund entry, so it can never be
+    mistaken for a verified provider callback or influence subscription access.
+    """
+
+    __tablename__ = "manual_financial_transactions"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('receipt', 'refund')",
+            name="ck_manual_financial_transactions_kind",
+        ),
+        CheckConstraint(
+            "amount_cents > 0",
+            name="ck_manual_financial_transactions_amount",
+        ),
+        CheckConstraint(
+            "length(currency) = 3",
+            name="ck_manual_financial_transactions_currency",
+        ),
+        Index(
+            "ix_manual_financial_transactions_tenant_occurred",
+            "tenant_id",
+            "occurred_at",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    kind = Column(String(16), nullable=False)
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False, server_default=text("'CNY'"))
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    reference = Column(String(128), nullable=True)
+    note = Column(Text, nullable=True)
+    recorded_by_platform_admin_id = Column(
+        String(36), ForeignKey("platform_admins.id"), nullable=False
+    )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class PaymentEvent(Base):
     """Minimal durable evidence for one verified provider payment fact."""
 
