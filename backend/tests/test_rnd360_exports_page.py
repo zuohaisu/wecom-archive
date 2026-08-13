@@ -1,0 +1,44 @@
+"""RND-360 shared export-center frontend contract."""
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from app.auth import require_html_session
+from app.main import create_app
+
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+def test_export_center_renders_export_forms_and_job_table() -> None:
+    app = create_app()
+    app.dependency_overrides[require_html_session] = lambda: "tenant-a"
+    with TestClient(app) as client:
+        response = client.get("/admin/exports")
+
+    assert response.status_code == 200
+    assert 'id="text-export-form"' in response.text
+    assert 'id="media-export-form"' in response.text
+    assert 'id="export-jobs"' in response.text
+    assert "/web/static/exports.js?" in response.text
+
+
+def test_export_frontend_uses_real_apis_without_foreground_polling() -> None:
+    script = (REPO / "backend/app/web/static/exports.js").read_text()
+    assert "/api/admin/exports/text" in script
+    assert "/api/admin/exports/media" in script
+    assert "/api/admin/exports/jobs" in script
+    assert "setInterval" not in script
+
+
+def test_review_search_and_customer_pages_handoff_to_one_export_center() -> None:
+    review = (REPO / "backend/app/web/templates/review_console.html").read_text()
+    timeline = (REPO / "backend/app/web/static/console/timeline.js").read_text()
+    search = (REPO / "backend/app/web/static/search.js").read_text()
+    contacts = (REPO / "backend/app/web/templates/contacts.html").read_text()
+
+    assert "openConversationExport()" in review
+    assert "openSelectedMessageExport()" in timeline
+    assert "wecom.exportPrefill" in search
+    assert "'/admin/exports?participant_id='" in contacts

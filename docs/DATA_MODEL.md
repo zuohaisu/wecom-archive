@@ -416,6 +416,23 @@ source queries include `WHERE archive_messages.tenant_id = <tenant_id>`.
 
 ---
 
+## Export jobs (RND-360)
+
+### `export_jobs`
+
+One row represents an asynchronous tenant-wide original-media ZIP. The row is
+owned by `tenant_id` and `requested_by`; no recipient email or download bearer
+token is persisted. `status` is one of `queued`, `processing`, `ready`,
+`failed`, or `expired`. A processing lease and attempt counter make generation
+retryable after worker termination. `storage_backend` and `storage_ref` use the
+same per-object provider boundary as archived media, while `file_size` and
+`checksum_sha256` describe the completed ZIP. `expires_at` is set to completion
+time plus seven days and is never extended by notification retry. Notification
+state and attempts are independent of generation so email retry cannot
+regenerate the archive.
+
+Migration `0046` creates this table and its queue/expiry indexes.
+
 ## Migration
 
 Managed with Alembic. Config: `backend/alembic.ini`. Run from `backend/`.
@@ -504,4 +521,4 @@ The WeCom SDK returns an encrypted envelope JSON object containing both `encrypt
 
 ---
 
-_Last updated: 2026-07-10 — Documentation refresh_
+_Last updated: 2026-08-13 — RND-360 export delivery_

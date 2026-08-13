@@ -29,9 +29,10 @@ def test_design_system_is_a_new_copy_of_the_design_source() -> None:
     assert _DESIGN_TARGET.read_bytes() == _DESIGN_SOURCE.read_bytes()
 
 
-def test_navigation_omits_unimplemented_review_tasks_and_export_records() -> None:
+def test_navigation_includes_shared_data_export_page() -> None:
     items = [item for group in NAV for item in group["items"]]
-    assert len(items) == 10
+    assert len(items) == 11
+    assert any(item["id"] == "exports" and item["path"] == "/admin/exports" for item in items)
     assert {item["id"] for item in items} == {
         "dashboard",
         "billing",
@@ -39,6 +40,7 @@ def test_navigation_omits_unimplemented_review_tasks_and_export_records() -> Non
         "search",
         "messages",
         "media",
+        "exports",
         "users",
         "contacts",
         "diagnostics",
@@ -47,7 +49,6 @@ def test_navigation_omits_unimplemented_review_tasks_and_export_records() -> Non
     assert "audit-log" not in {item["id"] for item in items}
     assert "/admin/audit-logs" not in {item["path"] for item in items}
     assert "review-tasks" not in {item["id"] for item in items}
-    assert "exports" not in {item["id"] for item in items}
     dashboard = next(item for item in items if item["id"] == "dashboard")
     assert dashboard["path"] == "/dashboard"
     assert "analytics" not in {item["id"] for item in items}

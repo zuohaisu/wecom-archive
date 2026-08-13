@@ -438,7 +438,8 @@ function renderPanelAudit(m){
   }).join('');
   body.innerHTML='<div class="panel-audit-preview">'+esc(preview)+'</div>'
     +rowsHtml
-    +'<div class="panel-audit-actions"><button type="button" class="panel-copy-btn" onclick="copyMsgid()">'+esc(I18N.t('panel.copyMsgid'))+'</button></div>';
+    +'<div class="panel-audit-actions"><button type="button" class="panel-copy-btn" onclick="copyMsgid()">'+esc(I18N.t('panel.copyMsgid'))+'</button> '
+    +'<button type="button" class="panel-copy-btn" onclick="openSelectedMessageExport()">'+esc(I18N.t('exports.openMessage'))+'</button></div>';
 }
 function copyMsgid(){
   if(!selectedMsgId)return;

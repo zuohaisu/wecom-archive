@@ -151,7 +151,7 @@ def write_audit(
     admin_user_id: Optional[str] = None,
     object_id: Optional[str] = None,
     detail: Optional[Mapping[str, Any]] = None,
-) -> None:
+) -> bool:
     """Append an immutable audit row. FAIL-SAFE: never raises or commits."""
     try:
         with db.begin_nested():
@@ -163,8 +163,10 @@ def write_audit(
                 )
             )
             db.flush()
+        return True
     except Exception:
         logger.exception("write_audit: failed to record audit row (action=%s)", action)
+        return False
 
 
 def record_export_audit(
@@ -177,13 +179,13 @@ def record_export_audit(
     scope: Optional[Mapping[str, Any]] = None,
     approval_ref: Optional[str] = None,
     gate_enforced: Optional[bool] = None,
-) -> None:
+) -> bool:
     """Record one export event with hash-only scope context, never committing."""
     params_hash = None
     if scope is not None:
         canonical = json.dumps({"format": export_format, "scope": scope}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         params_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    write_audit(
+    return write_audit(
         db, tenant_id=tenant_id, action=AuditAction.EXPORT,
         object_type=AuditObjectType.EXPORT, admin_user_id=admin_user_id,
         detail={"format": export_format, "record_count": record_count, "params_hash": params_hash,

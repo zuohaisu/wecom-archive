@@ -21,9 +21,13 @@ class ExportSelection:
     """
 
     roomid: Optional[str] = None
+    participant_id: Optional[str] = None
     start_ms: Optional[int] = None
     end_ms: Optional[int] = None
-    message_ids: Tuple[int, ...] = ()
+    # Public WeCom message identifiers, never database surrogate IDs.  These
+    # are the identifiers exposed by timeline/search APIs and are stable
+    # across UI handoffs into the shared export page.
+    message_ids: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -31,3 +35,4 @@ class ExportResult:
     content: bytes
     filename: str
     content_type: str
+    record_count: int

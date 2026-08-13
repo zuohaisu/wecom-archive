@@ -227,6 +227,28 @@ class QiniuStorageProvider(MediaStorageProvider):
             raise MediaStorageOperationError(f"qiniu upload failed (status={info.status_code})")
         return storage_ref
 
+    def save_file(self, storage_ref: str, source_path: Path) -> str:
+        """Upload a file from disk so multi-gigabyte exports stay memory bounded."""
+        if not source_path.is_file():
+            raise MediaObjectNotFound("source export file is missing")
+        from app.media_storage import detect_media_content_type_for_ref
+
+        mime_type = detect_media_content_type_for_ref(storage_ref) or "application/octet-stream"
+        up_token = self._auth.upload_token(self._bucket, key=storage_ref, expires=3600)
+        try:
+            _ret, info = self._qiniu.put_file(
+                up_token,
+                storage_ref,
+                str(source_path),
+                mime_type=mime_type,
+                check_crc=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise MediaStorageOperationError(_sanitized(exc, "qiniu upload failed")) from exc
+        if not info.ok():
+            raise MediaStorageOperationError(f"qiniu upload failed (status={info.status_code})")
+        return storage_ref
+
     def replace(self, source_ref: str, target_ref: str) -> str:
         try:
             _ret, info = self._bucket_manager.move(
@@ -252,9 +274,14 @@ class QiniuStorageProvider(MediaStorageProvider):
         # private_download_url embeds a short-lived signed token in the
         # query string — the resulting signed_url is deliberately never
         # logged, returned, or included in any exception raised below.
-        signed_url = self._auth.private_download_url(
-            object_url, expires=_INTERNAL_FETCH_URL_EXPIRY_SECONDS
-        )
+        try:
+            signed_url = self._auth.private_download_url(
+                object_url, expires=_INTERNAL_FETCH_URL_EXPIRY_SECONDS
+            )
+        except Exception as exc:  # noqa: BLE001 - may carry a signed URL
+            raise MediaStorageOperationError(
+                _sanitized(exc, "qiniu download signing failed")
+            ) from exc
         try:
             resp = httpx.get(signed_url, timeout=self._timeout)
         except httpx.HTTPError as exc:
@@ -267,6 +294,51 @@ class QiniuStorageProvider(MediaStorageProvider):
         if resp.status_code != 200:
             raise MediaStorageUnavailable(f"qiniu download failed (status={resp.status_code})")
         return resp.content
+
+    def copy_to_file(self, storage_ref: str, destination_path: Path) -> int:
+        """Stream a private object to disk without materializing it in memory."""
+        if not storage_ref:
+            raise MediaObjectNotFound("media object is missing")
+
+        import httpx
+
+        object_url = self._object_url(storage_ref)
+        try:
+            signed_url = self._auth.private_download_url(
+                object_url, expires=_INTERNAL_FETCH_URL_EXPIRY_SECONDS
+            )
+        except Exception as exc:  # noqa: BLE001 - may carry a signed URL
+            raise MediaStorageOperationError(
+                _sanitized(exc, "qiniu download signing failed")
+            ) from exc
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        written = 0
+        try:
+            with httpx.stream("GET", signed_url, timeout=self._timeout) as resp:
+                if resp.status_code == 404:
+                    raise MediaObjectNotFound("media object is missing")
+                if resp.status_code != 200:
+                    raise MediaStorageUnavailable(
+                        f"qiniu download failed (status={resp.status_code})"
+                    )
+                with destination_path.open("wb") as destination:
+                    for chunk in resp.iter_bytes():
+                        destination.write(chunk)
+                        written += len(chunk)
+        except (MediaObjectNotFound, MediaStorageUnavailable):
+            destination_path.unlink(missing_ok=True)
+            raise
+        except (httpx.HTTPError, OSError) as exc:
+            destination_path.unlink(missing_ok=True)
+            raise MediaStorageUnavailable(
+                _sanitized(exc, "qiniu download request failed")
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - never surface URL-bearing text
+            destination_path.unlink(missing_ok=True)
+            raise MediaStorageUnavailable(
+                _sanitized(exc, "qiniu download request failed")
+            ) from exc
+        return written
 
     def exists(self, storage_ref: Optional[str]) -> bool:
         """Return True/False only for a *confirmed* stat result. Any

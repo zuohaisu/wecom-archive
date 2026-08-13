@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>数据导出</title>
+<link rel="icon" href="/web/static/brand/favicon.svg?v=__STATIC_VERSION__" type="image/svg+xml">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<style>
+.export-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-5);align-items:start}.export-form{display:grid;gap:var(--space-4)}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3)}.form-field{display:grid;gap:6px}.form-field-full{grid-column:1/-1}.export-actions{display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap}.export-note{color:var(--color-text-3);font-size:var(--text-sm);line-height:1.6}.jobs-empty{padding:var(--space-6);text-align:center;color:var(--color-text-4)}.job-actions{white-space:nowrap}.job-highlight td{background:var(--color-info-bg)}@media(max-width:900px){.export-grid{grid-template-columns:1fr}.side-nav{display:none}.page{padding:var(--space-4)}}@media(max-width:620px){.form-grid{grid-template-columns:1fr}.form-field-full{grid-column:auto}.table-wrap{overflow-x:auto}}
+</style>
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.data">数据</span><span class="sep">/</span><span class="cur" data-i18n="nav.exports">数据导出</span></div></header>
+  <main class="page">
+    <div class="page-hd"><div><h1 data-i18n="exports.title">数据导出</h1><p data-i18n="exports.description">由 Owner 导出企业自己的会话文本或全量多媒体归档。</p></div><button id="refresh-exports" class="btn" type="button" data-i18n="exports.refresh">刷新状态</button></div>
+    <div id="exports-error" class="alert alert-danger" role="alert" hidden></div>
+    <div id="exports-success" class="alert alert-success" role="status" hidden></div>
+
+    <div class="export-grid mb-5">
+      <section class="card" aria-labelledby="text-export-title">
+        <div class="card-hd"><h2 id="text-export-title" data-i18n="exports.textTitle">文本记录导出</h2></div>
+        <div class="card-bd">
+          <form id="text-export-form" class="export-form">
+            <div class="form-grid">
+              <label class="form-field"><span data-i18n="exports.format">格式</span><select id="text-format" class="select"><option value="excel">Excel</option><option value="pdf">PDF</option></select></label>
+              <label class="form-field"><span data-i18n="exports.roomId">会话 ID（可选）</span><input id="export-roomid" class="input" maxlength="255"></label>
+              <label class="form-field"><span data-i18n="exports.participantId">客户 / 参与人 ID（可选）</span><input id="export-participant" class="input" maxlength="255"></label>
+              <label class="form-field"><span data-i18n="exports.messageIds">消息 ID（逗号分隔，可选）</span><input id="export-message-ids" class="input"></label>
+              <label class="form-field"><span data-i18n="exports.startDate">开始日期（可选）</span><input id="export-start" class="input" type="date"></label>
+              <label class="form-field"><span data-i18n="exports.endDate">结束日期（可选）</span><input id="export-end" class="input" type="date"></label>
+              <label class="form-field form-field-full"><span data-i18n="exports.password">当前账号密码（二次确认）</span><input id="text-password" class="input" type="password" autocomplete="current-password" required></label>
+            </div>
+            <p class="export-note" data-i18n="exports.textHelp">必须填写至少一个范围；单次同步导出最多 50,000 条记录。</p>
+            <div class="export-actions"><button id="text-export-button" class="btn btn-primary" type="submit" data-i18n="exports.downloadText">生成并下载</button></div>
+          </form>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="media-export-title">
+        <div class="card-hd"><h2 id="media-export-title" data-i18n="exports.mediaTitle">全量多媒体 ZIP</h2></div>
+        <div class="card-bd">
+          <form id="media-export-form" class="export-form">
+            <div class="alert alert-warning"><span class="alert-ico">!</span><span data-i18n="exports.mediaWarning">任务会打包本组织全部已归档原始媒体。生成后发送通知邮件，文件保留 7 天，之后自动删除。</span></div>
+            <p id="export-email" class="export-note"></p>
+            <label class="form-field"><span data-i18n="exports.password">当前账号密码（二次确认）</span><input id="media-password" class="input" type="password" autocomplete="current-password" required></label>
+            <div class="export-actions"><button id="media-export-button" class="btn btn-primary" type="submit" data-i18n="exports.requestMedia">申请全量导出</button></div>
+          </form>
+        </div>
+      </section>
+    </div>
+
+    <section class="card" aria-labelledby="jobs-title">
+      <div class="card-hd"><h2 id="jobs-title" data-i18n="exports.jobsTitle">多媒体导出任务</h2></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th data-i18n="exports.requestedAt">申请时间</th><th data-i18n="exports.status">状态</th><th data-i18n="exports.size">文件大小</th><th data-i18n="exports.expiresAt">保留至</th><th data-i18n="exports.emailStatus">邮件</th><th data-i18n="exports.actions">操作</th></tr></thead><tbody id="export-jobs"><tr><td colspan="6" class="loading" data-i18n="exports.loading">正在加载导出状态…</td></tr></tbody></table></div>
+    </section>
+  </main>
+</div></div>
+<script src="/web/static/exports.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

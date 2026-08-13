@@ -264,7 +264,39 @@ constructs a Qiniu/CDN URL itself.
 
 ---
 
-## 5. Search / Message APIs
+## 5. Data Export APIs
+
+All export routes are tenant-scoped and require the `owner` role. The browser
+never supplies `tenant_id`. Every accepted export writes the existing export
+audit record; password confirmation is obtained
+through `POST /api/admin/export/approve` and is bound to the canonical request
+parameters.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/admin/exports` | Shared export center used by review, search and customer-detail pages |
+| `POST` | `/api/admin/exports/text` | Generate a bounded PDF or Excel file synchronously |
+| `POST` | `/api/admin/exports/media` | Accept one asynchronous tenant-wide original-media ZIP job |
+| `GET` | `/api/admin/exports/jobs` | Latest 20 media export jobs for the authenticated tenant |
+| `GET` | `/api/admin/exports/jobs/{job_id}` | One tenant-owned job state |
+| `GET` | `/api/admin/exports/jobs/{job_id}/download` | Authenticated download or short-lived private-storage redirect |
+
+Text scope supports one or more of `roomid` (group room or derived
+`direct__...` conversation ID), `participant_id`, public WeCom `message_ids`,
+and a paired `start_ms`/`end_ms`. The synchronous limit is 50,000 rows. The
+synchronous limit is 50,000 rows.
+
+Media jobs move through `queued`, `processing`, `ready`, `failed`, and
+`expired`. A ready ZIP contains tenant-owned downloaded originals plus
+`manifest.csv`; any missing or checksum-mismatched source fails the whole job.
+The requesting Owner receives an email linking to `/admin/exports?job=...`,
+which is not a bearer credential and still requires an Owner session. The
+download route fails closed exactly seven days after successful generation;
+the maintenance worker then deletes the private object idempotently.
+
+---
+
+## 6. Search / Message APIs
 
 These routes expose raw message-centric access in addition to the main
 conversation-oriented review console.
@@ -297,7 +329,7 @@ Search behavior:
 
 ---
 
-## 6. Diagnostics APIs
+## 7. Diagnostics APIs
 
 | Method | Path | Query | Response |
 |--------|------|-------|----------|
@@ -309,7 +341,7 @@ classification happens server-side in `app/reachability_audit.py`.
 
 ---
 
-## 7. WeCom Callback APIs
+## 8. WeCom Callback APIs
 
 | Method | Path | Notes |
 |--------|------|-------|

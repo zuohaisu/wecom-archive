@@ -355,7 +355,7 @@ def test_router_count() -> None:
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
     # RND-350 adds provider instruction GET/POST and the admin-only status API.
-    assert route_count == 114
+    assert route_count == 120
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -374,6 +374,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/conversations",
             "/admin/contacts",
             "/admin/diagnostics/reachability",
+            "/admin/exports",
             "/admin/forgot-password",
             "/admin/login",
             "/admin/organization/confirm",
@@ -395,6 +396,11 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/export/approve",
             "/api/admin/export/execute",
             "/api/admin/export/record",
+            "/api/admin/exports/jobs",
+            "/api/admin/exports/jobs/{job_id}",
+            "/api/admin/exports/jobs/{job_id}/download",
+            "/api/admin/exports/media",
+            "/api/admin/exports/text",
             "/api/admin/external-contacts",
             "/api/admin/external-contacts/{external_userid}",
             "/api/admin/media",
@@ -509,7 +515,8 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/billing", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/conversations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/contacts", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
+            ("/admin/diagnostics/reachability", frozenset({"GET"}), "None", "HTMLResponse"),
+            ("/admin/exports", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/forgot-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/login", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/organization/confirm", frozenset({"GET"}), "None", "HTMLResponse"),
@@ -527,7 +534,22 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/dashboard", frozenset({"GET"}), "DashboardOut", "None"),
         ("/api/admin/export/approve", frozenset({"POST"}), "None", "None"),
         ("/api/admin/export/execute", frozenset({"POST"}), "None", "None"),
-        ("/api/admin/export/record", frozenset({"POST"}), "None", "None"),
+            ("/api/admin/export/record", frozenset({"POST"}), "None", "None"),
+            ("/api/admin/exports/jobs", frozenset({"GET"}), "None", "None"),
+            (
+                "/api/admin/exports/jobs/{job_id}",
+                frozenset({"GET"}),
+                "None",
+                "None",
+            ),
+            (
+                "/api/admin/exports/jobs/{job_id}/download",
+                frozenset({"GET"}),
+                "None",
+                "None",
+            ),
+            ("/api/admin/exports/media", frozenset({"POST"}), "None", "None"),
+            ("/api/admin/exports/text", frozenset({"POST"}), "None", "None"),
         (
             "/api/admin/external-contacts",
             frozenset({"GET"}),

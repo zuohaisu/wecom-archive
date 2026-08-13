@@ -314,7 +314,7 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 | Concern | Choice |
 |---------|--------|
 | Server | Alibaba Cloud ECS (single instance) |
-| Process manager | systemd for worker/media timers; main web service is operator-managed |
+| Process manager | systemd for worker/media/export timers; main web service is operator-managed |
 | Reverse proxy | Operator-managed reverse proxy in front of port 8035 |
 | Database | PostgreSQL on the same ECS instance (or RDS) |
 | Media | Mixed local filesystem + optional Qiniu Kodo object storage (RND-174). Each `media_files` row records its own storage backend; new writes use the configured default provider (`MEDIA_STORAGE_PROVIDER`), reads are selected per row. See §5. |
@@ -337,6 +337,8 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 | `wecom-archive-media-event.path` | path | shared mtime signal | Activates the event service without a queue payload |
 | `wecom-archive-media-download.service` | oneshot | `OnCalendar=*:15/30` | Reconcile pending/retryable generic media |
 | `wecom-archive-media-download.timer` | timer | — | Activates above |
+| `wecom-export-jobs.service` | oneshot | `OnCalendar=*:04/5` | Generates bounded-memory media ZIPs, sends ready notices, and deletes expired artifacts |
+| `wecom-export-jobs.timer` | timer | — | Activates above; download authorization still expires at the exact seven-day timestamp |
 
 The repository does **not** currently version:
 

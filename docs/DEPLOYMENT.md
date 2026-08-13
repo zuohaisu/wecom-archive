@@ -30,6 +30,7 @@ Versioned in this repository:
 | Media event path | `deploy/systemd/wecom-archive-media-event.path` | Coalescing mtime-only wake-up signal watcher (no task payload) |
 | Media unit | `deploy/systemd/wecom-archive-media-download.service` | One-shot generic media worker (image/voice/video/file/emotion/nested media) |
 | Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Pending/retryable reconciliation every 30 minutes by default (`:15`, `:45`) |
+| Export worker unit/timer | `deploy/systemd/wecom-export-jobs.{service,timer}` | Generate queued ZIPs, retry email delivery, and delete seven-day artifacts every five minutes |
 | GitHub Actions workflow | `.github/workflows/deploy.yml` | CI tests + migration + schema-drift gate, then triggers deploy script on `main` push (see §7) |
 
 Not versioned in this repository:
@@ -206,6 +207,24 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now wecom-archive-media-event.path
 sudo systemctl enable --now wecom-archive-media-download.timer
 ```
+
+Export generation and seven-day cleanup (RND-360; operator action only):
+
+```bash
+sudo cp deploy/systemd/wecom-export-jobs.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-export-jobs.timer
+sudo systemctl status wecom-export-jobs.timer --no-pager
+```
+
+Before enabling this timer, apply Alembic migrations `0046` and `0047`, set a
+public HTTPS `ADMIN_DOMAIN`, and configure real SMTP delivery (`SMTP_HOST` and
+`SMTP_FROM`; plus credentials where the relay requires them). Export requests
+are rejected when either the requesting Owner email or SMTP transport is not
+configured. `EXPORT_JOB_BATCH_SIZE` defaults to `1` and is capped at `5`; keep
+it at `1` on the supported 2C2G host. The worker uses the configured media
+storage provider for the private ZIP and temporary disk only while assembling
+it. No production unit is installed or enabled by repository changes alone.
 
 RND-343 defaults are intentionally staggered: archive reconciliation at
 `:00/:30`, generic media reconciliation at `:15/:45`. Callback → archive

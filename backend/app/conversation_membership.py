@@ -920,7 +920,11 @@ def _null_sender_candidate_message_ids(
     return matched
 
 
-def _resolve_conversation_message_ids(
+class ConversationMembershipResolutionError(ValueError):
+    """Conversation identifier cannot be resolved without ambiguity."""
+
+
+def resolve_conversation_message_ids(
     db: Session, conversation_id: str, tenant_id: str
 ) -> list[int]:
     """id-only counterpart to _fetch_conversation_messages(db, conversation_id,
@@ -945,13 +949,9 @@ def _resolve_conversation_message_ids(
             direct_ids.update(null_sender_extra)
 
         if group_ids and direct_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Conversation ID is ambiguous: it matches both a direct "
-                    "conversation and a group room. Provide mode and "
-                    "staff_id/contact_id to resolve it unambiguously."
-                ),
+            raise ConversationMembershipResolutionError(
+                "Conversation ID is ambiguous: it matches both a direct "
+                "conversation and a group room. Provide a narrower export scope."
             )
 
         if group_ids:
@@ -965,9 +965,21 @@ def _resolve_conversation_message_ids(
             if orphan_ids:
                 return orphan_ids
 
-        raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
+        raise ConversationMembershipResolutionError(
+            "Malformed direct conversation ID"
+        )
 
     return _group_room_message_ids(db, conversation_id, tenant_id)
+
+
+def _resolve_conversation_message_ids(
+    db: Session, conversation_id: str, tenant_id: str
+) -> list[int]:
+    """HTTP-compatible wrapper retained for the existing conversation route."""
+    try:
+        return resolve_conversation_message_ids(db, conversation_id, tenant_id)
+    except ConversationMembershipResolutionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 

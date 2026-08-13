@@ -1,0 +1,11 @@
+[Unit]
+Description=WeCom Archive Export Queue and Cleanup Timer
+
+[Timer]
+# Avoid the archive/media workers' common minute boundaries.
+OnCalendar=*:04/5
+Persistent=true
+Unit=wecom-export-jobs.service
+
+[Install]
+WantedBy=timers.target

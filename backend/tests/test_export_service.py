@@ -25,6 +25,10 @@ class _Query:
     def order_by(self, *_columns):
         return self
 
+    def limit(self, value):
+        self.row_limit = value
+        return self
+
     def all(self):
         # The fake models database isolation faithfully: each query's explicit
         # tenant predicate selects only its tenant's fixed rows.
@@ -35,7 +39,17 @@ class _Query:
             and hasattr(getattr(condition, "right", None), "value")
         ]
         tenant_id = tenant_values[-1] if tenant_values else None
-        return list(self.rows[self.source].get(tenant_id, []))
+        rows = list(self.rows[self.source].get(tenant_id, []))
+        msgid_values = [
+            condition.right.value
+            for condition in self.filters
+            if getattr(getattr(condition, "left", None), "key", None) == "msgid"
+            and hasattr(getattr(condition, "right", None), "value")
+        ]
+        if msgid_values and rows and hasattr(rows[0], "msgid"):
+            allowed = set(msgid_values[-1])
+            rows = [row for row in rows if row.msgid in allowed]
+        return rows[: getattr(self, "row_limit", len(rows))]
 
 
 class _Session:
@@ -50,6 +64,7 @@ class _Session:
 def _message(message_id, tenant_id, **values):
     defaults = {
         "id": message_id,
+        "msgid": f"msg-{message_id}",
         "tenant_id": tenant_id,
         "sender": "staff_alice",
         "roomid": "room_demo_001",
@@ -88,20 +103,34 @@ def test_excel_generation_is_parseable_and_contains_projected_content() -> None:
     )
 
     workbook = load_workbook(BytesIO(result.content), read_only=True)
-    rows = list(workbook.active.iter_rows(values_only=True))
-    assert rows[0] == ("Time (Beijing)", "Sender", "Recipient / conversation", "Type", "Content")
+    rows = list(workbook["Evidence export"].iter_rows(values_only=True))
+    assert rows[0] == (
+        "Time (Beijing)",
+        "Message ID",
+        "Sender",
+        "Conversation",
+        "Participants",
+        "Type",
+        "Content",
+    )
     assert rows[1][0] == "2025-01-01 08:00:00 CST"
-    assert rows[1][1] == "Alice"
-    assert rows[1][2] == "Group chat · mo_001"
-    assert rows[1][3:] == ("text", "fixed synthetic hello")
+    assert rows[1][1] == "msg-1"
+    assert rows[1][2] == "Alice (staff_alice)"
+    assert rows[1][3] == "Group chat · mo_001"
+    assert rows[1][4] == "Alice (staff_alice), Bob (contact_bob)"
+    assert rows[1][5:] == ("text", "fixed synthetic hello")
+    info = dict(workbook["Export info"].iter_rows(values_only=True))
+    assert info["Tenant ID"] == "tenant-a"
+    assert info["Record count"] == "1"
     assert result.filename == "evidence-export.xlsx"
+    assert result.record_count == 1
 
 
 def test_pdf_generation_has_valid_pdf_structure_and_readable_content() -> None:
     result = export_service.generate_export(
         _session_with_two_tenants(),
         "tenant-a",
-        ExportSelection(message_ids=(1,)),
+        ExportSelection(message_ids=("msg-1",)),
         ExportFormat.PDF,
     )
 
@@ -113,6 +142,7 @@ def test_pdf_generation_has_valid_pdf_structure_and_readable_content() -> None:
     pdf_text_operand = b"".join(b"\\000" + bytes((ord(char),)) for char in "fixed synthetic hello")
     assert pdf_text_operand in result.content
     assert result.filename == "evidence-export.pdf"
+    assert result.record_count == 1
 
 
 def test_unknown_type_uses_registry_name_not_raw_type_code() -> None:

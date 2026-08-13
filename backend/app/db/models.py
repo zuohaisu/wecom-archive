@@ -957,6 +957,83 @@ class ExportApprovalToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+# —— RND-360 会话存档导出与全量媒体离线包 ——
+class ExportJob(Base):
+    """Durable asynchronous export job for one tenant-wide media ZIP.
+
+    Text PDF/Excel exports are generated synchronously and therefore do not
+    need a durable job row.  Large media exports always use this queue so the
+    web process never buffers a tenant's archive or waits for object storage.
+    """
+
+    __tablename__ = "export_jobs"
+    __table_args__ = (
+        CheckConstraint("kind = 'media_zip'", name="ck_export_jobs_kind"),
+        CheckConstraint("format = 'zip'", name="ck_export_jobs_format"),
+        CheckConstraint(
+            "status IN ('queued', 'processing', 'ready', 'failed', 'expired')",
+            name="ck_export_jobs_status",
+        ),
+        CheckConstraint(
+            "notification_status IN ('pending', 'sent', 'failed')",
+            name="ck_export_jobs_notification_status",
+        ),
+        CheckConstraint("attempt_count >= 0", name="ck_export_jobs_attempt_count"),
+        CheckConstraint(
+            "notification_attempts >= 0",
+            name="ck_export_jobs_notification_attempts",
+        ),
+        CheckConstraint(
+            "file_size IS NULL OR file_size >= 0",
+            name="ck_export_jobs_file_size",
+        ),
+        Index("ix_export_jobs_tenant_requested", "tenant_id", "requested_at"),
+        Index("ix_export_jobs_status_requested", "status", "requested_at"),
+        Index("ix_export_jobs_status_expires", "status", "expires_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    requested_by = Column(
+        String(36), ForeignKey("admin_users.id"), nullable=False, index=True
+    )
+    kind = Column(String(24), nullable=False, default="media_zip")
+    format = Column(String(16), nullable=False, default="zip")
+    status = Column(String(16), nullable=False, default="queued")
+    storage_backend = Column(String(32), nullable=True)
+    storage_ref = Column(Text, nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    checksum_sha256 = Column(String(64), nullable=True)
+    requested_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    last_error = Column(String(64), nullable=True)
+    notification_status = Column(
+        String(16), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    notification_attempts = Column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    notification_last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    notification_sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class KeyVersion(Base):
     """Maps WeCom publickey_ver to the private key used for decryption."""
 

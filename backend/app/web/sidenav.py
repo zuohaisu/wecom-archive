@@ -26,6 +26,7 @@ NAV = (
         "items": (
             {"id": "messages", "key": "nav.messages", "path": "/admin/messages"},
             {"id": "media", "key": "nav.mediaAttachments", "path": "/admin/media"},
+            {"id": "exports", "key": "nav.exports", "path": "/admin/exports"},
         ),
     },
     {

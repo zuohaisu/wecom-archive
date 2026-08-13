@@ -69,6 +69,7 @@ function maybeAutoSelectEntity(items){
 }
 function onEntityClick(el){
   selEntityId=el.dataset.id; selEntityName=el.dataset.name; selConvId=null; selConvName=null;
+  if(typeof updateConversationExportButton==='function')updateConversationExportButton();
   if(mode==='staff'&&typeof persistLastEntity==='function')persistLastEntity(selEntityId);
   timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.querySelectorAll('.entity-item').forEach(function(e){e.classList.remove('active');});
@@ -152,6 +153,7 @@ function renderConvList(convs){
 }
 function onConvClick(el){
   selConvId=el.dataset.id; selConvName=el.dataset.name;
+  if(typeof updateConversationExportButton==='function')updateConversationExportButton();
   document.querySelectorAll('.conv-card').forEach(function(e){e.classList.remove('active');});
   el.classList.add('active');
   document.getElementById('timeline-header').textContent=I18N.t('console.timelineHeader')+' — '+el.dataset.name;

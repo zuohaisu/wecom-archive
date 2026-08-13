@@ -123,6 +123,26 @@ def admin_analytics(
     return RedirectResponse("/dashboard#data-insights", status_code=307)
 
 
+@router.get("/admin/exports", response_class=HTMLResponse)
+def admin_exports_page(
+    request: Request,
+    tenant_id: Optional[str] = Depends(require_html_session),
+):
+    """Owner data-portability page; APIs enforce the owner role."""
+    if tenant_id is None:
+        return RedirectResponse("/admin/login", status_code=302)
+    return HTMLResponse(
+        content=render_template(
+            "exports",
+            i18n_script=I18N_SCRIPT_TAG,
+            sidenav=render_sidenav(
+                "exports",
+                {route.path for route in request.app.routes if hasattr(route, "path")},
+            ),
+        )
+    )
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard_page(
     request: Request,

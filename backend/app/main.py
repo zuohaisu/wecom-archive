@@ -18,6 +18,7 @@ from app.routers.conversations import router as conversations_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.export_approval import router as export_approval_router
 from app.routers.export_audit import router as export_audit_router
+from app.routers.exports import router as exports_router
 from app.routers.external_contacts import router as external_contacts_router
 from app.routers.media import MediaAccessNoStoreMiddleware
 from app.routers.media import router as media_router
@@ -149,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(messages_router)
     app.include_router(export_approval_router)
     app.include_router(export_audit_router)
+    app.include_router(exports_router)
     app.include_router(retention_router, prefix="/api/admin")
     app.include_router(onboarding_router)
     app.include_router(platform_router, prefix="/api/platform")

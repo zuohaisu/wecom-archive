@@ -7,6 +7,7 @@ Only normalized message fields are selected: the encrypted envelope and
 from __future__ import annotations
 
 from copy import copy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any, Optional
@@ -20,8 +21,10 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.conversation_membership import resolve_conversation_message_ids
 from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
 from app.display_names import resolve_person_display_name, resolve_room_display_name
@@ -29,8 +32,29 @@ from app.message_type_registry import describe_message_type
 from app.schemas.export import ExportFormat, ExportResult, ExportSelection
 
 _BEIJING = ZoneInfo("Asia/Shanghai")
-_HEADERS = ("Time (Beijing)", "Sender", "Recipient / conversation", "Type", "Content")
+_HEADERS = (
+    "Time (Beijing)",
+    "Message ID",
+    "Sender",
+    "Conversation",
+    "Participants",
+    "Type",
+    "Content",
+)
 _MEDIA_CATEGORIES = frozenset({"media"})
+MAX_EXPORT_ROWS = 50_000
+
+
+class ExportTooLargeError(ValueError):
+    """The requested text export exceeds the bounded synchronous limit."""
+
+
+@dataclass(frozen=True)
+class _ExportMetadata:
+    tenant_id: str
+    generated_at: datetime
+    selection: ExportSelection
+    record_count: int
 
 
 def generate_export(
@@ -46,25 +70,39 @@ def generate_export(
     """
     _validate_selection(selection)
     rows = _load_export_rows(db, tenant_id, selection)
+    metadata = _ExportMetadata(
+        tenant_id=tenant_id,
+        generated_at=datetime.now(timezone.utc),
+        selection=selection,
+        record_count=len(rows),
+    )
     if export_format == ExportFormat.EXCEL:
         return ExportResult(
-            content=_render_excel(rows),
+            content=_render_excel(rows, metadata),
             filename="evidence-export.xlsx",
             content_type=(
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ),
+            record_count=len(rows),
         )
     if export_format == ExportFormat.PDF:
         return ExportResult(
-            content=_render_pdf(rows),
+            content=_render_pdf(rows, metadata),
             filename="evidence-export.pdf",
             content_type="application/pdf",
+            record_count=len(rows),
         )
     raise ValueError(f"Unsupported export format: {export_format!r}")
 
 
 def _validate_selection(selection: ExportSelection) -> None:
-    if not (selection.roomid or selection.message_ids or selection.start_ms is not None or selection.end_ms is not None):
+    if not (
+        selection.roomid
+        or selection.participant_id
+        or selection.message_ids
+        or selection.start_ms is not None
+        or selection.end_ms is not None
+    ):
         raise ValueError("An export selection must include a room, time range, or message IDs")
     if selection.start_ms is not None and selection.end_ms is not None and selection.start_ms > selection.end_ms:
         raise ValueError("start_ms must not be after end_ms")
@@ -81,6 +119,7 @@ def _load_export_rows(
     """
     query = db.query(
         ArchiveMessage.id,
+        ArchiveMessage.msgid,
         ArchiveMessage.sender,
         ArchiveMessage.roomid,
         ArchiveMessage.msgtime,
@@ -89,14 +128,39 @@ def _load_export_rows(
         ArchiveMessage.structured_content,
     ).filter(ArchiveMessage.tenant_id == tenant_id)
     if selection.roomid:
-        query = query.filter(ArchiveMessage.roomid == selection.roomid)
+        if selection.roomid.startswith("direct__"):
+            conversation_ids = resolve_conversation_message_ids(
+                db, selection.roomid, tenant_id
+            )
+            query = query.filter(ArchiveMessage.id.in_(conversation_ids))
+        else:
+            query = query.filter(ArchiveMessage.roomid == selection.roomid)
+    if selection.participant_id:
+        recipient_message_ids = select(ArchiveMessageRecipient.message_id).where(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.receiver_userid == selection.participant_id,
+        )
+        query = query.filter(
+            or_(
+                ArchiveMessage.sender == selection.participant_id,
+                ArchiveMessage.id.in_(recipient_message_ids),
+            )
+        )
     if selection.message_ids:
-        query = query.filter(ArchiveMessage.id.in_(selection.message_ids))
+        query = query.filter(ArchiveMessage.msgid.in_(selection.message_ids))
     if selection.start_ms is not None:
         query = query.filter(ArchiveMessage.msgtime >= selection.start_ms)
     if selection.end_ms is not None:
         query = query.filter(ArchiveMessage.msgtime <= selection.end_ms)
-    messages = query.order_by(ArchiveMessage.msgtime.asc(), ArchiveMessage.id.asc()).all()
+    messages = (
+        query.order_by(ArchiveMessage.msgtime.asc(), ArchiveMessage.id.asc())
+        .limit(MAX_EXPORT_ROWS + 1)
+        .all()
+    )
+    if len(messages) > MAX_EXPORT_ROWS:
+        raise ExportTooLargeError(
+            f"export exceeds the {MAX_EXPORT_ROWS}-record synchronous limit"
+        )
     if not messages:
         return []
 
@@ -183,13 +247,26 @@ def _project_message(
         # unsupported/non-text types; never expose a raw protocol type code.
         content = f"[{type_name}]"
 
+    participant_ids = list(dict.fromkeys([message.sender, *recipients]))
+    participants = ", ".join(
+        _display_identity(userid, display_names) for userid in participant_ids if userid
+    )
     return {
         "time": _format_beijing_time(message.msgtime),
-        "sender": resolve_person_display_name(message.sender, display_names.get(message.sender)),
+        "message_id": message.msgid,
+        "sender": _display_identity(message.sender, display_names),
         "conversation": conversation,
+        "participants": participants or "—",
         "type": type_name,
         "content": content,
     }
+
+
+def _display_identity(userid: str | None, display_names: dict[str, str]) -> str:
+    if not userid:
+        return "Unknown participant"
+    name = resolve_person_display_name(userid, display_names.get(userid))
+    return userid if name == userid else f"{name} ({userid})"
 
 
 def _media_reference(
@@ -225,27 +302,51 @@ def _format_beijing_time(msgtime: int | None) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-def _render_excel(rows: list[dict[str, str]]) -> bytes:
+def _render_excel(
+    rows: list[dict[str, str]], metadata: _ExportMetadata | None = None
+) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Evidence export"
     sheet.append(_HEADERS)
     for row in rows:
-        sheet.append([row["time"], row["sender"], row["conversation"], row["type"], row["content"]])
+        sheet.append(
+            [
+                row["time"],
+                row["message_id"],
+                row["sender"],
+                row["conversation"],
+                row["participants"],
+                row["type"],
+                row["content"],
+            ]
+        )
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    for column, width in zip("ABCDE", (25, 22, 30, 20, 60)):
+    for column, width in zip("ABCDEFG", (25, 24, 28, 34, 48, 18, 60)):
         sheet.column_dimensions[column].width = width
     for cell in sheet[1]:
         font = copy(cell.font)
         font.bold = True
         cell.font = font
+    if metadata is not None:
+        info = workbook.create_sheet("Export info")
+        for label, value in _metadata_rows(metadata):
+            info.append((label, value))
+        info.column_dimensions["A"].width = 28
+        info.column_dimensions["B"].width = 80
+        for cell in info["A"]:
+            font = copy(cell.font)
+            font.bold = True
+            cell.font = font
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
 
 
-def _render_pdf(rows: list[dict[str, str]]) -> bytes:
+def _render_pdf(
+    rows: list[dict[str, str]], metadata: _ExportMetadata | None = None
+) -> bytes:
     output = BytesIO()
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
     document = SimpleDocTemplate(
@@ -263,9 +364,24 @@ def _render_pdf(rows: list[dict[str, str]]) -> bytes:
     table_data = [[Paragraph(header, body) for header in _HEADERS]]
     for row in rows:
         table_data.append(
-            [Paragraph(_pdf_text(row[key]), body) for key in ("time", "sender", "conversation", "type", "content")]
+            [
+                Paragraph(_pdf_text(row[key]), body)
+                for key in (
+                    "time",
+                    "message_id",
+                    "sender",
+                    "conversation",
+                    "participants",
+                    "type",
+                    "content",
+                )
+            ]
         )
-    table = LongTable(table_data, colWidths=(34 * mm, 30 * mm, 45 * mm, 28 * mm, 110 * mm), repeatRows=1)
+    table = LongTable(
+        table_data,
+        colWidths=(28 * mm, 24 * mm, 30 * mm, 36 * mm, 48 * mm, 20 * mm, 91 * mm),
+        repeatRows=1,
+    )
     table.setStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9EAF7")),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
@@ -275,8 +391,37 @@ def _render_pdf(rows: list[dict[str, str]]) -> bytes:
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ])
-    document.build([Paragraph("Evidence export", heading), Spacer(1, 4 * mm), table])
+    story = [Paragraph("Evidence export", heading), Spacer(1, 2 * mm)]
+    if metadata is not None:
+        for label, value in _metadata_rows(metadata):
+            story.append(Paragraph(_pdf_text(f"{label}: {value}"), body))
+        story.append(Spacer(1, 3 * mm))
+    story.append(table)
+    document.build(story)
     return output.getvalue()
+
+
+def _metadata_rows(metadata: _ExportMetadata) -> list[tuple[str, str]]:
+    selection = metadata.selection
+    scope = []
+    if selection.roomid:
+        scope.append(f"conversation={selection.roomid}")
+    if selection.participant_id:
+        scope.append(f"participant={selection.participant_id}")
+    if selection.message_ids:
+        scope.append(f"message_ids={len(selection.message_ids)} selected")
+    if selection.start_ms is not None and selection.end_ms is not None:
+        scope.append(
+            "time="
+            f"{_format_beijing_time(selection.start_ms)} to "
+            f"{_format_beijing_time(selection.end_ms)}"
+        )
+    return [
+        ("Tenant ID", metadata.tenant_id),
+        ("Generated at (Beijing)", _format_beijing_time(int(metadata.generated_at.timestamp() * 1000))),
+        ("Selection", "; ".join(scope)),
+        ("Record count", str(metadata.record_count)),
+    ]
 
 
 def _pdf_text(value: str) -> str:

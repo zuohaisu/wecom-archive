@@ -23,6 +23,7 @@ from abc import ABC, abstractmethod
 import hashlib
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 
@@ -83,8 +84,16 @@ class MediaStorageProvider(ABC):
         """Persist bytes and return the provider's stored reference."""
 
     @abstractmethod
+    def save_file(self, storage_ref: str, source_path: Path) -> str:
+        """Persist a local file without loading the complete payload into memory."""
+
+    @abstractmethod
     def read_bytes(self, storage_ref: str) -> bytes:
         """Read bytes for an existing media object."""
+
+    @abstractmethod
+    def copy_to_file(self, storage_ref: str, destination_path: Path) -> int:
+        """Stream an existing object to a local file and return bytes written."""
 
     @abstractmethod
     def exists(self, storage_ref: Optional[str]) -> bool:
@@ -186,11 +195,25 @@ class LocalStorageProvider(MediaStorageProvider):
         path.write_bytes(data)
         return str(path)
 
+    def save_file(self, storage_ref: str, source_path: Path) -> str:
+        path = self._path_for_write(storage_ref)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_path, path)
+        return str(path)
+
     def read_bytes(self, storage_ref: str) -> bytes:
         path = self.get_local_path(storage_ref)
         if path is None:
             raise FileNotFoundError("media object is missing")
         return path.read_bytes()
+
+    def copy_to_file(self, storage_ref: str, destination_path: Path) -> int:
+        path = self.get_local_path(storage_ref)
+        if path is None:
+            raise FileNotFoundError("media object is missing")
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, destination_path)
+        return destination_path.stat().st_size
 
     def exists(self, storage_ref: Optional[str]) -> bool:
         return self.get_local_path(storage_ref) is not None

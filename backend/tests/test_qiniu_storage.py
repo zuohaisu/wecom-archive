@@ -12,6 +12,7 @@ Run (from backend/):
 
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
@@ -693,4 +694,92 @@ def test_read_bytes_signed_url_never_returned_or_included_in_error(monkeypatch) 
         provider.read_bytes("tenants/t1/images/1.jpg")
 
     assert signed_url not in str(exc_info.value)
+    assert _FAKE_SECRET_KEY not in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# File streaming (RND-360 multi-gigabyte ZIP path)
+# ---------------------------------------------------------------------------
+
+
+class _FakeHttpStreamResponse:
+    def __init__(self, status_code: int, chunks: tuple[bytes, ...] = ()):
+        self.status_code = status_code
+        self._chunks = chunks
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def iter_bytes(self):
+        yield from self._chunks
+
+
+def test_save_file_uploads_from_disk_without_reading_into_memory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    provider = _make_provider()
+    source = tmp_path / "export.zip"
+    source.write_bytes(b"PK-export")
+    seen = {}
+    monkeypatch.setattr(
+        provider._auth,
+        "upload_token",
+        lambda bucket, key, expires=3600: "upload-token",
+    )
+
+    def put_file(token, key, path, **kwargs):
+        seen.update(token=token, key=key, path=path, kwargs=kwargs)
+        return {}, _FakeInfo(200)
+
+    monkeypatch.setattr(provider._qiniu, "put_file", put_file)
+
+    ref = provider.save_file("tenants/t1/exports/job.zip", source)
+
+    assert ref == "tenants/t1/exports/job.zip"
+    assert seen["path"] == str(source)
+    assert seen["kwargs"]["mime_type"] == "application/zip"
+    assert seen["kwargs"]["check_crc"] is True
+
+
+def test_copy_to_file_streams_chunks_to_disk(tmp_path: Path, monkeypatch) -> None:
+    provider = _make_provider()
+    destination = tmp_path / "download" / "object.bin"
+    monkeypatch.setattr(
+        provider._auth,
+        "private_download_url",
+        lambda url, expires=3600: "https://cdn.example.com/signed?token=abc",
+    )
+
+    import httpx
+
+    monkeypatch.setattr(
+        httpx,
+        "stream",
+        lambda method, url, timeout=None: _FakeHttpStreamResponse(
+            200, (b"first", b"-second")
+        ),
+    )
+
+    written = provider.copy_to_file("tenants/t1/images/1.jpg", destination)
+
+    assert written == len(b"first-second")
+    assert destination.read_bytes() == b"first-second"
+
+
+def test_copy_to_file_signing_failure_is_sanitized(
+    tmp_path: Path, monkeypatch
+) -> None:
+    provider = _make_provider()
+
+    def raise_with_secret(*_args, **_kwargs):
+        raise RuntimeError(f"secret={_FAKE_SECRET_KEY}")
+
+    monkeypatch.setattr(provider._auth, "private_download_url", raise_with_secret)
+
+    with pytest.raises(MediaStorageOperationError) as exc_info:
+        provider.copy_to_file("tenants/t1/images/1.jpg", tmp_path / "object.bin")
+
     assert _FAKE_SECRET_KEY not in str(exc_info.value)

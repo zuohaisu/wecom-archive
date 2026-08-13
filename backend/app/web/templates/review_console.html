@@ -359,6 +359,7 @@ __SIDENAV__
     </div>
     <div class="top-bar-actions">
       <span id="sync-status" class="sync-status" aria-live="polite"></span>
+      <button type="button" class="btn-toggle" id="btn-export-conversation" onclick="openConversationExport()" data-i18n="exports.openConversation" disabled>导出当前会话</button>
       <button class="btn-sync-now" id="btn-sync-now" onclick="syncNow()" data-i18n="sync.now">立即同步</button>
       <button type="button" class="btn-toggle" id="btn-audit-mode" onclick="toggleAuditMode()" data-i18n="console.auditMode">审阅模式</button>
       <button type="button" class="btn-toggle active" id="btn-panel-toggle" onclick="togglePanel()" data-i18n="console.detailPanel">详情面板</button>

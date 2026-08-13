@@ -120,6 +120,7 @@ __SIDENAV__
       <span class="count" id="resultCount"></span>
     </div>
     <div class="sort-control">
+      <button type="button" class="btn btn-sm" id="export-search-results" onclick="exportSearchResults()" data-i18n="exports.openSearchResults" disabled>导出当前结果</button>
       <label for="sortSel">排序</label>
       <select id="sortSel" onchange="render()">
         <option value="time_desc" selected>时间（新→旧）</option>

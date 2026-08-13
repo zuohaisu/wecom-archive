@@ -95,6 +95,7 @@ document.addEventListener('click',function(e){
 });
 function setMode(m){
   mode=m; selEntityId=null; selConvId=null; selEntityName=null; selConvName=null;
+  if(typeof updateConversationExportButton==='function')updateConversationExportButton();
   lastConvItems=null;
   timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.getElementById('tab-staff').classList.toggle('active',m==='staff');
@@ -171,6 +172,18 @@ function renderSearchFilters(){
 function setSearchDateRange(v){searchDateRange=v;renderSearchFilters();forceSearch();}
 function setSearchAllTypes(v){searchAllTypes=v;renderSearchFilters();forceSearch();}
 function forceSearch(){searchLastQ=null;doSearch();}
+function updateConversationExportButton(){
+  var button=document.getElementById('btn-export-conversation');
+  if(button)button.disabled=!selConvId;
+}
+function openConversationExport(){
+  if(!selConvId)return;
+  window.location.href='/admin/exports?roomid='+encodeURIComponent(selConvId);
+}
+function openSelectedMessageExport(){
+  if(!selectedMsgId)return;
+  window.location.href='/admin/exports?message_ids='+encodeURIComponent(selectedMsgId);
+}
 function buildSearchMsgUrl(q){
   var url='/api/search/messages?q='+encodeURIComponent(q)+'&limit=10';
   if(searchDateRange)url+='&date_range='+encodeURIComponent(searchDateRange);
