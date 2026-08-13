@@ -30,6 +30,14 @@ only need the real SDK to work on the live sync path itself.
 
 ## Making a change
 
+Every change runs in an assigned non-`main` delivery worktree and branch, based
+on an up-to-date `origin/main`. Never develop on, commit to, or push directly to
+`main`. Each Linear issue keeps its own implementation conversation and exactly
+one final commit. A worktree/branch/pull request may group several related issue
+commits, normally from the same Epic. Those issues must be implemented serially
+so uncommitted changes from different tickets never coexist. Agents must verify
+`git branch --show-current` before editing and stop if it reports `main`.
+
 Run the acceptance chain before opening a pull request:
 
 ```bash
@@ -42,14 +50,28 @@ expected local result.
 
 Pull requests run the same gates in CI via
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). A red CI is a red
-pull request; do not ask for a review until it is green. Merging to `main`
-triggers the production deployment pipeline
-([`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)).
+pull request; do not merge until it is green and human review is complete.
+When Merge Queue is enabled, the same CI also runs for the merge-group
+candidate. A multi-ticket PR must list its issue-to-commit mapping and use a
+merge strategy that preserves the individual ticket commits; do not squash it
+into one commit.
+
+Merging deployable paths to `main` triggers the CD-only production workflow
+([`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)). CD deploys
+the exact merged `main` SHA and retains migration, readiness, serialization,
+and rollback gates, but it does not repeat the complete CI suite. The sole
+maintainer must therefore require a pull request and green CI, keep the branch
+up to date, and never push directly to `main`. The current private-repository
+plan does not enforce those settings; enable platform branch protection before
+adding another maintainer.
+Documentation/task-only merges still pass PR CI but are excluded from CD by the
+workflow's `paths-ignore` list.
 
 ## What makes a change easy to review
 
-- **One concern per pull request.** A bug fix bundled with a refactor is hard
-  to review and harder to revert.
+- **One coherent delivery per pull request.** A PR may contain several related
+  same-Epic ticket commits, but unrelated fixes or refactors belong in another
+  delivery branch and PR.
 - **A test that fails before your change and passes after it.** For a bug fix
   this is the single most useful thing you can include.
 - **Comments that explain why, not what.** This codebase leans heavily on

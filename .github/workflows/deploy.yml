@@ -1,5 +1,9 @@
-name: Deploy to Production
+name: CD - Deploy to Production
 
+# CD-only workflow. Full CI runs on the pull request (and merge queue, when
+# enabled) and must pass before the maintainer merges. Direct pushes to main
+# are prohibited by project policy; otherwise an untested commit could reach
+# this workflow. Enable platform-enforced branch protection when available.
 on:
   push:
     branches:
@@ -13,16 +17,12 @@ on:
       - 'tasks/**'
       - '*.md'
 
-jobs:
-  test:
-    name: CI Test Suite
-    # Delegates to the reusable workflow shared with ci.yml so the
-    # pre-deploy gate and the pull-request gate can never drift apart.
-    uses: ./.github/workflows/test.yml
+permissions:
+  contents: read
 
+jobs:
   deploy:
     name: Deploy to ECS
-    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     # QA round 2 finding: without this, two workflow runs (e.g. two rapid
@@ -38,9 +38,6 @@ jobs:
       group: production-deploy
       cancel-in-progress: false
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       # QA round 2 fix: the fetch/checkout-to-EXPECTED_SHA step and the
       # invocation of deploy_server.sh are ONE SSH session/script block
       # (not two separate steps) specifically so PREV_SHA, captured

@@ -27,12 +27,15 @@
 ## 你的角色与权限
 - 你是**独立验收 agent**，目标：判断 RND-<N> 交付物是否满足验收标准。
 - 你可以：读取仓库所有文件、运行**只读**检查命令（`make verify`、`pytest`、`grep`、`git diff`、`git status`）。
-- 你**不可以**：修改代码 / 文档 / 测试、commit、push、建分支、改工单、改验收标准。
+- 你**不可以**：修改代码 / 文档 / 测试、commit、push、创建额外分支、切换离开
+  已分配的交付分支、改工单、改验收标准。
 - 若实现不足或存在缺口，必须输出 **FAIL** 并列出具体缺口（**不替开发 agent 补做**）。
 
 ## 输入
 - RND-<N> 开发提示词中定义的 AC-1 ~ AC-<n>
-- 待验收的工作树 diff（`git diff`、`git status`），重点看：<关键文件清单>
+- 待验收的当前工单 diff（未提交时用 `git diff`；已获批提交时用
+  `git show <本票-commit>`），重点看：<关键文件清单>
+- 交付分支中更早的同 Epic 工单 commit（如有，只作为集成基线，不计入本票 scope）
 
 ## 验收方法（证据优先）
 逐条核对。每条必须给出**证据**（测试名 / `file:line` / 命令 exit code），不得仅凭「看起来对」。
@@ -53,12 +56,17 @@
    ```
 3. **架构边界**：确认 `routers` 未 import `app.main`、service 层未 import `app.routers.*`、`app/main.py` 未新增业务路由 / 直接 SQL / 内联 HTML。
 4. **架构冻结 D1**：diff 中不得出现 React / Vue / 打包器 / SPA 路由假设。出现即 FAIL（`type: SCOPE_VIOLATION`）。
-5. **文件所有权**：`git status` 中被修改的文件必须全部属于本工单的「拥有文件」清单。改到他人拥有的文件即 FAIL（`type: SCOPE_VIOLATION`），这会破坏并行波次。
+5. **文件所有权**：当前本票 diff 中的文件必须全部属于本工单的「拥有文件」清单。
+   改到他人拥有的文件即 FAIL（`type: SCOPE_VIOLATION`）。分支中更早的获批工单
+   commit 不归因到本票，但其 issue↔commit 映射必须清楚。
 
 ## 附加检查（Scope / Security 越界）
 - diff 是否引入数据库迁移、生产访问、CI/CD 改动、`.gitignore` 改动 → 若越界且不在 In scope，FAIL（`type: SCOPE_VIOLATION`）。
 - 是否有凭证 / 密钥 / 真实域名 / 真实用户数据被写进代码、测试、文档 → FAIL（`type: SECURITY_VIOLATION`）。
-- 开发 agent 是否 commit / push / 建分支 / 改 git 历史（`git log origin/main..HEAD` 应为空）→ 若有，FAIL（`type: SECURITY_VIOLATION`）。
+- 当前分支必须是已分配的交付分支且不是 `main`。检查是否存在未经 Haisu 批准的
+  commit/push、额外分支或历史改写；若有，FAIL（`type: SECURITY_VIOLATION`）。
+  `git log origin/main..HEAD` 可以包含同一 Epic 更早的获批工单 commit，但必须满足
+  一票一个最终 commit、一个 commit 不混票；当前本票至多对应一个最终 commit。
 
 ## 验证命令（只读，可运行）
 ```bash
@@ -66,9 +74,12 @@ make verify                                                   # 复合闸
 .venv/bin/python -m pytest backend/tests/<新增测试>.py -q       # 本工单用例
 .venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q
 git status --porcelain                                        # 文件所有权核对
-git log origin/main..HEAD                                     # 应为空（agent 不得 commit）
+git branch --show-current                                     # 必须是已分配的交付分支，不能是 main
+git log --oneline origin/main..HEAD                           # 核对每票一个 commit 及授权/范围
+git diff                                                      # 未提交时只应包含当前本票
+# 或 git show <本票-commit>                                   # 已提交时核对本票唯一 commit
 ```
-所有 Exit Code 必须为 0（`git log` 应无输出）；任何非 0 即 FAIL。
+所有命令 Exit Code 必须为 0；分支、提交授权或范围不符合即 FAIL。
 
 ## 产出
 写入 `tasks/RND-<N>-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。

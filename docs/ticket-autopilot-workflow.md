@@ -1,7 +1,7 @@
 # Ticket Autopilot 工作流（本项目适配版）
 
-> 移植自 `AI-Operations` 项目的 Ticket Autopilot v0.1，按本项目的 `DEV_AGENT_RULES.md` v3 做了三处关键改造。
-> 目的：把一张 Linear 工单自动跑成「已通过确定性验证 + 独立 AI QA」的可提交变更，从而并行压缩交付时间。
+> 移植自 `AI-Operations` 项目的 Ticket Autopilot v0.1，按本项目的 `DEV_AGENT_RULES.md` v4 适配。
+> 目的：把每张 Linear 工单自动跑成「已通过确定性验证 + 独立 AI QA」的单一可追踪 commit，再把一个或多个相关工单 commit 组成 required CI 通过的可合并 PR。
 > 建立：2026-07-29 ｜ 权威操作定义，与 `DEV_AGENT_RULES.md` 冲突时以 `DEV_AGENT_RULES.md` 为准。
 
 ---
@@ -11,27 +11,40 @@
 ```
 Linear Ticket（九字段合同齐全）
   → 人工置 In Progress（唯一启动信号）
-  → 开发 agent 执行 dev-prompt（直接在 main 上，禁 commit）
+  → 进入已分配的非 main 交付 worktree/分支（新建时基于最新 origin/main）
+  → 开发 agent 执行 dev-prompt（当前工单未经批准禁 commit）
   → 确定性验证闸：make verify 全绿
   → 独立 QA agent 执行 qa-prompt（只读，不改任何文件）
   → 产出 qa-verdict.json（PASS / FAIL / BLOCKED）
   → FAIL 则有界修复（最多 2 轮，只修 findings）
-  → Haisu 人工 review → 批准 commit
+  → Haisu 人工 review → 批准本工单的唯一 commit
+  → 可选：同一 Epic 的下一张相关工单在此 worktree 串行重复上述闭环
+  → 批准 push 交付分支 → 创建/更新 PR（列出工单↔commit 映射）
+  → required CI 全绿 → 保留各工单 commit，人工 merge main
+  → deployable paths 的 merge 触发 CD（纯 docs/tasks merge 不部署）
 ```
 
-## 2. 与 AI-Operations 原版的三处差异（重要）
+## 2. 项目适配（重要）
 
 | 维度 | AI-Operations 原版 | 本项目 | 原因 |
 |---|---|---|---|
-| 隔离 | 每个 Run 独立 git worktree + `agent/*` 分支 | **直接在 `main` 上，靠「文件所有权错峰」实现并行** | `DEV_AGENT_RULES.md`：「Development is performed directly on the main branch. No task branches are created.」2026-07-29 Haisu 决策：不改此规则，改用错峰。 |
-| PR | Controller 自建 PR，人工 merge | **无 PR。Agent 不 commit、不 push** | `DEV_AGENT_RULES.md`：「Do not commit unless Haisu explicitly asks.」交付物 = 代码改动 + QA Summary，由 Haisu 审后提交。 |
+| 隔离 | 每个 Run 独立 git worktree + `agent/*` 分支 | **交付 worktree/分支可承载一张或同 Epic 多张相关工单；同一 worktree 内严格串行** | 一票仍对应一个 commit；并行工单使用不同 worktree，避免未提交改动互相污染。 |
+| PR | Controller 自建 PR，人工 merge | **Haisu 批准 commit/push；PR required CI；人工 merge** | 保留 owner gate，同时禁止直推 `main`。 |
 | 验证闸 | `pytest` | **`make verify`**（lint-diff → typecheck → build → test） | 本项目既有的复合验收入口，见 `Makefile`。 |
 
 其余原则原样保留：**确定性动作不委托 LLM**、**只依据证据推进状态**、**R0/R1 自动执行，R2/R3 转人工（`BLOCKED_NEEDS_HUMAN`）**、**一次性 Run，不实现 Resume**。
 
-## 3. 文件所有权错峰协议（本项目并行的核心机制）
+## 3. Worktree 隔离与文件所有权协议
 
-原版靠 worktree 隔离实现并行。本项目留在 `main`，因此必须靠**静态划分文件所有权**避免冲突：**任意两张可并行的工单，其写入文件集合必须无交集。**
+Worktree/branch 是交付容器，不是工单身份。它可以只承载一张工单，也可以承载一个
+同 Epic 交付批次中的多张相关工单；每张工单仍必须有且只有一个最终 commit，且单个
+commit 不得混票。同一 worktree 内的工单必须串行：上一票完成 QA 并形成获批 commit
+后，下一票才能开始，任何时刻不得同时存在多票的未提交改动。真正并行执行的工单
+必须使用不同 worktree/branch。
+
+文件所有权仍用于控制 scope、发现跨票依赖并降低 PR 合并冲突：任意两张计划并行
+执行或 merge 的工单，其写入文件集合原则上应无交集；有交集时必须显式串行或记录
+交接顺序。
 
 ### 3.1 R1 波次的所有权矩阵
 
@@ -87,13 +100,17 @@ RND-326 是**唯一**允许写共享文件的工单，它一次性把 4 个页�
 
 > **沿革（2026-07-29）**：RND-288 首轮 QA 因此判 FAIL 并建议"另开契约维护票"——**该建议是错的**（会让 main 长期红灯），但 QA 判 FAIL 本身是对的（`make verify` 确实红）。根因是本项目自己写的提示词漏了这条随附改动；反观更早的 WorkBuddy 提示词（如 `tasks/RND-311-dev-prompt.md` §2「契约测试三处同步」）**本来就写对了**，是新体系没继承这个约定。已回填进本节与 `tasks/_templates/dev-prompt-template.md`。
 
-### 3.4 ⚠️ `make verify` 在共享工作树上会包含他票的在途改动
+### 3.4 ⚠️ `make verify` 必须在分配给本票的交付 worktree 中运行
 
-本项目并行方案是「直接在 main 上、靠文件所有权错峰」（§2），因此**多个 agent 的未提交改动会同时存在于同一个工作树**。`make verify` 跑的是**整棵树**，不是单张票的增量。
+若该 worktree 只承载本票，分支基线通常是 `origin/main`。若它承载同 Epic 的多票，
+HEAD 可以包含之前已通过 QA 且获批的工单 commit，但 working tree 只能包含当前本票
+的未提交改动。`make verify` 验证的是当前交付分支的整体集成状态。
 
-后果：QA agent 看到的 `make verify` 失败**可能来自他票**。RND-288 首轮 QA 就把 `+3 routes`（含 `/admin/users`、`/admin/audit-logs`——那是 RND-327/328 的路由，不是 RND-288 的）全部归因给了 RND-288，而 RND-288 实际只新增 1 个路由。
-
-**QA agent 必须先分离归因**：`git status --porcelain` 列出全部改动文件，确认哪些属于被验工单；若失败的断言指向清单外文件带来的路由/契约变化，如实写进 `notes` 并**只**就本票应负责的部分判定，不要把他票的在途改动记在本票账上。
+QA 开始时必须确认当前分支不是 `main`，并用 `git status`、`git diff` 与
+`git log origin/main..HEAD` 分离「当前本票 diff」和「更早的获批工单 commit」。当前
+本票已提交时，改用 `git show <本票-commit>` 核对范围。若多票未提交改动混在一起、
+分支含未获批 commit，或当前票出现所有权清单外改动，判
+`BLOCKED_NEEDS_HUMAN`，不得把它们混作本票交付。
 
 ## 4. 风险分级与自动化边界
 
@@ -102,7 +119,7 @@ RND-326 是**唯一**允许写共享文件的工单，它一次性把 4 个页�
 | R0 | 纯文档 / 注释 | 自动执行 |
 | R1 | 小而隔离、可逆的代码改动（本波次绝大多数） | 自动执行 |
 | R2 | 触及鉴权、迁移、跨模块契约 | 转人工确认后执行 |
-| R3 | 触及生产数据 / 密钥 / CI / 部署 | **禁止 agent 执行**，`BLOCKED_NEEDS_HUMAN` |
+| R3 | 触及生产数据 / 密钥 / CI / 部署 | 必须由 Haisu 明确批准范围；未批准即 `BLOCKED_NEEDS_HUMAN`。批准修改仓库配置不等于批准生产操作。 |
 
 `RND-331`（含 Alembic migration + NOT NULL 收紧）按 **R2** 处理：迁移脚本需 Haisu 审阅后才可执行。
 
@@ -192,5 +209,9 @@ tasks/
 
 ## 9. 明确不做（v0.1 边界）
 
-不含：resume、webhook 触发、并行 Run 编排器、自动 merge、自动部署、自动迁移、自动挑下一张票。
-PR / commit / push 一律人工。凭证只从环境变量读取，永不写入任何配置文件或提示词。
+不含：resume、webhook 触发、并行 Run 编排器、自动 merge、自动迁移、自动挑下一张票。
+每票唯一 commit、push 交付分支、创建/合并 PR 均由 Haisu 授权或人工执行；Autopilot
+本身不直接触发部署。多票 PR 必须列出工单与 commit 的一一映射，并使用保留各工单
+commit 的 merge 策略，禁止 squash 成一个 commit。PR merge 到 `main` 且包含
+deployable paths 时由仓库 CD 自动部署；纯 docs/tasks merge 不部署。凭证只从环境
+变量读取，永不写入任何配置文件或提示词。

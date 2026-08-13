@@ -46,7 +46,7 @@ Nginx catch-all 修复的问题。此前将根地址 404 视为正常或将根�
 | F6 | 仓库**不包含受控的生产 Nginx 配置**（README 明示 "This repo does not currently contain a checked-in Nginx config"）；生产 nginx 由运维人工管理 | `static_site/company_homepage/README.md:59-63` |
 | F7 | 仓库**不包含**生产 `wecom-archive-365.service` systemd 单元；应用以 `uvicorn app.main:app --host 127.0.0.1 --port 8035` 运行，经 nginx 反代 | `docs/DEPLOYMENT.md:101-109` |
 | F8 | `ssl-renew` 子系统只覆盖 **media（Qiniu CDN）域名**的证书（`media.example.com`），**与归档域名无关**；归档域名 TLS 终止位置与证书签发负责人仓库无记录 | `docs/ssl-renewal/ARCHITECTURE.md:30-35` |
-| F9 | CI/CD：push 到 `main`（`docs/**`、`tasks/**`、`*.md` 除外）触发 test → deploy；deploy 通过 SSH 调 `scripts/deploy_server.sh`，含公网 health gate。**本 runbook 位于 `docs/` 下，不会触发部署** | `.github/workflows/deploy.yml:3-14, 241-297` |
+| F9 | CI/CD：PR / merge-group 先运行 required CI；通过并 merge 到 `main` 后，push 触发 CD-only deploy。deploy 通过 SSH 调 `scripts/deploy_server.sh`，含公网 health gate。`docs/**` merge 不触发 CD。 | `.github/workflows/ci.yml`, `.github/workflows/test.yml`, `.github/workflows/deploy.yml` |
 | F10 | `.env.example`（仓库根）中 `ARCHIVE_DOMAIN` 为空、`ADMIN_DOMAIN=localhost`，均为占位，不含真实域名 | `.env.example:64-70, 209-213` |
 
 **关键联动（Gate 2 顺序风险）**：F1+F9 意味着——一旦生产 `backend/.env` 的 `ARCHIVE_DOMAIN` 改为 `archive.crowntime.cn`，**下一次 CI/CD 部署的 public health gate 就会打新域名**。若新域名 DNS/TLS 未就绪，部署会红（不自动回滚，但阻塞后续部署）。因此必须先完成 Gate 1（新域名可达+TLS 就绪），再执行 Gate 2（改 `.env`）。

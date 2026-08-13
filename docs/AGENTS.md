@@ -13,7 +13,7 @@ Full working rules are in [DEV_AGENT_RULES.md](../DEV_AGENT_RULES.md).
 | Claude Code | Primary implementer | File read/write, Bash, git, test runner |
 | Codex | Secondary implementer / search | Code generation, grep/search, parallel subtasks |
 | Cline | IDE-embedded agent | Targeted in-file edits, autocomplete |
-| Haisu | Human owner | Final approval, commit/push to main, rule override |
+| Haisu | Human owner | Final approval, delivery-branch commit/push, PR merge, rule override |
 
 ---
 
@@ -44,7 +44,12 @@ Full working rules are in [DEV_AGENT_RULES.md](../DEV_AGENT_RULES.md).
 
 **Responsibilities:**
 - Read `DEV_AGENT_RULES.md` and the approved Devplan before starting.
-- Work directly on `main` by default; do not create task branches.
+- Run `git branch --show-current` before editing and stop if it reports `main`;
+  the task must be in an assigned non-`main` delivery worktree/branch.
+- Work only in the assigned delivery worktree and branch; never work directly
+  on `main` or create an extra branch without approval. A shared Epic delivery
+  worktree may contain several tickets, but only one ticket may have
+  uncommitted changes at a time.
 - Implement exactly what the Devplan specifies — no scope creep.
 - Run tests and linting before requesting commit approval.
 - Write the QA Summary in the issue (or commit message when Haisu approves a commit).
@@ -58,7 +63,8 @@ Full working rules are in [DEV_AGENT_RULES.md](../DEV_AGENT_RULES.md).
 - Add a comment on the issue: "Ready for ChatGPT review."
 
 **Does not:**
-- Push to `main` without Haisu approval.
+- Commit or push the delivery branch without Haisu approval.
+- Push directly to `main` under any circumstances.
 - Change unrelated files.
 - Commit secrets.
 - Modify CI/CD pipelines without explicit approval.
@@ -98,12 +104,13 @@ Full working rules are in [DEV_AGENT_RULES.md](../DEV_AGENT_RULES.md).
 
 ## Haisu
 
-**When invoked:** At Devplan approval and commit approval.
+**When invoked:** At Devplan approval, commit/push approval, and PR merge.
 
 **Responsibilities:**
 - Approves or rejects the Devplan before implementation starts.
 - Performs final human review of every change.
-- The sole authority to approve commits and pushes to `main`.
+- The sole authority to approve each ticket commit, approve pushes to delivery
+  branches, and merge pull requests into `main`.
 - Can override any rule with explicit written justification.
 
 **Does not:**
@@ -132,7 +139,7 @@ ChatGPT writes Devplan
     │
 Haisu approves Devplan
     │
-Claude Code (or Codex) implements directly on main
+Claude Code (or Codex) implements one ticket in an assigned delivery worktree/branch
     │
 Claude Code writes QA Summary
     │
@@ -140,7 +147,15 @@ ChatGPT reviews the change
     │
 ChatGPT approves
     │
-Haisu approves commit/push to main
+Haisu approves the ticket's single commit + delivery-branch push
+    │
+Optional: repeat the ticket cycle for another related ticket in the same Epic
+    │
+Pull request runs required CI
+    │
+Haisu merges to main
+    │
+CD deploys the merged main commit when deployable paths changed
 ```
 
 ---
@@ -152,9 +167,9 @@ Haisu approves commit/push to main
 | Scope is unclear after reading Devplan | Claude Code → ChatGPT comment |
 | Implementation reveals new risk not in plan | Claude Code → Haisu comment, pause work |
 | Secret accidentally staged | Any agent → Haisu immediately, do not push |
-| Merge conflict on `main` | Claude Code resolves, ChatGPT reviews diff |
+| Delivery branch or PR merge conflict | Original implementing agent resolves, ChatGPT reviews diff |
 | Test failure that cannot be fixed in scope | Claude Code → new issue, block current change |
 
 ---
 
-_Last updated: 2026-06-26 — RND-73_
+_Last updated: 2026-08-14 — PR-first delivery governance_

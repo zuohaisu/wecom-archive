@@ -17,7 +17,7 @@ _DB_AVAILABLE = bool(os.environ.get("DATABASE_URL", "").strip())
 （见 `backend/tests/test_rnd293_audit_log.py:31,58`，全仓 32 个测试文件同此模式。）
 
 - `make test` **不设** `DATABASE_URL` → 这些用例自动 skip。
-- CI 的 PG job 设（`.github/workflows/deploy.yml:134`），offline job 故意不设（`:121-126`）。
+- PR CI 的 PG job 设（`.github/workflows/test.yml`），offline job 故意不设。
 - 各开发机 `.env` 里的 `DATABASE_URL` 通常指向**本机开发库**（有数据），
   **不是**测试库。
 

@@ -1,4 +1,4 @@
-# DEV_AGENT_RULES v3 - Crowntime WeCom Archive
+# DEV_AGENT_RULES v4 - Crowntime WeCom Archive
 
 Binding working rules for every AI agent and human contributor on this project.
 Deviation requires explicit approval from Haisu.
@@ -11,16 +11,22 @@ This project uses AI agents as scoped contributors, not autonomous owners.
 
 Core rules:
 
-- One Linear Issue = One Implementation Conversation.
+- One Linear Issue = One Implementation Conversation = One Final Commit.
 - Every implementation starts from an approved issue scope.
-- Development is performed directly on the main branch.
-- No task branches are created; Haisu may request a branch explicitly only in rare, high-risk cases.
+- Every implementation runs in an assigned non-`main` delivery worktree and
+  branch. A delivery worktree/branch may contain one issue or a serialized set
+  of related issues, normally from the same Epic.
+- Every change reaches `main` through a pull request. Direct development on,
+  commits to, and pushes to `main` are prohibited.
 - Every agent must preserve project safety, traceability, and reviewability.
 - The smallest correct change is preferred over broad refactors.
 - The original implementing agent owns implementation fixes within the same issue.
 - Haisu is Product Owner and final scope authority.
 
-The default unit of work is the Linear issue. Do not mix multiple issues into one implementation conversation or one commit.
+The default scope and commit unit is the Linear issue. Do not mix multiple issues
+into one implementation conversation or commit. A worktree, branch, and pull
+request are delivery containers and may group related issue commits when that
+grouping remains coherent and reviewable.
 
 ---
 
@@ -33,16 +39,31 @@ Linear Issue
 Planning (ChatGPT)
   |
   v
+Assigned delivery worktree + non-main branch
+  |
+  v
 Implementation (Claude Code or Codex)
   |
   v
 Codex QA
   |
   v
-Commit
+Approved issue commit
   |
   v
-Push origin/main
+Optional: repeat implementation + QA + commit for the next related issue
+  |
+  v
+Push delivery branch
+  |
+  v
+Pull Request + required CI
+  |
+  v
+Human merge to main
+  |
+  v
+CD
 ```
 
 Workflow rules:
@@ -50,9 +71,18 @@ Workflow rules:
 - Start from a Linear issue before implementation.
 - Keep the AI conversation tied to the issue being worked.
 - Plan in ChatGPT when scope, architecture, or sequencing needs clarification.
-- Implement directly on main.
+- Before changing files, run `git branch --show-current` and confirm the branch
+  is the assigned delivery branch, not `main`. If it is `main`, stop and move
+  the task to a non-`main` worktree/branch before implementation.
+- Implement only in the assigned delivery worktree and branch.
+- When a worktree groups multiple related issues, execute them serially. Finish
+  QA and obtain approval for the current issue's commit before starting the next
+  issue; never allow uncommitted changes from multiple issues to coexist.
 - Use Claude Code as the primary implementation agent unless Haisu assigns Codex.
 - Run Codex QA before committing.
+- After Haisu approves the issue commit and any push, create or update a focused
+  pull request to `main`. The PR may contain one or more related issue commits;
+  do not merge until required CI and human review pass.
 - Use the original implementing agent for implementation fixes unless Haisu explicitly redirects the work.
 - Do not expand scope during implementation without explicit approval.
 
@@ -99,7 +129,8 @@ Primary role: main implementation agent.
 Responsibilities:
 
 - Implement approved Linear issue scope.
-- Work directly on main. Do not create branches for task work.
+- Work only in the assigned delivery worktree and branch. Do not work on `main`
+  or create an additional branch without approval.
 - Keep changes focused and reviewable.
 - Run relevant tests, linting, and formatting checks.
 - Handle implementation fixes for its own work.
@@ -160,7 +191,7 @@ Haisu is the final product owner and scope authority.
 |---|---|---|
 | Project planning | ChatGPT | Long-lived planning context across the project |
 | Product or architecture framing | ChatGPT | Use before implementation when scope is unclear |
-| Main feature implementation | Claude Code | Work directly on main |
+| Main feature implementation | Claude Code | Work in the assigned non-`main` delivery worktree and branch |
 | Focused code implementation | Codex | Best for scoped repo edits and verification |
 | QA and code review | Codex | Primary reviewer before commit |
 | Implementation fixes | Original implementing agent | Keep fixes in the same issue conversation |
@@ -178,25 +209,75 @@ Default workflow:
 Linear Issue
   |
   v
-Implement on main
+Assigned delivery worktree + non-main branch
+  |
+  v
+Implement
   |
   v
 Codex QA
   |
   v
-Commit
+Approved issue commit
   |
   v
-Push origin/main
+Optional: repeat for the next related issue
+  |
+  v
+Push delivery branch
+  |
+  v
+Pull Request + required CI
+  |
+  v
+Human merge to main
+  |
+  v
+CD
 ```
 
 Rules:
 
-- Development happens directly on main. No task branches are created.
-- Keep each implementation tied to one Linear issue.
+- A delivery worktree/branch is based on an up-to-date `origin/main` and may
+  serve one issue or a coherent group of related issues, normally from one Epic.
+- Parallel issue work uses separate worktrees/branches. Multiple issues in one
+  worktree/branch are strictly serialized: the earlier issue must complete QA
+  and have its commit approved before the next issue begins.
+- At preflight and again before any approved commit/push, verify that
+  `git branch --show-current` is the assigned delivery branch and is not `main`.
+- Keep each implementation conversation and every final commit tied to exactly
+  one Linear issue. Each issue has exactly one final commit, and no commit may
+  combine changes from multiple issues.
 - Run Codex QA before committing.
-- Do not push `origin/main` unless Haisu explicitly asks.
-- Do not create feature branches for task work. Haisu may request a branch explicitly only in rare, high-risk cases.
+- Commits and pushes still require Haisu's explicit approval.
+- Push only the assigned delivery branch. Never commit to or push `main`
+  directly.
+- Open one focused pull request from the delivery branch to `main`. A PR may
+  contain multiple related issue commits; its description must list the
+  issue-to-commit mapping. Required CI and human review must pass before merge.
+- Preserve ticket-level commits when merging. Never squash a multi-issue PR
+  into one commit.
+- Merge is a human action. Agents must not merge unless Haisu explicitly asks.
+- A merge that changes deployable paths on `main` triggers CD; docs/task-only
+  merges are ignored by CD. CD does not rerun the complete CI suite, so GitHub's
+  single-maintainer no-direct-push discipline is currently a safety boundary.
+  Platform-enforced protection must replace that manual boundary before adding
+  another maintainer.
+
+Required `main` policy:
+
+- Require a pull request before merging.
+- Treat the repository CI check as required before merging.
+- Require the branch to be up to date, or use Merge Queue.
+- Do not allow direct pushes or bypass of the pull-request and CI requirements.
+- If Merge Queue is enabled, keep the `merge_group` trigger in `ci.yml`.
+
+Current enforcement note: this private repository's present GitHub plan does
+not enforce Rulesets or classic branch protection. Haisu is the sole human
+maintainer, and every development agent is bound by the repo-root `AGENTS.md`
+and this document, including the non-`main` preflight above. Before granting
+another human merge/push authority, move the repository to a plan/account that
+can enforce these settings and enable them first.
 
 ---
 
@@ -295,7 +376,10 @@ If a secret is accidentally committed:
 
 ## Commit Rules
 
-Do not commit unless Haisu explicitly asks.
+Do not commit unless Haisu explicitly asks. An approved commit must be created
+on the assigned delivery branch, never on `main`. Each Linear issue must be
+represented by exactly one final commit, and each commit must reference only
+one issue.
 
 When commits are approved, use this format:
 
@@ -304,7 +388,7 @@ When commits are approved, use this format:
 
 [optional body: what changed and why]
 
-[optional footer: issue reference]
+[required issue reference: exactly one Linear issue]
 ```
 
 Allowed types:
@@ -321,9 +405,14 @@ Rules:
 
 - Use imperative mood.
 - Keep the subject line concise.
-- Reference the Linear issue in the commit when practical.
+- Reference exactly one Linear issue in every ticket commit.
 - Do not create WIP commits.
 - Do not include unrelated changes in a commit.
+- If review or CI requires follow-up changes, the mergeable PR history must be
+  consolidated back to one final commit for that issue. Any amend, rebase, or
+  force-push still requires Haisu's explicit approval.
+- Every commit that reaches `main` must arrive by merging a pull request whose
+  required CI passed.
 
 ---
 
@@ -380,8 +469,9 @@ If QA fails, do not commit until the issue is fixed or Haisu explicitly accepts 
 
 AI agents must not do the following without explicit Haisu approval:
 
-- Commit changes.
-- Push `origin/main`.
+- Commit or push a delivery branch.
+- Push any commit directly to `origin/main` (**never** as an ordinary delivery
+  approval; changing this requires an explicit governance override).
 - Force-push.
 - Rewrite git history.
 - Modify CI/CD configuration.
@@ -413,4 +503,4 @@ If the correct action is unclear, stop and ask Haisu before changing files.
 
 ---
 
-_Last updated: 2026-06-27 - RND-73_
+_Last updated: 2026-08-14 - PR-first delivery governance_
