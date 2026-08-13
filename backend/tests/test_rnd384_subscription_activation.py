@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import pytest
@@ -162,6 +162,35 @@ def test_active_term_renews_from_current_end_and_preserves_original_start(
     with factory() as db:
         assert db.query(Subscription).count() == 1
         assert db.query(SubscriptionHistory).count() == 2
+        assert db.query(AuditLog).filter_by(
+            action=AuditAction.SUBSCRIPTION_RENEWED
+        ).count() == 1
+
+
+def test_effective_trial_payment_renews_from_trial_end(factory) -> None:
+    trial_start = NOW - timedelta(days=3)
+    trial_end = NOW + timedelta(days=12)
+    with factory() as db:
+        assign_subscription(
+            db,
+            tenant_id="tenant-a",
+            plan_code=ANNUAL_PLAN_CODE,
+            status="trial",
+            starts_at=trial_start,
+            ends_at=trial_end,
+            source="self_service_trial",
+        )
+        db.commit()
+
+    renewed = activate_or_renew_subscription(factory, _command())
+
+    assert renewed.activation_kind == "renewal"
+    assert renewed.starts_at == trial_start
+    assert renewed.ends_at == datetime(2027, 8, 25, 8, 0, tzinfo=timezone.utc)
+    assert renewed.renewal_count == 1
+    with factory() as db:
+        subscription = db.scalar(select(Subscription))
+        assert subscription is not None and subscription.status == "active"
         assert db.query(AuditLog).filter_by(
             action=AuditAction.SUBSCRIPTION_RENEWED
         ).count() == 1

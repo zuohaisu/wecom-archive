@@ -523,9 +523,9 @@ def test_password_mode_still_has_no_wecom_link_and_wecom_mode_has_no_password_fi
 
 
 # ---------------------------------------------------------------------------
-# QA follow-up (2026-07-28) — the login page's marketing/legal copy (brand-
-# slot hint, the 3 compliance selling points, both disclaimers, the hero
-# title, the timezone note, and <title>) previously rendered as hardcoded
+# QA follow-up (2026-07-28) — the login page's marketing/legal copy (the 3
+# compliance selling points, both disclaimers, the hero title, the timezone
+# note, and <title>) previously rendered as hardcoded
 # zh-CN text baked into templates/login.html, so switching locale left the
 # form translated but the rest of the page stuck in Chinese. All of it now
 # goes through data-i18n, same as the rest of the page.
@@ -535,7 +535,6 @@ _LOGIN_MARKETING_I18N_KEYS = [
     "login.pageTitle",
     "login.heroTitle",
     "login.timezoneNote",
-    "login.brandSlotPlaceholder",
     "login.point1Title",
     "login.point1Body",
     "login.point2Title",
@@ -551,9 +550,7 @@ _LOGIN_MARKETING_I18N_KEYS = [
 
 @pytest.mark.parametrize("mode", ["password", "wecom"])
 def test_login_marketing_and_legal_copy_all_use_i18n_keys(mode: str) -> None:
-    """Every string flagged in the 2026-07-28 QA blocker (brand-slot hint,
-    the 3 selling points, both disclaimers, hero title, timezone note,
-    <title>) must carry data-i18n — not just login.subtitle."""
+    """Every marketing/legal string must carry data-i18n."""
     from app.routers.auth import _login_page
 
     html = _login_page(mode=mode)
@@ -570,7 +567,6 @@ def test_login_marketing_and_legal_copy_all_use_i18n_keys(mode: str) -> None:
                 "login.pageTitle": "登录 — Crowntime WeCom Archive",
                 "login.heroTitle": "登录会话存档控制台",
                 "login.timezoneNote": "时间均为北京时间 (UTC+8)",
-                "login.brandSlotPlaceholder": "白标插槽 · 租户可上传自有标识（后续能力，当前为占位）",
                 "login.point1Title": "合规留存",
                 "login.point2Title": "可追溯审阅",
                 "login.point3Title": "最小授权",
@@ -583,7 +579,6 @@ def test_login_marketing_and_legal_copy_all_use_i18n_keys(mode: str) -> None:
                 "login.pageTitle": "登入 — Crowntime WeCom Archive",
                 "login.heroTitle": "登入會話存檔控制台",
                 "login.timezoneNote": "時間均為北京時間 (UTC+8)",
-                "login.brandSlotPlaceholder": "白標插槽 · 租戶可上傳自有標識（後續能力，當前為佔位）",
                 "login.point1Title": "合規留存",
                 "login.point2Title": "可追溯審閱",
                 "login.point3Title": "最小授權",
@@ -596,10 +591,6 @@ def test_login_marketing_and_legal_copy_all_use_i18n_keys(mode: str) -> None:
                 "login.pageTitle": "Login — Crowntime WeCom Archive",
                 "login.heroTitle": "Log in to the Conversation Archive Console",
                 "login.timezoneNote": "All times shown in Beijing Time (UTC+8)",
-                "login.brandSlotPlaceholder": (
-                    "White-label slot · tenants will be able to upload their "
-                    "own logo (upcoming capability, placeholder for now)"
-                ),
                 "login.point1Title": "Compliance retention",
                 "login.point2Title": "Traceable review",
                 "login.point3Title": "Least privilege",
