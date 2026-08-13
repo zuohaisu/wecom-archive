@@ -37,7 +37,22 @@ def is_initialized(db: Session) -> bool:
         value = get_bootstrap_config_value(
             db, "admin_password_hash", get_auth_settings().admin_password_hash
         )
-        return bool(value.strip())
+        if value.strip():
+            return True
+        # RND-386: deployments that created real per-user accounts are
+        # initialized even after the legacy env bootstrap credential was
+        # removed. Without this, removing ADMIN_PASSWORD_HASH from the env
+        # would re-open the public bootstrap endpoint (privilege escalation).
+        return (
+            db.query(AdminUser)
+            .filter(
+                AdminUser.status == "active",
+                AdminUser.email.isnot(None),
+                AdminUser.password_hash.isnot(None),
+            )
+            .first()
+            is not None
+        )
     return all((resolve(db, key) or "").strip() for key in _WECOM_INITIALIZATION_KEYS)
 
 

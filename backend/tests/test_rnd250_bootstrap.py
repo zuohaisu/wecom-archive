@@ -1,7 +1,11 @@
-"""Acceptance coverage for RND-250 first-run initialization."""
+"""Acceptance coverage for RND-250 first-run initialization, plus
+env-bootstrap retirement (RND-386): password login must work with only
+per-user accounts and bootstrap must stay closed once real users exist."""
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Generator
 
@@ -225,3 +229,99 @@ def test_credentials_are_not_returned_by_settings_api(
     }
     assert "admin_username" not in keys
     assert "admin_password_hash" not in keys
+
+
+def _add_real_user(
+    factory: sessionmaker,
+    *,
+    email: str,
+    password: str,
+) -> str:
+    """Insert an active per-user account with a password hash; return its id."""
+    db = factory()
+    try:
+        user = AdminUser(
+            id=str(uuid.uuid4()),
+            tenant_id="tenant-default",
+            wecom_user_id=f"real-{uuid.uuid4()}",
+            name="Real user",
+            email=email,
+            password_hash=hash_password(password),
+            role="compliance",
+            status="active",
+            last_login_at=datetime.now(timezone.utc),
+        )
+        db.add(user)
+        db.commit()
+        return user.id
+    finally:
+        db.close()
+
+
+def test_is_initialized_true_with_real_user_without_env_bootstrap(
+    bootstrap_client: tuple[TestClient, sessionmaker],
+) -> None:
+    """RND-386: after env bootstrap retirement, a real per-user account keeps
+    the deployment initialized so bootstrap cannot be re-opened."""
+    client, factory = bootstrap_client
+    user_id = _add_real_user(factory, email="real@example.com", password="real-secret")
+    db = factory()
+    try:
+        assert is_initialized(db) is True
+    finally:
+        db.close()
+
+    # Bootstrap must stay locked — re-opening it is a privilege escalation.
+    response = client.post(
+        "/api/admin/settings/bootstrap",
+        json={"admin_username": "attacker", "admin_password": "attacker-password"},
+    )
+    assert response.status_code == 403
+
+    db = factory()
+    try:
+        db.query(AdminUser).filter(AdminUser.id == user_id).delete()
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_password_login_with_real_user_without_env_bootstrap(
+    bootstrap_client: tuple[TestClient, sessionmaker],
+) -> None:
+    """RND-386: password login succeeds for a real per-user account when the
+    env bootstrap credential pair has been removed."""
+    client, factory = bootstrap_client
+    user_id = _add_real_user(factory, email="real@example.com", password="real-secret")
+
+    response = client.post(
+        "/api/auth/password/login",
+        json={"username": "real@example.com", "password": "real-secret"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"logged_in": True}
+    assert "session_id" in response.headers["set-cookie"]
+
+    db = factory()
+    try:
+        db.query(AdminSession).filter(AdminSession.admin_user_id == user_id).delete()
+        db.query(AdminUser).filter(AdminUser.id == user_id).delete()
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_password_login_without_env_bootstrap_rejects_unknown_credentials(
+    bootstrap_client: tuple[TestClient, sessionmaker],
+) -> None:
+    """RND-386: without env bootstrap and without a matching per-user account,
+    login fails closed with 401 (no account-enumeration oracle)."""
+    client, _factory = bootstrap_client
+
+    response = client.post(
+        "/api/auth/password/login",
+        json={"username": "admin", "password": "123456"},
+    )
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid credentials"}
+

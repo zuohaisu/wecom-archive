@@ -743,7 +743,7 @@ def test_wecom_callback_route_still_reachable_in_wecom_mode(client) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_password_login_missing_config_returns_500(client) -> None:
+def test_password_login_missing_config_fails_closed_401(client) -> None:
     from app.db.session import get_db
     from app.main import app
 
@@ -762,7 +762,11 @@ def test_password_login_missing_config_returns_500(client) -> None:
     finally:
         app.dependency_overrides[get_db] = _mock_db_no_session
 
-    assert resp.status_code == 500
+    # RND-386: env bootstrap credentials are optional once real per-user
+    # accounts exist. With neither env bootstrap nor a matching per-user
+    # account, login fails closed with 401 (indistinguishable from a wrong
+    # password — no configuration state is leaked).
+    assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

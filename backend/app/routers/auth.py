@@ -853,9 +853,11 @@ def password_login(
     admin_username = __import__("app.config.guard", fromlist=["get_bootstrap_config_value"]).get_bootstrap_config_value(db, "admin_username", auth_settings.admin_username).strip()
     admin_hash = __import__("app.config.guard", fromlist=["get_bootstrap_config_value"]).get_bootstrap_config_value(db, "admin_password_hash", auth_settings.admin_password_hash).strip()
 
-    if not admin_username or not admin_hash:
-        logger.error("password_login: ADMIN_USERNAME or ADMIN_PASSWORD_HASH not configured")
-        raise HTTPException(status_code=500, detail="Server configuration error")
+    # Legacy env bootstrap credentials are OPTIONAL once real per-user
+    # accounts exist (RND-386). An empty pair simply disables the env
+    # fallback below; login then relies solely on per-user accounts.
+    # Fresh deployments without either path still fail closed with 401 via
+    # the shared invalid-credentials path (no account-enumeration oracle).
 
     # Resolve default tenant — bound to slug='default' created by RND-111 bootstrap.
     # Must NEVER fall back to any other tenant: password-mode sessions are only
