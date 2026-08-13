@@ -54,6 +54,7 @@ class AuditAction:
     PLATFORM_TENANT_ACTIVATED = "platform.tenant_activated"
     PLATFORM_TENANT_DEACTIVATED = "platform.tenant_deactivated"
     ORGANIZATION_PROVISIONED = "organization.provisioned"
+    SUBSCRIPTION_TRIAL_STARTED = "subscription.trial_started"
     SUBSCRIPTION_ACTIVATED = "subscription.activated"
     SUBSCRIPTION_RENEWED = "subscription.renewed"
     DECRYPT_COMPLETED = "decrypt.completed"
@@ -107,6 +108,7 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.PLATFORM_TENANT_ACTIVATED: (AuditCategory.SECURITY, AuditObjectType.TENANT),
     AuditAction.PLATFORM_TENANT_DEACTIVATED: (AuditCategory.SECURITY, AuditObjectType.TENANT),
     AuditAction.ORGANIZATION_PROVISIONED: (AuditCategory.ACCOUNT, AuditObjectType.TENANT),
+    AuditAction.SUBSCRIPTION_TRIAL_STARTED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.SUBSCRIPTION_ACTIVATED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.SUBSCRIPTION_RENEWED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.DECRYPT_COMPLETED: (AuditCategory.SYSTEM, AuditObjectType.KEY_VERSION),
