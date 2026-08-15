@@ -1123,6 +1123,9 @@ class ExportJob(Base):
     status = Column(String(16), nullable=False, default="queued")
     storage_backend = Column(String(32), nullable=True)
     storage_ref = Column(Text, nullable=True)
+    provider_operation_id = Column(String(128), nullable=True)
+    provider_index_ref = Column(Text, nullable=True)
+    provider_manifest_ref = Column(Text, nullable=True)
     file_size = Column(BigInteger, nullable=True)
     checksum_sha256 = Column(String(64), nullable=True)
     requested_at = Column(

@@ -458,11 +458,13 @@ owned by `tenant_id` and `requested_by`; no recipient email or download bearer
 token is persisted. `status` is one of `queued`, `processing`, `ready`,
 `failed`, or `expired`. A processing lease and attempt counter make generation
 retryable after worker termination. `storage_backend` and `storage_ref` use the
-same per-object provider boundary as archived media, while `file_size` and
-`checksum_sha256` describe the completed ZIP. `expires_at` is set to completion
-time plus seven days and is never extended by notification retry. Notification
-state and attempts are independent of generation so email retry cannot
-regenerate the archive.
+same per-object provider boundary as archived media, while `file_size` describes
+the completed ZIP. Qiniu jobs persist a provider operation ID plus temporary
+private index/manifest references until Dora reports success or cleanup
+finishes; no final ZIP is staged on the application host. `expires_at` is set to
+completion time plus seven days and is never extended by notification retry.
+Notification state and attempts are independent of generation so email retry
+cannot regenerate the archive.
 
 ### `export_monthly_usage`
 

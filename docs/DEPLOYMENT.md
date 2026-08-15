@@ -218,14 +218,24 @@ sudo systemctl enable --now wecom-export-jobs.timer
 sudo systemctl status wecom-export-jobs.timer --no-pager
 ```
 
-Before enabling this timer, apply Alembic migrations `0046` and `0047`, set a
+Before enabling this timer, apply Alembic migrations through `0050`, set a
 public HTTPS `ADMIN_DOMAIN`, and configure real SMTP delivery (`SMTP_HOST` and
 `SMTP_FROM`; plus credentials where the relay requires them). Export requests
 are rejected when either the requesting Owner email or SMTP transport is not
 configured. `EXPORT_JOB_BATCH_SIZE` defaults to `1` and is capped at `5`; keep
-it at `1` on the supported 2C2G host. The worker uses the configured media
-storage provider for the private ZIP and temporary disk only while assembling
-it. No production unit is installed or enabled by repository changes alone.
+it at `1` on the supported 2C2G host. Full-media ZIP jobs require the Qiniu
+provider and a bucket region supported by Qiniu `qhash`: the worker verifies
+each source's size and SHA-256 through the small server-side `qhash/sha256`
+response, writes only a private index and manifest, then asks Qiniu Dora to
+assemble the ZIP in the bucket. It never stages the final ZIP or its source
+media on the application host.
+
+Before deploying this change, inspect `systemctl cat wecom-export-jobs.service`
+and remove any worker-only `MEDIA_STORAGE_PROVIDER=local` override left by the
+RND-360 incident mitigation. The effective worker environment must select
+`qiniu_kodo`; otherwise new media-export jobs fail closed instead of creating a
+local final ZIP. No production unit is installed, enabled, or changed by
+repository changes alone.
 
 RND-343 defaults are intentionally staggered: archive reconciliation at
 `:00/:30`, generic media reconciliation at `:15/:45`. Callback → archive

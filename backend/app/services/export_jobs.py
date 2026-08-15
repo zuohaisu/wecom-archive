@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import csv
-import hashlib
 import io
 import re
-import tempfile
 import uuid
-import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,6 +36,12 @@ EXPORT_RETENTION_DAYS = 7
 EXPORT_LEASE_HOURS = 6
 MAX_GENERATION_ATTEMPTS = 3
 MAX_NOTIFICATION_ATTEMPTS = 5
+# Dora fetches sources asynchronously.  Keep the signed private URLs valid
+# through ordinary queueing and a large ZIP build without exposing them to
+# clients or storing them outside the short-lived private index object.
+EXPORT_SOURCE_URL_TTL_SECONDS = 24 * 60 * 60
+MAX_QINIU_EXPORT_OBJECTS = 3000
+MAX_QINIU_EXPORT_BYTES = 45_000_000_000
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 _SAFE_SUFFIX = re.compile(r"^\.[A-Za-z0-9]{1,10}$")
 
@@ -55,11 +59,14 @@ class ExportMaintenanceSummary:
 
 
 @dataclass(frozen=True)
-class _Artifact:
-    storage_backend: str
-    storage_ref: str
-    file_size: int
-    checksum_sha256: str
+class _QiniuZipSubmission:
+    operation_id: str
+    index_ref: str
+    manifest_ref: str
+
+
+class ExportSourceIneligibleError(ValueError):
+    """A requested media export cannot be built safely by Qiniu mkzip."""
 
 
 def _utc(value: datetime | None = None) -> datetime:
@@ -162,14 +169,6 @@ def _safe_suffix(storage_ref: str) -> str:
     return suffix if _SAFE_SUFFIX.fullmatch(suffix) else ".bin"
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _media_rows(db: Session, tenant_id: str):
     return db.execute(
         select(
@@ -190,100 +189,277 @@ def _media_rows(db: Session, tenant_id: str):
     ).all()
 
 
-def _source_path_for_row(
-    row, tenant_id: str, scratch: Path
-) -> tuple[Path, str, int, bool]:
-    backend, storage_ref = resolve_effective_storage_reference(
-        row.storage_backend,
-        row.storage_ref,
-        row.local_path,
+def _qiniu_export_refs(job: ExportJob) -> tuple[str, str, str]:
+    """Return deterministic private refs for one Qiniu export job."""
+    output_ref = build_tenant_media_key(job.tenant_id, "exports", job.id, suffix=".zip")
+    index_ref = build_tenant_media_key(
+        job.tenant_id, "export-work", f"{job.id}-index", suffix=".txt"
     )
-    if not backend or not storage_ref:
-        raise MediaObjectNotFound("downloaded media has no storage reference")
-    if backend == "qiniu_kodo" and not object_key_tenant_prefix_matches(
-        storage_ref, tenant_id
-    ):
-        raise MediaStorageConfigurationError("media object tenant prefix mismatch")
-
-    provider = get_media_storage_provider_for_backend(backend)
-    local_path = provider.get_local_path(storage_ref) if provider.supports_local_path() else None
-    if local_path is not None:
-        actual_size = local_path.stat().st_size
-        return local_path, storage_ref, actual_size, False
-
-    scratch_path = scratch / f"source-{row.id}"
-    actual_size = provider.copy_to_file(storage_ref, scratch_path)
-    return scratch_path, storage_ref, actual_size, True
+    manifest_ref = build_tenant_media_key(
+        job.tenant_id, "export-work", f"{job.id}-manifest", suffix=".csv"
+    )
+    return output_ref, index_ref, manifest_ref
 
 
-def _build_media_zip(db: Session, job: ExportJob) -> _Artifact:
-    job_id = job.id
-    tenant_id = job.tenant_id
-    rows = _media_rows(db, tenant_id)
-    # The remaining work is storage/network I/O.  Do not keep a database read
-    # transaction open while a multi-gigabyte archive is assembled.
+def _qiniu_export_provider():
+    """Select the only provider permitted to create full-media exports."""
+    if get_configured_write_backend_name() != "qiniu_kodo":
+        raise ExportSourceIneligibleError("export_qiniu_storage_required")
+    provider = get_default_media_storage_provider()
+    # Keep the Qiniu SDK import lazy: a local-media deployment must not need
+    # the provider module merely to import this service.
+    from app.qiniu_storage import QiniuStorageProvider
+
+    if not isinstance(provider, QiniuStorageProvider):
+        raise ExportSourceIneligibleError("export_qiniu_storage_required")
+    return provider
+
+
+def _qiniu_export_provider_for_existing_job():
+    """Resolve Qiniu explicitly from a persisted export job."""
+    provider = get_media_storage_provider_for_backend("qiniu_kodo")
+    from app.qiniu_storage import QiniuStorageProvider
+
+    if not isinstance(provider, QiniuStorageProvider):
+        raise MediaStorageConfigurationError("qiniu export provider unavailable")
+    return provider
+
+
+def _urlsafe_base64(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii")
+
+
+def _qiniu_index_line(source_url: str, archive_path: str) -> str:
+    """Make one mode-4 index entry without ever logging its signed URL."""
+    return f"/url/{_urlsafe_base64(source_url)}/alias/{_urlsafe_base64(archive_path)}"
+
+
+def _build_qiniu_manifest_and_index(db: Session, job: ExportJob):
+    """Validate the exact export set and create its private Qiniu index data.
+
+    Qiniu Dora will read only the signed URLs generated here.  Source object
+    keys are never written into the ZIP manifest or returned to callers.
+    """
+    provider = _qiniu_export_provider()
+    rows = _media_rows(db, job.tenant_id)
+    # All remaining work is remote I/O.  Do not retain a database read
+    # transaction while validating every source or submitting Dora work.
     db.rollback()
-    with tempfile.TemporaryDirectory(prefix="wecom-media-export-") as temp_dir:
-        temp_root = Path(temp_dir)
-        zip_path = temp_root / f"{job.id}.zip"
-        manifest_rows: list[list[str | int]] = []
-        with zipfile.ZipFile(
-            zip_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True
-        ) as archive:
-            for row in rows:
-                source_path, storage_ref, actual_size, is_temporary = _source_path_for_row(
-                    row, tenant_id, temp_root
-                )
-                expected_size = int(row.file_size or 0)
-                if actual_size != expected_size:
-                    raise MediaStorageOperationError("media size verification failed")
-                checksum = _sha256_file(source_path)
-                if row.checksum_sha256 and checksum != row.checksum_sha256:
-                    raise MediaStorageOperationError("media checksum verification failed")
+    if len(rows) > MAX_QINIU_EXPORT_OBJECTS:
+        raise ExportSourceIneligibleError("export_qiniu_object_limit")
 
-                category = _safe_segment(row.file_type, "other")
-                arcname = (
-                    f"media/{category}/{row.archive_message_id}-{row.id}"
-                    f"{_safe_suffix(storage_ref)}"
-                )
-                archive.write(source_path, arcname=arcname)
-                manifest_rows.append(
-                    [arcname, row.archive_message_id, category, actual_size, checksum]
-                )
-                if is_temporary:
-                    source_path.unlink(missing_ok=True)
-
-            manifest = io.StringIO(newline="")
-            writer = csv.writer(manifest)
-            writer.writerow(
-                ["archive_path", "message_id", "media_type", "bytes", "sha256"]
-            )
-            writer.writerows(manifest_rows)
-            archive.writestr("manifest.csv", manifest.getvalue().encode("utf-8-sig"))
-
-        artifact_size = zip_path.stat().st_size
-        artifact_checksum = _sha256_file(zip_path)
-        backend = get_configured_write_backend_name()
-        provider = get_default_media_storage_provider()
-        target_ref = build_tenant_media_key(
-            tenant_id, "exports", job_id, suffix=".zip"
+    total_bytes = 0
+    manifest_rows: list[list[str | int]] = []
+    index_lines: list[str] = []
+    for row in rows:
+        backend, storage_ref = resolve_effective_storage_reference(
+            row.storage_backend,
+            row.storage_ref,
+            row.local_path,
         )
-        stored_ref = provider.save_file(target_ref, zip_path)
-        if not export_storage_reference_is_valid(
-            tenant_id=tenant_id,
-            job_id=job_id,
-            storage_backend=backend,
-            storage_ref=stored_ref,
+        if (
+            backend != "qiniu_kodo"
+            or not storage_ref
+            or not object_key_tenant_prefix_matches(storage_ref, job.tenant_id)
         ):
-            raise MediaStorageConfigurationError(
-                "export storage reference does not match tenant job scope"
-            )
-        return _Artifact(
-            storage_backend=backend,
-            storage_ref=stored_ref,
-            file_size=artifact_size,
-            checksum_sha256=artifact_checksum,
+            raise ExportSourceIneligibleError("export_qiniu_source_ineligible")
+        expected_size = int(row.file_size or 0)
+        actual_checksum, actual_size = provider.get_sha256_and_size(storage_ref)
+        if actual_size != expected_size:
+            raise MediaStorageOperationError("media size verification failed")
+        expected_checksum = str(row.checksum_sha256 or "").strip().lower()
+        if expected_checksum and actual_checksum != expected_checksum:
+            raise MediaStorageOperationError("media checksum verification failed")
+        total_bytes += actual_size
+        if total_bytes > MAX_QINIU_EXPORT_BYTES:
+            raise ExportSourceIneligibleError("export_qiniu_size_limit")
+
+        category = _safe_segment(row.file_type, "other")
+        archive_path = (
+            f"media/{category}/{row.archive_message_id}-{row.id}"
+            f"{_safe_suffix(storage_ref)}"
         )
+        source_url = provider.get_download_url(
+            storage_ref, expires_in=EXPORT_SOURCE_URL_TTL_SECONDS
+        )
+        if not source_url:
+            raise ExportSourceIneligibleError("export_qiniu_source_url_unavailable")
+        index_lines.append(_qiniu_index_line(source_url, archive_path))
+        manifest_rows.append(
+            [
+                archive_path,
+                row.archive_message_id,
+                category,
+                actual_size,
+                actual_checksum,
+            ]
+        )
+
+    output_ref, index_ref, manifest_ref = _qiniu_export_refs(job)
+    manifest = io.StringIO(newline="")
+    writer = csv.writer(manifest)
+    writer.writerow(["archive_path", "message_id", "media_type", "bytes", "sha256"])
+    writer.writerows(manifest_rows)
+    provider.save_bytes(manifest_ref, manifest.getvalue().encode("utf-8-sig"))
+    manifest_url = provider.get_download_url(
+        manifest_ref, expires_in=EXPORT_SOURCE_URL_TTL_SECONDS
+    )
+    if not manifest_url:
+        provider.delete(manifest_ref)
+        raise ExportSourceIneligibleError("export_qiniu_source_url_unavailable")
+    index_lines.append(_qiniu_index_line(manifest_url, "manifest.csv"))
+    try:
+        provider.save_bytes(index_ref, ("\n".join(index_lines) + "\n").encode("utf-8"))
+        operation_id = provider.submit_media_zip(index_ref, output_ref)
+    except Exception:
+        provider.delete(index_ref)
+        provider.delete(manifest_ref)
+        raise
+    return _QiniuZipSubmission(operation_id, index_ref, manifest_ref)
+
+
+def _delete_qiniu_work_refs(job: ExportJob, provider) -> bool:
+    """Best-effort cleanup for the short-lived private index and manifest."""
+    refs = [job.provider_index_ref, job.provider_manifest_ref]
+    cleaned = True
+    for ref in refs:
+        if not ref:
+            continue
+        # Treat an already-deleted object as clean.  This makes retries
+        # idempotent even when a previous cleanup deleted only one ref.
+        if provider.exists(ref):
+            cleaned = provider.delete(ref) and cleaned
+    return cleaned
+
+
+def _clear_qiniu_work_refs(db: Session, job_id: str, *, cleanup_pending: bool) -> None:
+    job = db.scalar(select(ExportJob).where(ExportJob.id == job_id).with_for_update())
+    if job is None:
+        db.rollback()
+        return
+    if cleanup_pending:
+        job.last_error = "cleanup_pending"
+    else:
+        job.provider_index_ref = None
+        job.provider_manifest_ref = None
+        if job.last_error == "cleanup_pending":
+            job.last_error = None
+    db.commit()
+
+
+def _mark_qiniu_submission(
+    db: Session, job_id: str, submission: _QiniuZipSubmission, now: datetime
+) -> None:
+    job = db.scalar(select(ExportJob).where(ExportJob.id == job_id).with_for_update())
+    if job is None:
+        db.rollback()
+        return
+    job.storage_backend = "qiniu_kodo"
+    job.provider_operation_id = submission.operation_id
+    job.provider_index_ref = submission.index_ref
+    job.provider_manifest_ref = submission.manifest_ref
+    job.lease_expires_at = now + timedelta(hours=EXPORT_LEASE_HOURS)
+    job.last_error = None
+    db.commit()
+
+
+def _mark_qiniu_ready(db: Session, job_id: str, file_size: int, now: datetime) -> None:
+    job = db.scalar(select(ExportJob).where(ExportJob.id == job_id).with_for_update())
+    if job is None:
+        db.rollback()
+        return
+    output_ref, _index_ref, _manifest_ref = _qiniu_export_refs(job)
+    job.status = "ready"
+    job.storage_backend = "qiniu_kodo"
+    job.storage_ref = output_ref
+    job.file_size = file_size
+    job.checksum_sha256 = None
+    job.completed_at = now
+    job.expires_at = now + timedelta(days=EXPORT_RETENTION_DAYS)
+    job.lease_expires_at = None
+    job.last_error = None
+    job.notification_status = "pending"
+    db.commit()
+
+
+def _mark_qiniu_poll_pending(
+    db: Session, job_id: str, error: Exception, now: datetime
+) -> None:
+    """Keep an already-submitted PFOP operation authoritative on outages.
+
+    Re-submitting after an ambiguous status-query failure could create two
+    Dora archives for one user request.  Preserve the provider operation ID
+    and poll it again after the lease is extended instead.
+    """
+    db.rollback()
+    job = db.scalar(select(ExportJob).where(ExportJob.id == job_id).with_for_update())
+    if job is None:
+        db.rollback()
+        return
+    if job.status == "processing" and job.provider_operation_id:
+        job.last_error = _failure_tag(error)
+        job.lease_expires_at = now + timedelta(hours=EXPORT_LEASE_HOURS)
+        db.commit()
+        return
+    db.rollback()
+
+
+def _poll_qiniu_media_exports(
+    db: Session, *, now: datetime, limit: int
+) -> tuple[int, int, int]:
+    """Advance submitted Dora jobs without rebuilding their ZIPs locally."""
+    ready = retried = failed = 0
+    jobs = db.scalars(
+        select(ExportJob)
+        .where(
+            ExportJob.status == "processing",
+            ExportJob.storage_backend == "qiniu_kodo",
+            ExportJob.provider_operation_id.is_not(None),
+        )
+        .order_by(ExportJob.started_at.asc())
+        .with_for_update(skip_locked=True)
+        .limit(max(1, limit))
+    ).all()
+    for claimed_job in jobs:
+        job_id = claimed_job.id
+        try:
+            provider = _qiniu_export_provider_for_existing_job()
+            status = provider.get_persistent_operation_status(
+                claimed_job.provider_operation_id
+            )
+            if status.state == "processing":
+                claimed_job.lease_expires_at = now + timedelta(hours=EXPORT_LEASE_HOURS)
+                claimed_job.last_error = None
+                db.commit()
+                continue
+            output_ref, _index_ref, _manifest_ref = _qiniu_export_refs(claimed_job)
+            if status.state != "succeeded" or not provider.exists(output_ref):
+                raise MediaStorageOperationError("qiniu media ZIP processing failed")
+            _mark_qiniu_ready(db, job_id, provider.size_bytes(output_ref), now)
+            try:
+                refreshed = db.scalar(select(ExportJob).where(ExportJob.id == job_id))
+                if refreshed is not None:
+                    _clear_qiniu_work_refs(
+                        db,
+                        job_id,
+                        cleanup_pending=not _delete_qiniu_work_refs(refreshed, provider),
+                    )
+            except (
+                MediaStorageConfigurationError,
+                MediaStorageUnavailable,
+                MediaStorageOperationError,
+            ):
+                _clear_qiniu_work_refs(db, job_id, cleanup_pending=True)
+            ready += 1
+        except (MediaStorageConfigurationError, MediaStorageUnavailable) as error:
+            _mark_qiniu_poll_pending(db, job_id, error, now)
+        except Exception as error:  # noqa: BLE001 - persist fixed error tags only
+            outcome = _mark_generation_error(db, job_id, error, now)
+            if outcome == "retried":
+                retried += 1
+            else:
+                failed += 1
+    return ready, retried, failed
 
 
 def _claim_next_job(db: Session, now: datetime) -> ExportJob | None:
@@ -294,6 +470,7 @@ def _claim_next_job(db: Session, now: datetime) -> ExportJob | None:
                 ExportJob.status == "queued",
                 (
                     (ExportJob.status == "processing")
+                    & (ExportJob.provider_operation_id.is_(None))
                     & (ExportJob.lease_expires_at.is_not(None))
                     & (ExportJob.lease_expires_at <= now)
                 ),
@@ -315,25 +492,9 @@ def _claim_next_job(db: Session, now: datetime) -> ExportJob | None:
     return job
 
 
-def _mark_ready(db: Session, job_id: str, artifact: _Artifact, now: datetime) -> None:
-    job = db.scalar(select(ExportJob).where(ExportJob.id == job_id).with_for_update())
-    if job is None:
-        db.rollback()
-        return
-    job.status = "ready"
-    job.storage_backend = artifact.storage_backend
-    job.storage_ref = artifact.storage_ref
-    job.file_size = artifact.file_size
-    job.checksum_sha256 = artifact.checksum_sha256
-    job.completed_at = now
-    job.expires_at = now + timedelta(days=EXPORT_RETENTION_DAYS)
-    job.lease_expires_at = None
-    job.last_error = None
-    job.notification_status = "pending"
-    db.commit()
-
-
 def _failure_tag(error: Exception) -> str:
+    if isinstance(error, ExportSourceIneligibleError):
+        return str(error)
     if isinstance(error, MediaObjectNotFound):
         return "media_missing"
     if isinstance(error, MediaStorageConfigurationError):
@@ -357,6 +518,10 @@ def _mark_generation_error(
         return "failed"
     job.last_error = _failure_tag(error)
     job.lease_expires_at = None
+    # A failed Dora operation must never be polled again.  The deterministic
+    # work refs are retained until a successful retry or cleanup can remove
+    # them; this also avoids losing the only safe cleanup targets.
+    job.provider_operation_id = None
     if int(job.attempt_count or 0) < MAX_GENERATION_ATTEMPTS:
         job.status = "queued"
         result = "retried"
@@ -471,11 +636,17 @@ def cleanup_expired_exports(
             ):
                 deleted = False
             else:
-                provider = get_media_storage_provider_for_backend(job.storage_backend)
+                provider = (
+                    _qiniu_export_provider_for_existing_job()
+                    if job.storage_backend == "qiniu_kodo"
+                    else get_media_storage_provider_for_backend(job.storage_backend)
+                )
                 if not provider.exists(job.storage_ref):
                     deleted = True
                 else:
                     deleted = provider.delete(job.storage_ref)
+                if deleted and job.storage_backend == "qiniu_kodo":
+                    deleted = _delete_qiniu_work_refs(job, provider)
         except (
             MediaStorageConfigurationError,
             MediaStorageUnavailable,
@@ -485,6 +656,8 @@ def cleanup_expired_exports(
         if deleted:
             job.status = "expired"
             job.storage_ref = None
+            job.provider_index_ref = None
+            job.provider_manifest_ref = None
             job.last_error = None
             expired += 1
         else:
@@ -494,6 +667,47 @@ def cleanup_expired_exports(
     return expired, pending
 
 
+def cleanup_terminal_qiniu_export_work(db: Session, *, limit: int = 20) -> int:
+    """Remove index/manifest objects left by completed Dora jobs.
+
+    A success normally deletes these immediately.  Keeping a separate,
+    idempotent maintenance pass closes the gap if one delete call had a
+    transient provider failure after the ZIP became ready.
+    """
+    jobs = db.scalars(
+        select(ExportJob)
+        .where(
+            ExportJob.status.in_(("ready", "failed", "expired")),
+            ExportJob.storage_backend == "qiniu_kodo",
+            (ExportJob.provider_index_ref.is_not(None))
+            | (ExportJob.provider_manifest_ref.is_not(None)),
+        )
+        .order_by(ExportJob.completed_at.asc())
+        .limit(max(1, limit))
+    ).all()
+    pending = 0
+    for job in jobs:
+        try:
+            provider = _qiniu_export_provider_for_existing_job()
+            cleaned = _delete_qiniu_work_refs(job, provider)
+        except (
+            MediaStorageConfigurationError,
+            MediaStorageUnavailable,
+            MediaStorageOperationError,
+        ):
+            cleaned = False
+        if cleaned:
+            job.provider_index_ref = None
+            job.provider_manifest_ref = None
+            if job.last_error == "cleanup_pending":
+                job.last_error = None
+        else:
+            job.last_error = "cleanup_pending"
+            pending += 1
+        db.commit()
+    return pending
+
+
 def run_export_maintenance_once(
     db: Session,
     *,
@@ -501,17 +715,18 @@ def run_export_maintenance_once(
     generation_limit: int = 1,
 ) -> ExportMaintenanceSummary:
     checked_at = _utc(now)
-    claimed = ready = retried = failed = 0
+    claimed = failed = 0
+    ready, retried, failed = _poll_qiniu_media_exports(
+        db, now=checked_at, limit=generation_limit
+    )
     for _ in range(max(1, generation_limit)):
         job = _claim_next_job(db, checked_at)
         if job is None:
             break
         claimed += 1
         try:
-            artifact = _build_media_zip(db, job)
-            completed_at = checked_at if now is not None else _utc()
-            _mark_ready(db, job.id, artifact, completed_at)
-            ready += 1
+            submission = _build_qiniu_manifest_and_index(db, job)
+            _mark_qiniu_submission(db, job.id, submission, checked_at)
         except Exception as error:  # noqa: BLE001 - persist only a fixed tag
             outcome = _mark_generation_error(db, job.id, error, checked_at)
             if outcome == "retried":
@@ -522,6 +737,7 @@ def run_export_maintenance_once(
     notifications_sent, notifications_failed = send_pending_export_notifications(
         db, now=checked_at
     )
+    terminal_work_pending = cleanup_terminal_qiniu_export_work(db)
     expired, cleanup_pending = cleanup_expired_exports(db, now=checked_at)
     return ExportMaintenanceSummary(
         claimed=claimed,
@@ -531,5 +747,5 @@ def run_export_maintenance_once(
         notifications_sent=notifications_sent,
         notifications_failed=notifications_failed,
         expired=expired,
-        cleanup_pending=cleanup_pending,
+        cleanup_pending=cleanup_pending + terminal_work_pending,
     )

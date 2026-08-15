@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from zipfile import ZipFile
 
 import pytest
 from alembic.migration import MigrationContext
@@ -22,11 +22,91 @@ from app.db.base import Base
 from app.db.models import AdminUser, ExportJob, ExportMonthlyUsage, Tenant
 from app.db.session import get_db
 from app.main import create_app
-from app.media_storage import MediaObjectNotFound
+from app.media_storage import (
+    MediaObjectNotFound,
+    MediaStorageOperationError,
+    MediaStorageUnavailable,
+)
+from app.routers import exports as export_router
 from app.services import export_jobs
 
 
 NOW = datetime(2026, 8, 13, 4, 0, tzinfo=timezone.utc)
+
+
+class _FakeQiniuExportProvider:
+    """In-memory Qiniu boundary for Dora export-worker tests."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+        self.operation_state = "processing"
+        self.status_error: Exception | None = None
+        self.submitted: tuple[str, str] | None = None
+        self.submit_error: Exception | None = None
+
+    def size_bytes(self, storage_ref: str) -> int:
+        if storage_ref not in self.objects:
+            raise MediaObjectNotFound("missing")
+        return len(self.objects[storage_ref])
+
+    def get_sha256_and_size(self, storage_ref: str) -> tuple[str, int]:
+        if storage_ref not in self.objects:
+            raise MediaObjectNotFound("missing")
+        payload = self.objects[storage_ref]
+        return hashlib.sha256(payload).hexdigest(), len(payload)
+
+    def get_download_url(self, storage_ref: str, *, expires_in: int) -> str:
+        assert expires_in == export_jobs.EXPORT_SOURCE_URL_TTL_SECONDS
+        if storage_ref not in self.objects:
+            raise MediaObjectNotFound("missing")
+        return f"https://media.example.test/{storage_ref}?e=1&token=fake-token"
+
+    def save_bytes(self, storage_ref: str, data: bytes) -> str:
+        self.objects[storage_ref] = data
+        return storage_ref
+
+    def submit_media_zip(self, index_ref: str, output_ref: str) -> str:
+        if self.submit_error is not None:
+            raise self.submit_error
+        self.submitted = (index_ref, output_ref)
+        return "persistent-operation-1"
+
+    def get_persistent_operation_status(self, operation_id: str):
+        assert operation_id == "persistent-operation-1"
+        if self.status_error is not None:
+            raise self.status_error
+        if self.operation_state == "succeeded":
+            assert self.submitted is not None
+            self.objects[self.submitted[1]] = b"PK-qiniu-generated"
+        return SimpleNamespace(state=self.operation_state)
+
+    def exists(self, storage_ref: str) -> bool:
+        return storage_ref in self.objects
+
+    def delete(self, storage_ref: str) -> bool:
+        return self.objects.pop(storage_ref, None) is not None
+
+
+def _qiniu_media_row(*, payload: bytes = b"fixed-original-media"):
+    return SimpleNamespace(
+        id=7,
+        archive_message_id=42,
+        file_type="../../image",
+        local_path=None,
+        storage_backend="qiniu_kodo",
+        storage_ref="tenants/tenant-a/images/original.jpg",
+        file_size=len(payload),
+        checksum_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+
+
+def _use_fake_qiniu(
+    monkeypatch: pytest.MonkeyPatch, provider: _FakeQiniuExportProvider
+) -> None:
+    monkeypatch.setattr(export_jobs, "_qiniu_export_provider", lambda: provider)
+    monkeypatch.setattr(
+        export_jobs, "_qiniu_export_provider_for_existing_job", lambda: provider
+    )
 
 
 def _factory():
@@ -90,67 +170,86 @@ def test_export_api_is_owner_only_and_quota_is_server_derived(
     assert body["notification_email_hint"] == "o***@example.com"
 
 
-def test_zip_contains_original_bytes_and_safe_manifest_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_qiniu_submission_uses_safe_private_index_and_manifest(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = tmp_path / "tenants" / "tenant-a" / "images" / "original.jpg"
-    source.parent.mkdir(parents=True)
-    source.write_bytes(b"fixed-original-media")
-    checksum = hashlib.sha256(source.read_bytes()).hexdigest()
-    row = SimpleNamespace(
-        id=7,
-        archive_message_id=42,
-        file_type="../../image",
-        local_path=str(source),
-        storage_backend="local",
-        storage_ref=str(source),
-        file_size=source.stat().st_size,
-        checksum_sha256=checksum,
-    )
-    monkeypatch.setenv("MEDIA_STORAGE_PROVIDER", "local")
-    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
+    provider = _FakeQiniuExportProvider()
+    row = _qiniu_media_row()
+    provider.objects[row.storage_ref] = b"fixed-original-media"
+    _use_fake_qiniu(monkeypatch, provider)
     monkeypatch.setattr(export_jobs, "_media_rows", lambda _db, _tenant: [row])
     fake_db = SimpleNamespace(rollback=lambda: None)
     job = SimpleNamespace(id="job-a", tenant_id="tenant-a")
 
-    artifact = export_jobs._build_media_zip(fake_db, job)
+    submission = export_jobs._build_qiniu_manifest_and_index(fake_db, job)
 
-    assert artifact.storage_backend == "local"
-    archive_path = Path(artifact.storage_ref)
-    assert archive_path.is_file()
-    with ZipFile(archive_path) as archive:
-        names = archive.namelist()
-        media_name = next(name for name in names if name.startswith("media/"))
-        assert ".." not in media_name
-        assert archive.read(media_name) == b"fixed-original-media"
-        manifest = archive.read("manifest.csv").decode("utf-8-sig")
-        assert media_name in manifest
-        assert str(source) not in manifest
+    assert provider.submitted == (
+        submission.index_ref,
+        "tenants/tenant-a/exports/job-a.zip",
+    )
+    manifest = provider.objects[submission.manifest_ref].decode("utf-8-sig")
+    index = provider.objects[submission.index_ref].decode("utf-8")
+    assert "media/image/42-7.jpg" in manifest
+    assert hashlib.sha256(b"fixed-original-media").hexdigest() in manifest
+    assert ".." not in manifest
+    assert row.storage_ref not in manifest
+    assert row.storage_ref not in index
+    # The index is Qiniu mode-4 syntax: the source URL and alias are encoded,
+    # so neither a source key nor a signed token appears as plaintext there.
+    assert "fake-token" not in index
+    source_url = "https://media.example.test/tenants/tenant-a/images/original.jpg?e=1&token=fake-token"
+    assert base64.urlsafe_b64encode(source_url.encode()).decode() in index
 
 
-def test_worker_marks_ready_emails_authenticated_link_and_expires_in_seven_days(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_qiniu_submission_rejects_checksum_mismatch_before_mkzip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _FakeQiniuExportProvider()
+    row = _qiniu_media_row()
+    row.checksum_sha256 = "0" * 64
+    provider.objects[row.storage_ref] = b"fixed-original-media"
+    _use_fake_qiniu(monkeypatch, provider)
+    monkeypatch.setattr(export_jobs, "_media_rows", lambda _db, _tenant: [row])
+    fake_db = SimpleNamespace(rollback=lambda: None)
+    job = SimpleNamespace(id="job-a", tenant_id="tenant-a")
+
+    with pytest.raises(MediaStorageOperationError, match="checksum verification failed"):
+        export_jobs._build_qiniu_manifest_and_index(fake_db, job)
+
+    assert provider.submitted is None
+    assert not any("export-work" in ref for ref in provider.objects)
+
+
+def test_qiniu_submission_rejects_size_mismatch_before_mkzip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _FakeQiniuExportProvider()
+    row = _qiniu_media_row()
+    row.file_size += 1
+    provider.objects[row.storage_ref] = b"fixed-original-media"
+    _use_fake_qiniu(monkeypatch, provider)
+    monkeypatch.setattr(export_jobs, "_media_rows", lambda _db, _tenant: [row])
+    fake_db = SimpleNamespace(rollback=lambda: None)
+    job = SimpleNamespace(id="job-a", tenant_id="tenant-a")
+
+    with pytest.raises(MediaStorageOperationError, match="size verification failed"):
+        export_jobs._build_qiniu_manifest_and_index(fake_db, job)
+
+    assert provider.submitted is None
+    assert not any("export-work" in ref for ref in provider.objects)
+
+
+def test_worker_polls_qiniu_then_emails_and_expires_in_seven_days(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     factory = _factory()
-    artifact_path = None
+    provider = _FakeQiniuExportProvider()
+    row = _qiniu_media_row()
+    provider.objects[row.storage_ref] = b"fixed-original-media"
     captured = {}
-    monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
     monkeypatch.setenv("ADMIN_DOMAIN", "archive.example.com")
-    def build(_db, job):
-        nonlocal artifact_path
-        artifact_path = (
-            tmp_path / "tenants" / "tenant-a" / "exports" / f"{job.id}.zip"
-        )
-        artifact_path.parent.mkdir(parents=True)
-        artifact_path.write_bytes(b"PK-fixed")
-        return export_jobs._Artifact(
-            storage_backend="local",
-            storage_ref=str(artifact_path),
-            file_size=artifact_path.stat().st_size,
-            checksum_sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
-        )
-
-    monkeypatch.setattr(export_jobs, "_build_media_zip", build)
+    _use_fake_qiniu(monkeypatch, provider)
+    monkeypatch.setattr(export_jobs, "_media_rows", lambda _db, _tenant: [row])
 
     def send(to_email, export_link, expires_at, locale):
         captured.update(
@@ -167,11 +266,29 @@ def test_worker_marks_ready_emails_authenticated_link_and_expires_in_seven_days(
             db, tenant_id="tenant-a", requested_by="owner-a", now=NOW
         )
         db.commit()
-        summary = export_jobs.run_export_maintenance_once(db, now=NOW)
+        submitted = export_jobs.run_export_maintenance_once(db, now=NOW)
         job = db.scalar(select(ExportJob))
+        assert submitted.claimed == 1
+        assert submitted.ready == submitted.notifications_sent == 0
+        assert job.status == "processing"
+        assert job.storage_ref is None
+        assert job.provider_operation_id == "persistent-operation-1"
+
+        provider.operation_state = "succeeded"
+        summary = export_jobs.run_export_maintenance_once(
+            db, now=NOW + timedelta(minutes=5)
+        )
+        db.refresh(job)
         assert summary.ready == summary.notifications_sent == 1
         assert job.status == "ready"
-        assert job.expires_at.replace(tzinfo=timezone.utc) == NOW + timedelta(days=7)
+        assert job.expires_at.replace(tzinfo=timezone.utc) == NOW + timedelta(
+            minutes=5, days=7
+        )
+        assert job.storage_backend == "qiniu_kodo"
+        assert job.storage_ref == f"tenants/tenant-a/exports/{job.id}.zip"
+        assert job.provider_index_ref is None
+        assert job.provider_manifest_ref is None
+        assert provider.exists(job.storage_ref)
         assert captured["email"] == "owner@example.com"
         assert captured["link"].startswith(
             "https://archive.example.com/admin/exports?job="
@@ -179,25 +296,23 @@ def test_worker_marks_ready_emails_authenticated_link_and_expires_in_seven_days(
         assert "/api/admin/exports/jobs/" not in captured["link"]
 
         expired = export_jobs.run_export_maintenance_once(
-            db, now=NOW + timedelta(days=7)
+            db, now=NOW + timedelta(minutes=5, days=7)
         )
         db.refresh(job)
         assert expired.expired == 1
         assert job.status == "expired"
         assert job.storage_ref is None
-        assert artifact_path is not None
-        assert artifact_path.exists() is False
+        assert provider.objects == {row.storage_ref: b"fixed-original-media"}
 
 
 def test_generation_retries_then_fails_without_ready_artifact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     factory = _factory()
-    monkeypatch.setattr(
-        export_jobs,
-        "_build_media_zip",
-        lambda _db, _job: (_ for _ in ()).throw(MediaObjectNotFound("missing")),
-    )
+    provider = _FakeQiniuExportProvider()
+    row = _qiniu_media_row()
+    _use_fake_qiniu(monkeypatch, provider)
+    monkeypatch.setattr(export_jobs, "_media_rows", lambda _db, _tenant: [row])
     with factory() as db:
         export_jobs.create_media_export_job(
             db, tenant_id="tenant-a", requested_by="owner-a", now=NOW
@@ -212,6 +327,142 @@ def test_generation_retries_then_fails_without_ready_artifact(
         assert job.status == "failed"
         assert job.last_error == "media_missing"
         assert job.storage_ref is None
+
+
+def test_terminal_qiniu_work_cleanup_retries_after_ready_delete_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = _factory()
+    provider = _FakeQiniuExportProvider()
+    row = _qiniu_media_row()
+    provider.objects[row.storage_ref] = b"fixed-original-media"
+    _use_fake_qiniu(monkeypatch, provider)
+    monkeypatch.setattr(export_jobs, "_media_rows", lambda _db, _tenant: [row])
+
+    with factory() as db:
+        job = export_jobs.create_media_export_job(
+            db, tenant_id="tenant-a", requested_by="owner-a", now=NOW
+        )
+        db.commit()
+        export_jobs.run_export_maintenance_once(db, now=NOW)
+        provider.operation_state = "succeeded"
+        original_delete = provider.delete
+        failed_attempts = {"remaining": 2}
+
+        def delete_once(ref: str) -> bool:
+            if failed_attempts["remaining"] and ref.endswith("-index.txt"):
+                failed_attempts["remaining"] -= 1
+                return False
+            return original_delete(ref)
+
+        monkeypatch.setattr(provider, "delete", delete_once)
+        first = export_jobs.run_export_maintenance_once(
+            db, now=NOW + timedelta(minutes=5)
+        )
+        db.refresh(job)
+        assert first.ready == 1
+        assert job.status == "ready"
+        assert job.provider_index_ref is not None
+        assert job.last_error == "cleanup_pending"
+
+        second = export_jobs.run_export_maintenance_once(
+            db, now=NOW + timedelta(minutes=10)
+        )
+        db.refresh(job)
+        assert second.cleanup_pending == 0
+        assert job.provider_index_ref is None
+        assert job.provider_manifest_ref is None
+        assert job.last_error is None
+
+
+def test_qiniu_status_outage_keeps_submitted_operation_for_later_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = _factory()
+    provider = _FakeQiniuExportProvider()
+    row = _qiniu_media_row()
+    provider.objects[row.storage_ref] = b"fixed-original-media"
+    _use_fake_qiniu(monkeypatch, provider)
+    monkeypatch.setattr(export_jobs, "_media_rows", lambda _db, _tenant: [row])
+
+    with factory() as db:
+        job = export_jobs.create_media_export_job(
+            db, tenant_id="tenant-a", requested_by="owner-a", now=NOW
+        )
+        db.commit()
+        export_jobs.run_export_maintenance_once(db, now=NOW)
+        provider.status_error = MediaStorageUnavailable("temporary outage")
+
+        summary = export_jobs.run_export_maintenance_once(
+            db, now=NOW + timedelta(minutes=5)
+        )
+        db.refresh(job)
+
+        assert summary.ready == summary.retried == summary.failed == 0
+        assert job.status == "processing"
+        assert job.provider_operation_id == "persistent-operation-1"
+        assert job.attempt_count == 1
+        assert job.last_error == "storage_unavailable"
+
+
+def test_ready_qiniu_export_download_redirects_directly_to_private_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = _factory()
+    expected_ref = {"value": None}
+
+    class _DownloadProvider:
+        def exists(self, storage_ref: str) -> bool:
+            assert storage_ref == expected_ref["value"]
+            return True
+
+        def supports_local_path(self) -> bool:
+            return False
+
+        def get_download_url(self, storage_ref: str, *, expires_in: int) -> str:
+            assert storage_ref == expected_ref["value"]
+            assert 1 <= expires_in <= 900
+            return f"https://media.example.test/{storage_ref}?e=1&token=fake-token"
+
+    monkeypatch.setattr(
+        export_router,
+        "get_media_storage_provider_for_backend",
+        lambda backend: _DownloadProvider(),
+    )
+    app = create_app()
+
+    def override_db():
+        with factory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    owner = SimpleNamespace(id="owner-a", role="owner", email="owner@example.com")
+    app.dependency_overrides[get_current_user] = lambda: (owner, "tenant-a")
+    with factory() as db:
+        job = export_jobs.create_media_export_job(
+            db,
+            tenant_id="tenant-a",
+            requested_by="owner-a",
+            now=datetime.now(timezone.utc),
+        )
+        job.status = "ready"
+        job.storage_backend = "qiniu_kodo"
+        job.storage_ref = f"tenants/tenant-a/exports/{job.id}.zip"
+        expected_ref["value"] = job.storage_ref
+        job.expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+        db.commit()
+        job_id = job.id
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/admin/exports/jobs/{job_id}/download", follow_redirects=False
+        )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == (
+        f"https://media.example.test/{expected_ref['value']}?e=1&token=fake-token"
+    )
+    assert response.headers["cache-control"] == "private, no-store"
 
 
 def test_job_view_distinguishes_retryable_and_final_email_failure() -> None:
@@ -267,6 +518,41 @@ def test_0046_migration_creates_and_removes_export_jobs(tmp_path: Path) -> None:
                 "WHERE type='table' AND name='export_jobs'"
             )
         ).fetchone() is None
+
+
+def test_0050_migration_adds_and_removes_qiniu_operation_columns(tmp_path: Path) -> None:
+    migration_path = (
+        Path(__file__).resolve().parent.parent
+        / "alembic"
+        / "versions"
+        / "0050_rnd397_qiniu_media_export.py"
+    )
+    spec = importlib.util.spec_from_file_location("migration_0050", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(migration)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'qiniu-export-migration.db'}")
+    with engine.connect() as connection:
+        connection.execute(text("CREATE TABLE export_jobs (id VARCHAR(36) PRIMARY KEY)"))
+        operations = Operations(MigrationContext.configure(connection))
+        migration.op = operations
+        migration.upgrade()
+        columns = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(export_jobs)"))
+        }
+        assert {
+            "provider_operation_id",
+            "provider_index_ref",
+            "provider_manifest_ref",
+        } <= columns
+        migration.downgrade()
+        columns = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(export_jobs)"))
+        }
+        assert "provider_operation_id" not in columns
 
 
 def test_export_worker_systemd_units_are_bounded_and_staggered() -> None:

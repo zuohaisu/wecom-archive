@@ -291,12 +291,16 @@ job acceptance; validation failures roll back, while an accepted asynchronous
 job keeps its consumed allowance even if later generation fails.
 
 Media jobs move through `queued`, `processing`, `ready`, `failed`, and
-`expired`. A ready ZIP contains tenant-owned downloaded originals plus
-`manifest.csv`; any missing or checksum-mismatched source fails the whole job.
-The requesting Owner receives an email linking to `/admin/exports?job=...`,
-which is not a bearer credential and still requires an Owner session. The
-download route fails closed exactly seven days after successful generation;
-the maintenance worker then deletes the private object idempotently.
+`expired`. A ready ZIP contains tenant-owned Qiniu originals plus
+`manifest.csv`; local, missing, cross-tenant, size-mismatched, or
+checksum-mismatched sources fail the whole job. The worker verifies source
+size and SHA-256 through Qiniu's server-side `qhash/sha256` response, then
+Qiniu Dora builds the ZIP asynchronously in storage. The API redirects an
+authenticated Owner to a short-lived private Qiniu URL. The requesting Owner
+receives an email linking to `/admin/exports?job=...`, which is not a bearer
+credential and still requires an Owner session. The download route fails
+closed exactly seven days after successful generation; the maintenance worker
+then deletes the private object idempotently.
 
 ---
 
