@@ -337,7 +337,7 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 | `wecom-archive-media-event.path` | path | shared mtime signal | Activates the event service without a queue payload |
 | `wecom-archive-media-download.service` | oneshot | `OnCalendar=*:15/30` | Reconcile pending/retryable generic media |
 | `wecom-archive-media-download.timer` | timer | — | Activates above |
-| `wecom-export-jobs.service` | oneshot | `OnCalendar=*:04/5` | Generates bounded-memory media ZIPs, sends ready notices, and deletes expired artifacts |
+| `wecom-export-jobs.service` | oneshot | `OnCalendar=*:04/5` | Submits/polls Qiniu Dora media ZIP work, sends ready notices, and deletes expired artifacts |
 | `wecom-export-jobs.timer` | timer | — | Activates above; download authorization still expires at the exact seven-day timestamp |
 
 The repository does **not** currently version:

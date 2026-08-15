@@ -43,6 +43,8 @@ docs/research/rnd_174_qiniu_kodo_provider.md).
 
 from __future__ import annotations
 
+import base64
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -57,6 +59,21 @@ from app.media_storage import (
 
 _INTERNAL_FETCH_URL_EXPIRY_SECONDS = 60
 _QINIU_NOT_FOUND_STATUS = 612
+_PFOP_SUCCESS = 0
+_PFOP_WAITING = 1
+_PFOP_PROCESSING = 2
+_PFOP_FAILED = 3
+
+
+@dataclass(frozen=True)
+class PersistentOperationStatus:
+    """Sanitized state of one Qiniu persistent-processing operation."""
+
+    state: str
+
+
+def _urlsafe_base64(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii")
 
 
 class QiniuConfigurationError(MediaStorageConfigurationError):
@@ -249,6 +266,74 @@ class QiniuStorageProvider(MediaStorageProvider):
             raise MediaStorageOperationError(f"qiniu upload failed (status={info.status_code})")
         return storage_ref
 
+    def submit_media_zip(self, index_ref: str, output_ref: str) -> str:
+        """Ask Qiniu Dora to asynchronously build a ZIP from a mode-4 index.
+
+        The caller is responsible for ensuring that ``index_ref`` and every
+        URL in it belong to one authorized tenant.  This method deliberately
+        accepts only opaque Qiniu references and returns only the persistent
+        operation ID; it never logs the index, signed source URLs, or output
+        key.
+        """
+        if not index_ref or not output_ref:
+            raise MediaStorageConfigurationError(
+                "Qiniu media ZIP requires index and output references"
+            )
+        saveas = _urlsafe_base64(f"{self._bucket}:{output_ref}")
+        encoding = _urlsafe_base64("utf-8")
+        fop = f"mkzip/4/encoding/{encoding}|saveas/{saveas}"
+        try:
+            persistent_fop = self._qiniu.PersistentFop(self._auth, self._bucket)
+            result, info = persistent_fop.execute(index_ref, fops=[fop])
+        except Exception as exc:  # noqa: BLE001 - SDK errors can contain signed URLs
+            raise MediaStorageOperationError(
+                _sanitized(exc, "qiniu media ZIP submission failed")
+            ) from exc
+        if not info.ok():
+            raise MediaStorageOperationError(
+                f"qiniu media ZIP submission failed (status={info.status_code})"
+            )
+        operation_id = str((result or {}).get("persistentId") or "").strip()
+        if not operation_id:
+            raise MediaStorageOperationError(
+                "qiniu media ZIP submission returned no persistent operation"
+            )
+        return operation_id
+
+    def get_persistent_operation_status(
+        self, operation_id: str
+    ) -> PersistentOperationStatus:
+        """Map Qiniu PFOP states without surfacing provider response bodies."""
+        if not operation_id:
+            raise MediaStorageConfigurationError(
+                "Qiniu persistent operation ID is required"
+            )
+        try:
+            persistent_fop = self._qiniu.PersistentFop(self._auth, self._bucket)
+            result, info = persistent_fop.get_status(operation_id)
+        except Exception as exc:  # noqa: BLE001 - raw result can include object keys
+            raise MediaStorageUnavailable(
+                _sanitized(exc, "qiniu media ZIP status query failed")
+            ) from exc
+        if not info.ok():
+            raise MediaStorageUnavailable(
+                f"qiniu media ZIP status query failed (status={info.status_code})"
+            )
+        try:
+            code = int((result or {}).get("code"))
+        except (TypeError, ValueError):
+            raise MediaStorageOperationError("qiniu media ZIP returned an invalid state")
+        if code in (_PFOP_WAITING, _PFOP_PROCESSING):
+            return PersistentOperationStatus("processing")
+        if code == _PFOP_SUCCESS:
+            items = (result or {}).get("items") or []
+            if all(int(item.get("code", _PFOP_SUCCESS)) == _PFOP_SUCCESS for item in items):
+                return PersistentOperationStatus("succeeded")
+            return PersistentOperationStatus("failed")
+        if code == _PFOP_FAILED:
+            return PersistentOperationStatus("failed")
+        raise MediaStorageOperationError("qiniu media ZIP returned an unknown state")
+
     def replace(self, source_ref: str, target_ref: str) -> str:
         try:
             _ret, info = self._bucket_manager.move(
@@ -294,6 +379,61 @@ class QiniuStorageProvider(MediaStorageProvider):
         if resp.status_code != 200:
             raise MediaStorageUnavailable(f"qiniu download failed (status={resp.status_code})")
         return resp.content
+
+    def get_sha256_and_size(self, storage_ref: str) -> tuple[str, int]:
+        """Return Qiniu-computed SHA-256 and size without downloading bytes.
+
+        ``qhash/sha256`` runs inside Qiniu Dora and returns only a small JSON
+        document.  Export assembly uses this to preserve RND-360's source
+        integrity check without pulling every media object through the 2C2G
+        application host before submitting the server-side ``mkzip`` job.
+        """
+        if not storage_ref:
+            raise MediaObjectNotFound("media object is missing")
+
+        import httpx
+
+        operation_url = f"{self._object_url(storage_ref)}?qhash/sha256"
+        try:
+            signed_url = self._auth.private_download_url(
+                operation_url, expires=_INTERNAL_FETCH_URL_EXPIRY_SECONDS
+            )
+        except Exception as exc:  # noqa: BLE001 - may carry an object URL
+            raise MediaStorageOperationError(
+                _sanitized(exc, "qiniu hash signing failed")
+            ) from exc
+        try:
+            response = httpx.get(signed_url, timeout=self._timeout)
+        except httpx.HTTPError as exc:
+            raise MediaStorageUnavailable(
+                _sanitized(exc, "qiniu hash request failed")
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - never surface URL-bearing text
+            raise MediaStorageUnavailable(
+                _sanitized(exc, "qiniu hash request failed")
+            ) from exc
+
+        if response.status_code == 404:
+            raise MediaObjectNotFound("media object is missing")
+        if response.status_code != 200:
+            raise MediaStorageUnavailable(
+                f"qiniu hash failed (status={response.status_code})"
+            )
+        try:
+            payload = response.json()
+            digest = str(payload.get("hash") or "").strip().lower()
+            file_size = int(payload.get("fsize"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise MediaStorageOperationError(
+                _sanitized(exc, "qiniu hash returned an invalid response")
+            ) from exc
+        if (
+            len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+            or file_size < 0
+        ):
+            raise MediaStorageOperationError("qiniu hash returned an invalid response")
+        return digest, file_size
 
     def copy_to_file(self, storage_ref: str, destination_path: Path) -> int:
         """Stream a private object to disk without materializing it in memory."""

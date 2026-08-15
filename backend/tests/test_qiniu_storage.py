@@ -12,6 +12,7 @@ Run (from backend/):
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -24,6 +25,7 @@ from app.media_storage import (
     MediaStorageUnavailable,
 )
 from app.qiniu_storage import (
+    PersistentOperationStatus,
     QiniuConfigurationError,
     QiniuStorageProvider,
     redact_signed_url_for_log,
@@ -276,6 +278,96 @@ def test_save_bytes_success(monkeypatch) -> None:
     assert result == "tenants/t1/images/1.part"
     assert calls["key"] == "tenants/t1/images/1.part"
     assert calls["data"] == b"image-bytes"
+
+
+# ---------------------------------------------------------------------------
+# RND-397 Dora mkzip persistent processing
+# ---------------------------------------------------------------------------
+
+
+def test_submit_media_zip_uses_mode4_persistent_fop_and_same_bucket_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _make_provider()
+    calls = {}
+
+    class _FakePersistentFop:
+        def __init__(self, auth, bucket):
+            calls["auth"] = auth
+            calls["bucket"] = bucket
+
+        def execute(self, key, fops):
+            calls["key"] = key
+            calls["fops"] = fops
+            return {"persistentId": "persistent-operation-1"}, _FakeInfo(200)
+
+    monkeypatch.setattr(provider._qiniu, "PersistentFop", _FakePersistentFop)
+
+    operation_id = provider.submit_media_zip(
+        "tenants/tenant-a/export-work/job-a-index.txt",
+        "tenants/tenant-a/exports/job-a.zip",
+    )
+
+    assert operation_id == "persistent-operation-1"
+    assert calls["bucket"] == "test-bucket"
+    assert calls["key"] == "tenants/tenant-a/export-work/job-a-index.txt"
+    assert len(calls["fops"]) == 1
+    fop = calls["fops"][0]
+    assert fop.startswith("mkzip/4/encoding/dXRmLTg=|saveas/")
+    destination = base64.urlsafe_b64decode(fop.rsplit("saveas/", 1)[1]).decode()
+    assert destination == "test-bucket:tenants/tenant-a/exports/job-a.zip"
+
+
+def test_submit_media_zip_rejects_provider_failure_without_response_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _make_provider()
+
+    class _FakePersistentFop:
+        def __init__(self, *_args):
+            pass
+
+        def execute(self, *_args, **_kwargs):
+            return {"error": "raw signed url must not leak"}, _FakeInfo(500)
+
+    monkeypatch.setattr(provider._qiniu, "PersistentFop", _FakePersistentFop)
+
+    with pytest.raises(MediaStorageOperationError) as exc_info:
+        provider.submit_media_zip("index.txt", "output.zip")
+
+    assert "raw signed url" not in str(exc_info.value)
+    assert "status=500" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("response", "expected_state"),
+    [
+        ({"code": 1}, "processing"),
+        ({"code": 2}, "processing"),
+        ({"code": 0, "items": [{"code": 0}]}, "succeeded"),
+        ({"code": 0, "items": [{"code": 1}]}, "failed"),
+        ({"code": 3}, "failed"),
+    ],
+)
+def test_persistent_operation_status_maps_qiniu_response_codes(
+    monkeypatch: pytest.MonkeyPatch, response: dict, expected_state: str
+) -> None:
+    provider = _make_provider()
+
+    class _FakePersistentFop:
+        def __init__(self, *_args):
+            pass
+
+        def get_status(self, operation_id):
+            assert operation_id == "persistent-operation-1"
+            return response, _FakeInfo(200)
+
+    monkeypatch.setattr(provider._qiniu, "PersistentFop", _FakePersistentFop)
+
+    status = provider.get_persistent_operation_status("persistent-operation-1")
+
+    assert isinstance(status, PersistentOperationStatus)
+    assert status.state == expected_state
 
 
 # ---------------------------------------------------------------------------
@@ -594,6 +686,125 @@ def test_read_bytes_success(monkeypatch) -> None:
 
     data = provider.read_bytes("tenants/t1/images/1.jpg")
     assert data == b"image-bytes"
+
+
+class _FakeQhashResponse:
+    def __init__(self, status_code: int, payload=None):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def test_get_sha256_and_size_uses_signed_qhash_without_downloading_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _make_provider()
+    seen = {}
+
+    def sign(url, expires=3600):
+        seen["operation_url"] = url
+        seen["expires"] = expires
+        return f"{url}&e=1&token=fake-token"
+
+    monkeypatch.setattr(provider._auth, "private_download_url", sign)
+
+    import httpx
+
+    digest = "ab" * 32
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda url, timeout=None: _FakeQhashResponse(
+            200, {"hash": digest.upper(), "fsize": 123}
+        ),
+    )
+
+    assert provider.get_sha256_and_size("tenants/t1/images/1.jpg") == (digest, 123)
+    assert seen["operation_url"] == (
+        "https://cdn.example.com/tenants/t1/images/1.jpg?qhash/sha256"
+    )
+    assert seen["expires"] == 60
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"hash": "short", "fsize": 1},
+        {"hash": "g" * 64, "fsize": 1},
+        {"hash": "a" * 64, "fsize": -1},
+        {"hash": "a" * 64},
+        None,
+    ],
+)
+def test_get_sha256_and_size_rejects_invalid_qhash_response(
+    monkeypatch: pytest.MonkeyPatch, payload
+) -> None:
+    provider = _make_provider()
+    monkeypatch.setattr(
+        provider._auth, "private_download_url", lambda url, expires=3600: "https://x/y"
+    )
+
+    import httpx
+
+    monkeypatch.setattr(
+        httpx, "get", lambda url, timeout=None: _FakeQhashResponse(200, payload)
+    )
+
+    with pytest.raises(MediaStorageOperationError, match="invalid response"):
+        provider.get_sha256_and_size("tenants/t1/images/1.jpg")
+
+
+def test_get_sha256_and_size_classifies_missing_and_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _make_provider()
+    with pytest.raises(MediaObjectNotFound):
+        provider.get_sha256_and_size("")
+
+    monkeypatch.setattr(
+        provider._auth, "private_download_url", lambda url, expires=3600: "https://x/y"
+    )
+
+    import httpx
+
+    monkeypatch.setattr(
+        httpx, "get", lambda url, timeout=None: _FakeQhashResponse(404)
+    )
+    with pytest.raises(MediaObjectNotFound):
+        provider.get_sha256_and_size("tenants/t1/images/missing.jpg")
+
+    monkeypatch.setattr(
+        httpx, "get", lambda url, timeout=None: _FakeQhashResponse(503)
+    )
+    with pytest.raises(MediaStorageUnavailable, match="status=503"):
+        provider.get_sha256_and_size("tenants/t1/images/1.jpg")
+
+
+def test_get_sha256_and_size_never_leaks_signed_url_on_network_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _make_provider()
+    signed_url = f"https://x/y?qhash/sha256&e=1&token={_FAKE_SECRET_KEY}"
+    monkeypatch.setattr(
+        provider._auth,
+        "private_download_url",
+        lambda url, expires=3600: signed_url,
+    )
+
+    import httpx
+
+    def fail(url, timeout=None):
+        raise httpx.ConnectError(f"failed for {url}")
+
+    monkeypatch.setattr(httpx, "get", fail)
+
+    with pytest.raises(MediaStorageUnavailable) as exc_info:
+        provider.get_sha256_and_size("tenants/t1/images/1.jpg")
+
+    assert signed_url not in str(exc_info.value)
+    assert _FAKE_SECRET_KEY not in str(exc_info.value)
 
 
 def test_read_bytes_passes_https_object_url_to_private_download_url(monkeypatch) -> None:
