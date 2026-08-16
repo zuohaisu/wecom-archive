@@ -121,14 +121,30 @@ def test_visible_faq_matches_faq_schema_and_covers_required_questions() -> None:
     } <= visible_questions
 
 
+TRIAL_CTA_URL = "https://archive.crowntime.cn/api/auth/wecom/third-party/install"
+
+
 def test_public_pages_have_real_ctas_without_backend_or_tracking_dependencies() -> None:
     for page in (HOME, PRICING):
         html = _text(page)
         assert "mailto:hs@crowntime.cn" in html
         assert 'href="demo/"' in html
-        assert "/admin" not in html
-        assert "/api/" not in html
         assert "fetch(" not in html
         assert "googletag" not in html.lower()
         assert "tracking" not in html.lower()
+        # RND-396: the one named, ticket-approved exception to the backend
+        # isolation rule below -- a plain outbound link to the backend's
+        # public, unauthenticated trial-start endpoint (see README.md). No
+        # other backend reference is permitted.
+        assert TRIAL_CTA_URL in html
+        without_trial_cta = html.replace(TRIAL_CTA_URL, "")
+        assert "/admin" not in without_trial_cta
+        assert "/api/" not in without_trial_cta
         _assert_local_references_exist(page)
+
+
+def test_public_pages_offer_self_service_trial_entry_with_fee_boundary() -> None:
+    for page in (HOME, PRICING):
+        html = _text(page)
+        assert "开始 15 天免费试用" in html
+        assert "企业微信官方" in html and "另计" in html

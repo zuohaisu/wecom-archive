@@ -76,6 +76,7 @@ from app.session_lifecycle import cleanup_expired_sessions
 from app.settings import (
     get_auth_settings,
     get_email_settings,
+    get_self_service_trial_settings,
     get_wecom_oauth_settings,
 )
 from app.web import render_template
@@ -133,6 +134,28 @@ def _wecom_qr_configured() -> bool:
 # dead QR is still good (or expiring a live one).
 _QR_EXPIRY_SECONDS = _STATE_TTL_SECONDS
 _QR_LOAD_TIMEOUT_SECONDS = 15
+
+
+# RND-396: closed by default. This only controls whether the public "start a
+# 15-day trial" CTA is discoverable on the login page -- the WeCom
+# third-party authorization endpoints it points at (RND-346/347/348/350)
+# already fail closed on their own when unconfigured, and RND-353 owns
+# their separate controlled production rollout. Deployment config is the
+# only thing that flips this on, once non-prod E2E has passed.
+def _trial_entry_enabled() -> bool:
+    value = get_self_service_trial_settings().self_service_trial_entry_enabled
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _trial_entry_section() -> str:
+    return (
+        '<a class="btn btn-secondary btn-block mt-4" '
+        'href="/api/auth/wecom/third-party/install" '
+        'data-i18n="login.startTrial">开始 15 天免费试用</a>'
+        '<p class="field-help mt-2" data-i18n="login.trialFeeDisclaimer">'
+        '软件试用免费；需使用企业微信管理员身份完成授权；企业微信会话存档接口开通'
+        '及官方费用另计。</p>'
+    )
 
 
 def _wecom_qr_section() -> str:
@@ -295,6 +318,7 @@ def _login_page(
         )
 
     qr_section = _wecom_qr_section() if _wecom_qr_configured() else ""
+    trial_section = _trial_entry_section() if _trial_entry_enabled() else ""
 
     if mode == "password":
         login_body = f"""\
@@ -317,6 +341,7 @@ def _login_page(
   {error_html}
   {organization_action}
   {qr_section}
+  {trial_section}
 <script>
 function doLogin(e){{
   e.preventDefault();
@@ -371,6 +396,7 @@ function doLogin(e){{
   {qr_section}
   {error_html}
   {organization_action}
+  {trial_section}
   <p class="field-help mt-2" data-i18n="login.footerWecom">仅限企业内部员工访问</p>"""
 
     return render_template("login", i18n_script=I18N_SCRIPT_TAG, login_body=login_body)
