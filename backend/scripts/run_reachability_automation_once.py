@@ -61,6 +61,19 @@ def _release_lock(fd: int) -> None:
 
 
 def _resolve_tenant_id(db: Session) -> str | None:
+    # Per-tenant mode first: WECOM_TENANT_ID is authoritative when set (the
+    # per-tenant worker chain merges it into the child environment).
+    tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
+    if tenant_id_env:
+        row = (
+            db.query(TenantWecomConfig.tenant_id)
+            .filter(
+                TenantWecomConfig.tenant_id == tenant_id_env,
+                TenantWecomConfig.is_active.is_(True),
+            )
+            .first()
+        )
+        return row[0] if row else None
     corp_id = os.environ.get("WECOM_CORP_ID", "").strip()
     if not corp_id:
         return None

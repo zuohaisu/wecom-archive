@@ -22,13 +22,17 @@ Usage (from backend/):
     python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 10
     python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 20 --retry --trigger-source timer
 
-Required environment variables (only DATABASE_URL / WECOM_CORP_ID are
-needed for --count-only, since that mode never touches the SDK or
-filesystem):
+Required environment variables (only DATABASE_URL plus either
+WECOM_TENANT_ID or WECOM_CORP_ID are needed for --count-only, since that
+mode never touches the SDK or filesystem):
     DATABASE_URL          PostgreSQL connection string
-    WECOM_CORP_ID         WeCom corporation ID (resolves the active tenant)
+    WECOM_TENANT_ID       Per-tenant mode: resolves the active tenant config
+                          row and uses its stored CorpID / archive secret
+                          (FIELD_ENCRYPTION_KEY must be set)
+    WECOM_CORP_ID         Legacy mode: WeCom corporation ID (resolves the
+                          active tenant)
     WECOM_SDK_LIB_PATH    Absolute path to libWeWorkFinanceSdk_C.so
-    WECOM_ARCHIVE_SECRET  WeCom conversation archive secret
+    WECOM_ARCHIVE_SECRET  WeCom conversation archive secret (legacy mode)
     STORAGE_LOCAL_PATH    Media storage root (same variable RND-144 reads)
 
 Optional environment variables:
@@ -40,9 +44,9 @@ Optional environment variables:
     EVENT_MEDIA_DOWNLOAD_BACKOFF_SECONDS
                              Exponential retry backoff base (default 30)
 
-Tenant scoping: resolved server-side from WECOM_CORP_ID via
-tenant_wecom_configs — there is no --tenant-id flag; this codebase's rule
-is that tenant_id is never accepted from caller-supplied input.
+Tenant scoping: resolved server-side from WECOM_TENANT_ID or WECOM_CORP_ID
+via tenant_wecom_configs — there is no --tenant-id flag; this codebase's
+rule is that tenant_id is never accepted from caller-supplied input.
 
 Concurrency: acquires a non-blocking process-level file lock (fcntl.flock)
 before touching the database at all. If another invocation already holds
@@ -90,6 +94,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.crypto import FieldDecryptionError
 from app.db.models import ArchiveMessage, MediaFile, TenantWecomConfig
 from app.media_download import (
     GENERIC_DOWNLOAD_MSGTYPES,
@@ -112,6 +117,7 @@ from app.services.media_worker import (  # noqa: F401 -- re-exported for backwar
     build_within_window_count,
     download_media_candidates,
 )
+from app.services.tenant_credentials import config_for_tenant
 from app.settings import get_event_media_download_settings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -513,12 +519,20 @@ def main() -> None:
 
 def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
     database_url = _require_env("DATABASE_URL")
-    corp_id = _require_env("WECOM_CORP_ID")
 
     engine = create_engine(database_url)
 
+    tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
     with Session(engine) as session:
-        tenant_id = _require_tenant_id(session, corp_id)
+        if tenant_id_env:
+            config = config_for_tenant(session, tenant_id_env)
+            if config is None:
+                _fail("tenant_unavailable", "No active tenant config found for this tenant")
+            corp_id = config.corp_id
+            tenant_id = config.tenant_id
+        else:
+            corp_id = _require_env("WECOM_CORP_ID")
+            tenant_id = _require_tenant_id(session, corp_id)
 
         since_ms = _since_ms_cutoff(args.since_hours) if args.since_hours is not None else None
 
@@ -593,7 +607,16 @@ def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
             sys.exit(0)
 
         lib_path = _require_env("WECOM_SDK_LIB_PATH")
-        secret = _require_env("WECOM_ARCHIVE_SECRET")
+        if tenant_id_env:
+            try:
+                secret = config.decrypted_app_secret
+            except FieldDecryptionError:
+                _fail(
+                    "tenant_credentials_unreadable",
+                    "Stored archive secret cannot be decrypted",
+                )
+        else:
+            secret = _require_env("WECOM_ARCHIVE_SECRET")
         timeout = _optional_int_env("WECOM_MEDIA_TIMEOUT", _DEFAULT_TIMEOUT)
         write_backend_name = get_configured_write_backend_name()
         storage_provider = _media_storage_provider(write_backend_name)

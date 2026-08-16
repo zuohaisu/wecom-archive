@@ -9,7 +9,6 @@ a second media pipeline.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import time
@@ -25,6 +24,7 @@ from app.media_download import (
     build_candidate_query,
     select_nested_media_candidates,
 )
+from app.services.tenant_credentials import tenant_log_tag as _tenant_tag
 from app.settings import get_event_media_download_settings
 
 logger = logging.getLogger(__name__)
@@ -68,10 +68,6 @@ def _positive(raw: str, default: int) -> int:
         return max(1, int(raw.strip()))
     except (AttributeError, ValueError):
         return default
-
-
-def _tenant_tag(tenant_id: str) -> str:
-    return hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:12]
 
 
 def _active_tenant_id() -> str | None:
@@ -154,21 +150,26 @@ def _signal_media_worker() -> bool:
         return False
 
 
-def dispatch_media_worker(trigger_source: str = "archive-complete") -> MediaWorkerDispatch:
+def dispatch_media_worker(
+    trigger_source: str = "archive-complete", tenant_id: str | None = None
+) -> MediaWorkerDispatch:
     """Request a non-blocking generic media-worker run after archive commit.
 
     The signal carries no task data and cannot grow: it is one mtime update.
     The systemd path unit starts the existing generic media CLI, which owns
     candidate selection, the media lock, retry state, SDK lifecycle, and
     persistence. This read-only preflight prevents no-media archive runs from
-    emitting a meaningless worker wake-up.
+    emitting a meaningless worker wake-up.  A caller that already resolved a
+    tenant (per-tenant worker chain) passes ``tenant_id``; the env-scoped
+    resolution remains the default for the single-corp deployment.
     """
     source = _safe_source(trigger_source)
     if not _enabled():
         logger.info("media_worker trigger_source=%s trigger=no-work reason=disabled", source)
         return MediaWorkerDispatch.NO_WORK
 
-    tenant_id = _active_tenant_id()
+    if tenant_id is None:
+        tenant_id = _active_tenant_id()
     if tenant_id is None:
         logger.error("media_worker trigger_source=%s trigger=dispatch-failed error_class=tenant_unavailable", source)
         return MediaWorkerDispatch.FAILED

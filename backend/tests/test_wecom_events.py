@@ -83,7 +83,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+        lambda *args, **kwargs: wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
     app = FastAPI()
     app.include_router(wecom_events.router)
@@ -239,7 +239,7 @@ def test_post_valid_signature_acknowledges_and_dispatches_only_archive_worker(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+        lambda *args, **kwargs: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
     response = _post_encrypted(client, _event_xml())
 
@@ -267,7 +267,7 @@ def test_post_decrypts_external_contact_change_and_queues_targeted_refresh(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+        lambda *args, **kwargs: wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
     event = (
         b"<xml><MsgType><![CDATA[event]]></MsgType>"
@@ -289,7 +289,7 @@ def test_post_rejects_malformed_decrypted_event_without_dispatch(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+        lambda *args, **kwargs: dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
 
     response = _post_encrypted(client, b"<xml><Event>unterminated")
@@ -306,7 +306,7 @@ def test_post_rejects_decrypted_corp_mismatch_without_dispatch(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+        lambda *args, **kwargs: dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
     payload = _encrypt(_envelope(_event_xml(), corp_id=b"other-corp"))
     body = f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode()
@@ -340,7 +340,7 @@ def test_post_malformed_or_unsigned_input_never_dispatches(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+        lambda *args, **kwargs: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
     response = _post(client, body, payload, signature=signature)
 
@@ -356,7 +356,7 @@ def test_post_missing_required_query_parameters_never_dispatches(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+        lambda *args, **kwargs: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
 
     response = client.post(_PATH, content=b"<xml><Encrypt><![CDATA[ignored]]></Encrypt></xml>")
@@ -432,7 +432,7 @@ def test_post_returns_before_the_shared_worker_finishes(
     release = Event()
     finished = Event()
 
-    def _blocking_worker(*, trigger_source: str) -> bool:
+    def _blocking_worker(*, trigger_source: str, tenant_id: str | None = None) -> bool:
         assert trigger_source == "callback"
         started.set()
         assert release.wait(timeout=1)
@@ -462,7 +462,7 @@ def test_post_dispatch_failure_is_not_acknowledged(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: wecom_events.ArchiveWorkerDispatch.FAILED,
+        lambda *args, **kwargs: wecom_events.ArchiveWorkerDispatch.FAILED,
     )
     response = _post_encrypted(client, _event_xml())
 
@@ -477,7 +477,7 @@ def test_dispatch_failure_does_not_leak_request_data(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: wecom_events.ArchiveWorkerDispatch.FAILED,
+        lambda *args, **kwargs: wecom_events.ArchiveWorkerDispatch.FAILED,
     )
     response = _post_encrypted(client, _event_xml())
 
@@ -494,7 +494,7 @@ def test_post_does_not_dispatch_without_an_active_callback_tenant(
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
-        lambda: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
+        lambda *args, **kwargs: worker_dispatches.append(1) or wecom_events.ArchiveWorkerDispatch.ACCEPTED,
     )
     response = _post_encrypted(client, _event_xml())
 
