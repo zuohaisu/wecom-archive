@@ -239,7 +239,7 @@ def test_provisioning_owner_can_view_plan_create_order_and_receive_only_qr_image
     created = _create(client)
 
     assert page.status_code == 200
-    assert "购买年度套餐" in page.text
+    assert "开始 15 天免费试用" in page.text
     assert "WECHAT_PAY_API_V3_KEY" not in page.text
     assert plan.status_code == 200
     assert plan.json() == {
@@ -474,8 +474,8 @@ def test_page_and_javascript_expose_precise_states_without_raw_checkout_material
     assert "billing.subscription.state.expiring_soon" in translations
     assert "billing.subscription.state.grace" in translations
     assert "billing.subscription.message.grace" in translations
-    assert "state==='expiring_soon'||state==='grace'" in script
-    assert "billing.purchaseOrRenewAmount" in translations
+    assert "state === 'expiring_soon' || state === 'grace'" in script
+    assert "billing.cta.renewSoon" in translations
     assert "/refresh" in script
     assert "weixin://" not in page
     assert "checkout_url" not in script
