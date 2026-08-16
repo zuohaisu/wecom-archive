@@ -189,6 +189,24 @@ assumed reliable because the platform query uses the same reconciliation path.
 This keeps a future Alipay adapter possible without changing entitlement
 authority; no Alipay adapter is implemented.
 
+### 3.4.1 Platform commercial operations projection
+
+The existing platform operations service is the sole read-model composition
+boundary for tenant lifecycle, Subscription stored/effective state, provider
+Payment/Refund facts, the separate manual ledger, and operational exceptions.
+Both dashboard totals and tenant detail use these same service calculations;
+the router and browser never recompute revenue or infer a refund from an HTTP
+response. Provider net revenue is confirmed receipts minus `succeeded`
+refunds. Manual rows remain a visibly separate projection.
+
+High-risk suspend/resume, full-refund and payment/refund query actions pass
+through one platform-operation authorization gate. It locks the tenant,
+requires the independent platform-admin credential plus reason and exact slug
+confirmation, stores only idempotency/command hashes in append-only Audit, and
+rejects a changed replay. Provider order, transaction, refund and event
+references are masked before crossing the service boundary; archive content
+and WeCom customer identity tables are never loaded into this projection.
+
 ### 3.5 Storage-capacity authority and write gate
 
 `storage_capacity.py` is the single policy boundary. It combines the effective

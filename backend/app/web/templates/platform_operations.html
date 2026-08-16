@@ -11,15 +11,16 @@
 <body>
 <header class="platform-header"><div><strong>365 Archive</strong><span>平台运营</span></div><small>仅限内部平台管理员 · 不展示聊天内容</small></header>
 <main class="platform-page">
-  <div class="page-hd"><div><h1>运营看板</h1><p>跨租户规模、用量、订阅和收入摘要。</p></div><button id="refresh" class="btn btn-primary" type="button">刷新数据</button></div>
+  <div class="page-hd"><div><h1>运营看板</h1><p>跨租户规模、用量、商业状态与渠道资金事实。</p></div><button id="refresh" class="btn btn-primary" type="button">刷新数据</button></div>
   <div id="error" class="alert alert-danger" role="alert" hidden></div>
   <section class="metric-grid" aria-label="核心指标">
     <article class="card metric"><span>租户总数</span><strong id="tenant-total">—</strong><small id="tenant-states">—</small></article>
     <article class="card metric"><span>管理员账号</span><strong id="admin-accounts">—</strong><small id="observed-users">—</small></article>
     <article class="card metric"><span>消息总数</span><strong id="message-total">—</strong><small>仅汇总，不展示内容</small></article>
     <article class="card metric"><span>媒体与存储</span><strong id="storage-total">—</strong><small id="media-total">—</small></article>
-    <article class="card metric"><span>收款</span><strong id="receipt-total">—</strong><small id="net-revenue">—</small></article>
-    <article class="card metric"><span>退款</span><strong id="refund-total">—</strong><small>收入按 CNY 汇总</small></article>
+    <article class="card metric"><span>渠道确认收款</span><strong id="receipt-total">—</strong><small id="net-revenue">—</small></article>
+    <article class="card metric"><span>渠道成功退款</span><strong id="refund-total">—</strong><small id="manual-financial">手工账本单独统计</small></article>
+    <article class="card metric metric-alert"><span>待处理异常</span><strong id="exception-total">—</strong><small id="exception-states">—</small></article>
   </section>
   <div class="platform-grid">
     <section class="card"><div class="card-hd"><h2>套餐 / 订阅分布</h2></div><div class="card-bd"><ul id="subscriptions" class="summary-list"></ul></div></section>
@@ -27,8 +28,21 @@
     <section class="card"><div class="card-hd"><h2>最近新增租户</h2></div><div class="card-bd"><ul id="recent-tenants" class="summary-list"></ul></div></section>
     <section class="card"><div class="card-hd"><h2>最近活跃租户</h2></div><div class="card-bd"><ul id="recent-active" class="summary-list"></ul></div></section>
   </div>
-  <section class="card"><div class="card-hd"><h2>收款、退款与净收入（月）</h2></div><div class="card-bd table-wrap"><table><thead><tr><th>周期</th><th>收款</th><th>退款</th><th>净收入</th></tr></thead><tbody id="revenue-periods"></tbody></table></div></section>
-  <section class="card tenant-card"><div class="card-hd"><h2>租户列表</h2><span id="tenant-pagination" class="muted"></span></div><div class="card-bd table-wrap"><table><thead><tr><th>租户</th><th>服务</th><th>套餐 / 到期</th><th>管理员</th><th>消息</th><th>媒体 / 存储</th><th>操作</th></tr></thead><tbody id="tenant-rows"></tbody></table><div class="pager"><button id="previous-page" class="btn" type="button">上一页</button><button id="next-page" class="btn" type="button">下一页</button></div></div></section>
+  <section class="card"><div class="card-hd"><h2>渠道确认收款、成功退款与净收入（月）</h2><span class="muted">不含手工账本</span></div><div class="card-bd table-wrap"><table><thead><tr><th>周期</th><th>渠道收款</th><th>成功退款</th><th>净收入</th></tr></thead><tbody id="revenue-periods"></tbody></table></div></section>
+  <section class="card tenant-card">
+    <div class="card-hd"><h2>租户商业状态</h2><span id="tenant-pagination" class="muted"></span></div>
+    <form id="tenant-filters" class="filter-grid">
+      <label>服务状态<select id="filter-service"><option value="">全部</option><option value="provisioning">配置中</option><option value="active">运行中</option><option value="frozen">已冻结</option><option value="suspended">人工暂停</option></select></label>
+      <label>订阅状态<select id="filter-subscription"><option value="">全部</option><option value="trial">试用</option><option value="active">有效</option><option value="grace">宽限期</option><option value="expired">已过期</option><option value="canceled">已取消</option><option value="not_subscribed">未订阅</option></select></label>
+      <label>退款状态<select id="filter-refund"><option value="">全部</option><option value="pending">处理中</option><option value="succeeded">已成功</option><option value="abnormal">异常</option><option value="manual_recovery_required">人工恢复</option><option value="closed">已关闭</option></select></label>
+      <label>异常<select id="filter-exception"><option value="">全部</option><option value="any">仅有异常</option><option value="payment">支付/激活</option><option value="refund">退款</option><option value="none">无异常</option></select></label>
+      <label>到期自<input id="filter-ends-from" type="date"></label>
+      <label>到期至<input id="filter-ends-to" type="date"></label>
+      <label>排序<select id="filter-sort"><option value="created_desc">最近创建</option><option value="name_asc">租户名称</option><option value="ends_asc">最早到期</option><option value="ends_desc">最晚到期</option></select></label>
+      <div class="filter-actions"><button class="btn btn-primary" type="submit">应用筛选</button><button id="reset-filters" class="btn" type="button">重置</button></div>
+    </form>
+    <div class="card-bd table-wrap"><table><thead><tr><th>租户</th><th>服务</th><th>套餐 / 到期</th><th>渠道净收入</th><th>异常</th><th>媒体 / 存储</th><th>操作</th></tr></thead><tbody id="tenant-rows"></tbody></table><div class="pager"><button id="previous-page" class="btn" type="button">上一页</button><button id="next-page" class="btn" type="button">下一页</button></div></div>
+  </section>
   <aside id="tenant-detail" class="card tenant-detail" hidden aria-live="polite"></aside>
 </main>
 <script src="/web/static/platform-operations.js?v=__STATIC_VERSION__"></script>

@@ -74,6 +74,7 @@ class AuditAction:
     TENANT_BILLING_RESTORED = "tenant.billing_restored"
     PLATFORM_TENANT_SUSPENDED = "platform.tenant_suspended"
     PLATFORM_TENANT_RESUMED = "platform.tenant_resumed"
+    PLATFORM_CONTROL_AUTHORIZED = "platform.control_authorized"
     REFUND_REQUESTED = "refund.requested"
     REFUND_PROCESSING = "refund.processing"
     REFUND_SUCCEEDED = "refund.succeeded"
@@ -167,6 +168,10 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
         AuditObjectType.TENANT,
     ),
     AuditAction.PLATFORM_TENANT_RESUMED: (
+        AuditCategory.SECURITY,
+        AuditObjectType.TENANT,
+    ),
+    AuditAction.PLATFORM_CONTROL_AUTHORIZED: (
         AuditCategory.SECURITY,
         AuditObjectType.TENANT,
     ),

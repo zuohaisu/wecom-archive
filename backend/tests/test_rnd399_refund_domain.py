@@ -81,6 +81,7 @@ class FakeProvider:
 
     def __init__(self):
         self.refund_requests = []
+        self.refund_query_calls = 0
         self.refund_query_event = None
         self.refund_notification_event = None
 
@@ -116,6 +117,7 @@ class FakeProvider:
         )
 
     def query_refund(self, provider_ref):
+        self.refund_query_calls += 1
         assert self.refund_query_event is not None
         assert self.refund_query_event.provider_ref == provider_ref
         return self.refund_query_event
@@ -676,6 +678,7 @@ def test_rnd403_http_surface_is_platform_controlled_and_callback_driven(factory)
                 json={
                     "payment_order_id": order.id,
                     "reason_code": "customer_request",
+                    "confirmation": "tenant-a",
                 },
             )
             assert unauthorized.status_code == 401
@@ -691,6 +694,7 @@ def test_rnd403_http_surface_is_platform_controlled_and_callback_driven(factory)
                 json={
                     "payment_order_id": order.id,
                     "reason_code": "customer_request",
+                    "confirmation": "tenant-a",
                 },
             )
             assert submitted.status_code == 202
@@ -700,6 +704,13 @@ def test_rnd403_http_surface_is_platform_controlled_and_callback_driven(factory)
                 payment = db.get(PaymentOrder, order.id)
                 refund = db.get(RefundOrder, submitted.json()["refund_id"])
                 assert payment is not None and refund is not None
+                provider.refund_query_event = _rnd403_event(
+                    payment,
+                    refund,
+                    provider,
+                    source="query",
+                    event_id="refund-http-query-rnd405",
+                )
                 provider.refund_notification_event = _rnd403_event(
                     payment,
                     refund,
@@ -707,6 +718,33 @@ def test_rnd403_http_surface_is_platform_controlled_and_callback_driven(factory)
                     source="callback",
                     event_id="refund-http-callback-rnd403",
                 )
+            query_path = (
+                path
+                + "/"
+                + submitted.json()["refund_id"]
+                + "/query"
+            )
+            query_headers = {
+                "Idempotency-Key": "refund-query-rnd405-api",
+            }
+            query_payload = {
+                "reason_code": "provider_reconciliation",
+                "confirmation": "tenant-a",
+            }
+            queried = client.post(
+                query_path,
+                headers=query_headers,
+                json=query_payload,
+            )
+            query_replay = client.post(
+                query_path,
+                headers=query_headers,
+                json=query_payload,
+            )
+            assert queried.status_code == 200
+            assert queried.json()["status"] == "succeeded"
+            assert query_replay.status_code == 200
+            assert provider.refund_query_calls == 1
             callback = client.post(
                 "/api/refunds/wechat/notify",
                 content=b"signed-provider-envelope",

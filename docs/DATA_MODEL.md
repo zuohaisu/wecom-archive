@@ -283,6 +283,14 @@ nullable only so pre-0054 evidence stays readable. New events must match the
 original Payment's reference, full amount, and currency before the domain
 accepts them.
 
+RND-405 adds no financial source-of-truth table. Its operations projection
+reads provider receipts from provider-confirmed `payment_orders`, successful
+refunds from `refund_orders.status='succeeded'`, and manual ledger rows from
+`manual_financial_transactions` as three deliberately separate facts.
+High-risk platform commands append `platform.control_authorized` audit rows
+containing tenant/platform-admin/action/reason plus SHA-256 idempotency and
+command hashes. Raw keys and typed confirmation values are never stored.
+
 ### `billing_notification_intents` and `billing_notification_attempts`
 
 Migration 0053 adds a durable email outbox for subscription thresholds and

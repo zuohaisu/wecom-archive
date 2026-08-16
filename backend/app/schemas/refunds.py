@@ -11,6 +11,12 @@ from pydantic import BaseModel, Field
 class SubmitRefundIn(BaseModel):
     payment_order_id: str = Field(min_length=1, max_length=36)
     reason_code: str = Field(min_length=1, max_length=64)
+    confirmation: str = Field(min_length=1, max_length=128)
+
+
+class QueryRefundIn(BaseModel):
+    reason_code: str = Field(min_length=1, max_length=64)
+    confirmation: str = Field(min_length=1, max_length=128)
 
 
 class RefundOut(BaseModel):

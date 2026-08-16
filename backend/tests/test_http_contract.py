@@ -359,8 +359,8 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    # RND-403 adds two platform refund controls and one signed callback route.
-    assert route_count == 147
+    # RND-405 adds one controlled platform payment-recovery route.
+    assert route_count == 148
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -483,6 +483,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/operations/tenants",
             "/api/platform/operations/tenants/{tenant_id}",
             "/api/platform/operations/tenants/{tenant_id}/financial-transactions",
+            "/api/platform/operations/tenants/{tenant_id}/payments/{order_id}/query",
             "/api/platform/operations/tenants/{tenant_id}/refunds",
             "/api/platform/operations/tenants/{tenant_id}/refunds/{refund_id}/query",
             "/api/platform/operations/tenants/{tenant_id}/service",
@@ -845,6 +846,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/platform/operations/tenants/{tenant_id}/financial-transactions",
             frozenset({"POST"}),
             "ManualFinancialTransactionOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/tenants/{tenant_id}/payments/{order_id}/query",
+            frozenset({"POST"}),
+            "PaymentOrderOut",
             "None",
         ),
         (

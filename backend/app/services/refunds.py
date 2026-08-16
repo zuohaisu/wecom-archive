@@ -137,6 +137,22 @@ def _summary(refund: RefundOrder) -> RefundSummary:
     )
 
 
+def get_refund_summary(
+    db: Session,
+    tenant_id: str,
+    refund_id: str,
+) -> RefundSummary:
+    refund = db.scalar(
+        select(RefundOrder).where(
+            RefundOrder.id == _safe_id(refund_id, "refund_id"),
+            RefundOrder.tenant_id == _safe_id(tenant_id, "tenant_id"),
+        )
+    )
+    if refund is None:
+        raise RefundNotFoundError("refund order does not exist")
+    return _summary(refund)
+
+
 def _audit(
     db: Session,
     refund: RefundOrder,

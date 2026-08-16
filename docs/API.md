@@ -96,8 +96,8 @@ Payment. They accept full refunds only.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/api/platform/operations/tenants/{tenant_id}/refunds` | Submit/idempotently replay one reviewed full refund; requires `Idempotency-Key`; HTTP 202 means provider acceptance/processing, not success |
-| `POST` | `/api/platform/operations/tenants/{tenant_id}/refunds/{refund_id}/query` | Actively query the signed WeChat result and reconcile a missed/delayed callback |
+| `POST` | `/api/platform/operations/tenants/{tenant_id}/refunds` | Submit/idempotently replay one reviewed full refund; requires `Idempotency-Key`, reason and exact tenant-slug confirmation; HTTP 202 means provider acceptance/processing, not success |
+| `POST` | `/api/platform/operations/tenants/{tenant_id}/refunds/{refund_id}/query` | Actively query the signed WeChat result and reconcile a missed/delayed callback; requires a new `Idempotency-Key`, reason and tenant-slug confirmation per deliberate attempt |
 | `POST` | `/api/refunds/wechat/notify` | Public WeChat refund notification receiver; authenticates the provider rather than a browser session |
 
 The notification route verifies the raw-body signature and timestamp, decrypts
@@ -109,6 +109,33 @@ subscription term grant. `ABNORMAL` and `CLOSED` remain explicit terminal
 operator-visible outcomes. Duplicate evidence is idempotent, changed replays
 and out-of-order terminal transitions fail closed, and raw bodies, keys, payer
 details, and provider error text are never returned.
+
+### Platform commercial operations
+
+`GET /platform/operations` and every `/api/platform/operations/*` route require
+the independent platform-administrator credential domain. A tenant Owner
+session never satisfies this boundary.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/platform/operations/dashboard` | Cross-tenant lifecycle, usage, provider-confirmed financial, manual-ledger and exception totals |
+| `GET` | `/api/platform/operations/tenants` | Paginated/filterable tenant commercial state; filters cover service, effective subscription, refund, exception and expiry range; sorting covers creation, name and expiry |
+| `GET` | `/api/platform/operations/tenants/{tenant_id}` | One safe detail projection with masked payment/refund references, separate manual rows, exceptions and append-only audit event IDs |
+| `PATCH` | `/api/platform/operations/tenants/{tenant_id}/service` | Manual suspend/resume with `Idempotency-Key`, reason and exact tenant-slug confirmation |
+| `POST` | `/api/platform/operations/tenants/{tenant_id}/payments/{order_id}/query` | Controlled payment/activation reconciliation with the same high-risk controls |
+
+Provider gross receipts count only provider-confirmed paid orders. Successful
+provider refunds count only authoritative refund rows in `succeeded`; a
+`processing` refund does not reduce revenue. Provider net revenue is therefore
+gross receipts minus successful provider refunds. Manual receipt/refund rows
+are returned in a separate ledger and never alter those totals or subscription
+entitlement. High-risk commands use the platform credential plus an explicit
+reason, exact tenant-slug confirmation and a hashed idempotency receipt in
+Audit. Exact completed query/control replays do not repeat provider I/O, while
+a failed refund submission may safely retry its already-reserved stable
+`out_refund_no`; changed replays fail.
+Responses never expose full provider references, payer accounts, CorpID,
+UserID, archive content, raw callbacks or keys.
 
 `GET /api/billing/capacity` measures only this tenant's successfully downloaded
 `media_files` bytes and joins that fact to the effective subscription quota.

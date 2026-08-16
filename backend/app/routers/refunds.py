@@ -12,13 +12,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.auth import require_platform_admin
 from app.db.models import PlatformAdmin
 from app.db.session import get_db
-from app.schemas.refunds import RefundOut, SubmitRefundIn
+from app.schemas.refunds import QueryRefundIn, RefundOut, SubmitRefundIn
+from app.services import platform_operations
 from app.services.payment_provider import PaymentProvider
+from app.services.payment_orders import PaymentOrderNotFoundError, get_order
 from app.services.refunds import (
     RefundAuthorizationError,
     RefundConflictError,
     RefundError,
     RefundNotFoundError,
+    get_refund_summary,
 )
 from app.services.wechat_pay import (
     WechatPayConfigurationError,
@@ -53,8 +56,18 @@ def _out(summary) -> RefundOut:
 
 
 def _raise_control_error(error: Exception) -> None:
+    if isinstance(error, platform_operations.PlatformOperationsNotFoundError):
+        raise HTTPException(status_code=404, detail="tenant_not_found") from error
+    if isinstance(error, platform_operations.PlatformOperationsConflictError):
+        raise HTTPException(
+            status_code=409, detail="operation_idempotency_conflict"
+        ) from error
+    if isinstance(error, platform_operations.PlatformOperationsValidationError):
+        raise HTTPException(status_code=422, detail="invalid_control_operation") from error
     if isinstance(error, RefundNotFoundError):
         raise HTTPException(status_code=404, detail="refund_not_found") from error
+    if isinstance(error, PaymentOrderNotFoundError):
+        raise HTTPException(status_code=404, detail="payment_order_not_found") from error
     if isinstance(error, RefundAuthorizationError):
         raise HTTPException(status_code=403, detail="refund_not_authorized") from error
     if isinstance(error, RefundConflictError):
@@ -80,6 +93,18 @@ def submit_platform_refund(
     provider: PaymentProvider = Depends(get_refund_provider),
 ) -> RefundOut:
     try:
+        get_order(db, tenant_id, payload.payment_order_id)
+        platform_operations.authorize_platform_operation(
+            db,
+            tenant_id=tenant_id,
+            platform_admin_id=platform_admin.id,
+            action="refund.submit",
+            target_id=payload.payment_order_id,
+            reason_code=payload.reason_code,
+            confirmation=payload.confirmation,
+            idempotency_key=idempotency_key,
+        )
+        db.commit()
         return _out(
             submit_wechat_refund(
                 _factory(db),
@@ -106,13 +131,29 @@ def submit_platform_refund(
 def query_platform_refund(
     tenant_id: str,
     refund_id: str,
-    _platform_admin: PlatformAdmin = Depends(require_platform_admin),
+    payload: QueryRefundIn,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    platform_admin: PlatformAdmin = Depends(require_platform_admin),
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_refund_provider),
 ) -> RefundOut:
     try:
+        get_refund_summary(db, tenant_id, refund_id)
+        replay = platform_operations.authorize_platform_operation(
+            db,
+            tenant_id=tenant_id,
+            platform_admin_id=platform_admin.id,
+            action="refund.query",
+            target_id=refund_id,
+            reason_code=payload.reason_code,
+            confirmation=payload.confirmation,
+            idempotency_key=idempotency_key,
+        )
+        db.commit()
         return _out(
-            query_and_reconcile_wechat_refund(
+            get_refund_summary(db, tenant_id, refund_id)
+            if replay
+            else query_and_reconcile_wechat_refund(
                 _factory(db), provider, tenant_id, refund_id
             )
         )
