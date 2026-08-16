@@ -364,7 +364,8 @@ def test_router_count() -> None:
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
     # RND-405 adds one controlled platform payment-recovery route.
     # RND-386 adds three provisioning config-wizard routes.
-    assert route_count == 151
+    # RND-388 adds one self-service activation route.
+    assert route_count == 152
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -499,6 +500,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/tenants/{tenant_id}/branding/certificate-status",
             "/api/platform/wecom/third-party/suite-ticket-status",
             "/api/payments/wechat/notify",
+            "/api/provisioning/activate",
             "/api/provisioning/config",
             "/api/provisioning/config/test",
             "/api/provisioning/status",
@@ -910,6 +912,7 @@ def test_route_snapshot_with_real_model_names() -> None:
             "None",
         ),
         ("/api/payments/wechat/notify", frozenset({"POST"}), "None", "None"),
+        ("/api/provisioning/activate", frozenset({"POST"}), "dict", "None"),
         ("/api/provisioning/config", frozenset({"GET"}), "dict", "None"),
         ("/api/provisioning/config", frozenset({"PUT"}), "dict", "None"),
         ("/api/provisioning/config/test", frozenset({"POST"}), "dict", "None"),

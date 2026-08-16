@@ -18,6 +18,15 @@ from app.auth import get_provisioning_user
 from app.db.models import AdminUser, Tenant
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
+from app.services.archive_worker_trigger import (
+    ArchiveWorkerDispatch,
+    dispatch_archive_worker,
+)
+from app.services.tenant_activation import (
+    activate_tenant,
+    activation_status,
+    spawn_activation_worker,
+)
 from app.services.tenant_config_service import (
     TenantConfigBindingMissingError,
     TenantConfigValidationError,
@@ -51,11 +60,8 @@ def provisioning_waiting(
     return HTMLResponse(
         render_template(
             "provisioning",
-            page_title="组织配置中",
-            heading="组织已创建",
-            body="完成企业微信会话存档配置和自动检查后，系统会开始一次 15 天免费试用；无需先付款。",
-            primary_href="/admin/billing",
-            primary_label="开始 15 天免费试用",
+            i18n_script=I18N_SCRIPT_TAG,
+            sidenav=render_provisioning_sidenav("organization"),
         )
     )
 
@@ -75,12 +81,27 @@ def provisioning_settings(
 
 @router.get("/api/provisioning/status")
 def provisioning_status(
-    _context: tuple[AdminUser, Tenant] = Depends(get_provisioning_user),
+    context: tuple[AdminUser, Tenant] = Depends(get_provisioning_user),
+    db: Session = Depends(get_db),
 ) -> dict:
+    """Onboarding status: lifecycle + the persisted activation-check state
+    machine (RND-388).  ``activate`` appears in allowed_actions only when the
+    gates already passed and the tenant is waiting for promotion."""
+    _user, tenant = context
+    snapshot = activation_status(db, tenant.id)
+    allowed_actions = ["view_status", "purchase_plan", "view_settings"]
+    if snapshot.state == "ready":
+        allowed_actions.append("activate")
     return {
-        "lifecycle_status": "provisioning",
-        "archive_enabled": False,
-        "allowed_actions": ["view_status", "purchase_plan", "view_settings"],
+        "lifecycle_status": tenant.lifecycle_status,
+        "archive_enabled": tenant.lifecycle_status == "active",
+        "activation": {
+            "state": snapshot.state,
+            "gate_results": snapshot.gate_results,
+            "safe_error_code": snapshot.safe_error_code,
+            "revision": snapshot.revision,
+        },
+        "allowed_actions": allowed_actions,
     }
 
 
@@ -103,7 +124,7 @@ def put_provisioning_config(
     """Persist wizard fields; blank values never overwrite existing secrets."""
     _user, tenant = context
     try:
-        return apply_config_updates(db, tenant.id, payload.model_dump())
+        result = apply_config_updates(db, tenant.id, payload.model_dump())
     except TenantConfigValidationError as error:
         return JSONResponse(
             status_code=400,
@@ -113,6 +134,11 @@ def put_provisioning_config(
         raise HTTPException(
             status_code=409, detail="organization_binding_missing"
         ) from error
+    # Auto-activation trigger: configuration may now be complete. Best-effort
+    # and detached; the tenant row lock serializes concurrent attempts and a
+    # later payment notify or manual retry re-evaluates anyway.
+    spawn_activation_worker(db.get_bind(), tenant.id, actor="self_service")
+    return result
 
 
 @router.post("/api/provisioning/config/test")
@@ -122,4 +148,42 @@ def test_provisioning_config(
 ) -> dict:
     """Run local credential checks and a real WeCom connectivity probe."""
     _user, tenant = context
-    return test_config(db, tenant.id)
+    result = test_config(db, tenant.id)
+    # Auto-activation trigger: a successful probe means gates may now pass.
+    # Best-effort and detached — the response is never held hostage by the
+    # evaluation, and a concurrent save/payment is serialized by the tenant
+    # row lock inside activate_tenant.
+    spawn_activation_worker(db.get_bind(), tenant.id, actor="self_service")
+    return result
+
+
+@router.post("/api/provisioning/activate")
+def activate_provisioning_tenant(
+    context: tuple[AdminUser, Tenant] = Depends(get_provisioning_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manual retry entry for a ready or blocked tenant (RND-388).
+
+    Idempotent: a replaying or blocked attempt never double-grants a trial,
+    double-audits or double-dispatches the worker.  The worker dispatch
+    happens strictly after the promotion commit, with the "activation"
+    trigger source the T2 worker chain already understands.
+    """
+    _user, tenant = context
+    result = activate_tenant(db, tenant.id, actor="self_service")
+    dispatch: ArchiveWorkerDispatch | None = None
+    if result.activated:
+        dispatch = dispatch_archive_worker(
+            trigger_source="activation", tenant_id=tenant.id
+        )
+    return {
+        "activated": result.activated,
+        "replayed": result.replayed,
+        "activation": {
+            "state": result.snapshot.state,
+            "gate_results": result.snapshot.gate_results,
+            "safe_error_code": result.snapshot.safe_error_code,
+            "revision": result.snapshot.revision,
+        },
+        "worker_dispatch": dispatch.value if dispatch is not None else None,
+    }

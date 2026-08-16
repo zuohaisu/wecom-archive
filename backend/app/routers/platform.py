@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.auth import get_wecom_token, require_platform_admin
 from app.db.models import (
-    AdminSession,
     DuplicateCorpIdError,
     Tenant,
     TenantBranding,
@@ -49,6 +48,7 @@ from app.services.usageservice import (
     sum_storage,
     sync_health,
 )
+from app.services.tenant_activation import activate_tenant
 
 router = APIRouter()
 
@@ -178,45 +178,37 @@ def update_tenant_status(
     old_lifecycle_status = tenant.lifecycle_status
     new_status = payload.is_active
     if old_status != new_status:
-        tenant.is_active = new_status
-        tenant.lifecycle_status = "active" if new_status else "suspended"
-        promoted_sessions = 0
         if new_status and old_lifecycle_status == "provisioning":
-            promoted_sessions = (
-                db.query(AdminSession)
-                .filter(
-                    AdminSession.tenant_id == tenant_id,
-                    AdminSession.session_scope == "provisioning",
-                    AdminSession.is_revoked.is_(False),
-                )
-                .update(
-                    {AdminSession.session_scope: "admin"},
-                    synchronize_session=False,
-                )
+            # RND-388: the provisioning→active transition now delegates to the
+            # shared promotion routine (identical session promotion + audit).
+            # The platform console stays authoritative — gates are not
+            # required here.  activate_tenant commits internally.
+            activate_tenant(db, tenant_id, actor="platform", require_gates=False)
+            db.refresh(tenant)
+        else:
+            tenant.is_active = new_status
+            tenant.lifecycle_status = "active" if new_status else "suspended"
+            audit_detail = {
+                "platform_admin_id": admin_user.id,
+                "previous_is_active": old_status,
+                "is_active": new_status,
+            }
+            write_audit(
+                db,
+                tenant_id=tenant_id,
+                action=(
+                    AuditAction.PLATFORM_TENANT_DEACTIVATED
+                    if not new_status else AuditAction.PLATFORM_TENANT_ACTIVATED
+                ),
+                object_type=AuditObjectType.TENANT,
+                # PlatformAdmin is tenant-less and cannot satisfy this FK.
+                admin_user_id=None,
+                object_id=tenant_id,
+                detail=audit_detail,
             )
-        audit_detail = {
-            "platform_admin_id": admin_user.id,
-            "previous_is_active": old_status,
-            "is_active": new_status,
-        }
-        if promoted_sessions:
-            audit_detail["promoted_provisioning_sessions"] = promoted_sessions
-        write_audit(
-            db,
-            tenant_id=tenant_id,
-            action=(
-                AuditAction.PLATFORM_TENANT_DEACTIVATED
-                if not new_status else AuditAction.PLATFORM_TENANT_ACTIVATED
-            ),
-            object_type=AuditObjectType.TENANT,
-            # PlatformAdmin is tenant-less and cannot satisfy this FK.
-            admin_user_id=None,
-            object_id=tenant_id,
-            detail=audit_detail,
-        )
-        # Persist the state transition and its audit row together.
-        db.commit()
-        db.refresh(tenant)
+            # Persist the state transition and its audit row together.
+            db.commit()
+            db.refresh(tenant)
 
     return TenantStatusUpdateOut(
         tenant_id=tenant.id,

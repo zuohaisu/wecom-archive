@@ -302,6 +302,17 @@ CREATE TABLE tenant_wecom_configs (
     created_at TEXT,
     updated_at TEXT
 );
+CREATE TABLE tenant_activation_checks (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'not_started',
+    gate_results TEXT NOT NULL DEFAULT '{}',
+    safe_error_code TEXT,
+    revision INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id)
+);
 CREATE TABLE sync_states (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     corp_id TEXT NOT NULL,
