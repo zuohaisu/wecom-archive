@@ -166,3 +166,23 @@ def test_manifest_root_must_be_array(tmp_path: Path) -> None:
 def test_manifest_not_found() -> None:
     with pytest.raises(ManifestValidationError):
         load_manifest(Path("/nonexistent/manifest.json"), check_files_exist=False)
+
+
+def test_check_files_exist_honors_custom_repo_root(tmp_path: Path) -> None:
+    """A manifest whose paths are relative to an isolated tmp tree (e.g. a
+    test fixture, not this repo) must validate against THAT tree, not the
+    real repo root — otherwise check_files_exist=True is unusable for any
+    caller testing against isolated fixtures (RND-356 build_index tests)."""
+    (tmp_path / "doc-a.md").write_text("content", encoding="utf-8")
+    manifest_path = _write_manifest(tmp_path, [_VALID_ENTRY])
+
+    entries = load_manifest(manifest_path, check_files_exist=True, repo_root=tmp_path)
+
+    assert len(entries) == 1
+
+
+def test_check_files_exist_rejects_when_custom_repo_root_lacks_file(tmp_path: Path) -> None:
+    manifest_path = _write_manifest(tmp_path, [_VALID_ENTRY])  # doc-a.md never written
+
+    with pytest.raises(ManifestValidationError):
+        load_manifest(manifest_path, check_files_exist=True, repo_root=tmp_path)

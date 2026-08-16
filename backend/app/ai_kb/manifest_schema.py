@@ -146,10 +146,21 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def load_manifest(path: Optional[Path] = None, *, check_files_exist: bool = True) -> list[ManifestEntry]:
+def load_manifest(
+    path: Optional[Path] = None,
+    *,
+    check_files_exist: bool = True,
+    repo_root: Optional[Path] = None,
+) -> list[ManifestEntry]:
     """Load and validate the manifest. Raises ManifestValidationError with
     every problem found (not just the first) so a human can fix them all in
-    one pass instead of playing whack-a-mole."""
+    one pass instead of playing whack-a-mole.
+
+    repo_root anchors the manifest's repo-relative `path` fields for the
+    file-existence check; it defaults to this repo's real root but callers
+    testing against an isolated tmp_path manifest must override it —
+    otherwise check_files_exist would validate paths against the wrong
+    tree entirely."""
     manifest_path = path or _MANIFEST_PATH
     try:
         raw_text = manifest_path.read_text(encoding="utf-8")
@@ -173,7 +184,7 @@ def load_manifest(path: Optional[Path] = None, *, check_files_exist: bool = True
 
     entries: list[ManifestEntry] = []
     seen_ids: dict[str, int] = {}
-    repo_root = _repo_root()
+    root = repo_root if repo_root is not None else _repo_root()
     for index, raw in enumerate(raw_entries):
         source_id = raw["source_id"]
         if source_id in seen_ids:
@@ -181,7 +192,7 @@ def load_manifest(path: Optional[Path] = None, *, check_files_exist: bool = True
             continue
         seen_ids[source_id] = index
 
-        if check_files_exist and not (repo_root / raw["path"]).is_file():
+        if check_files_exist and not (root / raw["path"]).is_file():
             issues.append(f"manifest[{index}] ({source_id}): path does not exist: {raw['path']}")
             continue
 

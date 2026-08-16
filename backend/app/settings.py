@@ -212,3 +212,19 @@ class SelfServiceTrialSettings(BaseSettings):
 
 def get_self_service_trial_settings() -> SelfServiceTrialSettings:
     return SelfServiceTrialSettings()
+
+
+class AiSettings(BaseSettings):
+    """AI support (RND-354 epic) configuration. ai_support_enabled is the
+    single kill switch every AI surface (T2 answer service, T3 UI, T5
+    eval/handoff) reads — never duplicate this flag elsewhere."""
+
+    ai_support_enabled: str = "false"
+    ai_llm_provider: str = ""  # "" | "deepseek" | "fake"
+    ai_llm_model: str = ""
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+
+
+def get_ai_settings() -> AiSettings:
+    return AiSettings()
