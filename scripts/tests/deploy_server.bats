@@ -245,9 +245,23 @@ line_of() {
 	rm -f "$DEPLOY_DIR/backend/.env"
 	run run_deploy
 	[ "$status" -ne 0 ]
-	assert_output_contains "backend/.env not found"
+	assert_output_contains "deployment configuration file not found"
 	assert_output_contains "Restoring working tree"
 	[ "$(current_head)" = "$PREV_SHA" ]
+}
+
+@test "external EnvironmentFile supplies deployment configuration without leaking its value" {
+	local external_env="$TEST_TMPDIR/external-nonprod.env"
+	cat >"$external_env" <<'EOF'
+DATABASE_URL=postgresql://nonprod:external-config-sentinel@localhost:5432/mockdb
+EOF
+	rm -f "$DEPLOY_DIR/backend/.env"
+	export DEPLOY_ENV_FILE="$external_env"
+
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_not_contains "external-config-sentinel"
 }
 
 @test "QA-04: a fully successful deploy records the new commit as last-known-good" {

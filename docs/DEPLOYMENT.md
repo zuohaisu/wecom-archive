@@ -34,6 +34,7 @@ Versioned in this repository:
 | Billing notification unit/timer | `deploy/systemd/wecom-billing-notifications.{service,timer}` | Schedule and retry lifecycle, payment-activation and refund-anomaly notices every five minutes |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
 | GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
+| Controlled non-production deployment | `.github/workflows/deploy-nonprod.yml`, `scripts/deploy_nonprod.sh`, `deploy/systemd/wecom-archive-365-nonprod.service` | Manually deploys an exact `main` SHA only to the isolated staging instance; see [operations/nonproduction-deployment.md](operations/nonproduction-deployment.md) |
 
 Not versioned in this repository:
 
@@ -690,6 +691,22 @@ which of §7.3 / §7.5 / §7.6 fired and, for a rollback, whether it
 succeeded — start there before reaching for any command above.
 
 ---
+
+### 7.9 Controlled non-production self-service validation (RND-392)
+
+Third-party self-service authorization must be validated on the isolated
+non-production instance before any production configuration or entry point is
+considered. The manual `deploy-nonprod.yml` workflow has a separate GitHub
+Environment, SSH credentials, host path, service, lock and health port; it
+never receives application runtime secrets. The non-production service loads
+only its protected host EnvironmentFile and fails before startup if its
+ownership, `0600` mode, isolation marker or safety policy is wrong.
+
+Follow [operations/nonproduction-deployment.md](operations/nonproduction-deployment.md)
+for the fixed resource names, allowed configuration channel, GitHub Environment
+rules, initial setup, validation and rollback. Do not use production
+`deploy.yml`, production `.env`, production workers, or production credentials
+as a shortcut for this verification.
 
 ## 8. Known Gaps
 

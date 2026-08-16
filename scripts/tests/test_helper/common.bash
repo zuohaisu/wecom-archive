@@ -90,6 +90,7 @@ EOF
 	export GIT_REMOTE="origin"
 	export GIT_BRANCH="main"
 	export EXPECTED_SHA=""          # unset by default -- floating-pull path
+	export DEPLOY_ENV_FILE=""        # default remains checkout-local backend/.env
 	export SUDO_BIN=""                     # tests never need real sudo
 	export SYSTEMCTL_BIN="systemctl"       # resolved via mocked PATH
 	export CURL_BIN="curl"

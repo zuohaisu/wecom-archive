@@ -1,0 +1,29 @@
+[Unit]
+Description=WeCom Archive controlled non-production web service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wecomarchive-nonprod
+Group=wecomarchive-nonprod
+WorkingDirectory=/srv/apps/wecom-archive-365-nonprod/current/backend
+EnvironmentFile=/etc/wecom-archive-365/nonprod.env
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+# The policy check reads the same 0600 EnvironmentFile as this process and
+# refuses production-facing integrations before Uvicorn can start.
+ExecStartPre=/srv/apps/wecom-archive-365-nonprod/current/scripts/validate_nonprod_config.sh
+ExecStart=/srv/apps/wecom-archive-365-nonprod/current/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 18035
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/srv/apps/wecom-archive-365-nonprod
+ReadOnlyPaths=/usr /etc
+
+[Install]
+WantedBy=multi-user.target

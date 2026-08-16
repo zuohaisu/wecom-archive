@@ -149,6 +149,12 @@ GIT_BRANCH="${GIT_BRANCH:-main}"
 # first-run), falls back to the original floating `git pull --ff-only`.
 EXPECTED_SHA="${EXPECTED_SHA:-}"
 
+# By default the deployment keeps its existing checkout-local configuration.
+# The controlled non-production wrapper overrides this with a separate,
+# operator-managed EnvironmentFile so runtime secrets never enter the Git
+# checkout or GitHub Actions environment.
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-}"
+
 # QA-04 fix: persisted outside the git working tree (sibling to the
 # existing `shared/www` convention — see docs/DEPLOYMENT.md §1) so it is
 # never seen as an uncommitted change by the clean-tree guard below, and
@@ -601,20 +607,23 @@ fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
-# Load DATABASE_URL (and any other backend/.env vars) into this shell so
-# `alembic upgrade head` below runs against the SAME database the
-# systemd service uses — never echoed, never included in any log line.
-if [ -f .env ]; then
+# Load DATABASE_URL (and any other deployment configuration) into this shell
+# so `alembic upgrade head` below runs against the SAME database the systemd
+# service uses — never echoed, never included in any log line.  Production
+# retains the checkout-local .env default; RND-392 passes an operator-managed
+# external file through DEPLOY_ENV_FILE.
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$PWD/.env}"
+if [ -f "$DEPLOY_ENV_FILE" ]; then
     set -a
-    # shellcheck disable=SC1091
-    source .env
+    # shellcheck disable=SC1090
+    source "$DEPLOY_ENV_FILE"
     set +a
     # PUBLIC_HEALTH was not defaulted at the top of this script (see config
     # section) because it depends on ARCHIVE_DOMAIN which may be set in .env.
     # Default it now that .env has been sourced.
     PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://${ARCHIVE_DOMAIN}/health}"
 else
-    echo "ERROR: backend/.env not found — required to supply DATABASE_URL for Alembic." >&2
+    echo "ERROR: deployment configuration file not found — required to supply DATABASE_URL for Alembic." >&2
     _restore_worktree_only
     exit 1
 fi
