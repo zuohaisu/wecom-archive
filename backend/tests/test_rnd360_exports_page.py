@@ -26,6 +26,15 @@ def test_export_center_renders_real_quota_forms_and_job_table() -> None:
     assert "/web/static/exports.js?" in response.text
 
 
+def test_export_messages_are_hidden_until_a_request_produces_one() -> None:
+    template = (REPO / "backend/app/web/templates/exports.html").read_text()
+    styles = (REPO / "backend/app/web/static/design-system.css").read_text()
+
+    assert 'id="exports-error" class="alert alert-danger" role="alert" hidden' in template
+    assert 'id="exports-success" class="alert alert-success" role="status" hidden' in template
+    assert ".alert[hidden]{display:none}" in styles
+
+
 def test_export_frontend_uses_server_authority_without_foreground_polling() -> None:
     script = (REPO / "backend/app/web/static/exports.js").read_text()
     assert "/api/admin/exports/quota" in script
