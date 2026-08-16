@@ -165,13 +165,47 @@ WeChat Pay → POST /api/payments/wechat/notify (raw signed body)
            → payment_events replay record + paid order state
            → provider-neutral subscription activation/renewal
            → subscriptions + history + audit committed atomically
+
+Platform admin → POST /api/platform/operations/tenants/{tenant}/refunds
+               → original Payment fixes tenant/full CNY amount/provider refs
+               → stable out_refund_no persisted before provider I/O
+               → signed WeChat refund application → processing only
+
+WeChat Pay → POST /api/refunds/wechat/notify (raw signed body)
+           → signature/freshness + AES-GCM + merchant/reference/amount checks
+           → append-only refund event
+           → SUCCESS only: reverse exact subscription term grant + audit
+
+Platform admin → POST .../refunds/{refund}/query
+               → signed provider query → same trusted-event/reversal path
 ```
 
-The payment provider boundary exposes create/query/close/verified-event
-operations and contains no subscription policy. The order service is the only
-bridge from a trusted payment fact to subscription activation. This keeps a
-future Alipay adapter possible without changing entitlement authority; no
-Alipay adapter is implemented by RND-380.
+The payment provider boundary exposes payment and refund create/query/verified-
+event operations and contains no subscription policy. The order service is the
+only bridge from a trusted payment fact to subscription activation; the refund
+domain is the only authority that reverses its exact term grant. Provider
+acceptance never implies money movement success, and callback delivery is not
+assumed reliable because the platform query uses the same reconciliation path.
+This keeps a future Alipay adapter possible without changing entitlement
+authority; no Alipay adapter is implemented.
+
+### 3.4.1 Platform commercial operations projection
+
+The existing platform operations service is the sole read-model composition
+boundary for tenant lifecycle, Subscription stored/effective state, provider
+Payment/Refund facts, the separate manual ledger, and operational exceptions.
+Both dashboard totals and tenant detail use these same service calculations;
+the router and browser never recompute revenue or infer a refund from an HTTP
+response. Provider net revenue is confirmed receipts minus `succeeded`
+refunds. Manual rows remain a visibly separate projection.
+
+High-risk suspend/resume, full-refund and payment/refund query actions pass
+through one platform-operation authorization gate. It locks the tenant,
+requires the independent platform-admin credential plus reason and exact slug
+confirmation, stores only idempotency/command hashes in append-only Audit, and
+rejects a changed replay. Provider order, transaction, refund and event
+references are masked before crossing the service boundary; archive content
+and WeCom customer identity tables are never loaded into this projection.
 
 ### 3.5 Storage-capacity authority and write gate
 
@@ -339,6 +373,8 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 | `wecom-archive-media-download.timer` | timer | — | Activates above |
 | `wecom-export-jobs.service` | oneshot | `OnCalendar=*:04/5` | Submits/polls Qiniu Dora media ZIP work, sends ready notices, and deletes expired artifacts |
 | `wecom-export-jobs.timer` | timer | — | Activates above; download authorization still expires at the exact seven-day timestamp |
+| `wecom-billing-notifications.service` | oneshot | `*:02/5` | Plans durable billing intents and delivers one bounded, retryable email batch |
+| `wecom-billing-notifications.timer` | timer | — | Activates above; all lifecycle thresholds are evaluated in UTC |
 
 The repository does **not** currently version:
 

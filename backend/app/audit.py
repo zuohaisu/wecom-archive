@@ -67,6 +67,20 @@ class AuditAction:
     SUBSCRIPTION_TRIAL_STARTED = "subscription.trial_started"
     SUBSCRIPTION_ACTIVATED = "subscription.activated"
     SUBSCRIPTION_RENEWED = "subscription.renewed"
+    SUBSCRIPTION_GRACE_STARTED = "subscription.grace_started"
+    SUBSCRIPTION_EXPIRED = "subscription.expired"
+    SUBSCRIPTION_CANCEL_INTENT_CHANGED = "subscription.cancel_intent_changed"
+    TENANT_BILLING_FROZEN = "tenant.billing_frozen"
+    TENANT_BILLING_RESTORED = "tenant.billing_restored"
+    PLATFORM_TENANT_SUSPENDED = "platform.tenant_suspended"
+    PLATFORM_TENANT_RESUMED = "platform.tenant_resumed"
+    PLATFORM_CONTROL_AUTHORIZED = "platform.control_authorized"
+    REFUND_REQUESTED = "refund.requested"
+    REFUND_PROCESSING = "refund.processing"
+    REFUND_SUCCEEDED = "refund.succeeded"
+    REFUND_CLOSED = "refund.closed"
+    REFUND_ABNORMAL = "refund.abnormal"
+    REFUND_MANUAL_RECOVERY_REQUIRED = "refund.manual_recovery_required"
     PLATFORM_SUBSCRIPTION_UPDATED = "platform.subscription_updated"
     PLATFORM_MANUAL_FINANCIAL_TRANSACTION_RECORDED = "platform.manual_financial_transaction_recorded"
     DECRYPT_COMPLETED = "decrypt.completed"
@@ -87,6 +101,7 @@ class AuditObjectType:
     ACCESS_REQUEST = "access_request"
     SUBSCRIPTION = "subscription"
     FINANCIAL_TRANSACTION = "manual_financial_transaction"
+    REFUND = "refund_order"
 
 
 # The catalogue is intentionally application-level: category is computed for
@@ -134,6 +149,41 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.SUBSCRIPTION_TRIAL_STARTED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.SUBSCRIPTION_ACTIVATED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.SUBSCRIPTION_RENEWED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
+    AuditAction.SUBSCRIPTION_GRACE_STARTED: (
+        AuditCategory.ACCOUNT,
+        AuditObjectType.SUBSCRIPTION,
+    ),
+    AuditAction.SUBSCRIPTION_EXPIRED: (
+        AuditCategory.ACCOUNT,
+        AuditObjectType.SUBSCRIPTION,
+    ),
+    AuditAction.SUBSCRIPTION_CANCEL_INTENT_CHANGED: (
+        AuditCategory.ACCOUNT,
+        AuditObjectType.SUBSCRIPTION,
+    ),
+    AuditAction.TENANT_BILLING_FROZEN: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
+    AuditAction.TENANT_BILLING_RESTORED: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
+    AuditAction.PLATFORM_TENANT_SUSPENDED: (
+        AuditCategory.SECURITY,
+        AuditObjectType.TENANT,
+    ),
+    AuditAction.PLATFORM_TENANT_RESUMED: (
+        AuditCategory.SECURITY,
+        AuditObjectType.TENANT,
+    ),
+    AuditAction.PLATFORM_CONTROL_AUTHORIZED: (
+        AuditCategory.SECURITY,
+        AuditObjectType.TENANT,
+    ),
+    AuditAction.REFUND_REQUESTED: (AuditCategory.ACCOUNT, AuditObjectType.REFUND),
+    AuditAction.REFUND_PROCESSING: (AuditCategory.ACCOUNT, AuditObjectType.REFUND),
+    AuditAction.REFUND_SUCCEEDED: (AuditCategory.ACCOUNT, AuditObjectType.REFUND),
+    AuditAction.REFUND_CLOSED: (AuditCategory.ACCOUNT, AuditObjectType.REFUND),
+    AuditAction.REFUND_ABNORMAL: (AuditCategory.SYSTEM, AuditObjectType.REFUND),
+    AuditAction.REFUND_MANUAL_RECOVERY_REQUIRED: (
+        AuditCategory.SYSTEM,
+        AuditObjectType.REFUND,
+    ),
     AuditAction.PLATFORM_SUBSCRIPTION_UPDATED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.PLATFORM_MANUAL_FINANCIAL_TRANSACTION_RECORDED: (
         AuditCategory.ACCOUNT,

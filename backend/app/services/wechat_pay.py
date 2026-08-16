@@ -28,7 +28,10 @@ from app.services.payment_provider import (
     CheckoutArtifact,
     PaymentQueryResult,
     PaymentRequest,
+    RefundRequest,
+    RefundSubmissionResult,
     TrustedPaymentEvent,
+    TrustedRefundEvent,
 )
 from app.settings import WechatPaySettings, get_wechat_pay_settings
 
@@ -37,6 +40,7 @@ WECHAT_PAY_PROVIDER = "wechat_pay"
 CALLBACK_TOLERANCE_SECONDS = 300
 PENDING_STATES = frozenset({"NOTPAY", "USERPAYING"})
 TERMINAL_FAILED_STATES = frozenset({"CLOSED", "REVOKED", "PAYERROR"})
+REFUND_STATES = frozenset({"PROCESSING", "SUCCESS", "CLOSED", "ABNORMAL"})
 
 
 class WechatPayError(RuntimeError):
@@ -69,6 +73,7 @@ class WechatPayConfig:
     public_key_id: str
     public_key: rsa.RSAPublicKey = field(repr=False)
     notify_url: str
+    refund_notify_url: str
 
 
 def _enabled(raw: str) -> bool:
@@ -106,6 +111,7 @@ def load_wechat_pay_config(
         "WECHAT_PAY_PUBLIC_KEY_ID": source.wechat_pay_public_key_id.strip(),
         "WECHAT_PAY_PUBLIC_KEY": source.wechat_pay_public_key.strip(),
         "WECHAT_PAY_NOTIFY_URL": source.wechat_pay_notify_url.strip(),
+        "WECHAT_PAY_REFUND_NOTIFY_URL": source.wechat_pay_refund_notify_url.strip(),
     }
     missing = sorted(name for name, value in values.items() if not value)
     if missing:
@@ -121,17 +127,21 @@ def load_wechat_pay_config(
     api_v3_key = values["WECHAT_PAY_API_V3_KEY"].encode("utf-8")
     if len(api_v3_key) != 32:
         raise WechatPayConfigurationError("WECHAT_PAY_API_V3_KEY must be 32 bytes")
-    notify = urlparse(values["WECHAT_PAY_NOTIFY_URL"])
-    if (
-        notify.scheme != "https"
-        or not notify.hostname
-        or notify.username is not None
-        or notify.password is not None
-        or notify.query
-        or notify.fragment
-        or notify.path != "/api/payments/wechat/notify"
+    for name, expected_path in (
+        ("WECHAT_PAY_NOTIFY_URL", "/api/payments/wechat/notify"),
+        ("WECHAT_PAY_REFUND_NOTIFY_URL", "/api/refunds/wechat/notify"),
     ):
-        raise WechatPayConfigurationError("WECHAT_PAY_NOTIFY_URL is invalid")
+        notify = urlparse(values[name])
+        if (
+            notify.scheme != "https"
+            or not notify.hostname
+            or notify.username is not None
+            or notify.password is not None
+            or notify.query
+            or notify.fragment
+            or notify.path != expected_path
+        ):
+            raise WechatPayConfigurationError(f"{name} is invalid")
     try:
         private_key = serialization.load_pem_private_key(
             _pem(values["WECHAT_PAY_MERCHANT_PRIVATE_KEY"]), password=None
@@ -154,6 +164,7 @@ def load_wechat_pay_config(
         public_key_id=values["WECHAT_PAY_PUBLIC_KEY_ID"],
         public_key=public_key,
         notify_url=values["WECHAT_PAY_NOTIFY_URL"],
+        refund_notify_url=values["WECHAT_PAY_REFUND_NOTIFY_URL"],
     )
 
 
@@ -463,6 +474,214 @@ class WechatPayProvider:
                 else "failed"
             ),
             success=success,
+        )
+
+    def _refund_result_fields(
+        self,
+        data: dict[str, Any],
+        *,
+        expected_provider_ref: str | None = None,
+    ) -> tuple[dict[str, str], int, int]:
+        amount = data.get("amount")
+        if not isinstance(amount, dict):
+            raise WechatPayProtocolError("refund amount is missing")
+        required_strings = {
+            "refund_id": data.get("refund_id"),
+            "out_refund_no": data.get("out_refund_no"),
+            "transaction_id": data.get("transaction_id"),
+            "out_trade_no": data.get("out_trade_no"),
+            "status": data.get("refund_status", data.get("status")),
+            "currency": amount.get("currency"),
+        }
+        if any(
+            not isinstance(value, str) or not value
+            for value in required_strings.values()
+        ):
+            raise WechatPayProtocolError("refund result is incomplete")
+        if required_strings["status"] not in REFUND_STATES:
+            raise WechatPayProtocolError("refund result has unknown state")
+        if (
+            expected_provider_ref is not None
+            and required_strings["out_refund_no"] != expected_provider_ref
+        ):
+            raise WechatPayVerificationError("refund reference mismatch")
+        total = amount.get("total")
+        refund = amount.get("refund")
+        if (
+            not isinstance(total, int)
+            or isinstance(total, bool)
+            or total <= 0
+            or not isinstance(refund, int)
+            or isinstance(refund, bool)
+            or refund <= 0
+            or refund != total
+        ):
+            raise WechatPayProtocolError("refund amount is invalid")
+        return required_strings, refund, total
+
+    def create_refund(self, request: RefundRequest) -> RefundSubmissionResult:
+        body = json.dumps(
+            {
+                "transaction_id": request.provider_transaction_id,
+                "out_refund_no": request.provider_ref,
+                "reason": request.reason,
+                "notify_url": self._config.refund_notify_url,
+                "amount": {
+                    "refund": request.amount_cents,
+                    "total": request.total_amount_cents,
+                    "currency": request.currency,
+                },
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        raw = self._request("POST", "/v3/refund/domestic/refunds", body)
+        data = _json_object(raw)
+        fields, refund, total = self._refund_result_fields(
+            data, expected_provider_ref=request.provider_ref
+        )
+        if (
+            fields["transaction_id"] != request.provider_transaction_id
+            or fields["out_trade_no"] != request.provider_order_ref
+            or refund != request.amount_cents
+            or total != request.total_amount_cents
+            or fields["currency"] != request.currency
+        ):
+            raise WechatPayVerificationError("refund submission result mismatch")
+        return RefundSubmissionResult(
+            provider=self.code,
+            provider_ref=fields["out_refund_no"],
+            provider_refund_id=fields["refund_id"],
+            provider_order_ref=fields["out_trade_no"],
+            provider_transaction_id=fields["transaction_id"],
+            state=fields["status"],
+            amount_cents=refund,
+            total_amount_cents=total,
+            currency=fields["currency"],
+            accepted_at=_parse_rfc3339(data.get("create_time")),
+        )
+
+    def _trusted_refund_event(
+        self,
+        data: dict[str, Any],
+        *,
+        event_id: str,
+        payload_hash: str,
+        source: str,
+        occurred_at: datetime,
+        expected_provider_ref: str | None = None,
+    ) -> TrustedRefundEvent:
+        fields, refund, total = self._refund_result_fields(
+            data, expected_provider_ref=expected_provider_ref
+        )
+        return TrustedRefundEvent(
+            provider=self.code,
+            provider_event_id=event_id,
+            provider_ref=fields["out_refund_no"],
+            provider_refund_id=fields["refund_id"],
+            provider_order_ref=fields["out_trade_no"],
+            provider_transaction_id=fields["transaction_id"],
+            merchant_id=self.merchant_id,
+            state=fields["status"],
+            source=source,
+            amount_cents=refund,
+            total_amount_cents=total,
+            currency=fields["currency"],
+            payload_hash=payload_hash,
+            occurred_at=occurred_at,
+        )
+
+    def query_refund(self, provider_ref: str) -> TrustedRefundEvent:
+        safe_ref = quote(provider_ref, safe="")
+        raw = self._request("GET", f"/v3/refund/domestic/refunds/{safe_ref}")
+        data = _json_object(raw)
+        payload_hash = hashlib.sha256(raw).hexdigest()
+        state = data.get("status")
+        refund_id = data.get("refund_id")
+        if not isinstance(state, str) or not isinstance(refund_id, str):
+            raise WechatPayProtocolError("refund query result is incomplete")
+        occurred_at = (
+            _parse_rfc3339(data.get("success_time"))
+            if state == "SUCCESS"
+            else _utc(self._now())
+        )
+        return self._trusted_refund_event(
+            data,
+            event_id=f"query:{refund_id}:{state}:{payload_hash[:32]}",
+            payload_hash=payload_hash,
+            source="query",
+            occurred_at=occurred_at,
+            expected_provider_ref=provider_ref,
+        )
+
+    def verify_and_parse_refund_notification(
+        self, headers: Mapping[str, str], raw_body: bytes
+    ) -> TrustedRefundEvent:
+        if not raw_body or len(raw_body) > 65536:
+            raise WechatPayProtocolError("refund notification body is invalid")
+        self._verify_headers(headers, raw_body)
+        envelope = _json_object(raw_body)
+        event_id = envelope.get("id")
+        event_type = envelope.get("event_type")
+        expected_state = {
+            "REFUND.SUCCESS": "SUCCESS",
+            "REFUND.ABNORMAL": "ABNORMAL",
+            "REFUND.CLOSED": "CLOSED",
+        }.get(event_type)
+        if (
+            not isinstance(event_id, str)
+            or not event_id
+            or len(event_id) > 128
+            or expected_state is None
+            or envelope.get("resource_type") != "encrypt-resource"
+        ):
+            raise WechatPayProtocolError("refund notification envelope is invalid")
+        resource = envelope.get("resource")
+        if (
+            not isinstance(resource, dict)
+            or resource.get("original_type") != "refund"
+            or resource.get("algorithm") != "AEAD_AES_256_GCM"
+        ):
+            raise WechatPayProtocolError("refund notification resource is invalid")
+        nonce = resource.get("nonce")
+        ciphertext = resource.get("ciphertext")
+        associated_data = resource.get("associated_data", "")
+        if (
+            not isinstance(nonce, str)
+            or not nonce
+            or not isinstance(ciphertext, str)
+            or not ciphertext
+            or not isinstance(associated_data, str)
+        ):
+            raise WechatPayProtocolError("refund notification resource is incomplete")
+        try:
+            encrypted = base64.b64decode(ciphertext, validate=True)
+            plaintext = AESGCM(self._config.api_v3_key).decrypt(
+                nonce.encode("utf-8"),
+                encrypted,
+                associated_data.encode("utf-8"),
+            )
+        except Exception as error:
+            raise WechatPayVerificationError(
+                "refund notification decryption failed"
+            ) from error
+        data = _json_object(plaintext)
+        if data.get("mchid") != self.merchant_id:
+            raise WechatPayVerificationError(
+                "refund notification merchant identity mismatch"
+            )
+        if data.get("refund_status") != expected_state:
+            raise WechatPayVerificationError("refund notification state mismatch")
+        return self._trusted_refund_event(
+            data,
+            event_id=event_id,
+            payload_hash=hashlib.sha256(raw_body).hexdigest(),
+            source="callback",
+            occurred_at=(
+                _parse_rfc3339(data.get("success_time"))
+                if expected_state == "SUCCESS"
+                else _parse_rfc3339(envelope.get("create_time"))
+            ),
         )
 
     def close_payment(self, provider_order_ref: str) -> None:

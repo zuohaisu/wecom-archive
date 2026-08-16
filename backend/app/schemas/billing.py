@@ -45,6 +45,8 @@ class SubscriptionOverviewOut(BaseModel):
     is_entitled: bool
     starts_at: Optional[datetime]
     ends_at: Optional[datetime]
+    grace_ends_at: Optional[datetime]
+    cancel_at_period_end: bool
     entitlements: list[str]
     renewal_count: int
     measured_at: datetime

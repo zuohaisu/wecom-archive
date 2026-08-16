@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -30,10 +30,11 @@ UNLIMITED_SEATS = "unlimited_seats"
 # either capability.
 CUSTOM_BRANDING = "custom_branding"
 CUSTOM_DOMAIN = "custom_domain"
-ENTITLED_STATUSES = frozenset({"trial", "active"})
+ENTITLED_STATUSES = frozenset({"trial", "active", "grace"})
 SUBSCRIPTION_STATUSES = frozenset(
-    {"trial", "active", "past_due", "expired", "canceled"}
+    {"trial", "active", "grace", "expired", "canceled"}
 )
+SUBSCRIPTION_GRACE_PERIOD = timedelta(days=7)
 
 
 class SubscriptionAssignmentError(ValueError):
@@ -59,6 +60,8 @@ class SubscriptionSummary:
     is_entitled: bool
     starts_at: datetime
     ends_at: datetime
+    grace_ends_at: datetime
+    cancel_at_period_end: bool
     amount_cents: int
     currency: str
     billing_period_months: int
@@ -79,10 +82,33 @@ def _at(value: datetime | None) -> datetime:
     return _as_utc(value or datetime.now(timezone.utc))
 
 
+def subscription_grace_ends_at(subscription: Subscription) -> datetime:
+    value = subscription.grace_ends_at
+    if value is None:  # Defensive compatibility while a deployment is migrating.
+        return _as_utc(subscription.ends_at) + SUBSCRIPTION_GRACE_PERIOD
+    return _as_utc(value)
+
+
+def effective_subscription_status(subscription: Subscription, *, at: datetime) -> str:
+    """Return the time-effective status from the one authoritative policy."""
+    checked_at = _as_utc(at)
+    if subscription.status in {"expired", "canceled"}:
+        return subscription.status
+    if checked_at < _as_utc(subscription.starts_at):
+        return subscription.status
+    if checked_at >= subscription_grace_ends_at(subscription):
+        return "expired"
+    if checked_at >= _as_utc(subscription.ends_at):
+        return "grace"
+    return subscription.status
+
+
 def _is_effectively_entitled(subscription: Subscription, at: datetime) -> bool:
     return (
-        subscription.status in ENTITLED_STATUSES
-        and _as_utc(subscription.starts_at) <= at < _as_utc(subscription.ends_at)
+        effective_subscription_status(subscription, at=at)
+        in {"trial", "active", "grace"}
+        and _as_utc(subscription.starts_at) <= at
+        < subscription_grace_ends_at(subscription)
     )
 
 
@@ -119,12 +145,7 @@ def get_subscription_summary(
     subscription, plan = row
     checked_at = _at(at)
     entitled = _is_effectively_entitled(subscription, checked_at)
-    effective_status = subscription.status
-    if (
-        subscription.status in ENTITLED_STATUSES
-        and checked_at >= _as_utc(subscription.ends_at)
-    ):
-        effective_status = "expired"
+    effective_status = effective_subscription_status(subscription, at=checked_at)
     return SubscriptionSummary(
         subscription_id=subscription.id,
         tenant_id=subscription.tenant_id,
@@ -135,6 +156,8 @@ def get_subscription_summary(
         is_entitled=entitled,
         starts_at=_as_utc(subscription.starts_at),
         ends_at=_as_utc(subscription.ends_at),
+        grace_ends_at=subscription_grace_ends_at(subscription),
+        cancel_at_period_end=bool(subscription.cancel_at_period_end),
         amount_cents=plan.amount_cents,
         currency=plan.currency,
         billing_period_months=plan.billing_period_months,
@@ -184,6 +207,8 @@ def assign_subscription(
     ends_at: datetime,
     source: str,
     renewal_count: int = 0,
+    grace_ends_at: datetime | None = None,
+    cancel_at_period_end: bool = False,
 ) -> Subscription:
     """Assign the current subscription and append one immutable snapshot.
 
@@ -194,8 +219,13 @@ def assign_subscription(
         raise SubscriptionAssignmentError("unsupported subscription status")
     normalized_starts_at = _as_utc(starts_at)
     normalized_ends_at = _as_utc(ends_at)
+    normalized_grace_ends_at = _as_utc(
+        grace_ends_at or normalized_ends_at + SUBSCRIPTION_GRACE_PERIOD
+    )
     if normalized_starts_at >= normalized_ends_at:
         raise SubscriptionAssignmentError("subscription end must follow start")
+    if normalized_ends_at >= normalized_grace_ends_at:
+        raise SubscriptionAssignmentError("subscription grace end must follow end")
     normalized_source = source.strip()
     if not normalized_source or len(normalized_source) > 32:
         raise SubscriptionAssignmentError("invalid subscription source")
@@ -234,23 +264,39 @@ def assign_subscription(
     subscription.status = status
     subscription.starts_at = normalized_starts_at
     subscription.ends_at = normalized_ends_at
+    subscription.grace_ends_at = normalized_grace_ends_at
+    subscription.cancel_at_period_end = bool(cancel_at_period_end)
     subscription.source = normalized_source
     subscription.renewal_count = renewal_count
     db.flush()
-    db.add(
-        SubscriptionHistory(
-            id=str(uuid.uuid4()),
-            subscription_id=subscription.id,
-            tenant_id=tenant_id,
-            plan_id=plan.id,
-            status=status,
-            starts_at=normalized_starts_at,
-            ends_at=normalized_ends_at,
-            source=normalized_source,
-            renewal_count=renewal_count,
-            revision=subscription.revision,
-            change_kind=change_kind,
-        )
-    )
-    db.flush()
+    append_subscription_history(db, subscription, change_kind=change_kind)
     return subscription
+
+
+def append_subscription_history(
+    db: Session,
+    subscription: Subscription,
+    *,
+    change_kind: str,
+) -> SubscriptionHistory:
+    """Append the full current subscription projection at its current revision."""
+    if not change_kind or len(change_kind) > 32:
+        raise SubscriptionAssignmentError("invalid subscription change kind")
+    history = SubscriptionHistory(
+        id=str(uuid.uuid4()),
+        subscription_id=subscription.id,
+        tenant_id=subscription.tenant_id,
+        plan_id=subscription.plan_id,
+        status=subscription.status,
+        starts_at=_as_utc(subscription.starts_at),
+        ends_at=_as_utc(subscription.ends_at),
+        grace_ends_at=subscription_grace_ends_at(subscription),
+        cancel_at_period_end=bool(subscription.cancel_at_period_end),
+        source=subscription.source,
+        renewal_count=subscription.renewal_count,
+        revision=subscription.revision,
+        change_kind=change_kind,
+    )
+    db.add(history)
+    db.flush()
+    return history

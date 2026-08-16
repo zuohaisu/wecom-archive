@@ -25,6 +25,7 @@ from app.services.payment_provider import (
     PaymentRequest,
     TrustedPaymentEvent,
 )
+from app.services.refunds import ensure_payment_term_grant
 from app.services.subscription_activation import (
     ActivationCommand,
     activate_or_renew_subscription,
@@ -439,6 +440,8 @@ def apply_trusted_payment(
             db.rollback()
             raise PaymentOrderConflictError("payment event conflicts with existing data") from error
         if already_succeeded:
+            ensure_payment_term_grant(db, order)
+            db.commit()
             return _summary(db, order)
 
     try:
@@ -472,6 +475,8 @@ def apply_trusted_payment(
         order.activation_id = activation.activation_id
         order.activated_at = datetime.now(timezone.utc)
         order.failure_code = None
+        db.flush()
+        ensure_payment_term_grant(db, order)
         db.commit()
         return _summary(db, order)
 

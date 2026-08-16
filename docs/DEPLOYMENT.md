@@ -31,6 +31,7 @@ Versioned in this repository:
 | Media unit | `deploy/systemd/wecom-archive-media-download.service` | One-shot generic media worker (image/voice/video/file/emotion/nested media) |
 | Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Pending/retryable reconciliation every 30 minutes by default (`:15`, `:45`) |
 | Export worker unit/timer | `deploy/systemd/wecom-export-jobs.{service,timer}` | Generate queued ZIPs, retry email delivery, and delete seven-day artifacts every five minutes |
+| Billing notification unit/timer | `deploy/systemd/wecom-billing-notifications.{service,timer}` | Schedule and retry lifecycle, payment-activation and refund-anomaly notices every five minutes |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
 | GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
 
@@ -102,15 +103,19 @@ Additional variables are required for:
 - Sync/decrypt/media scripts: `WECOM_SDK_LIB_PATH`, `WECOM_ARCHIVE_SECRET`, `WECOM_PRIVATE_KEY_PATH`, `WECOM_PUBLIC_KEY_VERSION`
 - Media serving/download, local-backed rows only: `STORAGE_LOCAL_PATH`
 - Media serving/download, Qiniu-backed rows only (optional — see below): `QINIU_ACCESS_KEY`, `QINIU_SECRET_KEY`, `QINIU_BUCKET`, `QINIU_DOMAIN` (full `https://` URL), `QINIU_REGION` (optional)
-- WeChat Pay annual purchase (optional until production approval): set `WECHAT_PAY_ENABLED=true` plus `WECHAT_PAY_APP_ID`, `WECHAT_PAY_MCH_ID`, `WECHAT_PAY_MERCHANT_SERIAL_NO`, `WECHAT_PAY_MERCHANT_PRIVATE_KEY`, `WECHAT_PAY_API_V3_KEY`, `WECHAT_PAY_PUBLIC_KEY_ID`, `WECHAT_PAY_PUBLIC_KEY`, and the exact public HTTPS `WECHAT_PAY_NOTIFY_URL`. The app fails startup when enabled configuration is incomplete or malformed.
+- WeChat Pay annual purchase/refund (optional until production approval): set `WECHAT_PAY_ENABLED=true` plus `WECHAT_PAY_APP_ID`, `WECHAT_PAY_MCH_ID`, `WECHAT_PAY_MERCHANT_SERIAL_NO`, `WECHAT_PAY_MERCHANT_PRIVATE_KEY`, `WECHAT_PAY_API_V3_KEY`, `WECHAT_PAY_PUBLIC_KEY_ID`, `WECHAT_PAY_PUBLIC_KEY`, and the exact public HTTPS `WECHAT_PAY_NOTIFY_URL` and `WECHAT_PAY_REFUND_NOTIFY_URL`. The app fails startup when enabled configuration is incomplete or malformed.
 
-The reverse proxy must expose `POST /api/payments/wechat/notify` at the exact
-HTTPS URL configured above without browser/session authentication. Do not
-cache or rewrite the request body: API v3 signature verification uses the
-original raw bytes. The remaining `/admin/billing` and `/api/billing/*` routes
-retain normal owner-session authentication. Enabling production payments is a
-separate RND-390 operational gate; committing this implementation does not
-authorize live merchant traffic.
+The reverse proxy must expose both `POST /api/payments/wechat/notify` and
+`POST /api/refunds/wechat/notify` at the exact HTTPS URLs configured above
+without browser/session authentication. Do not cache or rewrite either request
+body: API v3 signature verification uses the original raw bytes. The remaining
+`/admin/billing` and `/api/billing/*` routes retain normal owner-session
+authentication. Refund creation and active reconciliation live only under
+`/api/platform/operations/*` and require platform-administrator authentication;
+there is no tenant Owner refund endpoint. Enabling production payments or
+issuing a real refund remains a separate RND-390 operational gate; committing
+this implementation authorizes neither live merchant traffic nor a real
+money movement.
 
 **Capacity enforcement (RND-385).** After migration `0044`, every production
 media-worker invocation enforces the active subscription's storage quota before
@@ -236,6 +241,29 @@ RND-360 incident mitigation. The effective worker environment must select
 `qiniu_kodo`; otherwise new media-export jobs fail closed instead of creating a
 local final ZIP. No production unit is installed, enabled, or changed by
 repository changes alone.
+
+Billing lifecycle and anomaly notifications (RND-401; operator action only):
+
+```bash
+sudo cp deploy/systemd/wecom-billing-notifications.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-billing-notifications.timer
+sudo systemctl status wecom-billing-notifications.timer --no-pager
+```
+
+Apply Alembic migration `0053` before enabling the timer. Configure a public
+HTTPS `ADMIN_DOMAIN` and real SMTP delivery (`SMTP_HOST` and `SMTP_FROM`, plus
+relay credentials where required). Missing transport, action link or recipient
+is recorded as a fixed retryable failure code; it is never reported as sent.
+`BILLING_NOTIFICATION_BATCH_SIZE` defaults to `20` and is capped at `100`.
+All event timestamps are evaluated and rendered in UTC. The outbox stores no
+email address, provider transaction detail, CorpID, UserID, secret or message
+content.
+
+Rollback is two-stage: first disable the timer, then revert application code.
+Do not downgrade `0053` while retaining notification history; its downgrade
+drops the intent and append-only attempt tables. A code rollback can safely
+leave those unused tables in place.
 
 RND-343 defaults are intentionally staggered: archive reconciliation at
 `:00/:30`, generic media reconciliation at `:15/:45`. Callback → archive

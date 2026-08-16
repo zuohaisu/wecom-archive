@@ -48,6 +48,7 @@ def _config(key_material) -> WechatPayConfig:
         public_key_id=PUBLIC_KEY_ID,
         public_key=wechat_private.public_key(),
         notify_url="https://billing.example.test/api/payments/wechat/notify",
+        refund_notify_url="https://billing.example.test/api/refunds/wechat/notify",
     )
 
 
@@ -274,6 +275,7 @@ def test_configuration_is_explicit_complete_and_secret_safe(key_material) -> Non
         wechat_pay_public_key_id=PUBLIC_KEY_ID,
         wechat_pay_public_key=_pem_public(wechat_private.public_key()),
         wechat_pay_notify_url="https://billing.example.test/api/payments/wechat/notify",
+        wechat_pay_refund_notify_url="https://billing.example.test/api/refunds/wechat/notify",
     )
     config = load_wechat_pay_config(settings)
 

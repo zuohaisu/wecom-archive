@@ -4,7 +4,8 @@ PostgreSQL schema for storing WeCom conversation archive messages and tenant
 management infrastructure for future SaaS use.
 
 Related issues: RND-75 (initial schema), RND-111 (tenant foundation), RND-156
-(multi-tenant), RND-184 (corp ID uniqueness), RND-376 (billing authority).
+(multi-tenant), RND-184 (corp ID uniqueness), RND-376 (billing authority),
+RND-400 (subscription and Tenant service lifecycle).
 
 ---
 
@@ -26,6 +27,9 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | `subscriptions` | One authoritative current subscription per tenant |
 | `subscription_history` | Append-only snapshots of subscription assignments |
 | `subscription_activations` | Idempotent paid activation/renewal attempts and results |
+| `subscription_term_grants` | Exact reversible subscription projection added by each trusted payment |
+| `refund_orders` | Authoritative full-refund workflow, independent of payment and manual-ledger state |
+| `refund_events` | Append-only trusted provider refund facts |
 | `manual_financial_transactions` | Platform-recorded manual receipts and refunds, separate from provider facts |
 | `key_versions` | Registry mapping WeCom `publickey_ver` to a private key path or alias |
 | `sync_states` | Cursor tracking — last successfully synced `seq` per tenant+corp |
@@ -54,7 +58,11 @@ Top-level tenant entity. MVP: one default row with
 | `id` | varchar(36) PK | UUID string |
 | `name` | varchar(255) | Display name (e.g. "Acme Corp") |
 | `slug` | varchar(128) | URL-safe identifier; unique |
-| `is_active` | boolean | Soft-disable a tenant |
+| `is_active` | boolean | Legacy compatibility projection; true only for service `active` |
+| `lifecycle_status` | varchar(16) | `provisioning` / `active` / `frozen` / `suspended` |
+| `lifecycle_revision` | integer | Monotonic service-state revision |
+| `frozen_at` | timestamptz nullable | First time the current billing freeze began |
+| suspension fields | nullable timestamp/reason/actor/previous status | Current manual suspension override; immutable Audit retains cleared history |
 | `created_at` | timestamptz | auto-set on insert |
 | `updated_at` | timestamptz | auto-updated on write |
 
@@ -171,21 +179,37 @@ field and is read through the same entitlement service.
 ### `subscriptions`
 
 There is exactly one row per tenant (`UNIQUE(tenant_id)`). It is the mutable
-current projection, with status, effective range, source, renewal count and
-revision. Only `trial` and `active` inside the half-open interval
-`[starts_at, ends_at)` grant capabilities. `past_due`, `expired`, `canceled`,
-future-start and missing subscriptions fail closed.
+current projection, with status, effective range, grace end, cancel intent,
+source, renewal count and revision. `trial` and `active` grant capabilities in
+`[starts_at, ends_at)`; `grace` continues the same capabilities in
+`[ends_at, grace_ends_at)`. The fixed first-version grace duration is seven
+24-hour periods. `expired`, `canceled`, future-start and missing subscriptions
+fail closed.
+
+The lifecycle service is the only time policy: reads use its effective-state
+calculation so a delayed persistence job cannot extend access past
+`grace_ends_at`, while the row-locked reconcile persists `grace` / `expired`,
+updates the independent Tenant service projection and appends Audit. A paid
+renewal clears `cancel_at_period_end` and can restore `frozen`, but it never
+restores a manually `suspended` Tenant.
 
 An inactive plan cannot be newly assigned. It does not retroactively remove an
 already purchased term; reads continue to honor that term until its own end.
 
 ### `subscription_history`
 
-Every authoritative assignment appends a full snapshot keyed by subscription
-and monotonically increasing revision. Application code has no update/delete
-path for these rows. RND-384 builds payment idempotency and renewal transactions
-on this primitive; RND-385 consumes `get_storage_quota()` for the actual storage
-write gate.
+Every authoritative assignment, time transition and cancel-intent change
+appends a full snapshot keyed by subscription and monotonically increasing
+revision, including `grace_ends_at` and `cancel_at_period_end`. Application code
+has no update/delete path for these rows. RND-384 builds payment idempotency and
+renewal transactions on this primitive; RND-385 consumes `get_storage_quota()`
+for the actual storage write gate.
+
+Migration 0051 preserves existing Tenant service state and maps legacy
+`past_due` subscriptions to `grace` without consulting deployment wall-clock
+time. Code and schema availability do not mean the production lifecycle job or
+service gates are enabled; scheduling and all auth/Worker entrypoint gates are
+separate delivery evidence.
 
 ### `subscription_activations`
 
@@ -194,10 +218,11 @@ idempotency keys are never persisted. A command fingerprint prevents a key
 from being replayed against another tenant, plan or trusted payment time.
 
 `pending` and `failed` rows are retryable. An `applied` row stores the exact
-subscription revision and paid term returned to all later replays. The current
-subscription, immutable history snapshot, activation result and audit row are
-committed atomically; a domain failure records only a coarse failure code in a
-separate recovery transaction.
+subscription revision and paid term returned to all later replays. RND-399 also
+stores the pre-payment subscription projection and applied grace end in this
+same transaction. The current subscription, immutable history snapshot,
+activation result and audit row are committed atomically; a domain failure
+records only a coarse failure code in a separate recovery transaction.
 
 ### `payment_orders`
 
@@ -222,6 +247,64 @@ transaction references, event type, source, occurrence time and a SHA-256
 payload hash; it does not retain raw notification bodies, encrypted resources,
 keys or payer details. Reusing an event ID with a different hash, order or
 transaction fails closed as a replay conflict.
+
+### `subscription_term_grants`
+
+Every succeeded provider Payment owns exactly one grant, and every activation
+can belong to only one grant. The row snapshots the complete subscription
+projection before and after that payment. A provider-confirmed full refund may
+reverse the grant only when the current term still matches the grant's applied
+projection. A later renewal or other ambiguous term edit moves the grant to
+`manual_recovery_required` without silently changing entitlement.
+
+Migration 0052 backfills already-succeeded historical payments as
+`manual_recovery_required`: older activations never stored their pre-payment
+projection, so the migration deliberately does not invent one.
+
+### `refund_orders` and `refund_events`
+
+One full-refund workflow is allowed per original Payment and term grant. Its
+state machine is `created` → `processing` → `succeeded`, with distinct
+`closed`, `abnormal`, and `manual_recovery_required` outcomes. Amount, currency,
+tenant and provider come from the original succeeded Payment, and the raw
+idempotency key is stored only as a SHA-256 hash.
+
+Provider `PROCESSING` is money-movement progress only and never changes the
+Subscription. Only a trusted `SUCCESS` event can atomically restore the exact
+pre-payment subscription projection (or cancel a first activation), append
+SubscriptionHistory and Audit, and project Tenant billing service state.
+Provider events are append-only and unique by `(provider, provider_event_id)`;
+a changed replay fails closed.
+
+Migration 0054 adds the provider's `refund_id` to `refund_orders`, unique with
+the provider, and stores the refund ID plus original provider order/transaction
+references on every new `refund_events` fact. These event columns remain
+nullable only so pre-0054 evidence stays readable. New events must match the
+original Payment's reference, full amount, and currency before the domain
+accepts them.
+
+RND-405 adds no financial source-of-truth table. Its operations projection
+reads provider receipts from provider-confirmed `payment_orders`, successful
+refunds from `refund_orders.status='succeeded'`, and manual ledger rows from
+`manual_financial_transactions` as three deliberately separate facts.
+High-risk platform commands append `platform.control_authorized` audit rows
+containing tenant/platform-admin/action/reason plus SHA-256 idempotency and
+command hashes. Raw keys and typed confirmation values are never stored.
+
+### `billing_notification_intents` and `billing_notification_attempts`
+
+Migration 0053 adds a durable email outbox for subscription thresholds and
+payment/refund anomalies. An intent is unique by `(tenant_id, dedupe_key)`;
+subscription deduplication uses the authoritative term boundaries rather than
+wall-clock execution time, so lifecycle revision changes cannot create repeat
+notices for the same term. A renewal or refund projection cancels obsolete
+pending intents without deleting sent, failed or canceled history.
+
+Every delivery attempt is append-only and stores only an attempt number,
+outcome, fixed failure code and UTC timestamp. Recipient addresses are resolved
+from current Owner/platform-admin records only while sending and are not copied
+to either table. Provider transaction details, CorpID, UserID, secrets and
+archive content are never notification fields.
 
 ### `manual_financial_transactions`
 

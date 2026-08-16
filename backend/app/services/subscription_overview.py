@@ -11,7 +11,15 @@ from app.services.entitlements import SubscriptionSummary, get_subscription_summ
 
 EXPIRING_SOON_WINDOW = timedelta(days=30)
 SUBSCRIPTION_DISPLAY_STATES = frozenset(
-    {"trial", "paid_active", "expiring_soon", "expired", "canceled", "unavailable"}
+    {
+        "trial",
+        "paid_active",
+        "expiring_soon",
+        "grace",
+        "expired",
+        "canceled",
+        "unavailable",
+    }
 )
 SUBSCRIPTION_UNAVAILABLE_REASONS = frozenset(
     {
@@ -19,7 +27,6 @@ SUBSCRIPTION_UNAVAILABLE_REASONS = frozenset(
         "subscription_not_started",
         "subscription_expired",
         "subscription_canceled",
-        "payment_overdue",
         "subscription_inactive",
     }
 )
@@ -36,6 +43,8 @@ class SubscriptionOverview:
     is_entitled: bool
     starts_at: datetime | None
     ends_at: datetime | None
+    grace_ends_at: datetime | None
+    cancel_at_period_end: bool
     entitlements: tuple[str, ...]
     renewal_count: int
     measured_at: datetime
@@ -58,14 +67,14 @@ def classify_subscription_display(
         return "unavailable", "no_subscription"
     if summary.stored_status == "canceled":
         return "canceled", "subscription_canceled"
-    if summary.stored_status == "past_due":
-        return "unavailable", "payment_overdue"
     if summary.effective_status == "expired" or summary.stored_status == "expired":
         return "expired", "subscription_expired"
     if checked_at < _as_utc(summary.starts_at):
         return "unavailable", "subscription_not_started"
     if not summary.is_entitled:
         return "unavailable", "subscription_inactive"
+    if summary.effective_status == "grace" or summary.stored_status == "grace":
+        return "grace", None
     if summary.stored_status == "trial":
         return "trial", None
     if _as_utc(summary.ends_at) <= checked_at + EXPIRING_SOON_WINDOW:
@@ -97,6 +106,8 @@ def get_subscription_overview(
             is_entitled=False,
             starts_at=None,
             ends_at=None,
+            grace_ends_at=None,
+            cancel_at_period_end=False,
             entitlements=(),
             renewal_count=0,
             measured_at=measured_at,
@@ -111,6 +122,8 @@ def get_subscription_overview(
         is_entitled=summary.is_entitled,
         starts_at=summary.starts_at,
         ends_at=summary.ends_at,
+        grace_ends_at=summary.grace_ends_at,
+        cancel_at_period_end=summary.cancel_at_period_end,
         entitlements=summary.entitlements,
         renewal_count=summary.renewal_count,
         measured_at=measured_at,

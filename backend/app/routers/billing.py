@@ -192,6 +192,8 @@ def billing_subscription(
         is_entitled=overview.is_entitled,
         starts_at=overview.starts_at,
         ends_at=overview.ends_at,
+        grace_ends_at=overview.grace_ends_at,
+        cancel_at_period_end=overview.cancel_at_period_end,
         entitlements=list(overview.entitlements),
         renewal_count=overview.renewal_count,
         measured_at=overview.measured_at,
