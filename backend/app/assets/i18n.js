@@ -367,6 +367,8 @@
         "login.error.organizationNotFound": "组织不存在，请先创建组织。",
         "login.error.organizationExists": "该组织已存在，请使用已有组织登录。",
         "login.createOrganization": "创建组织",
+        "login.startTrial": "开始 15 天免费试用",
+        "login.trialFeeDisclaimer": "软件试用免费；需使用企业微信管理员身份完成授权；企业微信会话存档接口开通及官方费用另计。",
 
         "nav.diagnostics": "消息可查阅性",
 
@@ -991,6 +993,8 @@
         "login.error.organizationNotFound": "組織不存在，請先建立組織。",
         "login.error.organizationExists": "該組織已存在，請使用現有組織登入。",
         "login.createOrganization": "建立組織",
+        "login.startTrial": "開始 15 天免費試用",
+        "login.trialFeeDisclaimer": "軟體試用免費；需使用企業微信管理員身分完成授權；企業微信會話存檔介面開通及官方費用另計。",
 
         "nav.diagnostics": "訊息可查閱性",
 
@@ -1615,6 +1619,8 @@
         "login.error.organizationNotFound": "Organization not found. Create an organization first.",
         "login.error.organizationExists": "This organization already exists. Log in to the existing organization.",
         "login.createOrganization": "Create organization",
+        "login.startTrial": "Start your 15-day free trial",
+        "login.trialFeeDisclaimer": "The software trial is free; a WeCom management administrator must complete the authorization; enabling WeCom's conversation-archive interface has its own official fees.",
 
         "nav.diagnostics": "Message visibility",
 

@@ -195,3 +195,20 @@ class WechatPaySettings(BaseSettings):
 
 def get_wechat_pay_settings() -> WechatPaySettings:
     return WechatPaySettings()
+
+
+class SelfServiceTrialSettings(BaseSettings):
+    """Controls visibility of the public "start 15-day trial" entry point
+    (RND-396) on the login page. Defaults closed: the underlying WeCom
+    third-party authorization endpoints (RND-346/347/348/350) are governed
+    separately by real suite credentials and by RND-353's own controlled
+    production rollout -- this flag only decides whether the CTA that
+    points visitors at them is discoverable. Deployment config is the only
+    thing that turns it on, once non-prod E2E has passed.
+    """
+
+    self_service_trial_entry_enabled: str = "false"
+
+
+def get_self_service_trial_settings() -> SelfServiceTrialSettings:
+    return SelfServiceTrialSettings()

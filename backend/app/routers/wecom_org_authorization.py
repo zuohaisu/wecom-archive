@@ -110,6 +110,11 @@ _CONFIRM_COPY = {
         "confirm": "确认创建",
         "cancel": "取消",
         "confirmed": "信息已确认，正在准备组织。",
+        "trial_note": (
+            "确认后将创建该组织唯一的管理员账户。完成企业微信会话存档配置并通过自动"
+            "连通性检查后，系统会自动开始一次 15 天免费试用，无需先付款；企业微信"
+            "会话存档接口开通及官方费用另计。"
+        ),
     },
     "en": {
         "title": "Create organization",
@@ -120,6 +125,12 @@ _CONFIRM_COPY = {
         "confirm": "Create organization",
         "cancel": "Cancel",
         "confirmed": "Confirmed. Your organization is being prepared.",
+        "trial_note": (
+            "Confirming creates this organization's sole owner account. Once WeCom "
+            "conversation-archive configuration passes automated connectivity checks, "
+            "a 15-day free trial starts automatically -- no payment required first. "
+            "Enabling WeCom's conversation-archive interface has its own official fees."
+        ),
     },
     "ja": {
         "title": "組織を作成",
@@ -130,6 +141,12 @@ _CONFIRM_COPY = {
         "confirm": "組織を作成",
         "cancel": "キャンセル",
         "confirmed": "確認済みです。組織を準備しています。",
+        "trial_note": (
+            "確認すると、この組織の唯一の管理者アカウントが作成されます。企業微信の"
+            "会話アーカイブ設定が自動接続確認に合格すると、15日間の無料トライアルが"
+            "自動的に開始されます。事前の支払いは不要です。企業微信の会話アーカイブ"
+            "インターフェースの有効化には別途公式料金がかかります。"
+        ),
     },
 }
 
@@ -156,6 +173,7 @@ def organization_confirmation_page(
         actions = f'<p role="status">{copy["confirmed"]}</p>'
     else:
         actions = (
+            f'<p class="field-help">{copy["trial_note"]}</p>'
             '<form method="post" action="/api/auth/wecom/organization-claim/confirm">'
             f'<button class="btn btn-primary btn-block" type="submit">{copy["confirm"]}</button>'
             '</form>'

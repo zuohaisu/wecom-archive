@@ -698,3 +698,32 @@ process.stdout.write(JSON.stringify({{loading:loadingHtml,end:endHtml,retry:retr
         assert loading_sub in out["loading"], f"[{code}] {out['loading']!r}"
         assert end_sub in out["end"], f"[{code}] {out['end']!r}"
         assert retry_sub in out["retry"], f"[{code}] {out['retry']!r}"
+
+
+# ---------------------------------------------------------------------------
+# RND-396 — public "start 15-day trial" login-page entry point copy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "code,expected_cta,expected_disclaimer_substring",
+    [
+        ("zh-CN", "开始 15 天免费试用", "另计"),
+        ("zh-TW", "開始 15 天免費試用", "另計"),
+        ("en", "Start your 15-day free trial", "official fees"),
+    ],
+)
+def test_login_trial_cta_and_fee_disclaimer_translate_per_locale(
+    code: str, expected_cta: str, expected_disclaimer_substring: str
+) -> None:
+    out = _run(
+        f"""
+I18N.setLocale({json.dumps(code)});
+process.stdout.write(JSON.stringify({{
+  cta: I18N.t('login.startTrial'),
+  disclaimer: I18N.t('login.trialFeeDisclaimer')
+}}));
+"""
+    )
+    assert out["cta"] == expected_cta
+    assert expected_disclaimer_substring in out["disclaimer"]

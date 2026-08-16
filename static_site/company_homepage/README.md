@@ -2,6 +2,8 @@
 
 This directory is the public, standalone static website for **康冠时代企业微信会话存档**. It is intentionally isolated from the archive backend: it must not link to `/admin`, `/api`, health endpoints, or an authenticated archive UI.
 
+**One named exception (RND-396):** `index.html` and `pricing.html` link their "开始 15 天免费试用" (start free trial) call-to-action directly to `https://archive.crowntime.cn/api/auth/wecom/third-party/install` — a plain outbound `<a href>` navigation, not a script-driven API call from this static origin. That endpoint is public and unauthenticated, requires no prior session, and is itself closed by default in the backend (`SELF_SERVICE_TRIAL_ENTRY_ENABLED`) until non-prod E2E passes and RND-353 gives a controlled production go. No other link from this site to the backend is permitted without a similarly explicit, ticket-approved exception recorded here.
+
 It contains two public experiences:
 
 - `/` — marketing homepage: customer-asset positioning, delivered capabilities, boundaries, FAQ, legal footer, and real consultation links.
