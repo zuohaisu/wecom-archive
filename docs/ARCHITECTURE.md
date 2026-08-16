@@ -339,6 +339,8 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 | `wecom-archive-media-download.timer` | timer | — | Activates above |
 | `wecom-export-jobs.service` | oneshot | `OnCalendar=*:04/5` | Submits/polls Qiniu Dora media ZIP work, sends ready notices, and deletes expired artifacts |
 | `wecom-export-jobs.timer` | timer | — | Activates above; download authorization still expires at the exact seven-day timestamp |
+| `wecom-billing-notifications.service` | oneshot | `*:02/5` | Plans durable billing intents and delivers one bounded, retryable email batch |
+| `wecom-billing-notifications.timer` | timer | — | Activates above; all lifecycle thresholds are evaluated in UTC |
 
 The repository does **not** currently version:
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import smtplib
 import ssl
-from datetime import datetime
+from datetime import datetime, timezone
 from email.message import EmailMessage
 
 from app.settings import get_email_settings
@@ -116,6 +116,39 @@ def send_export_ready_email(
         return False
 
 
+def send_billing_notification_email(
+    to_email: str,
+    kind: str,
+    effective_at: datetime,
+    action_link: str,
+    locale: str = "zh-CN",
+) -> bool:
+    """Deliver a fixed billing-state notice without provider/payment details."""
+    settings = get_email_settings()
+    if not settings.smtp_host or not settings.smtp_from:
+        logger.warning("billing notification email transport is not configured")
+        return False
+    subject, body = _render_billing_notification_email(
+        kind, effective_at, action_link, locale
+    )
+    message = EmailMessage()
+    message["From"] = settings.smtp_from
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body)
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(
+            settings.smtp_host, int(settings.smtp_port or 465), context=context
+        ) as smtp:
+            smtp.login(settings.smtp_user, settings.smtp_password)
+            smtp.send_message(message)
+        return True
+    except Exception:  # noqa: BLE001 - never log recipient or billing identifiers
+        logger.exception("send_billing_notification_email failed")
+        return False
+
+
 def _render_invite_email(accept_link: str, locale: str) -> tuple[str, str]:
     """Render the invitation mail; its link is the only account action."""
     subject = "您被邀请加入康冠时代企业微信会话存档"
@@ -148,4 +181,47 @@ def _render_export_ready_email(
         f"文件保留至：{expires_at.isoformat()}\n"
         "到期后系统会自动删除文件；如您未发起本次导出，请立即检查账号安全。"
     )
+    return subject, body
+
+
+def _render_billing_notification_email(
+    kind: str,
+    effective_at: datetime,
+    action_link: str,
+    locale: str,
+) -> tuple[str, str]:
+    """Render only allow-listed state text and an authenticated action link."""
+    zh = {
+        "subscription_expiry_30d": ("年度套餐将在 30 天后到期", "年度套餐即将到期，请提前安排续费。"),
+        "subscription_expiry_7d": ("年度套餐将在 7 天后到期", "年度套餐即将到期，请尽快续费。"),
+        "subscription_expiry_1d": ("年度套餐将在明日到期", "年度套餐即将到期，请立即检查续费安排。"),
+        "subscription_expired": ("年度套餐已到期", "年度套餐已进入七天宽限期，请续费以避免服务冻结。"),
+        "subscription_grace_ending_1d": ("服务宽限期将在明日结束", "宽限期即将结束，未续费将停止新的归档和业务访问。"),
+        "tenant_frozen": ("组织服务已冻结", "组织因套餐到期已冻结；历史数据保留，请登录续费恢复服务。"),
+        "payment_activation_pending": ("支付激活需要处理", "可信收款已确认，但订阅激活尚未完成，请在运营后台处理。"),
+        "refund_processing_timeout": ("退款处理超时", "退款长时间仍在处理中，请在运营后台查询渠道状态。"),
+        "refund_abnormal": ("退款状态异常", "退款渠道返回异常状态，请在运营后台检查并处理。"),
+        "refund_manual_recovery_required": ("退款需要人工恢复", "退款与订阅期限存在歧义，请在运营后台完成受控恢复。"),
+    }
+    en = {
+        "subscription_expiry_30d": ("Annual plan expires in 30 days", "Your annual plan is approaching expiry. Please plan the renewal."),
+        "subscription_expiry_7d": ("Annual plan expires in 7 days", "Your annual plan is approaching expiry. Please renew soon."),
+        "subscription_expiry_1d": ("Annual plan expires tomorrow", "Your annual plan is approaching expiry. Please review renewal now."),
+        "subscription_expired": ("Annual plan has expired", "Your plan is in its seven-day grace period. Renew to prevent a service freeze."),
+        "subscription_grace_ending_1d": ("Service grace period ends tomorrow", "The grace period is ending. New archive and business access will stop without renewal."),
+        "tenant_frozen": ("Organization service is frozen", "The plan expired and service is frozen. Historical data is retained; sign in to renew."),
+        "payment_activation_pending": ("Payment activation needs attention", "A trusted payment was confirmed but subscription activation is pending. Review it in platform operations."),
+        "refund_processing_timeout": ("Refund processing timed out", "A refund remains in processing. Query the provider state in platform operations."),
+        "refund_abnormal": ("Refund status is abnormal", "The provider reported an abnormal refund state. Review it in platform operations."),
+        "refund_manual_recovery_required": ("Refund needs manual recovery", "The refund and subscription term are ambiguous. Complete controlled recovery in platform operations."),
+    }
+    translations = en if locale.lower().startswith("en") else zh
+    if kind not in translations:
+        raise ValueError("unsupported billing notification kind")
+    subject, message = translations[kind]
+    when = effective_at.astimezone(timezone.utc).isoformat()
+    if translations is en:
+        body = f"{message}\n\nEffective time (UTC): {when}\n\nSign in securely:\n{action_link}\n"
+    else:
+        body = f"{message}\n\n生效时间（UTC）：{when}\n\n请通过安全入口登录：\n{action_link}\n"
     return subject, body

@@ -744,6 +744,120 @@ class RefundEvent(Base):
     )
 
 
+class BillingNotificationIntent(Base):
+    """Durable, deduplicated instruction to send one billing-state notice."""
+
+    __tablename__ = "billing_notification_intents"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "dedupe_key",
+            name="uq_billing_notification_intents_tenant_dedupe",
+        ),
+        CheckConstraint(
+            "subject_type IN ('subscription', 'payment_order', 'refund_order')",
+            name="ck_billing_notification_intents_subject_type",
+        ),
+        CheckConstraint(
+            "audience IN ('owner', 'operations')",
+            name="ck_billing_notification_intents_audience",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'sent', 'canceled', 'failed')",
+            name="ck_billing_notification_intents_status",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_billing_notification_intents_attempt_count",
+        ),
+        CheckConstraint(
+            "length(context_key) = 64 AND length(dedupe_key) = 64",
+            name="ck_billing_notification_intents_hashes",
+        ),
+        Index(
+            "ix_billing_notification_intents_due",
+            "status",
+            "next_attempt_at",
+            "scheduled_at",
+        ),
+        Index(
+            "ix_billing_notification_intents_tenant_subject",
+            "tenant_id",
+            "subject_type",
+            "subject_id",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    subject_type = Column(String(32), nullable=False)
+    subject_id = Column(String(36), nullable=False)
+    kind = Column(String(64), nullable=False)
+    audience = Column(String(16), nullable=False)
+    context_key = Column(String(64), nullable=False)
+    dedupe_key = Column(String(64), nullable=False)
+    source_revision = Column(Integer, nullable=True)
+    effective_at = Column(DateTime(timezone=True), nullable=False)
+    scheduled_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(
+        String(16), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    attempt_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    next_attempt_at = Column(DateTime(timezone=True), nullable=False)
+    cancellation_code = Column(String(64), nullable=True)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    canceled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class BillingNotificationAttempt(Base):
+    """Append-only, sanitized result of one notification delivery attempt."""
+
+    __tablename__ = "billing_notification_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "intent_id",
+            "attempt_no",
+            name="uq_billing_notification_attempts_intent_number",
+        ),
+        CheckConstraint(
+            "outcome IN ('sent', 'failed')",
+            name="ck_billing_notification_attempts_outcome",
+        ),
+        CheckConstraint(
+            "attempt_no >= 1",
+            name="ck_billing_notification_attempts_number",
+        ),
+        CheckConstraint(
+            "outcome != 'failed' OR failure_code IS NOT NULL",
+            name="ck_billing_notification_attempts_failure_code",
+        ),
+        Index(
+            "ix_billing_notification_attempts_tenant_attempted",
+            "tenant_id",
+            "attempted_at",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    intent_id = Column(
+        String(36), ForeignKey("billing_notification_intents.id"), nullable=False
+    )
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    attempt_no = Column(Integer, nullable=False)
+    outcome = Column(String(16), nullable=False)
+    failure_code = Column(String(64), nullable=True)
+    attempted_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class TenantWecomConfig(Base):
     """Per-tenant WeCom app credentials. One row per tenant for MVP.
 

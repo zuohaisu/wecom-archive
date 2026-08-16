@@ -1,0 +1,12 @@
+[Unit]
+Description=WeCom Archive Billing Notification Timer
+
+[Timer]
+# Daily thresholds are UTC-authoritative; the five-minute cadence also gives
+# payment/refund anomalies prompt retries without relying on a request thread.
+OnCalendar=*:02/5
+Persistent=true
+Unit=wecom-billing-notifications.service
+
+[Install]
+WantedBy=timers.target

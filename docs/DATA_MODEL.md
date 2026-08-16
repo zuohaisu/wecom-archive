@@ -276,6 +276,21 @@ SubscriptionHistory and Audit, and project Tenant billing service state.
 Provider events are append-only and unique by `(provider, provider_event_id)`;
 a changed replay fails closed.
 
+### `billing_notification_intents` and `billing_notification_attempts`
+
+Migration 0053 adds a durable email outbox for subscription thresholds and
+payment/refund anomalies. An intent is unique by `(tenant_id, dedupe_key)`;
+subscription deduplication uses the authoritative term boundaries rather than
+wall-clock execution time, so lifecycle revision changes cannot create repeat
+notices for the same term. A renewal or refund projection cancels obsolete
+pending intents without deleting sent, failed or canceled history.
+
+Every delivery attempt is append-only and stores only an attempt number,
+outcome, fixed failure code and UTC timestamp. Recipient addresses are resolved
+from current Owner/platform-admin records only while sending and are not copied
+to either table. Provider transaction details, CorpID, UserID, secrets and
+archive content are never notification fields.
+
 ### `manual_financial_transactions`
 
 An internal platform administrator can record a CNY receipt or refund for a

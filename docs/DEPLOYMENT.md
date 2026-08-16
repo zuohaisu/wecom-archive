@@ -31,6 +31,7 @@ Versioned in this repository:
 | Media unit | `deploy/systemd/wecom-archive-media-download.service` | One-shot generic media worker (image/voice/video/file/emotion/nested media) |
 | Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Pending/retryable reconciliation every 30 minutes by default (`:15`, `:45`) |
 | Export worker unit/timer | `deploy/systemd/wecom-export-jobs.{service,timer}` | Generate queued ZIPs, retry email delivery, and delete seven-day artifacts every five minutes |
+| Billing notification unit/timer | `deploy/systemd/wecom-billing-notifications.{service,timer}` | Schedule and retry lifecycle, payment-activation and refund-anomaly notices every five minutes |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
 | GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
 
@@ -236,6 +237,29 @@ RND-360 incident mitigation. The effective worker environment must select
 `qiniu_kodo`; otherwise new media-export jobs fail closed instead of creating a
 local final ZIP. No production unit is installed, enabled, or changed by
 repository changes alone.
+
+Billing lifecycle and anomaly notifications (RND-401; operator action only):
+
+```bash
+sudo cp deploy/systemd/wecom-billing-notifications.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-billing-notifications.timer
+sudo systemctl status wecom-billing-notifications.timer --no-pager
+```
+
+Apply Alembic migration `0053` before enabling the timer. Configure a public
+HTTPS `ADMIN_DOMAIN` and real SMTP delivery (`SMTP_HOST` and `SMTP_FROM`, plus
+relay credentials where required). Missing transport, action link or recipient
+is recorded as a fixed retryable failure code; it is never reported as sent.
+`BILLING_NOTIFICATION_BATCH_SIZE` defaults to `20` and is capped at `100`.
+All event timestamps are evaluated and rendered in UTC. The outbox stores no
+email address, provider transaction detail, CorpID, UserID, secret or message
+content.
+
+Rollback is two-stage: first disable the timer, then revert application code.
+Do not downgrade `0053` while retaining notification history; its downgrade
+drops the intent and append-only attempt tables. A code rollback can safely
+leave those unused tables in place.
 
 RND-343 defaults are intentionally staggered: archive reconciliation at
 `:00/:30`, generic media reconciliation at `:15/:45`. Callback → archive
