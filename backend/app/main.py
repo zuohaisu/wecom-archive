@@ -34,6 +34,7 @@ from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.reachability_checks import router as reachability_checks_router
 from app.routers.reachability_findings import router as reachability_findings_router
 from app.routers.retention import router as retention_router
+from app.routers.refunds import router as refunds_router
 from app.routers.search import router as search_router
 from app.routers.settings import settings_router
 from app.routers.sync import router as sync_router
@@ -157,6 +158,7 @@ def create_app() -> FastAPI:
     app.include_router(export_audit_router)
     app.include_router(exports_router)
     app.include_router(retention_router, prefix="/api/admin")
+    app.include_router(refunds_router)
     app.include_router(onboarding_router)
     app.include_router(platform_router, prefix="/api/platform")
     app.include_router(platform_access_router, prefix="/api/platform")

@@ -359,8 +359,8 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
-    # RND-259 branding and the platform-operations surface register 144 routes together.
-    assert route_count == 144
+    # RND-403 adds two platform refund controls and one signed callback route.
+    assert route_count == 147
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -483,6 +483,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/operations/tenants",
             "/api/platform/operations/tenants/{tenant_id}",
             "/api/platform/operations/tenants/{tenant_id}/financial-transactions",
+            "/api/platform/operations/tenants/{tenant_id}/refunds",
+            "/api/platform/operations/tenants/{tenant_id}/refunds/{refund_id}/query",
             "/api/platform/operations/tenants/{tenant_id}/service",
             "/api/platform/operations/tenants/{tenant_id}/subscription",
             "/api/platform/tenants",
@@ -493,6 +495,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/wecom/third-party/suite-ticket-status",
             "/api/payments/wechat/notify",
             "/api/provisioning/status",
+            "/api/refunds/wechat/notify",
             "/api/search/contacts",
             "/api/search/messages",
             "/api/wecom/archive/events",
@@ -844,6 +847,18 @@ def test_route_snapshot_with_real_model_names() -> None:
             "ManualFinancialTransactionOut",
             "None",
         ),
+        (
+            "/api/platform/operations/tenants/{tenant_id}/refunds",
+            frozenset({"POST"}),
+            "RefundOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/tenants/{tenant_id}/refunds/{refund_id}/query",
+            frozenset({"POST"}),
+            "RefundOut",
+            "None",
+        ),
         ("/api/platform/tenants", frozenset({"POST"}), "TenantProvisionOut", "None"),
         (
             "/api/platform/tenants",
@@ -883,6 +898,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ),
         ("/api/payments/wechat/notify", frozenset({"POST"}), "None", "None"),
         ("/api/provisioning/status", frozenset({"GET"}), "dict", "None"),
+        ("/api/refunds/wechat/notify", frozenset({"POST"}), "None", "None"),
         (
             "/api/search/contacts",
             frozenset({"GET"}),

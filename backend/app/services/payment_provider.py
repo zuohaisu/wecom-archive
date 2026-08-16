@@ -49,6 +49,49 @@ class PaymentQueryResult:
     success: TrustedPaymentEvent | None
 
 
+@dataclass(frozen=True)
+class RefundRequest:
+    provider_ref: str
+    provider_order_ref: str
+    provider_transaction_id: str
+    amount_cents: int
+    total_amount_cents: int
+    currency: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class RefundSubmissionResult:
+    provider: str
+    provider_ref: str
+    provider_refund_id: str
+    provider_order_ref: str
+    provider_transaction_id: str
+    state: str
+    amount_cents: int
+    total_amount_cents: int
+    currency: str
+    accepted_at: datetime
+
+
+@dataclass(frozen=True)
+class TrustedRefundEvent:
+    provider: str
+    provider_event_id: str
+    provider_ref: str
+    provider_refund_id: str
+    provider_order_ref: str
+    provider_transaction_id: str
+    merchant_id: str
+    state: str
+    source: str
+    amount_cents: int
+    total_amount_cents: int
+    currency: str
+    payload_hash: str
+    occurred_at: datetime
+
+
 class PaymentProvider(Protocol):
     code: str
     app_id: str
@@ -63,3 +106,11 @@ class PaymentProvider(Protocol):
     def query_payment(self, provider_order_ref: str) -> PaymentQueryResult: ...
 
     def close_payment(self, provider_order_ref: str) -> None: ...
+
+    def create_refund(self, request: RefundRequest) -> RefundSubmissionResult: ...
+
+    def query_refund(self, provider_ref: str) -> TrustedRefundEvent: ...
+
+    def verify_and_parse_refund_notification(
+        self, headers: Mapping[str, str], raw_body: bytes
+    ) -> TrustedRefundEvent: ...

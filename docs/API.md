@@ -87,6 +87,29 @@ agreement. The payer may choose only the funding methods offered by WeChat for
 that transaction; the product does not promise a specific bank-card option.
 Tencent's Conversation Archive service fee remains separate.
 
+### Platform-controlled full refunds
+
+Refunds are deliberately outside the tenant Owner surface. The control routes
+require an authenticated active platform administrator and derive the amount,
+currency, provider transaction, and tenant from the original succeeded
+Payment. They accept full refunds only.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/platform/operations/tenants/{tenant_id}/refunds` | Submit/idempotently replay one reviewed full refund; requires `Idempotency-Key`; HTTP 202 means provider acceptance/processing, not success |
+| `POST` | `/api/platform/operations/tenants/{tenant_id}/refunds/{refund_id}/query` | Actively query the signed WeChat result and reconcile a missed/delayed callback |
+| `POST` | `/api/refunds/wechat/notify` | Public WeChat refund notification receiver; authenticates the provider rather than a browser session |
+
+The notification route verifies the raw-body signature and timestamp, decrypts
+the AES-GCM resource, and matches merchant, original order/transaction, refund
+references, full amount, and currency before storing the fact. A successful
+refund application response changes the domain only to `processing`; only a
+trusted callback or signed query result with `SUCCESS` may reverse the exact
+subscription term grant. `ABNORMAL` and `CLOSED` remain explicit terminal
+operator-visible outcomes. Duplicate evidence is idempotent, changed replays
+and out-of-order terminal transitions fail closed, and raw bodies, keys, payer
+details, and provider error text are never returned.
+
 `GET /api/billing/capacity` measures only this tenant's successfully downloaded
 `media_files` bytes and joins that fact to the effective subscription quota.
 States are `normal`, `warning_80`, `warning_90`, `full`, `over_limit`, and

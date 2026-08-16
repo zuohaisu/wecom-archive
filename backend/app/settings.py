@@ -190,6 +190,7 @@ class WechatPaySettings(BaseSettings):
     wechat_pay_public_key_id: str = ""
     wechat_pay_public_key: str = ""
     wechat_pay_notify_url: str = ""
+    wechat_pay_refund_notify_url: str = ""
 
 
 def get_wechat_pay_settings() -> WechatPaySettings:

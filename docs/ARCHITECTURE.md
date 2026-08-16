@@ -165,13 +165,29 @@ WeChat Pay → POST /api/payments/wechat/notify (raw signed body)
            → payment_events replay record + paid order state
            → provider-neutral subscription activation/renewal
            → subscriptions + history + audit committed atomically
+
+Platform admin → POST /api/platform/operations/tenants/{tenant}/refunds
+               → original Payment fixes tenant/full CNY amount/provider refs
+               → stable out_refund_no persisted before provider I/O
+               → signed WeChat refund application → processing only
+
+WeChat Pay → POST /api/refunds/wechat/notify (raw signed body)
+           → signature/freshness + AES-GCM + merchant/reference/amount checks
+           → append-only refund event
+           → SUCCESS only: reverse exact subscription term grant + audit
+
+Platform admin → POST .../refunds/{refund}/query
+               → signed provider query → same trusted-event/reversal path
 ```
 
-The payment provider boundary exposes create/query/close/verified-event
-operations and contains no subscription policy. The order service is the only
-bridge from a trusted payment fact to subscription activation. This keeps a
-future Alipay adapter possible without changing entitlement authority; no
-Alipay adapter is implemented by RND-380.
+The payment provider boundary exposes payment and refund create/query/verified-
+event operations and contains no subscription policy. The order service is the
+only bridge from a trusted payment fact to subscription activation; the refund
+domain is the only authority that reverses its exact term grant. Provider
+acceptance never implies money movement success, and callback delivery is not
+assumed reliable because the platform query uses the same reconciliation path.
+This keeps a future Alipay adapter possible without changing entitlement
+authority; no Alipay adapter is implemented.
 
 ### 3.5 Storage-capacity authority and write gate
 

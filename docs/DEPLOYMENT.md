@@ -103,15 +103,19 @@ Additional variables are required for:
 - Sync/decrypt/media scripts: `WECOM_SDK_LIB_PATH`, `WECOM_ARCHIVE_SECRET`, `WECOM_PRIVATE_KEY_PATH`, `WECOM_PUBLIC_KEY_VERSION`
 - Media serving/download, local-backed rows only: `STORAGE_LOCAL_PATH`
 - Media serving/download, Qiniu-backed rows only (optional — see below): `QINIU_ACCESS_KEY`, `QINIU_SECRET_KEY`, `QINIU_BUCKET`, `QINIU_DOMAIN` (full `https://` URL), `QINIU_REGION` (optional)
-- WeChat Pay annual purchase (optional until production approval): set `WECHAT_PAY_ENABLED=true` plus `WECHAT_PAY_APP_ID`, `WECHAT_PAY_MCH_ID`, `WECHAT_PAY_MERCHANT_SERIAL_NO`, `WECHAT_PAY_MERCHANT_PRIVATE_KEY`, `WECHAT_PAY_API_V3_KEY`, `WECHAT_PAY_PUBLIC_KEY_ID`, `WECHAT_PAY_PUBLIC_KEY`, and the exact public HTTPS `WECHAT_PAY_NOTIFY_URL`. The app fails startup when enabled configuration is incomplete or malformed.
+- WeChat Pay annual purchase/refund (optional until production approval): set `WECHAT_PAY_ENABLED=true` plus `WECHAT_PAY_APP_ID`, `WECHAT_PAY_MCH_ID`, `WECHAT_PAY_MERCHANT_SERIAL_NO`, `WECHAT_PAY_MERCHANT_PRIVATE_KEY`, `WECHAT_PAY_API_V3_KEY`, `WECHAT_PAY_PUBLIC_KEY_ID`, `WECHAT_PAY_PUBLIC_KEY`, and the exact public HTTPS `WECHAT_PAY_NOTIFY_URL` and `WECHAT_PAY_REFUND_NOTIFY_URL`. The app fails startup when enabled configuration is incomplete or malformed.
 
-The reverse proxy must expose `POST /api/payments/wechat/notify` at the exact
-HTTPS URL configured above without browser/session authentication. Do not
-cache or rewrite the request body: API v3 signature verification uses the
-original raw bytes. The remaining `/admin/billing` and `/api/billing/*` routes
-retain normal owner-session authentication. Enabling production payments is a
-separate RND-390 operational gate; committing this implementation does not
-authorize live merchant traffic.
+The reverse proxy must expose both `POST /api/payments/wechat/notify` and
+`POST /api/refunds/wechat/notify` at the exact HTTPS URLs configured above
+without browser/session authentication. Do not cache or rewrite either request
+body: API v3 signature verification uses the original raw bytes. The remaining
+`/admin/billing` and `/api/billing/*` routes retain normal owner-session
+authentication. Refund creation and active reconciliation live only under
+`/api/platform/operations/*` and require platform-administrator authentication;
+there is no tenant Owner refund endpoint. Enabling production payments or
+issuing a real refund remains a separate RND-390 operational gate; committing
+this implementation authorizes neither live merchant traffic nor a real
+money movement.
 
 **Capacity enforcement (RND-385).** After migration `0044`, every production
 media-worker invocation enforces the active subscription's storage quota before

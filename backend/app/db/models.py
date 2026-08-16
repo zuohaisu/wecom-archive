@@ -650,6 +650,11 @@ class RefundOrder(Base):
         UniqueConstraint(
             "provider", "provider_ref", name="uq_refund_orders_provider_ref"
         ),
+        UniqueConstraint(
+            "provider",
+            "provider_refund_id",
+            name="uq_refund_orders_provider_refund_id",
+        ),
         CheckConstraint("amount_cents > 0", name="ck_refund_orders_amount"),
         CheckConstraint("length(currency) = 3", name="ck_refund_orders_currency"),
         CheckConstraint(
@@ -682,6 +687,7 @@ class RefundOrder(Base):
     currency = Column(String(3), nullable=False)
     provider = Column(String(32), nullable=False)
     provider_ref = Column(String(64), nullable=True)
+    provider_refund_id = Column(String(64), nullable=True)
     provider_state = Column(String(32), nullable=True)
     status = Column(String(32), nullable=False)
     reason_code = Column(String(64), nullable=False)
@@ -733,6 +739,9 @@ class RefundEvent(Base):
     provider = Column(String(32), nullable=False)
     provider_event_id = Column(String(128), nullable=False)
     provider_ref = Column(String(64), nullable=False)
+    provider_refund_id = Column(String(64), nullable=True)
+    provider_order_ref = Column(String(64), nullable=True)
+    provider_transaction_id = Column(String(64), nullable=True)
     state = Column(String(16), nullable=False)
     source = Column(String(16), nullable=False)
     amount_cents = Column(Integer, nullable=False)

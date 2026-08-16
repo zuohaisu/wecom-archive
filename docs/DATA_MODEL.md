@@ -276,6 +276,13 @@ SubscriptionHistory and Audit, and project Tenant billing service state.
 Provider events are append-only and unique by `(provider, provider_event_id)`;
 a changed replay fails closed.
 
+Migration 0054 adds the provider's `refund_id` to `refund_orders`, unique with
+the provider, and stores the refund ID plus original provider order/transaction
+references on every new `refund_events` fact. These event columns remain
+nullable only so pre-0054 evidence stays readable. New events must match the
+original Payment's reference, full amount, and currency before the domain
+accepts them.
+
 ### `billing_notification_intents` and `billing_notification_attempts`
 
 Migration 0053 adds a durable email outbox for subscription thresholds and

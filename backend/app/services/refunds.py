@@ -30,6 +30,7 @@ from app.db.models import (
 )
 from app.services.billing_lifecycle import reconcile_tenant_billing_lifecycle
 from app.services.entitlements import append_subscription_history
+from app.services.payment_provider import TrustedRefundEvent
 
 _SAFE_REASON = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
 _REFUND_STATES = frozenset({"PROCESSING", "SUCCESS", "CLOSED", "ABNORMAL"})
@@ -66,19 +67,6 @@ class CreateRefundCommand:
 
 
 @dataclass(frozen=True)
-class TrustedRefundEvent:
-    provider: str
-    provider_event_id: str
-    provider_ref: str
-    state: str
-    source: str
-    amount_cents: int
-    currency: str
-    payload_hash: str
-    occurred_at: datetime
-
-
-@dataclass(frozen=True)
 class RefundSummary:
     refund_id: str
     tenant_id: str
@@ -88,6 +76,7 @@ class RefundSummary:
     currency: str
     provider: str
     provider_ref: str | None
+    provider_refund_id: str | None
     provider_state: str | None
     status: str
     reason_code: str
@@ -133,6 +122,7 @@ def _summary(refund: RefundOrder) -> RefundSummary:
         currency=refund.currency,
         provider=refund.provider,
         provider_ref=refund.provider_ref,
+        provider_refund_id=refund.provider_refund_id,
         provider_state=refund.provider_state,
         status=refund.status,
         reason_code=refund.reason_code,
@@ -342,17 +332,16 @@ def create_refund_request(
     return _summary(refund)
 
 
-def mark_refund_processing(
+def reserve_refund_provider_ref(
     db: Session,
     tenant_id: str,
     refund_id: str,
     *,
     provider_ref: str,
-    accepted_at: datetime,
 ) -> RefundSummary:
+    """Persist one stable out_refund_no before any provider network call."""
     normalized_tenant = _safe_id(tenant_id, "tenant_id")
     normalized_refund = _safe_id(refund_id, "refund_id")
-    checked_at = _explicit_utc(accepted_at)
     normalized_provider_ref = provider_ref.strip()
     if not normalized_provider_ref or len(normalized_provider_ref) > 64:
         raise RefundError("invalid provider refund reference")
@@ -366,11 +355,65 @@ def mark_refund_processing(
     )
     if refund is None:
         raise RefundNotFoundError("refund order does not exist")
-    if refund.status == "processing" and refund.provider_ref == normalized_provider_ref:
+    if refund.provider_ref is not None:
+        if refund.provider_ref != normalized_provider_ref:
+            raise RefundConflictError("refund already owns another provider reference")
         return _summary(refund)
     if refund.status != "created":
         raise RefundConflictError("refund is not eligible for provider submission")
     refund.provider_ref = normalized_provider_ref
+    db.flush()
+    return _summary(refund)
+
+
+def mark_refund_processing(
+    db: Session,
+    tenant_id: str,
+    refund_id: str,
+    *,
+    provider_ref: str,
+    provider_refund_id: str | None = None,
+    accepted_at: datetime,
+) -> RefundSummary:
+    normalized_tenant = _safe_id(tenant_id, "tenant_id")
+    normalized_refund = _safe_id(refund_id, "refund_id")
+    checked_at = _explicit_utc(accepted_at)
+    normalized_provider_ref = provider_ref.strip()
+    if not normalized_provider_ref or len(normalized_provider_ref) > 64:
+        raise RefundError("invalid provider refund reference")
+    normalized_provider_refund_id = (
+        provider_refund_id.strip() if provider_refund_id is not None else None
+    )
+    if normalized_provider_refund_id is not None and (
+        not normalized_provider_refund_id or len(normalized_provider_refund_id) > 64
+    ):
+        raise RefundError("invalid provider refund ID")
+    refund = db.scalar(
+        select(RefundOrder)
+        .where(
+            RefundOrder.id == normalized_refund,
+            RefundOrder.tenant_id == normalized_tenant,
+        )
+        .with_for_update()
+    )
+    if refund is None:
+        raise RefundNotFoundError("refund order does not exist")
+    if refund.status == "processing" and refund.provider_ref == normalized_provider_ref:
+        if (
+            normalized_provider_refund_id is not None
+            and refund.provider_refund_id not in (None, normalized_provider_refund_id)
+        ):
+            raise RefundConflictError("refund provider ID changed")
+        if refund.provider_refund_id is None:
+            refund.provider_refund_id = normalized_provider_refund_id
+            db.flush()
+        return _summary(refund)
+    if refund.status != "created":
+        raise RefundConflictError("refund is not eligible for provider submission")
+    if refund.provider_ref not in (None, normalized_provider_ref):
+        raise RefundConflictError("refund already owns another provider reference")
+    refund.provider_ref = normalized_provider_ref
+    refund.provider_refund_id = normalized_provider_refund_id
     refund.provider_state = "PROCESSING"
     refund.status = "processing"
     refund.provider_accepted_at = checked_at
@@ -385,26 +428,53 @@ def mark_refund_processing(
     return _summary(refund)
 
 
-def _validate_event(refund: RefundOrder, event: TrustedRefundEvent) -> datetime:
+def _validate_event(
+    db: Session, refund: RefundOrder, event: TrustedRefundEvent
+) -> datetime:
     occurred_at = _explicit_utc(event.occurred_at)
+    payment = db.get(PaymentOrder, refund.payment_order_id)
     if (
-        event.provider != refund.provider
+        payment is None
+        or event.provider != refund.provider
         or event.provider_ref != refund.provider_ref
+        or event.provider_order_ref != payment.provider_order_ref
+        or event.provider_transaction_id != payment.provider_transaction_id
+        or event.total_amount_cents != payment.amount_cents
         or event.state not in _REFUND_STATES
         or event.source not in {"callback", "query"}
         or event.amount_cents != refund.amount_cents
         or event.currency != refund.currency
         or not event.provider_event_id
         or len(event.provider_event_id) > 128
+        or not event.provider_refund_id
+        or len(event.provider_refund_id) > 64
+        or not event.merchant_id
+        or len(event.merchant_id) > 32
         or len(event.payload_hash) != 64
     ):
         raise RefundConflictError("trusted refund fact does not match the refund order")
+    if refund.provider_refund_id not in (None, event.provider_refund_id):
+        raise RefundConflictError("trusted refund provider ID changed")
+    if refund.provider_refund_id is None:
+        refund.provider_refund_id = event.provider_refund_id
     return occurred_at
 
 
 def _event_matches(stored: RefundEvent, event: TrustedRefundEvent) -> bool:
     return (
         stored.provider_ref == event.provider_ref
+        and (
+            stored.provider_refund_id is None
+            or stored.provider_refund_id == event.provider_refund_id
+        )
+        and (
+            stored.provider_order_ref is None
+            or stored.provider_order_ref == event.provider_order_ref
+        )
+        and (
+            stored.provider_transaction_id is None
+            or stored.provider_transaction_id == event.provider_transaction_id
+        )
         and stored.state == event.state
         and stored.source == event.source
         and stored.amount_cents == event.amount_cents
@@ -537,7 +607,7 @@ def apply_trusted_refund_event(
     )
     if refund is None:
         raise RefundNotFoundError("refund order does not exist")
-    occurred_at = _validate_event(refund, event)
+    occurred_at = _validate_event(db, refund, event)
     duplicate = db.scalar(
         select(RefundEvent).where(
             RefundEvent.provider == event.provider,
@@ -552,10 +622,14 @@ def apply_trusted_refund_event(
                 "provider refund event ID was replayed with different content"
             )
         return _summary(refund)
-    if refund.status in {"succeeded", "closed", "abnormal"}:
+    terminal_state = {
+        "succeeded": "SUCCESS",
+        "closed": "CLOSED",
+        "abnormal": "ABNORMAL",
+        "manual_recovery_required": "SUCCESS",
+    }.get(refund.status)
+    if terminal_state is not None and event.state != terminal_state:
         raise RefundConflictError("refund is already terminal")
-    if refund.status == "manual_recovery_required":
-        raise RefundConflictError("refund requires manual recovery")
     db.add(
         RefundEvent(
             id=str(uuid.uuid4()),
@@ -563,6 +637,9 @@ def apply_trusted_refund_event(
             provider=event.provider,
             provider_event_id=event.provider_event_id,
             provider_ref=event.provider_ref,
+            provider_refund_id=event.provider_refund_id,
+            provider_order_ref=event.provider_order_ref,
+            provider_transaction_id=event.provider_transaction_id,
             state=event.state,
             source=event.source,
             amount_cents=event.amount_cents,
@@ -571,6 +648,9 @@ def apply_trusted_refund_event(
             occurred_at=occurred_at,
         )
     )
+    if terminal_state is not None:
+        db.flush()
+        return _summary(refund)
     refund.provider_state = event.state
     if event.state == "PROCESSING":
         refund.status = "processing"

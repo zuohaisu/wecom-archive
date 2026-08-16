@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
@@ -15,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.audit import AuditAction
+from app.auth import require_platform_admin
 from app.db.base import Base
 from app.db.models import (
     AuditLog,
@@ -31,13 +34,20 @@ from app.db.models import (
     SubscriptionTermGrant,
     Tenant,
 )
+from app.db.session import get_db
+from app.main import app
+from app.routers.refunds import get_refund_provider
 from app.services.entitlements import ANNUAL_PLAN_CODE, ARCHIVE_ACCESS, has_entitlement
 from app.services.payment_orders import (
     CreateOrderCommand,
     apply_trusted_payment,
     create_payment_order,
 )
-from app.services.payment_provider import CheckoutArtifact, TrustedPaymentEvent
+from app.services.payment_provider import (
+    CheckoutArtifact,
+    RefundSubmissionResult,
+    TrustedPaymentEvent,
+)
 from app.services.refunds import (
     CreateRefundCommand,
     RefundConflictError,
@@ -47,6 +57,12 @@ from app.services.refunds import (
     apply_trusted_refund_event,
     create_refund_request,
     mark_refund_processing,
+)
+from app.services.wechat_refunds import (
+    SubmitWechatRefundCommand,
+    apply_wechat_refund_event,
+    query_and_reconcile_wechat_refund,
+    submit_wechat_refund,
 )
 
 NOW = datetime(2026, 8, 16, 8, 0, tzinfo=timezone.utc)
@@ -63,6 +79,11 @@ class FakeProvider:
     app_id = "wx-rnd399"
     merchant_id = "1900003999"
 
+    def __init__(self):
+        self.refund_requests = []
+        self.refund_query_event = None
+        self.refund_notification_event = None
+
     def create_payment(self, request):
         return CheckoutArtifact(
             provider_order_ref=request.provider_order_ref,
@@ -78,6 +99,30 @@ class FakeProvider:
 
     def close_payment(self, provider_order_ref):
         raise NotImplementedError
+
+    def create_refund(self, request):
+        self.refund_requests.append(request)
+        return RefundSubmissionResult(
+            provider=self.code,
+            provider_ref=request.provider_ref,
+            provider_refund_id=f"wechat-{request.provider_ref}",
+            provider_order_ref=request.provider_order_ref,
+            provider_transaction_id=request.provider_transaction_id,
+            state="PROCESSING",
+            amount_cents=request.amount_cents,
+            total_amount_cents=request.total_amount_cents,
+            currency=request.currency,
+            accepted_at=NOW + timedelta(hours=1, minutes=1),
+        )
+
+    def query_refund(self, provider_ref):
+        assert self.refund_query_event is not None
+        assert self.refund_query_event.provider_ref == provider_ref
+        return self.refund_query_event
+
+    def verify_and_parse_refund_notification(self, headers, raw_body):
+        assert self.refund_notification_event is not None
+        return self.refund_notification_event
 
 
 def _tables():
@@ -202,14 +247,28 @@ def _request(db: Session, order: PaymentOrder, *, key="refund-request-rnd399-000
     )
 
 
-def _refund_event(refund, *, state="SUCCESS", event_id="refund-event-rnd399-1", **changes):
+def _refund_event(
+    db: Session,
+    refund,
+    *,
+    state="SUCCESS",
+    event_id="refund-event-rnd399-1",
+    **changes,
+):
+    payment = db.get(PaymentOrder, refund.payment_order_id)
+    assert payment is not None and payment.provider_transaction_id is not None
     values = {
         "provider": "wechat_pay",
         "provider_event_id": event_id,
         "provider_ref": refund.provider_ref,
+        "provider_refund_id": "refund-id-rnd399",
+        "provider_order_ref": payment.provider_order_ref,
+        "provider_transaction_id": payment.provider_transaction_id,
+        "merchant_id": FakeProvider.merchant_id,
         "state": state,
         "source": "callback",
         "amount_cents": 9900,
+        "total_amount_cents": payment.amount_cents,
         "currency": "CNY",
         "payload_hash": "b" * 64,
         "occurred_at": NOW + timedelta(hours=2),
@@ -318,7 +377,7 @@ def test_successful_first_payment_refund_atomically_revokes_entitlement(factory)
         result = apply_trusted_refund_event(
             db,
             refund.refund_id,
-            _refund_event(refund),
+            _refund_event(db, refund),
         )
         db.commit()
         subscription = db.scalar(select(Subscription))
@@ -356,7 +415,9 @@ def test_refunding_latest_renewal_restores_exact_pre_payment_term(factory) -> No
         original_end = first_activation.applied_ends_at
     refund = _accepted_refund(factory, second)
     with factory() as db:
-        result = apply_trusted_refund_event(db, refund.refund_id, _refund_event(refund))
+        result = apply_trusted_refund_event(
+            db, refund.refund_id, _refund_event(db, refund)
+        )
         db.commit()
         subscription = db.scalar(select(Subscription))
         assert result.status == "succeeded"
@@ -382,7 +443,9 @@ def test_refunding_older_payment_after_later_renewal_requires_manual_recovery(fa
     )
     with factory() as db:
         before = db.scalar(select(Subscription)).ends_at
-        result = apply_trusted_refund_event(db, refund.refund_id, _refund_event(refund))
+        result = apply_trusted_refund_event(
+            db, refund.refund_id, _refund_event(db, refund)
+        )
         db.commit()
         subscription = db.scalar(select(Subscription))
         grant = db.get(SubscriptionTermGrant, result.term_grant_id)
@@ -422,18 +485,22 @@ def test_cross_tenant_forged_event_and_changed_replay_fail_closed(factory) -> No
             apply_trusted_refund_event(
                 db,
                 refund.refund_id,
-                _refund_event(refund, amount_cents=1),
+                _refund_event(db, refund, amount_cents=1),
             )
         db.rollback()
-        applied = apply_trusted_refund_event(db, refund.refund_id, _refund_event(refund))
+        applied = apply_trusted_refund_event(
+            db, refund.refund_id, _refund_event(db, refund)
+        )
         db.commit()
-        replay = apply_trusted_refund_event(db, refund.refund_id, _refund_event(refund))
+        replay = apply_trusted_refund_event(
+            db, refund.refund_id, _refund_event(db, refund)
+        )
         assert replay == applied
         with pytest.raises(RefundReplayConflictError):
             apply_trusted_refund_event(
                 db,
                 refund.refund_id,
-                _refund_event(refund, payload_hash="c" * 64),
+                _refund_event(db, refund, payload_hash="c" * 64),
             )
 
 
@@ -461,7 +528,9 @@ def test_audit_failure_rolls_back_refund_subscription_event_and_history(factory)
     try:
         with factory() as db:
             with pytest.raises(RuntimeError, match="injected refund audit failure"):
-                apply_trusted_refund_event(db, refund.refund_id, _refund_event(refund))
+                apply_trusted_refund_event(
+                    db, refund.refund_id, _refund_event(db, refund)
+                )
                 db.commit()
             db.rollback()
     finally:
@@ -476,6 +545,182 @@ def test_audit_failure_rolls_back_refund_subscription_event_and_history(factory)
         assert grant.status == "active"
         assert db.query(RefundEvent).count() == 0
         assert db.query(SubscriptionHistory).count() == 1
+
+
+def _rnd403_event(
+    payment: PaymentOrder,
+    refund,
+    provider: FakeProvider,
+    *,
+    state: str = "SUCCESS",
+    source: str = "query",
+    event_id: str = "refund-query-rnd403",
+) -> TrustedRefundEvent:
+    assert payment.provider_transaction_id is not None
+    assert refund.provider_ref is not None
+    assert refund.provider_refund_id is not None
+    return TrustedRefundEvent(
+        provider=provider.code,
+        provider_event_id=event_id,
+        provider_ref=refund.provider_ref,
+        provider_refund_id=refund.provider_refund_id,
+        provider_order_ref=payment.provider_order_ref,
+        provider_transaction_id=payment.provider_transaction_id,
+        merchant_id=provider.merchant_id,
+        state=state,
+        source=source,
+        amount_cents=payment.amount_cents,
+        total_amount_cents=payment.amount_cents,
+        currency=payment.currency,
+        payload_hash=hashlib.sha256(event_id.encode()).hexdigest(),
+        occurred_at=NOW + timedelta(hours=2),
+    )
+
+
+def test_rnd403_submission_is_stable_and_query_success_reverses_once(factory) -> None:
+    provider = FakeProvider()
+    order = _pay(
+        factory,
+        key="payment-browser-rnd403-service",
+        transaction_id="payment-transaction-rnd403-service",
+        event_id="payment-event-rnd403-service",
+    )
+    command = SubmitWechatRefundCommand(
+        tenant_id="tenant-a",
+        payment_order_id=order.id,
+        idempotency_key="refund-request-rnd403-service",
+        reason_code="customer_request",
+        approved_by_platform_admin_id="platform-admin",
+        requested_at=NOW + timedelta(hours=1),
+    )
+
+    submitted = submit_wechat_refund(factory, provider, command)
+    replay = submit_wechat_refund(factory, provider, command)
+
+    assert submitted == replay
+    assert submitted.status == "processing"
+    assert submitted.provider_ref.startswith("R")
+    assert len(provider.refund_requests) == 1
+    request = provider.refund_requests[0]
+    assert request.amount_cents == request.total_amount_cents == 9900
+    with factory() as db:
+        subscription = db.scalar(select(Subscription))
+        payment = db.get(PaymentOrder, order.id)
+        refund = db.get(RefundOrder, submitted.refund_id)
+        assert subscription.status == "active" and subscription.revision == 1
+        assert payment is not None and refund is not None
+        provider.refund_query_event = _rnd403_event(
+            payment, refund, provider
+        )
+
+    recovered = query_and_reconcile_wechat_refund(
+        factory, provider, "tenant-a", submitted.refund_id
+    )
+    duplicate = query_and_reconcile_wechat_refund(
+        factory, provider, "tenant-a", submitted.refund_id
+    )
+    assert recovered == duplicate
+    assert recovered.status == "succeeded"
+
+    with factory() as db:
+        payment = db.get(PaymentOrder, order.id)
+        refund = db.get(RefundOrder, submitted.refund_id)
+        assert payment is not None and refund is not None
+        callback = _rnd403_event(
+            payment,
+            refund,
+            provider,
+            source="callback",
+            event_id="refund-callback-rnd403",
+        )
+    callback_result = apply_wechat_refund_event(factory, provider, callback)
+    assert callback_result.status == "succeeded"
+
+    with factory() as db:
+        subscription = db.scalar(select(Subscription))
+        assert subscription.status == "canceled" and subscription.revision == 2
+        assert db.query(RefundEvent).count() == 2
+
+    late_processing = replace(
+        callback,
+        provider_event_id="refund-late-processing-rnd403",
+        state="PROCESSING",
+        payload_hash="d" * 64,
+    )
+    with pytest.raises(RefundConflictError, match="already terminal"):
+        apply_wechat_refund_event(factory, provider, late_processing)
+
+
+def test_rnd403_http_surface_is_platform_controlled_and_callback_driven(factory) -> None:
+    provider = FakeProvider()
+    order = _pay(
+        factory,
+        key="payment-browser-rnd403-api",
+        transaction_id="payment-transaction-rnd403-api",
+        event_id="payment-event-rnd403-api",
+    )
+
+    def override_db():
+        with factory() as db:
+            yield db
+
+    old_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_refund_provider] = lambda: provider
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            path = "/api/platform/operations/tenants/tenant-a/refunds"
+            unauthorized = client.post(
+                path,
+                headers={"Idempotency-Key": "refund-request-rnd403-api"},
+                json={
+                    "payment_order_id": order.id,
+                    "reason_code": "customer_request",
+                },
+            )
+            assert unauthorized.status_code == 401
+
+            with factory() as db:
+                platform_admin = db.get(PlatformAdmin, "platform-admin")
+                assert platform_admin is not None
+                db.expunge(platform_admin)
+            app.dependency_overrides[require_platform_admin] = lambda: platform_admin
+            submitted = client.post(
+                path,
+                headers={"Idempotency-Key": "refund-request-rnd403-api"},
+                json={
+                    "payment_order_id": order.id,
+                    "reason_code": "customer_request",
+                },
+            )
+            assert submitted.status_code == 202
+            assert submitted.json()["status"] == "processing"
+
+            with factory() as db:
+                payment = db.get(PaymentOrder, order.id)
+                refund = db.get(RefundOrder, submitted.json()["refund_id"])
+                assert payment is not None and refund is not None
+                provider.refund_notification_event = _rnd403_event(
+                    payment,
+                    refund,
+                    provider,
+                    source="callback",
+                    event_id="refund-http-callback-rnd403",
+                )
+            callback = client.post(
+                "/api/refunds/wechat/notify",
+                content=b"signed-provider-envelope",
+            )
+            assert callback.status_code == 204
+            with factory() as db:
+                stored = db.get(RefundOrder, submitted.json()["refund_id"])
+                assert stored is not None and stored.status == "succeeded"
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(old_overrides)
+
+    paths = {route.path for route in app.routes}
+    assert "/api/tenants/{tenant_id}/refunds" not in paths
 
 
 def _postgres_test_url() -> str | None:
@@ -598,9 +843,14 @@ def test_concurrent_postgresql_success_event_reverses_once() -> None:
             provider=provider.code,
             provider_event_id=f"refund-event-{suffix}",
             provider_ref=processing.provider_ref,
+            provider_refund_id=f"refund-id-{suffix}",
+            provider_order_ref=provider_order_ref,
+            provider_transaction_id=f"transaction-{suffix}",
+            merchant_id=provider.merchant_id,
             state="SUCCESS",
             source="callback",
             amount_cents=9900,
+            total_amount_cents=9900,
             currency="CNY",
             payload_hash=uuid.uuid4().hex * 2,
             occurred_at=NOW + timedelta(hours=2),
