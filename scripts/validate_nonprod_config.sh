@@ -7,7 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly NONPROD_ENV_FILE="/etc/wecom-archive-365/nonprod.env"
 
-# shellcheck source=nonprod_deployment_lib.sh
+# SCRIPTDIR anchors the source directive to this script's directory; a bare
+# filename is searched relative to the invocation CWD and triggers SC1091.
+# shellcheck source=SCRIPTDIR/nonprod_deployment_lib.sh
 source "$SCRIPT_DIR/nonprod_deployment_lib.sh"
 
 if ! validate_nonprod_config "$NONPROD_ENV_FILE"; then
