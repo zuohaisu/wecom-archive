@@ -1,6 +1,6 @@
 # ADR-0004: 年度套餐、微信支付与自助接入门禁
 
-**状态**：已决策（2026-08-12）
+**状态**：已决策；订阅生命周期、退款与服务门禁由 [ADR-0005](0005-saas-billing-lifecycle-refunds-and-service-gates.md) 接续（2026-08-16）
 **日期**：2026-08-12
 **作者**：Haisu / Codex
 **关联任务**：RND-382
@@ -12,6 +12,7 @@
 | 版本 | 日期 | 变更内容 |
 |---|---|---|
 | v1 | 2026-08-12 | 冻结首个年度套餐、Native 支付、订阅生命周期和生产启用门禁 |
+| v2 | 2026-08-16 | 标注订阅生命周期、退款与服务门禁由 ADR-0005 接续；套餐、支付安全、身份和生产配置契约保持有效 |
 
 ---
 
@@ -46,6 +47,9 @@
 Plan 失活后不得创建新订单，但既有订单、支付和订阅历史必须保持可追溯。
 
 ### 2.2 订阅生命周期
+
+> 本节的套餐期限和 Native 单次扫码续费原则继续有效；`grace`、`frozen`、独立 `suspended`、
+> 到期不续费和 provider 退款后的期限回退，以 [ADR-0005](0005-saas-billing-lifecycle-refunds-and-service-gates.md) 为准。
 
 - 只有可信支付结果可以激活或续费；创建订单、展示二维码或浏览器声称“支付成功”都不可以。
 - 首次激活：`starts_at = trusted_payment_succeeded_at`，`ends_at` 为其后 12 个日历月，
@@ -184,6 +188,7 @@ Subscription 激活服务不 import 微信 client。`checkout_artifact` 当前�
 ## 5. References
 
 - [ADR-0003：已公开定价与产品策略](0003-product-strategy-hosted-only.md)
+- [ADR-0005：SaaS 收费生命周期、退款与服务门禁](0005-saas-billing-lifecycle-refunds-and-service-gates.md)
 - [企业微信第三方企业授权运维说明](../operations/wecom-third-party-authorization.md)
 - [微信支付：Native 支付产品介绍](https://pay.weixin.qq.com/doc/v3/merchant/4012791874)
 - [微信支付：支付确认页可选择零钱或银行卡](https://pay.weixin.qq.com/doc/v3/merchant/4012062524)
@@ -198,4 +203,4 @@ Subscription 激活服务不 import 微信 client。`checkout_artifact` 当前�
 
 ---
 
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-16_
