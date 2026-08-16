@@ -89,7 +89,7 @@ def _provisioning_sidenav() -> str:
   <div class="side-nav-scroll">
     <div class="side-nav-group">开通步骤</div>
     <a class="side-nav-item" href="/admin/provisioning">组织状态</a>
-    <a class="side-nav-item active" href="/admin/billing" aria-current="page">购买年度套餐</a>
+    <a class="side-nav-item active" href="/admin/billing" aria-current="page">开始 15 天免费试用</a>
     <a class="side-nav-item" href="/admin/provisioning/settings">配置准备</a>
   </div>
   <div class="side-nav-user"><button class="btn-logout" onclick="doLogout()">退出登录</button></div>
@@ -112,6 +112,7 @@ def billing_page(
             "billing",
             i18n_script=I18N_SCRIPT_TAG,
             sidenav=sidenav,
+            billing_mode=context.session_scope,
         )
     )
 

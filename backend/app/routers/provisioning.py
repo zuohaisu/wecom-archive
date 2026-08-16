@@ -19,9 +19,9 @@ def provisioning_waiting(
             "provisioning",
             page_title="组织配置中",
             heading="组织已创建",
-            body="请先购买年度套餐，再继续完成企业微信会话存档配置。归档功能会在配置和自动检查通过后启用。",
+            body="完成企业微信会话存档配置和自动检查后，系统会开始一次 15 天免费试用；无需先付款。",
             primary_href="/admin/billing",
-            primary_label="购买年度套餐",
+            primary_label="开始 15 天免费试用",
         )
     )
 
@@ -35,9 +35,9 @@ def provisioning_settings(
             "provisioning",
             page_title="配置准备",
             heading="配置准备",
-            body="购买套餐后，请按页面指引自行完成企业微信会话存档配置。自动检查通过前不会启动归档任务。",
+            body="请按页面指引完成企业微信会话存档配置。自动检查通过后开始 15 天免费试用；此前不会启动归档任务。",
             primary_href="/admin/billing",
-            primary_label="查看年度套餐",
+            primary_label="查看试用与续费",
         )
     )
 

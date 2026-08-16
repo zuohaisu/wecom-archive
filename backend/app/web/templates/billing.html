@@ -3,37 +3,78 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>年度套餐</title>
+<title>续费</title>
 <link rel="icon" href="/api/branding/favicon" sizes="any">
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
-<style>
-.billing-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--space-5);align-items:start}.plan-price{font-size:var(--text-4xl);font-weight:var(--weight-bold);line-height:1}.plan-price small{font-size:var(--text-base);color:var(--color-text-4);font-weight:var(--weight-medium)}.plan-facts{list-style:none;display:grid;gap:var(--space-2);margin-top:var(--space-5)}.plan-facts li{padding-left:20px;position:relative;color:var(--color-text-2)}.plan-facts li:before{content:'✓';position:absolute;left:0;color:var(--color-success-fg);font-weight:var(--weight-bold)}.checkout{text-align:center}.checkout-qr{width:256px;height:256px;max-width:100%;object-fit:contain;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:#fff;padding:8px}.checkout-placeholder{height:256px;display:flex;align-items:center;justify-content:center;border:1px dashed var(--color-border-strong);border-radius:var(--radius-lg);color:var(--color-text-4);padding:var(--space-5)}.billing-status{margin:var(--space-4) 0}.order-meta{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;text-align:left;font-size:var(--text-sm);margin-top:var(--space-4)}.order-meta dt{color:var(--color-text-4)}.order-meta dd{color:var(--color-text-2);word-break:break-word}.billing-actions{display:flex;gap:var(--space-2);justify-content:center;flex-wrap:wrap;margin-top:var(--space-4)}.billing-error{margin-bottom:var(--space-4)}.subscription-card,.capacity-card{margin-bottom:var(--space-5)}.subscription-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-4)}.subscription-facts .capacity-value{font-size:var(--text-base);overflow-wrap:anywhere}.subscription-state{margin-top:var(--space-4)}.capacity-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-4)}.capacity-value{display:block;font-size:var(--text-2xl);font-weight:var(--weight-semibold);margin-top:4px}.capacity-label{color:var(--color-text-4);font-size:var(--text-sm)}.capacity-state{margin-top:var(--space-4)}.capacity-measured{margin-top:var(--space-2);color:var(--color-text-4);font-size:var(--text-xs)}@media(max-width:850px){.billing-grid{grid-template-columns:1fr}.checkout-card{order:-1}.subscription-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:640px){.side-nav{display:none}.page{padding:var(--space-4)}.subscription-facts,.capacity-facts{grid-template-columns:1fr}}
-</style>
+<link rel="stylesheet" href="/web/static/billing.css?v=__STATIC_VERSION__">
 </head>
-<body>
+<body data-billing-mode="__BILLING_MODE__">
 __I18N_SCRIPT__
 <div class="shell">
 __SIDENAV__
 <div class="main">
-  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.overview">总览</span><span class="sep">/</span><span class="cur" data-i18n="nav.billing">年度套餐</span></div></header>
-  <main class="page page-narrow">
-    <div class="page-hd"><div><h1 data-i18n="billing.title">年度套餐</h1><p data-i18n="billing.description">在线购买后，系统会在可信支付结果到达时自动开通或续期。</p></div></div>
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.overview">总览</span><span class="sep">/</span><span class="cur" data-i18n="nav.billing">续费</span></div></header>
+  <main class="page page-narrow billing-page">
+    <div class="page-hd"><div><h1 data-i18n="billing.title">续费与套餐</h1><p data-i18n="billing.description">查看当前服务期限，并在需要时创建新的微信支付订单。</p></div></div>
     <div id="billing-error" class="alert alert-danger billing-error" role="alert" hidden></div>
-    <section class="card subscription-card" aria-labelledby="subscription-title">
-      <div class="card-hd"><h2 id="subscription-title" data-i18n="billing.subscriptionTitle">当前套餐与权益</h2><span id="subscription-badge" class="badge badge-neutral">—</span></div>
-      <div class="card-bd">
-        <div class="subscription-facts">
-          <div><span class="capacity-label" data-i18n="billing.currentPlan">当前套餐</span><strong id="current-plan" class="capacity-value">—</strong></div>
-          <div><span class="capacity-label" data-i18n="billing.startsAt">生效时间</span><strong id="subscription-starts" class="capacity-value">—</strong></div>
-          <div><span class="capacity-label" data-i18n="billing.endsAt">到期时间</span><strong id="subscription-current-ends" class="capacity-value">—</strong></div>
-          <div><span class="capacity-label" data-i18n="billing.entitlements">当前权益</span><strong id="subscription-entitlements" class="capacity-value">—</strong></div>
+
+    <section class="card subscription-hero" aria-labelledby="subscription-title">
+      <div class="card-bd subscription-hero-layout">
+        <div class="subscription-hero-copy">
+          <span class="eyebrow" data-i18n="billing.subscriptionTitle">当前服务状态</span>
+          <div class="subscription-title-row"><h2 id="subscription-title"><span id="current-plan">—</span></h2><span id="subscription-badge" class="badge badge-neutral">—</span></div>
+          <div id="subscription-state" class="subscription-message" role="status" aria-live="polite"></div>
+          <div id="trial-remaining" class="trial-remaining" hidden></div>
         </div>
-        <div id="subscription-state" class="alert alert-neutral subscription-state" role="status" aria-live="polite"></div>
-        <div id="subscription-measured" class="capacity-measured"></div>
+        <dl class="subscription-deadline">
+          <div><dt data-i18n="billing.endsAt">到期时间</dt><dd id="subscription-current-ends">—</dd></div>
+          <div><dt data-i18n="billing.startsAt">生效时间</dt><dd id="subscription-starts">—</dd></div>
+          <div><dt data-i18n="billing.entitlements">当前权益</dt><dd id="subscription-entitlements">—</dd></div>
+        </dl>
       </div>
+      <div id="subscription-measured" class="card-footnote"></div>
     </section>
+
+    <div class="billing-grid">
+      <section class="card plan-card" aria-labelledby="plan-title">
+        <div class="card-hd"><div><span class="eyebrow" data-i18n="billing.benefitsLabel">套餐权益</span><h2 id="plan-title" data-i18n="billing.planTitle">年度基础套餐</h2></div></div>
+        <div class="card-bd">
+          <div class="plan-price"><span id="plan-price">—</span><small data-i18n="billing.perYear"> / 年</small></div>
+          <ul class="plan-facts">
+            <li><span id="plan-storage">5 GiB</span> <span data-i18n="billing.storage">存储额度</span></li>
+            <li data-i18n="billing.unlimitedSeats">不限座席</li>
+            <li data-i18n="billing.calendarTerm">支付成功后生效 12 个日历月</li>
+            <li data-i18n="billing.noAutoDebit">一次性扫码支付，不是免密自动扣款</li>
+          </ul>
+          <div class="next-step"><strong data-i18n="billing.nextStepTitle">下一步</strong><p id="billing-next-step"></p></div>
+          <details class="billing-notes"><summary data-i18n="billing.notesTitle">费用与付款说明</summary><p data-i18n="billing.tencentFee">企业微信会话存档接口的开通和腾讯官方费用另计。</p><p data-i18n="billing.fundingCopy">可使用微信支付页面实际显示的零钱或银行卡等方式；具体可用方式由微信、银行、商户权限和风控决定。</p></details>
+        </div>
+      </section>
+
+      <section class="card checkout-card" aria-labelledby="checkout-title">
+        <div class="card-hd"><div><span class="eyebrow" data-i18n="billing.checkoutLabel">安全操作</span><h2 id="checkout-title" data-i18n="billing.checkoutTitle">续费与付款</h2></div></div>
+        <div class="card-bd checkout">
+          <a id="complete-setup" class="btn btn-primary btn-lg" href="/admin/provisioning/settings" hidden data-i18n="billing.cta.completeSetup">完成配置，开始试用</a>
+          <div id="checkout-placeholder" class="checkout-placeholder" hidden></div>
+          <img id="checkout-qr" class="checkout-qr" alt="微信支付二维码" data-i18n-alt="billing.qrAlt" hidden>
+          <div id="billing-status" class="billing-status badge badge-neutral" role="status" aria-live="polite" hidden></div>
+          <dl id="order-meta" class="order-meta" hidden>
+            <dt data-i18n="billing.orderId">订单号</dt><dd id="order-id" class="mono"></dd>
+            <dt data-i18n="billing.expiresAt">二维码有效期</dt><dd id="order-expires"></dd>
+            <dt data-i18n="billing.subscriptionEnds">套餐有效期至</dt><dd id="subscription-ends">—</dd>
+          </dl>
+          <div class="billing-actions">
+            <button id="create-order" class="btn btn-primary btn-lg" type="button" hidden></button>
+            <button id="refresh-order" class="btn" type="button" hidden data-i18n="billing.refresh">查询支付结果</button>
+            <button id="close-order" class="btn btn-danger" type="button" hidden data-i18n="billing.close">关闭订单</button>
+          </div>
+          <p id="payment-unavailable" class="payment-unavailable" hidden data-i18n="billing.unavailable">微信支付尚未配置，当前不能创建真实订单。</p>
+        </div>
+      </section>
+    </div>
+
     <section class="card capacity-card" aria-labelledby="capacity-title">
-      <div class="card-hd"><h2 id="capacity-title" data-i18n="billing.capacityTitle">存储容量</h2></div>
+      <div class="card-hd"><div><span class="eyebrow" data-i18n="billing.operationsLabel">运行信息</span><h2 id="capacity-title" data-i18n="billing.capacityTitle">存储容量</h2></div></div>
       <div class="card-bd">
         <div class="capacity-facts">
           <div><span class="capacity-label" data-i18n="billing.capacityQuota">套餐额度</span><strong id="capacity-quota" class="capacity-value">—</strong></div>
@@ -44,41 +85,6 @@ __SIDENAV__
         <div id="capacity-measured" class="capacity-measured"></div>
       </div>
     </section>
-    <div class="billing-grid">
-      <section class="card" aria-labelledby="plan-title">
-        <div class="card-hd"><h2 id="plan-title" data-i18n="billing.planTitle">年度基础套餐</h2></div>
-        <div class="card-bd">
-          <div class="plan-price"><span id="plan-price">—</span><small data-i18n="billing.perYear"> / 年</small></div>
-          <ul class="plan-facts">
-            <li><span id="plan-storage">5 GiB</span> <span data-i18n="billing.storage">存储额度</span></li>
-            <li data-i18n="billing.unlimitedSeats">不限座席</li>
-            <li data-i18n="billing.calendarTerm">支付成功后生效 12 个日历月</li>
-            <li data-i18n="billing.noAutoDebit">一次性扫码支付，不是免密自动扣款</li>
-          </ul>
-          <div class="alert alert-neutral mt-5"><span class="alert-ico">ℹ</span><span data-i18n="billing.tencentFee">企业微信会话存档接口的开通和腾讯官方费用另计。</span></div>
-          <p class="field-help mt-4" data-i18n="billing.fundingCopy">可使用微信支付页面实际显示的零钱或银行卡等方式；具体可用方式由微信、银行、商户权限和风控决定。</p>
-        </div>
-      </section>
-      <section class="card checkout-card" aria-labelledby="checkout-title">
-        <div class="card-hd"><h2 id="checkout-title" data-i18n="billing.checkoutTitle">微信扫码支付</h2></div>
-        <div class="card-bd checkout">
-          <div id="checkout-placeholder" class="checkout-placeholder" data-i18n="billing.checkoutEmpty">确认套餐后创建支付订单。</div>
-          <img id="checkout-qr" class="checkout-qr" alt="微信支付二维码" data-i18n-alt="billing.qrAlt" hidden>
-          <div id="billing-status" class="billing-status badge badge-neutral" role="status" aria-live="polite" data-i18n="billing.status.none">尚未创建订单</div>
-          <dl id="order-meta" class="order-meta" hidden>
-            <dt data-i18n="billing.orderId">订单号</dt><dd id="order-id" class="mono"></dd>
-            <dt data-i18n="billing.expiresAt">二维码有效期</dt><dd id="order-expires"></dd>
-            <dt data-i18n="billing.subscriptionEnds">套餐有效期至</dt><dd id="subscription-ends">—</dd>
-          </dl>
-          <div class="billing-actions">
-            <button id="create-order" class="btn btn-primary btn-lg" type="button" disabled data-i18n="billing.create">创建 99 元支付订单</button>
-            <button id="refresh-order" class="btn" type="button" hidden data-i18n="billing.refresh">查询支付结果</button>
-            <button id="close-order" class="btn btn-danger" type="button" hidden data-i18n="billing.close">关闭订单</button>
-          </div>
-          <p id="payment-unavailable" class="field-help mt-4" hidden data-i18n="billing.unavailable">微信支付尚未配置，当前不能创建真实订单。</p>
-        </div>
-      </section>
-    </div>
   </main>
 </div>
 </div>
