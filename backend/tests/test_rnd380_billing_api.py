@@ -24,6 +24,7 @@ from app.db.models import (
     Subscription,
     SubscriptionActivation,
     SubscriptionHistory,
+    SubscriptionTermGrant,
     Tenant,
     TenantStorageDaily,
 )
@@ -93,6 +94,7 @@ def _tables():
         SubscriptionActivation.__table__,
         PaymentOrder.__table__,
         PaymentEvent.__table__,
+        SubscriptionTermGrant.__table__,
         AdminUser.__table__,
         AdminSession.__table__,
         AuditLog.__table__,

@@ -37,6 +37,7 @@ from app.services.entitlements import (
     TenantNotFoundError,
     assign_subscription,
     effective_subscription_status,
+    subscription_grace_ends_at,
 )
 
 _SAFE_SOURCE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
@@ -306,6 +307,22 @@ def activate_or_renew_subscription(
                 .where(Subscription.tenant_id == normalized.tenant_id)
                 .with_for_update()
             )
+            # Persist the exact pre-payment projection before assignment. A
+            # later provider-confirmed full refund can restore only this
+            # snapshot; legacy attempts with NULL here fail to manual recovery.
+            attempt.prior_subscription_existed = current is not None
+            if current is not None:
+                attempt.prior_plan_id = current.plan_id
+                attempt.prior_status = current.status
+                attempt.prior_starts_at = _stored_utc(current.starts_at)
+                attempt.prior_ends_at = _stored_utc(current.ends_at)
+                attempt.prior_grace_ends_at = subscription_grace_ends_at(current)
+                attempt.prior_cancel_at_period_end = bool(
+                    current.cancel_at_period_end
+                )
+                attempt.prior_source = current.source
+                attempt.prior_renewal_count = current.renewal_count
+                attempt.prior_revision = current.revision
             current_effective_status = (
                 effective_subscription_status(current, at=normalized.trusted_at)
                 if current is not None
@@ -378,6 +395,7 @@ def activate_or_renew_subscription(
             attempt.activation_kind = activation_kind
             attempt.applied_starts_at = starts_at
             attempt.applied_ends_at = ends_at
+            attempt.applied_grace_ends_at = subscription_grace_ends_at(subscription)
             attempt.applied_at = datetime.now(timezone.utc)
             db.flush()
             result = _result(attempt, replayed=False)

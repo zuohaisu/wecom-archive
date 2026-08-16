@@ -26,6 +26,7 @@ from app.db.models import (
     Subscription,
     SubscriptionActivation,
     SubscriptionHistory,
+    SubscriptionTermGrant,
     Tenant,
 )
 from app.services.entitlements import ANNUAL_PLAN_CODE
@@ -99,6 +100,7 @@ def _tables():
         SubscriptionActivation.__table__,
         PaymentOrder.__table__,
         PaymentEvent.__table__,
+        SubscriptionTermGrant.__table__,
         AdminUser.__table__,
         AuditLog.__table__,
     ]
@@ -454,6 +456,9 @@ def _delete_postgres_tenant(factory, tenant_id: str) -> None:
             db.query(PaymentEvent).filter(
                 PaymentEvent.order_id.in_(order_ids)
             ).delete(synchronize_session=False)
+            db.query(SubscriptionTermGrant).filter(
+                SubscriptionTermGrant.payment_order_id.in_(order_ids)
+            ).delete(synchronize_session=False)
         db.query(PaymentOrder).filter_by(tenant_id=tenant_id).delete()
         db.query(AuditLog).filter_by(tenant_id=tenant_id).delete()
         db.query(SubscriptionActivation).filter_by(tenant_id=tenant_id).delete()
@@ -517,6 +522,9 @@ def test_concurrent_postgresql_callback_replay_activates_exactly_once() -> None:
                 tenant_id=tenant_id
             ).count() == 1
             assert db.query(SubscriptionHistory).filter_by(
+                tenant_id=tenant_id
+            ).count() == 1
+            assert db.query(SubscriptionTermGrant).filter_by(
                 tenant_id=tenant_id
             ).count() == 1
             assert db.query(AuditLog).filter_by(tenant_id=tenant_id).count() == 1

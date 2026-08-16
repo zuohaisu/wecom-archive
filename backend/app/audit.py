@@ -74,6 +74,12 @@ class AuditAction:
     TENANT_BILLING_RESTORED = "tenant.billing_restored"
     PLATFORM_TENANT_SUSPENDED = "platform.tenant_suspended"
     PLATFORM_TENANT_RESUMED = "platform.tenant_resumed"
+    REFUND_REQUESTED = "refund.requested"
+    REFUND_PROCESSING = "refund.processing"
+    REFUND_SUCCEEDED = "refund.succeeded"
+    REFUND_CLOSED = "refund.closed"
+    REFUND_ABNORMAL = "refund.abnormal"
+    REFUND_MANUAL_RECOVERY_REQUIRED = "refund.manual_recovery_required"
     PLATFORM_SUBSCRIPTION_UPDATED = "platform.subscription_updated"
     PLATFORM_MANUAL_FINANCIAL_TRANSACTION_RECORDED = "platform.manual_financial_transaction_recorded"
     DECRYPT_COMPLETED = "decrypt.completed"
@@ -94,6 +100,7 @@ class AuditObjectType:
     ACCESS_REQUEST = "access_request"
     SUBSCRIPTION = "subscription"
     FINANCIAL_TRANSACTION = "manual_financial_transaction"
+    REFUND = "refund_order"
 
 
 # The catalogue is intentionally application-level: category is computed for
@@ -162,6 +169,15 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.PLATFORM_TENANT_RESUMED: (
         AuditCategory.SECURITY,
         AuditObjectType.TENANT,
+    ),
+    AuditAction.REFUND_REQUESTED: (AuditCategory.ACCOUNT, AuditObjectType.REFUND),
+    AuditAction.REFUND_PROCESSING: (AuditCategory.ACCOUNT, AuditObjectType.REFUND),
+    AuditAction.REFUND_SUCCEEDED: (AuditCategory.ACCOUNT, AuditObjectType.REFUND),
+    AuditAction.REFUND_CLOSED: (AuditCategory.ACCOUNT, AuditObjectType.REFUND),
+    AuditAction.REFUND_ABNORMAL: (AuditCategory.SYSTEM, AuditObjectType.REFUND),
+    AuditAction.REFUND_MANUAL_RECOVERY_REQUIRED: (
+        AuditCategory.SYSTEM,
+        AuditObjectType.REFUND,
     ),
     AuditAction.PLATFORM_SUBSCRIPTION_UPDATED: (AuditCategory.ACCOUNT, AuditObjectType.SUBSCRIPTION),
     AuditAction.PLATFORM_MANUAL_FINANCIAL_TRANSACTION_RECORDED: (

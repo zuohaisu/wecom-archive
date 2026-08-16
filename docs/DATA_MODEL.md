@@ -27,6 +27,9 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | `subscriptions` | One authoritative current subscription per tenant |
 | `subscription_history` | Append-only snapshots of subscription assignments |
 | `subscription_activations` | Idempotent paid activation/renewal attempts and results |
+| `subscription_term_grants` | Exact reversible subscription projection added by each trusted payment |
+| `refund_orders` | Authoritative full-refund workflow, independent of payment and manual-ledger state |
+| `refund_events` | Append-only trusted provider refund facts |
 | `manual_financial_transactions` | Platform-recorded manual receipts and refunds, separate from provider facts |
 | `key_versions` | Registry mapping WeCom `publickey_ver` to a private key path or alias |
 | `sync_states` | Cursor tracking — last successfully synced `seq` per tenant+corp |
@@ -215,10 +218,11 @@ idempotency keys are never persisted. A command fingerprint prevents a key
 from being replayed against another tenant, plan or trusted payment time.
 
 `pending` and `failed` rows are retryable. An `applied` row stores the exact
-subscription revision and paid term returned to all later replays. The current
-subscription, immutable history snapshot, activation result and audit row are
-committed atomically; a domain failure records only a coarse failure code in a
-separate recovery transaction.
+subscription revision and paid term returned to all later replays. RND-399 also
+stores the pre-payment subscription projection and applied grace end in this
+same transaction. The current subscription, immutable history snapshot,
+activation result and audit row are committed atomically; a domain failure
+records only a coarse failure code in a separate recovery transaction.
 
 ### `payment_orders`
 
@@ -243,6 +247,34 @@ transaction references, event type, source, occurrence time and a SHA-256
 payload hash; it does not retain raw notification bodies, encrypted resources,
 keys or payer details. Reusing an event ID with a different hash, order or
 transaction fails closed as a replay conflict.
+
+### `subscription_term_grants`
+
+Every succeeded provider Payment owns exactly one grant, and every activation
+can belong to only one grant. The row snapshots the complete subscription
+projection before and after that payment. A provider-confirmed full refund may
+reverse the grant only when the current term still matches the grant's applied
+projection. A later renewal or other ambiguous term edit moves the grant to
+`manual_recovery_required` without silently changing entitlement.
+
+Migration 0052 backfills already-succeeded historical payments as
+`manual_recovery_required`: older activations never stored their pre-payment
+projection, so the migration deliberately does not invent one.
+
+### `refund_orders` and `refund_events`
+
+One full-refund workflow is allowed per original Payment and term grant. Its
+state machine is `created` → `processing` → `succeeded`, with distinct
+`closed`, `abnormal`, and `manual_recovery_required` outcomes. Amount, currency,
+tenant and provider come from the original succeeded Payment, and the raw
+idempotency key is stored only as a SHA-256 hash.
+
+Provider `PROCESSING` is money-movement progress only and never changes the
+Subscription. Only a trusted `SUCCESS` event can atomically restore the exact
+pre-payment subscription projection (or cancel a first activation), append
+SubscriptionHistory and Audit, and project Tenant billing service state.
+Provider events are append-only and unique by `(provider, provider_event_id)`;
+a changed replay fails closed.
 
 ### `manual_financial_transactions`
 

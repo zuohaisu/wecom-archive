@@ -383,6 +383,20 @@ class SubscriptionActivation(Base):
     activation_kind = Column(String(16), nullable=True)
     applied_starts_at = Column(DateTime(timezone=True), nullable=True)
     applied_ends_at = Column(DateTime(timezone=True), nullable=True)
+    applied_grace_ends_at = Column(DateTime(timezone=True), nullable=True)
+    # RND-399: exact pre-payment snapshot. NULL on legacy applied rows means
+    # the historical state is unknowable and any refund must fail to manual
+    # recovery rather than guessing.
+    prior_subscription_existed = Column(Boolean, nullable=True)
+    prior_plan_id = Column(String(36), ForeignKey("billing_plans.id"), nullable=True)
+    prior_status = Column(String(16), nullable=True)
+    prior_starts_at = Column(DateTime(timezone=True), nullable=True)
+    prior_ends_at = Column(DateTime(timezone=True), nullable=True)
+    prior_grace_ends_at = Column(DateTime(timezone=True), nullable=True)
+    prior_cancel_at_period_end = Column(Boolean, nullable=True)
+    prior_source = Column(String(32), nullable=True)
+    prior_renewal_count = Column(Integer, nullable=True)
+    prior_revision = Column(Integer, nullable=True)
     applied_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -542,6 +556,187 @@ class PaymentEvent(Base):
     provider_transaction_id = Column(String(64), nullable=False)
     event_type = Column(String(32), nullable=False)
     source = Column(String(16), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class SubscriptionTermGrant(Base):
+    """One exact subscription projection added by one trusted payment."""
+
+    __tablename__ = "subscription_term_grants"
+    __table_args__ = (
+        UniqueConstraint("payment_order_id", name="uq_term_grants_payment_order"),
+        UniqueConstraint("activation_id", name="uq_term_grants_activation"),
+        CheckConstraint(
+            "status IN ('active', 'reversed', 'manual_recovery_required')",
+            name="ck_term_grants_status",
+        ),
+        CheckConstraint(
+            "activation_kind IN ('activation', 'renewal')",
+            name="ck_term_grants_activation_kind",
+        ),
+        CheckConstraint(
+            "applied_starts_at < applied_ends_at AND "
+            "applied_ends_at < applied_grace_ends_at",
+            name="ck_term_grants_applied_range",
+        ),
+        CheckConstraint(
+            "applied_renewal_count >= 0 AND applied_revision >= 1",
+            name="ck_term_grants_applied_counters",
+        ),
+        CheckConstraint(
+            "status != 'manual_recovery_required' OR failure_code IS NOT NULL",
+            name="ck_term_grants_manual_failure",
+        ),
+        Index("ix_term_grants_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    payment_order_id = Column(
+        String(36), ForeignKey("payment_orders.id"), nullable=False
+    )
+    activation_id = Column(
+        String(36), ForeignKey("subscription_activations.id"), nullable=False
+    )
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    subscription_id = Column(
+        String(36), ForeignKey("subscriptions.id"), nullable=False
+    )
+    status = Column(String(32), nullable=False)
+    failure_code = Column(String(64), nullable=True)
+    activation_kind = Column(String(16), nullable=False)
+    prior_subscription_existed = Column(Boolean, nullable=True)
+    prior_plan_id = Column(String(36), ForeignKey("billing_plans.id"), nullable=True)
+    prior_status = Column(String(16), nullable=True)
+    prior_starts_at = Column(DateTime(timezone=True), nullable=True)
+    prior_ends_at = Column(DateTime(timezone=True), nullable=True)
+    prior_grace_ends_at = Column(DateTime(timezone=True), nullable=True)
+    prior_cancel_at_period_end = Column(Boolean, nullable=True)
+    prior_source = Column(String(32), nullable=True)
+    prior_renewal_count = Column(Integer, nullable=True)
+    prior_revision = Column(Integer, nullable=True)
+    applied_plan_id = Column(
+        String(36), ForeignKey("billing_plans.id"), nullable=False
+    )
+    applied_status = Column(String(16), nullable=False)
+    applied_starts_at = Column(DateTime(timezone=True), nullable=False)
+    applied_ends_at = Column(DateTime(timezone=True), nullable=False)
+    applied_grace_ends_at = Column(DateTime(timezone=True), nullable=False)
+    applied_cancel_at_period_end = Column(Boolean, nullable=False)
+    applied_source = Column(String(32), nullable=False)
+    applied_renewal_count = Column(Integer, nullable=False)
+    applied_revision = Column(Integer, nullable=False)
+    reversed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RefundOrder(Base):
+    """Authoritative full-refund workflow, separate from manual finance rows."""
+
+    __tablename__ = "refund_orders"
+    __table_args__ = (
+        UniqueConstraint("payment_order_id", name="uq_refund_orders_payment_order"),
+        UniqueConstraint("term_grant_id", name="uq_refund_orders_term_grant"),
+        UniqueConstraint(
+            "tenant_id",
+            "idempotency_key_hash",
+            name="uq_refund_orders_tenant_idempotency",
+        ),
+        UniqueConstraint(
+            "provider", "provider_ref", name="uq_refund_orders_provider_ref"
+        ),
+        CheckConstraint("amount_cents > 0", name="ck_refund_orders_amount"),
+        CheckConstraint("length(currency) = 3", name="ck_refund_orders_currency"),
+        CheckConstraint(
+            "status IN ('created', 'processing', 'succeeded', 'closed', "
+            "'abnormal', 'manual_recovery_required')",
+            name="ck_refund_orders_status",
+        ),
+        CheckConstraint(
+            "status != 'succeeded' OR "
+            "(succeeded_at IS NOT NULL AND entitlement_reversed_at IS NOT NULL)",
+            name="ck_refund_orders_succeeded_result",
+        ),
+        CheckConstraint(
+            "status NOT IN ('abnormal', 'manual_recovery_required') OR "
+            "failure_code IS NOT NULL",
+            name="ck_refund_orders_failure_code",
+        ),
+        Index("ix_refund_orders_tenant_created", "tenant_id", "requested_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    payment_order_id = Column(
+        String(36), ForeignKey("payment_orders.id"), nullable=False
+    )
+    term_grant_id = Column(
+        String(36), ForeignKey("subscription_term_grants.id"), nullable=False
+    )
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False)
+    provider = Column(String(32), nullable=False)
+    provider_ref = Column(String(64), nullable=True)
+    provider_state = Column(String(32), nullable=True)
+    status = Column(String(32), nullable=False)
+    reason_code = Column(String(64), nullable=False)
+    approved_by_platform_admin_id = Column(
+        String(36), ForeignKey("platform_admins.id"), nullable=False
+    )
+    idempotency_key_hash = Column(String(64), nullable=False)
+    failure_code = Column(String(64), nullable=True)
+    requested_at = Column(DateTime(timezone=True), nullable=False)
+    provider_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    succeeded_at = Column(DateTime(timezone=True), nullable=True)
+    entitlement_reversed_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class RefundEvent(Base):
+    """Append-only trusted provider refund fact."""
+
+    __tablename__ = "refund_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "provider_event_id", name="uq_refund_events_provider_event"
+        ),
+        CheckConstraint(
+            "source IN ('callback', 'query')", name="ck_refund_events_source"
+        ),
+        CheckConstraint(
+            "state IN ('PROCESSING', 'SUCCESS', 'CLOSED', 'ABNORMAL')",
+            name="ck_refund_events_state",
+        ),
+        CheckConstraint("amount_cents > 0", name="ck_refund_events_amount"),
+        CheckConstraint("length(currency) = 3", name="ck_refund_events_currency"),
+        CheckConstraint(
+            "length(payload_hash) = 64", name="ck_refund_events_payload_hash"
+        ),
+        Index("ix_refund_events_refund_created", "refund_order_id", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    refund_order_id = Column(
+        String(36), ForeignKey("refund_orders.id"), nullable=False
+    )
+    provider = Column(String(32), nullable=False)
+    provider_event_id = Column(String(128), nullable=False)
+    provider_ref = Column(String(64), nullable=False)
+    state = Column(String(16), nullable=False)
+    source = Column(String(16), nullable=False)
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False)
     payload_hash = Column(String(64), nullable=False)
     occurred_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(
