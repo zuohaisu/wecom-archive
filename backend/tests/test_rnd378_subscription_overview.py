@@ -22,6 +22,8 @@ def _summary(**changes) -> SubscriptionSummary:
         is_entitled=True,
         starts_at=NOW - timedelta(days=10),
         ends_at=NOW + timedelta(days=365),
+        grace_ends_at=NOW + timedelta(days=372),
+        cancel_at_period_end=False,
         amount_cents=9900,
         currency="CNY",
         billing_period_months=12,
@@ -61,12 +63,14 @@ def _summary(**changes) -> SubscriptionSummary:
         ),
         (
             _summary(
-                stored_status="past_due",
-                effective_status="past_due",
-                is_entitled=False,
+                stored_status="grace",
+                effective_status="grace",
+                is_entitled=True,
+                ends_at=NOW - timedelta(days=1),
+                grace_ends_at=NOW + timedelta(days=6),
             ),
-            "unavailable",
-            "payment_overdue",
+            "grace",
+            None,
         ),
         (
             _summary(

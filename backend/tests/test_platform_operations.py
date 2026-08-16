@@ -14,6 +14,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.audit import AuditAction
 from app.auth import hash_password
 from app.db.base import Base
 from app.db.models import (
@@ -135,7 +136,7 @@ def operations_client() -> Generator[tuple[TestClient, sessionmaker], None, None
                     plan_id="operations-plan",
                     status="active",
                     starts_at=NOW - timedelta(days=30),
-                    ends_at=NOW - timedelta(days=1),
+                    ends_at=NOW - timedelta(days=8),
                     source="test",
                     renewal_count=0,
                     revision=1,
@@ -250,9 +251,10 @@ def test_operations_dashboard_is_platform_only_and_contains_only_summary_metrics
         "total": 4,
         "trial": 1,
         "active": 1,
+        "grace": 0,
         "expired": 1,
         "canceled": 1,
-        "past_due": 0,
+        "frozen": 0,
         "suspended": 0,
     }
     assert body["account_counts"] == {
@@ -333,7 +335,7 @@ def test_paginated_tenant_detail_is_audited_and_manual_operations_are_audited(
         actions = {row.action: row.detail for row in db.query(AuditLog).all()}
         assert AuditLog.__tablename__ == "audit_logs"
         assert "platform.tenant_accessed" in actions
-        assert "platform.tenant_deactivated" in actions
+        assert AuditAction.PLATFORM_TENANT_SUSPENDED in actions
         assert "platform.subscription_updated" in actions
         financial = actions["platform.manual_financial_transaction_recorded"]
         assert financial["platform_admin_id"] == "platform-operator"

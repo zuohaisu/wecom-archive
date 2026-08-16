@@ -130,7 +130,7 @@ def test_trial_and_paid_subscription_receive_authoritative_entitlements(
     assert get_storage_quota(db, "tenant-a", at=NOW) == QUOTA
 
 
-@pytest.mark.parametrize("status", ["past_due", "expired", "canceled"])
+@pytest.mark.parametrize("status", ["expired", "canceled"])
 def test_non_entitled_statuses_fail_closed(db: Session, status: str) -> None:
     _assign(db, status=status)
 
@@ -140,16 +140,40 @@ def test_non_entitled_statuses_fail_closed(db: Session, status: str) -> None:
     assert get_storage_quota(db, "tenant-a", at=NOW) == 0
 
 
+def test_grace_remains_entitled_until_its_exclusive_end(db: Session) -> None:
+    _assign(
+        db,
+        status="grace",
+        starts_at=NOW - timedelta(days=366),
+        ends_at=NOW - timedelta(days=1),
+    )
+
+    during = get_subscription_summary(db, "tenant-a", at=NOW)
+    at_end = get_subscription_summary(
+        db,
+        "tenant-a",
+        at=NOW + timedelta(days=6),
+    )
+    assert during is not None and during.effective_status == "grace"
+    assert during.is_entitled is True
+    assert at_end is not None and at_end.effective_status == "expired"
+    assert at_end.is_entitled is False
+
+
 def test_expiry_and_future_start_are_effective_at_read_time(db: Session) -> None:
     _assign(
         db,
         starts_at=NOW - timedelta(days=365),
         ends_at=NOW,
     )
-    expired = get_subscription_summary(db, "tenant-a", at=NOW)
-    assert expired is not None
-    assert expired.stored_status == "active"
-    assert expired.effective_status == "expired"
+    grace = get_subscription_summary(db, "tenant-a", at=NOW)
+    assert grace is not None
+    assert grace.stored_status == "active"
+    assert grace.effective_status == "grace"
+    assert grace.is_entitled is True
+
+    expired = get_subscription_summary(db, "tenant-a", at=NOW + timedelta(days=7))
+    assert expired is not None and expired.effective_status == "expired"
     assert expired.is_entitled is False
 
     _assign(

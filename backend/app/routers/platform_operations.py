@@ -135,24 +135,13 @@ def update_operations_tenant_service(
     """Suspend or restore service without granting tenant-admin privileges."""
     try:
         tenant = platform_operations.set_service_status(
-            db, tenant_id, payload.lifecycle_status
+            db,
+            tenant_id,
+            payload.lifecycle_status,
+            platform_admin_id=platform_admin.id,
         )
     except platform_operations.PlatformOperationsNotFoundError as error:
         raise _not_found(error) from error
-    action = (
-        AuditAction.PLATFORM_TENANT_ACTIVATED
-        if payload.lifecycle_status == "active"
-        else AuditAction.PLATFORM_TENANT_DEACTIVATED
-    )
-    _record_operation_audit(
-        db,
-        tenant_id=tenant_id,
-        platform_admin=platform_admin,
-        action=action,
-        object_type=AuditObjectType.TENANT,
-        object_id=tenant_id,
-        detail={"lifecycle_status": payload.lifecycle_status},
-    )
     db.commit()
     db.refresh(tenant)
     return TenantServiceStatusOut(

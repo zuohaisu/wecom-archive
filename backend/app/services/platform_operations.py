@@ -27,14 +27,20 @@ from app.db.models import (
     Subscription,
     Tenant,
 )
+from app.services.billing_lifecycle import (
+    BillingLifecycleError,
+    BillingLifecycleNotFoundError,
+    resume_tenant_service,
+    suspend_tenant_service,
+)
 from app.services.entitlements import (
     PlanUnavailableError,
     SubscriptionAssignmentError,
     assign_subscription,
+    effective_subscription_status,
 )
 
 _CURRENCY = "CNY"
-_ENTITLED_STATUSES = frozenset({"trial", "active"})
 _PAID_ORDER_STATUSES = ("paid_activation_pending", "succeeded")
 
 
@@ -71,15 +77,11 @@ def _as_utc(value: datetime) -> datetime:
 def _subscription_state(subscription: Subscription | None, now: datetime) -> tuple[str, bool]:
     if subscription is None:
         return "not_subscribed", False
-    if subscription.status == "canceled":
-        return "canceled", False
     starts_at = _as_utc(subscription.starts_at)
-    ends_at = _as_utc(subscription.ends_at)
     if now < starts_at:
         return "not_started", False
-    if subscription.status in _ENTITLED_STATUSES and now >= ends_at:
-        return "expired", False
-    return subscription.status, subscription.status in _ENTITLED_STATUSES
+    effective_status = effective_subscription_status(subscription, at=now)
+    return effective_status, effective_status in {"trial", "active", "grace"}
 
 
 def _rows_by_tenant(
@@ -382,9 +384,12 @@ def get_dashboard(db: Session, *, months: int = 12, at: datetime | None = None) 
             "total": len(snapshots),
             "trial": subscription_counts["trial"],
             "active": subscription_counts["active"],
+            "grace": subscription_counts["grace"],
             "expired": subscription_counts["expired"],
             "canceled": subscription_counts["canceled"],
-            "past_due": subscription_counts["past_due"],
+            "frozen": sum(
+                1 for snapshot in snapshots if snapshot.tenant.lifecycle_status == "frozen"
+            ),
             "suspended": sum(
                 1 for snapshot in snapshots if snapshot.tenant.lifecycle_status == "suspended"
             ),
@@ -485,15 +490,36 @@ def get_tenant_detail(
     return detail
 
 
-def set_service_status(db: Session, tenant_id: str, lifecycle_status: str) -> Tenant:
-    tenant = db.get(Tenant, tenant_id)
-    if tenant is None:
-        raise PlatformOperationsNotFoundError("tenant does not exist")
+def set_service_status(
+    db: Session,
+    tenant_id: str,
+    lifecycle_status: str,
+    *,
+    platform_admin_id: str,
+) -> Tenant:
     if lifecycle_status not in {"active", "suspended"}:
         raise PlatformOperationsValidationError("unsupported service status")
-    tenant.lifecycle_status = lifecycle_status
-    tenant.is_active = lifecycle_status == "active"
-    db.flush()
+    try:
+        if lifecycle_status == "suspended":
+            suspend_tenant_service(
+                db,
+                tenant_id,
+                platform_admin_id=platform_admin_id,
+                reason_code="platform_operations_control",
+            )
+        else:
+            resume_tenant_service(
+                db,
+                tenant_id,
+                platform_admin_id=platform_admin_id,
+            )
+    except BillingLifecycleNotFoundError as error:
+        raise PlatformOperationsNotFoundError(str(error)) from error
+    except BillingLifecycleError as error:
+        raise PlatformOperationsValidationError(str(error)) from error
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:  # Defensive: lifecycle service just locked this row.
+        raise PlatformOperationsNotFoundError("tenant does not exist")
     return tenant
 
 

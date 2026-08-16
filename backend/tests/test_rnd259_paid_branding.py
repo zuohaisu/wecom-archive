@@ -244,9 +244,17 @@ def test_domain_token_is_one_time_hash_only_and_activation_needs_dns_and_tls(bra
     assert enabled.json()["effective_domain_active"] is True
     assert client.get("/api/branding/logo", headers={"Host": "archive.a.example.com"}).status_code == 200
 
-    # A subscription expiry leaves configuration intact but immediately stops
-    # the custom host, while the platform hostname remains a recovery path.
-    db.query(Subscription).filter_by(id="sub-a").one().ends_at = utc_now() - timedelta(seconds=1)
+    # Expiry keeps paid capabilities available during the seven-day grace
+    # period; only grace exhaustion stops the custom host. Configuration stays
+    # intact and the platform hostname remains a recovery path throughout.
+    subscription = db.query(Subscription).filter_by(id="sub-a").one()
+    subscription.ends_at = utc_now() - timedelta(seconds=1)
+    db.commit()
+    assert client.get("/api/branding/logo", headers={"Host": "archive.a.example.com"}).status_code == 200
+
+    subscription.grace_ends_at = utc_now() - timedelta(seconds=1)
+    subscription.ends_at = subscription.grace_ends_at - timedelta(days=7)
+    subscription.starts_at = subscription.ends_at - timedelta(days=1)
     db.commit()
     assert client.get("/api/branding/logo", headers={"Host": "archive.a.example.com"}).status_code == 421
     assert client.get("/api/branding/logo", headers={"Host": "testserver"}, cookies={"session_id": "session-a"}).status_code == 200

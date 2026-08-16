@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -24,6 +26,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from app.db.base import Base
 
 
+def _default_subscription_grace_ends_at(context):
+    """Keep ORM-created rows compatible with the database's seven-day policy."""
+    ends_at = context.get_current_parameters().get("ends_at")
+    return ends_at + timedelta(days=7) if ends_at is not None else None
+
+
 class DuplicateCorpIdError(ValueError):
     """Raised when a TenantWecomConfig write would assign an active corp_id
     to more than one tenant. See RND-184."""
@@ -36,8 +44,17 @@ class Tenant(Base):
     __table_args__ = (
         UniqueConstraint("slug", name="uq_tenants_slug"),
         CheckConstraint(
-            "lifecycle_status IN ('provisioning', 'active', 'suspended')",
+            "lifecycle_status IN ('provisioning', 'active', 'frozen', 'suspended')",
             name="ck_tenants_lifecycle_status",
+        ),
+        CheckConstraint(
+            "lifecycle_revision >= 1",
+            name="ck_tenants_lifecycle_revision",
+        ),
+        CheckConstraint(
+            "suspension_previous_status IS NULL OR "
+            "suspension_previous_status IN ('provisioning', 'active', 'frozen')",
+            name="ck_tenants_suspension_previous_status",
         ),
     )
 
@@ -48,6 +65,14 @@ class Tenant(Base):
     lifecycle_status = Column(
         String(16), nullable=False, default="active", server_default=text("'active'")
     )
+    lifecycle_revision = Column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    frozen_at = Column(DateTime(timezone=True), nullable=True)
+    suspended_at = Column(DateTime(timezone=True), nullable=True)
+    suspension_reason = Column(String(255), nullable=True)
+    suspended_by_platform_admin_id = Column(String(36), nullable=True)
+    suspension_previous_status = Column(String(16), nullable=True)
     onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -205,10 +230,14 @@ class Subscription(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", name="uq_subscriptions_tenant"),
         CheckConstraint(
-            "status IN ('trial', 'active', 'past_due', 'expired', 'canceled')",
+            "status IN ('trial', 'active', 'grace', 'expired', 'canceled')",
             name="ck_subscriptions_status",
         ),
         CheckConstraint("starts_at < ends_at", name="ck_subscriptions_date_range"),
+        CheckConstraint(
+            "ends_at < grace_ends_at",
+            name="ck_subscriptions_grace_date_range",
+        ),
         CheckConstraint("renewal_count >= 0", name="ck_subscriptions_renewal_count"),
         CheckConstraint("revision >= 1", name="ck_subscriptions_revision"),
     )
@@ -221,6 +250,14 @@ class Subscription(Base):
     status = Column(String(16), nullable=False)
     starts_at = Column(DateTime(timezone=True), nullable=False)
     ends_at = Column(DateTime(timezone=True), nullable=False)
+    grace_ends_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_default_subscription_grace_ends_at,
+    )
+    cancel_at_period_end = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     source = Column(String(32), nullable=False)
     renewal_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
     revision = Column(Integer, nullable=False, default=1, server_default=text("1"))
@@ -246,11 +283,15 @@ class SubscriptionHistory(Base):
             name="uq_subscription_history_revision",
         ),
         CheckConstraint(
-            "status IN ('trial', 'active', 'past_due', 'expired', 'canceled')",
+            "status IN ('trial', 'active', 'grace', 'expired', 'canceled')",
             name="ck_subscription_history_status",
         ),
         CheckConstraint(
             "starts_at < ends_at", name="ck_subscription_history_date_range"
+        ),
+        CheckConstraint(
+            "ends_at < grace_ends_at",
+            name="ck_subscription_history_grace_date_range",
         ),
         CheckConstraint(
             "renewal_count >= 0", name="ck_subscription_history_renewal_count"
@@ -267,6 +308,14 @@ class SubscriptionHistory(Base):
     status = Column(String(16), nullable=False)
     starts_at = Column(DateTime(timezone=True), nullable=False)
     ends_at = Column(DateTime(timezone=True), nullable=False)
+    grace_ends_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=_default_subscription_grace_ends_at,
+    )
+    cancel_at_period_end = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     source = Column(String(32), nullable=False)
     renewal_count = Column(Integer, nullable=False)
     revision = Column(Integer, nullable=False)

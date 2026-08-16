@@ -4,7 +4,8 @@ PostgreSQL schema for storing WeCom conversation archive messages and tenant
 management infrastructure for future SaaS use.
 
 Related issues: RND-75 (initial schema), RND-111 (tenant foundation), RND-156
-(multi-tenant), RND-184 (corp ID uniqueness), RND-376 (billing authority).
+(multi-tenant), RND-184 (corp ID uniqueness), RND-376 (billing authority),
+RND-400 (subscription and Tenant service lifecycle).
 
 ---
 
@@ -54,7 +55,11 @@ Top-level tenant entity. MVP: one default row with
 | `id` | varchar(36) PK | UUID string |
 | `name` | varchar(255) | Display name (e.g. "Acme Corp") |
 | `slug` | varchar(128) | URL-safe identifier; unique |
-| `is_active` | boolean | Soft-disable a tenant |
+| `is_active` | boolean | Legacy compatibility projection; true only for service `active` |
+| `lifecycle_status` | varchar(16) | `provisioning` / `active` / `frozen` / `suspended` |
+| `lifecycle_revision` | integer | Monotonic service-state revision |
+| `frozen_at` | timestamptz nullable | First time the current billing freeze began |
+| suspension fields | nullable timestamp/reason/actor/previous status | Current manual suspension override; immutable Audit retains cleared history |
 | `created_at` | timestamptz | auto-set on insert |
 | `updated_at` | timestamptz | auto-updated on write |
 
@@ -171,21 +176,37 @@ field and is read through the same entitlement service.
 ### `subscriptions`
 
 There is exactly one row per tenant (`UNIQUE(tenant_id)`). It is the mutable
-current projection, with status, effective range, source, renewal count and
-revision. Only `trial` and `active` inside the half-open interval
-`[starts_at, ends_at)` grant capabilities. `past_due`, `expired`, `canceled`,
-future-start and missing subscriptions fail closed.
+current projection, with status, effective range, grace end, cancel intent,
+source, renewal count and revision. `trial` and `active` grant capabilities in
+`[starts_at, ends_at)`; `grace` continues the same capabilities in
+`[ends_at, grace_ends_at)`. The fixed first-version grace duration is seven
+24-hour periods. `expired`, `canceled`, future-start and missing subscriptions
+fail closed.
+
+The lifecycle service is the only time policy: reads use its effective-state
+calculation so a delayed persistence job cannot extend access past
+`grace_ends_at`, while the row-locked reconcile persists `grace` / `expired`,
+updates the independent Tenant service projection and appends Audit. A paid
+renewal clears `cancel_at_period_end` and can restore `frozen`, but it never
+restores a manually `suspended` Tenant.
 
 An inactive plan cannot be newly assigned. It does not retroactively remove an
 already purchased term; reads continue to honor that term until its own end.
 
 ### `subscription_history`
 
-Every authoritative assignment appends a full snapshot keyed by subscription
-and monotonically increasing revision. Application code has no update/delete
-path for these rows. RND-384 builds payment idempotency and renewal transactions
-on this primitive; RND-385 consumes `get_storage_quota()` for the actual storage
-write gate.
+Every authoritative assignment, time transition and cancel-intent change
+appends a full snapshot keyed by subscription and monotonically increasing
+revision, including `grace_ends_at` and `cancel_at_period_end`. Application code
+has no update/delete path for these rows. RND-384 builds payment idempotency and
+renewal transactions on this primitive; RND-385 consumes `get_storage_quota()`
+for the actual storage write gate.
+
+Migration 0051 preserves existing Tenant service state and maps legacy
+`past_due` subscriptions to `grace` without consulting deployment wall-clock
+time. Code and schema availability do not mean the production lifecycle job or
+service gates are enabled; scheduling and all auth/Worker entrypoint gates are
+separate delivery evidence.
 
 ### `subscription_activations`
 

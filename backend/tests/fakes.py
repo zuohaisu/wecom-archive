@@ -243,6 +243,12 @@ _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT, slug TEXT, is_active INTEGER,
     lifecycle_status TEXT NOT NULL DEFAULT 'active',
+    lifecycle_revision INTEGER NOT NULL DEFAULT 1,
+    frozen_at DATETIME,
+    suspended_at DATETIME,
+    suspension_reason TEXT,
+    suspended_by_platform_admin_id TEXT,
+    suspension_previous_status TEXT,
     onboarding_completed_at TEXT,
     created_at TEXT, updated_at TEXT
 );
@@ -273,6 +279,8 @@ CREATE TABLE subscriptions (
     status TEXT NOT NULL,
     starts_at DATETIME NOT NULL,
     ends_at DATETIME NOT NULL,
+    grace_ends_at DATETIME,
+    cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
     source TEXT NOT NULL,
     renewal_count INTEGER NOT NULL DEFAULT 0,
     revision INTEGER NOT NULL DEFAULT 1,

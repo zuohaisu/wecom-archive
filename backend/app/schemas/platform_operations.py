@@ -12,9 +12,10 @@ class TenantLifecycleCountsOut(BaseModel):
     total: int
     trial: int
     active: int
+    grace: int
     expired: int
     canceled: int
-    past_due: int
+    frozen: int
     suspended: int
 
 
@@ -131,7 +132,7 @@ class TenantServiceStatusOut(BaseModel):
 
 class ManualSubscriptionUpdateIn(BaseModel):
     plan_code: str = Field(min_length=1, max_length=64)
-    status: Literal["trial", "active", "past_due", "expired", "canceled"]
+    status: Literal["trial", "active", "grace", "expired", "canceled"]
     starts_at: datetime
     ends_at: datetime
 

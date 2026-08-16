@@ -470,6 +470,9 @@ def test_page_and_javascript_expose_precise_states_without_raw_checkout_material
     assert "warning_90" in script
     assert "billing.capacity.warning_90" in translations
     assert "billing.subscription.state.expiring_soon" in translations
+    assert "billing.subscription.state.grace" in translations
+    assert "billing.subscription.message.grace" in translations
+    assert "state==='expiring_soon'||state==='grace'" in script
     assert "billing.purchaseOrRenewAmount" in translations
     assert "/refresh" in script
     assert "weixin://" not in page

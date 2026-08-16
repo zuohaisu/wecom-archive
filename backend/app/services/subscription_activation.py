@@ -30,11 +30,13 @@ from app.db.models import (
     SubscriptionActivation,
     Tenant,
 )
+from app.services.billing_lifecycle import restore_tenant_after_paid_subscription
 from app.services.entitlements import (
     PlanUnavailableError,
     SubscriptionAssignmentError,
     TenantNotFoundError,
     assign_subscription,
+    effective_subscription_status,
 )
 
 _SAFE_SOURCE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
@@ -304,11 +306,15 @@ def activate_or_renew_subscription(
                 .where(Subscription.tenant_id == normalized.tenant_id)
                 .with_for_update()
             )
+            current_effective_status = (
+                effective_subscription_status(current, at=normalized.trusted_at)
+                if current is not None
+                else None
+            )
             if (
                 current is not None
-                and current.status in {"trial", "active"}
+                and current_effective_status in {"trial", "active", "grace"}
                 and _stored_utc(current.starts_at) <= normalized.trusted_at
-                and _stored_utc(current.ends_at) > normalized.trusted_at
             ):
                 activation_kind = "renewal"
                 starts_at = _stored_utc(current.starts_at)
@@ -334,6 +340,12 @@ def activate_or_renew_subscription(
                 ends_at=ends_at,
                 source=normalized.source,
                 renewal_count=renewal_count,
+            )
+            restore_tenant_after_paid_subscription(
+                db,
+                tenant,
+                subscription,
+                at=normalized.trusted_at,
             )
             action = (
                 AuditAction.SUBSCRIPTION_RENEWED

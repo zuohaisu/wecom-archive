@@ -18,8 +18,11 @@ from app.db.session import get_db
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT 1, lifecycle_status TEXT NOT NULL DEFAULT 'active', created_at DATETIME,
-    updated_at DATETIME, onboarding_completed_at DATETIME
+    is_active BOOLEAN NOT NULL DEFAULT 1, lifecycle_status TEXT NOT NULL DEFAULT 'active',
+    lifecycle_revision INTEGER NOT NULL DEFAULT 1, frozen_at DATETIME,
+    suspended_at DATETIME, suspension_reason TEXT,
+    suspended_by_platform_admin_id TEXT, suspension_previous_status TEXT,
+    created_at DATETIME, updated_at DATETIME, onboarding_completed_at DATETIME
 );
 CREATE TABLE platform_admins (
     id TEXT PRIMARY KEY, email TEXT NOT NULL, password_hash TEXT NOT NULL,
