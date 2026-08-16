@@ -1,0 +1,66 @@
+name: CD - Deploy to Non-Production
+
+# A reviewed, manual staging gate for third-party onboarding work.  This is
+# deliberately independent of production deploy.yml: it never runs on push,
+# can use only the non-production GitHub Environment, and deploys an exact
+# main SHA to a separately named host path.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Deploy controlled non-production instance
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: non-production
+    concurrency:
+      group: non-production-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Deploy exact main SHA via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.NONPROD_DEPLOY_HOST }}
+          username: ${{ secrets.NONPROD_DEPLOY_USER }}
+          key: ${{ secrets.NONPROD_DEPLOY_SSH_KEY }}
+          port: ${{ secrets.NONPROD_DEPLOY_PORT }}
+          envs: EXPECTED_SHA
+          script: |
+            set -euo pipefail
+            cd /srv/apps/wecom-archive-365-nonprod/current
+
+            # Lock before checkout so an overlapping manual invocation can
+            # never swap this instance's working tree underneath a deploy.
+            DEPLOY_LOCK_FILE=/srv/apps/wecom-archive-365-nonprod/shared/deploy_state/deploy.lock
+            mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
+            exec 9>"$DEPLOY_LOCK_FILE"
+            if ! flock -n 9; then
+              echo "ERROR: another non-production deployment is already in progress." >&2
+              exit 1
+            fi
+
+            if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+              echo "ERROR: non-production working tree has modified tracked files; refusing to checkout." >&2
+              exit 1
+            fi
+            PREV_SHA="$(git rev-parse HEAD)"
+            git fetch --quiet origin main
+            if ! git merge-base --is-ancestor "$PREV_SHA" "$EXPECTED_SHA"; then
+              echo "ERROR: expected commit is not a fast-forward from the non-production checkout." >&2
+              exit 1
+            fi
+            git checkout -B main "$EXPECTED_SHA"
+
+            # fd 9 is inherited by the wrapper and then deploy_server.sh.
+            # The wrapper verifies the hand-off before it permits the generic
+            # script to skip opening a second lock.
+            export PREV_SHA
+            export DEPLOY_LOCK_ALREADY_HELD=1
+            bash scripts/deploy_nonprod.sh

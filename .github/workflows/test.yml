@@ -104,10 +104,16 @@ jobs:
       # QA round 1 flagged that as a gap (a regression here could land
       # on main undetected until an actual production deploy failed).
       - name: "[GATE] Shellcheck deploy scripts"
-        run: shellcheck scripts/deploy_server.sh scripts/tests/test_helper/*.sh
+        run: >-
+          shellcheck
+          scripts/deploy_server.sh
+          scripts/deploy_nonprod.sh
+          scripts/validate_nonprod_config.sh
+          scripts/nonprod_deployment_lib.sh
+          scripts/tests/test_helper/*.sh
 
-      - name: "[GATE] deploy_server.sh integration tests (bats)"
-        run: bats scripts/tests/deploy_server.bats
+      - name: "[GATE] deploy script integration tests (bats)"
+        run: bats scripts/tests/deploy_server.bats scripts/tests/nonprod_deploy.bats
 
       # ── Round 1: offline / SQLite-compatible tests ─────────────
       - name: "Offline / SQLite-compatible tests"
