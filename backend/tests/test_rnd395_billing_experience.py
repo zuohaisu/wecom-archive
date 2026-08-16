@@ -62,16 +62,17 @@ def test_billing_page_uses_static_assets_and_state_first_dom_order() -> None:
 
 def test_navigation_and_provisioning_copy_do_not_present_payment_as_first_step() -> None:
     translations = _I18N.read_text(encoding="utf-8")
-    billing_router = (_BACKEND / "app/routers/billing.py").read_text(encoding="utf-8")
-    provisioning_router = (_BACKEND / "app/routers/provisioning.py").read_text(
-        encoding="utf-8"
-    )
+    # The trial-first provisioning navigation and copy moved out of the
+    # routers into the shared sidenav module and the i18n asset when the
+    # RND-383 wizard/status-page rework merged; the payment-not-first policy
+    # is enforced at those sources of truth.
+    sidenav_module = (_BACKEND / "app/web/sidenav.py").read_text(encoding="utf-8")
 
     for entry in ('"nav.billing": "续费"', '"nav.billing": "續費"', '"nav.billing": "Renewal"'):
         assert entry in translations
-    assert "开始 15 天免费试用" in billing_router
-    assert "无需先付款" in provisioning_router
-    assert "配置和自动检查" in provisioning_router
+    assert "开始 15 天免费试用" in sidenav_module
+    assert "无需先付款" in translations
+    assert "配置和自动检查" in translations
 
 
 def test_cta_policy_is_unique_for_subscription_and_pending_order_states() -> None:

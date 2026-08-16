@@ -51,7 +51,7 @@ from app.services.wechat_pay import (
     wechat_pay_is_enabled,
 )
 from app.web import render_template
-from app.web.sidenav import render_sidenav
+from app.web.sidenav import render_provisioning_sidenav, render_sidenav
 
 router = APIRouter()
 
@@ -83,19 +83,6 @@ def _raise_order_error(error: Exception) -> None:
     raise error
 
 
-def _provisioning_sidenav() -> str:
-    return """<nav class="side-nav">
-  <div class="side-nav-brand"><img class="side-nav-logo" src="/web/static/brand/icon-tile-24.svg" alt="康冠时代" width="24" height="24"><div class="side-nav-title">组织自助开通</div></div>
-  <div class="side-nav-scroll">
-    <div class="side-nav-group">开通步骤</div>
-    <a class="side-nav-item" href="/admin/provisioning">组织状态</a>
-    <a class="side-nav-item active" href="/admin/billing" aria-current="page">开始 15 天免费试用</a>
-    <a class="side-nav-item" href="/admin/provisioning/settings">配置准备</a>
-  </div>
-  <div class="side-nav-user"><button class="btn-logout" onclick="doLogout()">退出登录</button></div>
-</nav>"""
-
-
 @router.get("/admin/billing", response_class=HTMLResponse)
 def billing_page(
     request: Request,
@@ -103,7 +90,7 @@ def billing_page(
 ) -> HTMLResponse:
     paths = {route.path for route in request.app.routes if hasattr(route, "path")}
     sidenav = (
-        _provisioning_sidenav()
+        render_provisioning_sidenav("billing")
         if context.session_scope == "provisioning"
         else render_sidenav("billing", paths)
     )

@@ -295,6 +295,9 @@ CREATE TABLE tenant_wecom_configs (
     app_secret TEXT NOT NULL,
     callback_domain TEXT NOT NULL DEFAULT '',
     private_key_encrypted TEXT,
+    callback_token_encrypted TEXT,
+    callback_encoding_aes_key_encrypted TEXT,
+    publickey_version INTEGER,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT,
     updated_at TEXT
