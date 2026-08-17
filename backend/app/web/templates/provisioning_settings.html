@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title data-i18n="provisioning.settings.title">会话存档配置</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<style>
+.provisioning-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--space-5);align-items:start}.org-facts{display:grid;gap:6px 12px;grid-template-columns:auto 1fr;font-size:var(--text-sm);margin-top:var(--space-4)}.org-facts dt{color:var(--color-text-4)}.org-facts dd{color:var(--color-text-2);overflow-wrap:anywhere}.callback-url{display:flex;gap:var(--space-2);align-items:center;margin-top:var(--space-4)}.callback-url code{flex:1;padding:8px 12px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-1);overflow-wrap:anywhere;font-size:var(--text-sm)}.field-card{margin-bottom:var(--space-5)}.field-meta{display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-top:var(--space-2)}.field-help{color:var(--color-text-4);font-size:var(--text-sm);margin-top:var(--space-2)}.wizard-actions{display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-5)}.missing-banner{margin-bottom:var(--space-5)}@media(max-width:850px){.provisioning-grid{grid-template-columns:1fr}.side-panel{order:-1}}@media(max-width:640px){.side-nav{display:none}.page{padding:var(--space-4)}}
+</style>
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="provisioning.settings.crumb">开通步骤</span><span class="sep">/</span><span class="cur" data-i18n="provisioning.settings.title">会话存档配置</span></div></header>
+  <main class="page page-narrow">
+    <div class="page-hd"><div><h1 data-i18n="provisioning.settings.title">会话存档配置</h1><p data-i18n="provisioning.settings.subtitle">按企业微信官方要求完成会话存档配置。Secret、私钥与回调凭据只会加密保存，页面不回显明文。</p></div></div>
+    <div id="provisioning-error" class="alert alert-danger" role="alert" hidden></div>
+    <section id="missing-banner" class="alert alert-warning missing-banner" role="status" hidden>
+      <strong data-i18n="provisioning.missing.title">尚未完成的配置项</strong>
+      <ul id="missing-list"></ul>
+      <p class="field-help" data-i18n="provisioning.missing.hint">完成下方所有必填项并保存后，可点击“测试连接”验证配置。</p>
+    </section>
+
+    <section class="card" aria-labelledby="org-title">
+      <div class="card-hd"><h2 id="org-title" data-i18n="provisioning.org.cardTitle">组织信息（来自企业微信授权，只读）</h2></div>
+      <div class="card-bd">
+        <dl class="org-facts">
+          <dt data-i18n="provisioning.org.corpName">企业名称</dt><dd id="org-name">—</dd>
+          <dt data-i18n="provisioning.org.corpId">企业 CorpID</dt><dd id="org-corpid" class="mono">—</dd>
+          <dt data-i18n="provisioning.org.agentId">AgentID</dt><dd id="org-agentid" class="mono">—</dd>
+          <dt data-i18n="provisioning.org.source">来源</dt><dd id="org-source" data-i18n="provisioning.org.source.thirdParty">企业微信可信第三方授权</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="callback-title">
+      <div class="card-hd"><h2 id="callback-title" data-i18n="provisioning.callbackUrl.title">会话存档回调地址</h2></div>
+      <div class="card-bd">
+        <p class="field-help" data-i18n="provisioning.callbackUrl.hint">在企业微信管理后台“会话内容存档 → API 配置”中填写此地址，并使用与下方相同的 Token 与 EncodingAESKey。</p>
+        <div class="callback-url">
+          <code id="callback-url">—</code>
+          <button id="copy-callback-url" class="btn btn-sm" type="button" data-i18n="provisioning.callbackUrl.copy">复制</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="fields-form" aria-label="会话存档配置项">
+      <div class="card field-card" data-field-card="archive_secret">
+        <div class="card-hd"><h2 data-i18n="provisioning.field.archiveSecret.label">会话存档 Secret</h2><span data-field-status="archive_secret" class="badge badge-neutral">—</span></div>
+        <div class="card-bd">
+          <p class="field-help" data-i18n="provisioning.field.archiveSecret.hint">企业微信管理后台“会话内容存档”中查看或重新获取。平台无法通过接口代取。</p>
+          <div data-field-control="archive_secret"></div>
+        </div>
+      </div>
+      <div class="card field-card" data-field-card="private_key">
+        <div class="card-hd"><h2 data-i18n="provisioning.field.privateKey.label">消息解密私钥（RSA PEM）</h2><span data-field-status="private_key" class="badge badge-neutral">—</span></div>
+        <div class="card-bd">
+          <p class="field-help" data-i18n="provisioning.field.privateKey.hint">使用 openssl 生成 RSA 密钥对后，将公钥上传至企业微信管理后台，私钥内容粘贴到此处。私钥仅加密保存。</p>
+          <div data-field-control="private_key"></div>
+        </div>
+      </div>
+      <div class="card field-card" data-field-card="publickey_version">
+        <div class="card-hd"><h2 data-i18n="provisioning.field.publickeyVersion.label">公钥版本号</h2><span data-field-status="publickey_version" class="badge badge-neutral">—</span></div>
+        <div class="card-bd">
+          <p class="field-help" data-i18n="provisioning.field.publickeyVersion.hint">企业微信管理后台上传公钥后显示的版本号，从 1 开始。</p>
+          <div data-field-control="publickey_version"></div>
+        </div>
+      </div>
+      <div class="card field-card" data-field-card="callback_token">
+        <div class="card-hd"><h2 data-i18n="provisioning.field.callbackToken.label">回调 Token</h2><span data-field-status="callback_token" class="badge badge-neutral">—</span></div>
+        <div class="card-bd">
+          <p class="field-help" data-i18n="provisioning.field.callbackToken.hint">在企业微信管理后台生成后，将相同的值粘贴到此处。平台不会反向展示该值。</p>
+          <div data-field-control="callback_token"></div>
+        </div>
+      </div>
+      <div class="card field-card" data-field-card="callback_encoding_aes_key">
+        <div class="card-hd"><h2 data-i18n="provisioning.field.callbackAesKey.label">EncodingAESKey（43 位）</h2><span data-field-status="callback_encoding_aes_key" class="badge badge-neutral">—</span></div>
+        <div class="card-bd">
+          <p class="field-help" data-i18n="provisioning.field.callbackAesKey.hint">与回调 Token 一起在企业微信管理后台生成，两个值必须与回调地址配置一致。</p>
+          <div data-field-control="callback_encoding_aes_key"></div>
+        </div>
+      </div>
+    </section>
+
+    <p class="field-help"><span data-i18n="provisioning.officialGuide">官方操作指引：</span><a href="https://developer.work.weixin.qq.com/document/path/91774" target="_blank" rel="noopener noreferrer" data-i18n="provisioning.guide.apiDoc">企业微信会话内容存档接口文档</a></p>
+
+    <div class="wizard-actions">
+      <button id="save-config" class="btn btn-primary btn-lg" type="button" data-i18n="provisioning.save">保存配置</button>
+      <button id="test-config" class="btn btn-lg" type="button" data-i18n="provisioning.test">测试连接</button>
+    </div>
+    <div id="wizard-result" role="status" hidden></div>
+  </main>
+</div>
+</div>
+<script src="/web/static/provisioning.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

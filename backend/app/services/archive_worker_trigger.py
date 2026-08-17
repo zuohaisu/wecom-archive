@@ -33,18 +33,26 @@ class ArchiveWorkerDispatch(str, Enum):
     FAILED = "dispatch-failed"
 
 
-_TRIGGER_SOURCES = frozenset({"callback", "manual", "timer"})
+_TRIGGER_SOURCES = frozenset({"activation", "callback", "manual", "timer"})
 
 
 def _safe_trigger_source(raw: str) -> str:
     return raw if raw in _TRIGGER_SOURCES else "manual"
 
 
-def run_archive_worker_once(trigger_source: str = "manual") -> bool:
-    """Run the existing lock-owning worker and report only its exit outcome."""
+def run_archive_worker_once(
+    trigger_source: str = "manual", tenant_id: str | None = None
+) -> bool:
+    """Run the existing lock-owning worker and report only its exit outcome.
+
+    ``tenant_id`` selects the per-tenant worker chain via child env; the raw
+    id never appears in logs (the worker script logs its digest tag only).
+    """
     source = _safe_trigger_source(trigger_source)
     environment = os.environ.copy()
     environment["ARCHIVE_WORKER_TRIGGER_SOURCE"] = source
+    if tenant_id is not None:
+        environment["WECOM_TENANT_ID"] = tenant_id
     try:
         result = subprocess.run(
             [sys.executable, str(_WORKER_SCRIPT)],
@@ -64,14 +72,16 @@ def run_archive_worker_once(trigger_source: str = "manual") -> bool:
     return True
 
 
-def _run_dispatched_worker(trigger_source: str) -> None:
+def _run_dispatched_worker(trigger_source: str, tenant_id: str | None) -> None:
     try:
-        run_archive_worker_once(trigger_source=trigger_source)
+        run_archive_worker_once(trigger_source=trigger_source, tenant_id=tenant_id)
     finally:
         _dispatch_lock.release()
 
 
-def dispatch_archive_worker(trigger_source: str = "callback") -> ArchiveWorkerDispatch:
+def dispatch_archive_worker(
+    trigger_source: str = "callback", tenant_id: str | None = None
+) -> ArchiveWorkerDispatch:
     """Request one worker cycle without waiting for it or queuing unbounded work."""
     source = _safe_trigger_source(trigger_source)
     if not _dispatch_lock.acquire(blocking=False):
@@ -84,7 +94,7 @@ def dispatch_archive_worker(trigger_source: str = "callback") -> ArchiveWorkerDi
     try:
         thread = threading.Thread(
             target=_run_dispatched_worker,
-            args=(source,),
+            args=(source, tenant_id),
             name="wecom-archive-worker-trigger",
             daemon=True,
         )

@@ -20,6 +20,7 @@ from app.db.models import (
     AuditLog,
     PlatformAdmin,
     Tenant,
+    TenantActivationCheck,
     TenantWecomConfig,
     ThirdPartyOrganizationBinding,
     WecomAuthorizationAttempt,
@@ -69,6 +70,7 @@ def _setup(monkeypatch):
         AdminSession.__table__,
         AuditLog.__table__,
         PlatformAdmin.__table__,
+        TenantActivationCheck.__table__,
         ThirdPartyOrganizationBinding.__table__,
         WecomAuthorizationAttempt.__table__,
         WecomAuthorizationProof.__table__,
@@ -163,6 +165,12 @@ def test_provisioning_session_can_only_reach_waiting_and_settings_surface(monkey
     assert status.json() == {
         "lifecycle_status": "provisioning",
         "archive_enabled": False,
+        "activation": {
+            "state": "not_started",
+            "gate_results": {},
+            "safe_error_code": None,
+            "revision": 0,
+        },
         "allowed_actions": ["view_status", "purchase_plan", "view_settings"],
     }
     assert client.get("/api/admin/settings").status_code == 401

@@ -24,6 +24,12 @@ Usage (from backend/):
 Required environment variables:
     DATABASE_URL              PostgreSQL connection string
     WECOM_SDK_LIB_PATH        Absolute path to libWeWorkFinanceSdk_C.so
+
+    Either the per-tenant mode:
+    WECOM_TENANT_ID           Resolves the active tenant config row and uses
+                              its stored CorpID / archive secret / publickey
+                              version / RSA private key (FIELD_ENCRYPTION_KEY
+                              must be set), or the legacy single-corp mode:
     WECOM_CORP_ID             WeCom corporation ID
     WECOM_ARCHIVE_SECRET      WeCom conversation archive secret
     WECOM_PRIVATE_KEY_PATH    Absolute path to RSA private key PEM file
@@ -32,7 +38,7 @@ Required environment variables:
 Exit codes:
     0  Success (all records processed, possibly some failed)
     1  Fatal initialisation failure (env, SDK load, DB connect, no active
-       tenant for WECOM_CORP_ID)
+       tenant for WECOM_CORP_ID or WECOM_TENANT_ID)
 
 Safety constraints:
     - No decrypted message content is printed.
@@ -54,6 +60,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
+from app.crypto import FieldDecryptionError
 from app.db.models import TenantWecomConfig
 from app.key_provider import KeyProviderError, get_key_provider
 from app.sdk import wecom_sdk
@@ -67,6 +74,7 @@ from app.services.decrypt_worker import (  # noqa: F401 -- re-exported for backw
     repair_missing_recipients,
     run_decrypt_once,
 )
+from app.services.tenant_credentials import config_for_tenant
 
 
 # ---------------------------------------------------------------------------
@@ -174,12 +182,48 @@ def main() -> None:
     # --- 1. Load environment ---
     database_url = _require_env("DATABASE_URL")
     lib_path = _require_env("WECOM_SDK_LIB_PATH")
-    corp_id = _require_env("WECOM_CORP_ID")
-    secret = _require_env("WECOM_ARCHIVE_SECRET")
     # Retained as the local_file compatibility fallback. kms_envelope reads
     # the tenant-scoped encrypted value from KeyVersion instead.
     private_key_path = os.environ.get("WECOM_PRIVATE_KEY_PATH", "").strip()
-    expected_pubkey_ver_str = _require_env("WECOM_PUBLIC_KEY_VERSION")
+
+    engine = create_engine(database_url)
+    _configure_sqlite_for_savepoints_if_needed(engine)
+
+    # --- 2. Resolve credentials and tenant (before SDK init — RND-222
+    # tenant-scope audit fix; fail fast, matching the other worker shells'
+    # existing tenant-first ordering). The per-tenant mode reads every
+    # credential from the tenant config row; the env mode is unchanged.
+    tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
+    config = None
+    if tenant_id_env:
+        with Session(engine) as session:
+            config = config_for_tenant(session, tenant_id_env)
+            if config is None:
+                print("[FAIL] No active tenant config found for this tenant", flush=True)
+                sys.exit(1)
+            try:
+                corp_id = config.corp_id
+                secret = config.decrypted_app_secret
+                tenant_id = config.tenant_id
+            except FieldDecryptionError:
+                print("[FAIL] Stored archive secret cannot be decrypted", flush=True)
+                sys.exit(1)
+        expected_pubkey_ver_str = os.environ.get("WECOM_PUBLIC_KEY_VERSION", "").strip()
+        if not expected_pubkey_ver_str and config.publickey_version is not None:
+            expected_pubkey_ver_str = str(config.publickey_version)
+        if not expected_pubkey_ver_str:
+            print(
+                "[FAIL] Neither WECOM_PUBLIC_KEY_VERSION nor the tenant "
+                "config publickey_version is set",
+                flush=True,
+            )
+            sys.exit(1)
+    else:
+        corp_id = _require_env("WECOM_CORP_ID")
+        secret = _require_env("WECOM_ARCHIVE_SECRET")
+        expected_pubkey_ver_str = _require_env("WECOM_PUBLIC_KEY_VERSION")
+        with Session(engine) as session:
+            tenant_id: str = _require_tenant_id(session, corp_id)
 
     try:
         expected_pubkey_ver = int(expected_pubkey_ver_str)
@@ -191,26 +235,27 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # --- 2. Resolve tenant (before SDK init — RND-222 tenant-scope audit
-    # fix; fail fast, matching sync_wecom_archive_once.py and
-    # download_wecom_media_once.py's existing tenant-first ordering) ---
-    engine = create_engine(database_url)
-    _configure_sqlite_for_savepoints_if_needed(engine)
-
-    with Session(engine) as session:
-        tenant_id: str = _require_tenant_id(session, corp_id)
-
     # --- 3. Resolve the tenant/version private key. The provider owns all
     # file/database key material handling and intentionally exposes no detail
-    # on failure, so a PEM can never reach CLI output.
+    # on failure, so a PEM can never reach CLI output. When no provider can
+    # serve the key, the per-tenant config row's own stored private key is
+    # the tenant's fallback (the T1 wizard persists it there).
     with Session(engine) as session:
         try:
             private_key = get_key_provider(
                 session, legacy_private_key_path=private_key_path or None
             ).get_private_key(tenant_id, expected_pubkey_ver)
         except KeyProviderError:
-            print("[FAIL] Private key retrieval failed", flush=True)
-            sys.exit(1)
+            if config is None or not config.private_key_encrypted:
+                print("[FAIL] Private key retrieval failed", flush=True)
+                sys.exit(1)
+            try:
+                private_key = serialization.load_pem_private_key(
+                    config.decrypted_private_key.encode("utf-8"), password=None
+                )
+            except (FieldDecryptionError, TypeError, ValueError):
+                print("[FAIL] Private key retrieval failed", flush=True)
+                sys.exit(1)
 
     # --- 4. Initialise WeCom SDK ---
     try:

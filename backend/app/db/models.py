@@ -900,6 +900,12 @@ class TenantWecomConfig(Base):
     app_secret = Column(Text, nullable=False)
     # RND-311 (B2-1): encrypted PEM private key; nullable for existing rows.
     private_key_encrypted = Column(Text, nullable=True)
+    # RND-386 (T1): per-tenant session-archive callback credentials, Fernet
+    # ciphertext at rest. Nullable — the legacy single-corp deployment keeps
+    # using env-scoped WECOM_CALLBACK_TOKEN/AESKey.
+    callback_token_encrypted = Column(Text, nullable=True)
+    callback_encoding_aes_key_encrypted = Column(Text, nullable=True)
+    publickey_version = Column(Integer, nullable=True)
 
     def set_app_secret(self, plain: str) -> None:
         """Encrypt and assign the permanent WeCom app credential for storage."""
@@ -930,6 +936,41 @@ class TenantWecomConfig(Base):
         from app.crypto import decrypt_value
 
         return decrypt_value(self.private_key_encrypted)
+
+    def set_private_key(self, private_key_pem: str) -> None:
+        """Encrypt and assign only the RSA PEM private key."""
+        from app.crypto import encrypt_value
+
+        self.private_key_encrypted = encrypt_value(private_key_pem)
+
+    def set_callback_credentials(self, token: str, aes_key: str) -> None:
+        """Encrypt and assign the per-tenant callback Token/EncodingAESKey."""
+        from app.crypto import encrypt_value
+
+        self.callback_token_encrypted = encrypt_value(token)
+        self.callback_encoding_aes_key_encrypted = encrypt_value(aes_key)
+
+    @property
+    def decrypted_callback_token(self) -> str:
+        """Return the stored callback Token; never log this value."""
+        from app.crypto import decrypt_value
+
+        return decrypt_value(self.callback_token_encrypted)
+
+    @property
+    def decrypted_callback_encoding_aes_key(self) -> str:
+        """Return the stored callback EncodingAESKey; never log this value."""
+        from app.crypto import decrypt_value
+
+        return decrypt_value(self.callback_encoding_aes_key_encrypted)
+
+    @property
+    def has_callback_credentials(self) -> bool:
+        """True when per-tenant callback credentials are fully stored."""
+        return bool(
+            self.callback_token_encrypted
+            and self.callback_encoding_aes_key_encrypted
+        )
 
     callback_domain = Column(String(255), nullable=False, default="")
     is_active = Column(Boolean, nullable=False, default=True)
@@ -2519,3 +2560,49 @@ class ExternalContactNicknameHistory(Base):
     new_nickname_display = Column(Text, nullable=True)
     observed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class TenantActivationCheck(Base):
+    """Persisted self-service activation-gate state (RND-388).
+
+    Deliberately separate from ``Tenant.lifecycle_status``: that column keeps
+    its frozen CHECK (provisioning|active|frozen|suspended) while this table
+    records the automated activation-check state machine
+    (not_started|blocked|ready).  A tenant with no row has never been
+    evaluated; rows are created by the first evaluation and updated in place
+    (revision+1 per evaluation).
+    """
+
+    __tablename__ = "tenant_activation_checks"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_tenant_activation_checks_tenant"),
+        CheckConstraint(
+            "state IN ('not_started', 'blocked', 'ready')",
+            name="ck_tenant_activation_checks_state",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36),
+        ForeignKey("tenants.id"),
+        nullable=False,
+    )
+    state = Column(
+        String(16),
+        nullable=False,
+        default="not_started",
+        server_default=text("'not_started'"),
+    )
+    gate_results = Column(JSONB, nullable=False, default=dict)
+    safe_error_code = Column(String(64), nullable=True)
+    revision = Column(Integer, nullable=False, default=0)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

@@ -14,13 +14,21 @@ Required environment variables:
     WORKER_LOCK_PATH    Absolute path to shared lock file
                         (default: /srv/apps/wecom-archive-365/shared/run/wecom-archive-worker.lock)
 
+    WECOM_TENANT_ID     When set, runs the hard-fail chain for exactly that
+                        tenant (used by per-tenant dispatches).
+    WECOM_CORP_ID       When set (and no WECOM_TENANT_ID), the legacy
+                        single-corp environment chain runs unchanged.
+    Neither             Loop mode: the sync+decrypt chain runs once per
+                        active tenant with per-tenant credentials; one
+                        tenant's failure never aborts the others.
+
     All env vars required by sync_wecom_archive_once.py and
     decrypt_wecom_messages_once.py (DATABASE_URL, WECOM_SDK_LIB_PATH, …).
 
 Exit codes:
     0  Success, or lock already held (safe no-op).
     1  Fatal failure (env missing, lock directory creation failed,
-       or sync/decrypt subprocess failed).
+       sync/decrypt subprocess failed, or every tenant failed in loop mode).
 
 Safety constraints:
     - No message content, secrets, private keys, or raw customer data is printed.
@@ -47,7 +55,17 @@ from datetime import datetime, timezone
 # installed package, matching the other worker shells.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.crypto import FieldDecryptionError
+from app.db.models import TenantWecomConfig
 from app.media_event_dispatch import MediaWorkerDispatch, dispatch_media_worker
+from app.services.tenant_credentials import (
+    active_tenant_configs,
+    config_for_tenant,
+    tenant_log_tag,
+)
 
 
 class ArchiveWorkerExit(SystemExit):
@@ -139,7 +157,7 @@ _DECRYPT_SCRIPT = os.path.join(_SCRIPTS_DIR, "decrypt_wecom_messages_once.py")
 _REACHABILITY_AUTOMATION_SCRIPT = os.path.join(
     _SCRIPTS_DIR, "run_reachability_automation_once.py"
 )
-def _run_best_effort_reachability_automation() -> None:
+def _run_best_effort_reachability_automation(env: dict | None = None) -> None:
     """Run incremental diagnosis without changing archive-worker truth."""
     try:
         proc = subprocess.run(
@@ -147,6 +165,7 @@ def _run_best_effort_reachability_automation() -> None:
             cwd=_BACKEND_DIR,
             capture_output=False,
             check=False,
+            env=env,
         )
         if proc.returncode:
             print(
@@ -188,6 +207,31 @@ def _run_script(script_path: str, label: str) -> None:
     print(f"[INFO] archive_worker finished: {label}", flush=True)
 
 
+def _run_script_env(script_path: str, label: str, env: dict, tag: str) -> bool:
+    """Run *script_path* with one tenant's merged environment.
+
+    Returns whether the child succeeded; the caller owns the failure policy
+    (hard-fail for a single explicit tenant, continue for the loop).
+    """
+    print(f"[INFO] archive_worker tenant={tag} starting: {label}", flush=True)
+    proc = subprocess.run(
+        [sys.executable, script_path],
+        cwd=_BACKEND_DIR,
+        capture_output=False,   # child writes to our stdout/stderr directly
+        check=False,
+        env=env,
+    )
+    if proc.returncode != 0:
+        print(
+            f"[FAIL] archive_worker tenant={tag} error_class=child_worker_failed "
+            f"child_exit_code={proc.returncode}",
+            flush=True,
+        )
+        return False
+    print(f"[INFO] archive_worker tenant={tag} finished: {label}", flush=True)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -195,7 +239,7 @@ def _run_script(script_path: str, label: str) -> None:
 _DEFAULT_LOCK_PATH = (
     "/srv/apps/wecom-archive-365/shared/run/wecom-archive-worker.lock"
 )
-_TRIGGER_SOURCES = frozenset({"callback", "manual", "timer"})
+_TRIGGER_SOURCES = frozenset({"activation", "callback", "manual", "timer"})
 
 
 def _trigger_source() -> str:
@@ -203,10 +247,108 @@ def _trigger_source() -> str:
     return raw if raw in _TRIGGER_SOURCES else "manual"
 
 
-def _request_media_worker_after_archive() -> MediaWorkerDispatch:
+def _tenant_engine():
+    """Engine for tenant resolution; missing DATABASE_URL is classified."""
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if not database_url:
+        _fail(
+            "configuration_missing",
+            "Environment variable not set or empty: DATABASE_URL",
+        )
+    return create_engine(database_url)
+
+
+def _tenant_env(config: TenantWecomConfig) -> dict:
+    """Merged child environment for one tenant's worker chain.
+
+    WECOM_TENANT_ID routes every child to the tenant's own DB-stored
+    credentials (including the decrypt private-key fallback); the decrypted
+    archive secret lives only in this in-process dictionary and the child's
+    process environment — never in logs, output, or files.
+    """
+    env = os.environ.copy()
+    env["WECOM_TENANT_ID"] = config.tenant_id
+    env["WECOM_CORP_ID"] = config.corp_id
+    env["WECOM_ARCHIVE_SECRET"] = config.decrypted_app_secret
+    publickey_version = config.publickey_version
+    if publickey_version is not None:
+        env["WECOM_PUBLIC_KEY_VERSION"] = str(publickey_version)
+    return env
+
+
+def _run_single_tenant_chain(tenant_id: str) -> None:
+    """Hard-fail sync+decrypt chain for one explicit tenant."""
+    tag = tenant_log_tag(tenant_id)
+    try:
+        with Session(_tenant_engine()) as db:
+            config = config_for_tenant(db, tenant_id)
+        if config is None:
+            _fail("tenant_unavailable", f"Active config not found (tenant={tag})")
+        env = _tenant_env(config)
+    except FieldDecryptionError:
+        _fail(
+            "tenant_credentials_unreadable",
+            f"Stored archive secret cannot be decrypted (tenant={tag})",
+        )
+    print(f"[INFO] archive_worker tenant={tag} trigger=tenant-selected", flush=True)
+    if not _run_script_env(_SYNC_SCRIPT, "sync_wecom_archive_once.py", env, tag):
+        raise ArchiveWorkerExit(1, "child_worker_failed")
+    if not _run_script_env(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py", env, tag):
+        raise ArchiveWorkerExit(1, "child_worker_failed")
+    _run_best_effort_reachability_automation(env)
+
+
+def _run_all_tenants_chain() -> list[str]:
+    """Run the sync+decrypt chain once per active tenant.
+
+    One tenant's failure (unreadable credentials or a failed child) is logged
+    and never aborts the others; the loop fails only when every tenant
+    failed.  Returns the ids of tenants whose full chain succeeded so the
+    archive-complete media wake-up stays per-tenant.
+    """
+    try:
+        with Session(_tenant_engine()) as db:
+            configs = active_tenant_configs(db)
+    except Exception:  # noqa: BLE001 -- DB failures are classified, never detailed
+        _fail("database_unavailable", "Active tenant configs cannot be read")
+
+    if not configs:
+        print("[INFO] archive_worker tenant_count=0 trigger=no-active-tenants", flush=True)
+        return []
+
+    successful: list[str] = []
+    for config in configs:
+        tag = tenant_log_tag(config.tenant_id)
+        try:
+            env = _tenant_env(config)
+        except FieldDecryptionError:
+            print(
+                f"[WARN] archive_worker tenant={tag} trigger=skipped-failed "
+                "error_class=tenant_credentials_unreadable",
+                flush=True,
+            )
+            continue
+        print(f"[INFO] archive_worker tenant={tag} trigger=tenant-selected", flush=True)
+        if not _run_script_env(_SYNC_SCRIPT, "sync_wecom_archive_once.py", env, tag):
+            continue
+        if not _run_script_env(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py", env, tag):
+            continue
+        _run_best_effort_reachability_automation(env)
+        successful.append(config.tenant_id)
+
+    if not successful:
+        raise ArchiveWorkerExit(1, "all_tenants_failed")
+    return successful
+
+
+def _request_media_worker_after_archive(tenant_id: str | None = None) -> MediaWorkerDispatch:
     """Wake the existing generic media worker without changing archive truth."""
     try:
-        return dispatch_media_worker(trigger_source="archive-complete")
+        if tenant_id is None:
+            return dispatch_media_worker(trigger_source="archive-complete")
+        return dispatch_media_worker(
+            trigger_source="archive-complete", tenant_id=tenant_id
+        )
     except Exception:  # noqa: BLE001 -- archive success must not depend on media wake-up
         # The dispatcher itself handles expected DB/spawn failures.  This
         # final isolation guard ensures a future dispatcher regression can
@@ -225,6 +367,10 @@ def main() -> None:
     error_class = "unexpected_failure"
     exit_code = 1
 
+    # None = legacy env chain (no-arg media wake-up); () = no media wake-up;
+    # (tenant_id, ...) = one per-tenant wake-up per successful tenant.
+    media_tenant_ids: tuple[str, ...] | None = None
+
     try:
         lock_path = os.environ.get("WORKER_LOCK_PATH", _DEFAULT_LOCK_PATH).strip()
         if not lock_path:
@@ -233,9 +379,17 @@ def main() -> None:
         try:
             lock_fd = _acquire_lock(lock_path)
             print(f"[INFO] archive_worker trigger_source={source} trigger=accepted", flush=True)
-            _run_script(_SYNC_SCRIPT, "sync_wecom_archive_once.py")
-            _run_script(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py")
-            _run_best_effort_reachability_automation()
+            tenant_id = os.environ.get("WECOM_TENANT_ID", "").strip()
+            if tenant_id:
+                _run_single_tenant_chain(tenant_id)
+                media_tenant_ids = (tenant_id,)
+            elif os.environ.get("WECOM_CORP_ID", "").strip():
+                # Legacy single-corp chain unchanged.
+                _run_script(_SYNC_SCRIPT, "sync_wecom_archive_once.py")
+                _run_script(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py")
+                _run_best_effort_reachability_automation()
+            else:
+                media_tenant_ids = tuple(_run_all_tenants_chain())
             completed = True
         finally:
             if lock_fd is not None:
@@ -245,7 +399,15 @@ def main() -> None:
         # The archive lock is intentionally released before this request. The
         # bounded signal is consumed by a separate systemd event service,
         # whose existing generic media worker owns its own shared media lock.
-        if completed:
+        if completed and media_tenant_ids is not None:
+            for media_tenant_id in media_tenant_ids:
+                media_dispatch = _request_media_worker_after_archive(media_tenant_id)
+                print(
+                    f"[INFO] archive_worker media_trigger_source=archive-complete "
+                    f"media_trigger={media_dispatch.value}",
+                    flush=True,
+                )
+        elif completed:
             media_dispatch = _request_media_worker_after_archive()
             print(
                 f"[INFO] archive_worker media_trigger_source=archive-complete "

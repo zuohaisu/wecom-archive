@@ -467,6 +467,10 @@ def test_archive_worker_never_runs_full_external_contact_sync(
     calls: list[str] = []
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
     monkeypatch.setenv("ARCHIVE_WORKER_TRIGGER_SOURCE", source)
+    # RND-387: with neither WECOM_TENANT_ID nor WECOM_CORP_ID set, main()
+    # enters the multi-tenant loop mode which needs DATABASE_URL. Pin the
+    # legacy env chain — the contract under test is mode-agnostic.
+    monkeypatch.setenv("WECOM_CORP_ID", "corp-legacy")
     monkeypatch.setattr(worker, "_run_script", lambda _path, label: calls.append(label))
     monkeypatch.setattr(
         worker,

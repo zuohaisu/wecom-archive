@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 from io import BytesIO
@@ -15,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth import BillingOwnerContext, get_billing_owner
-from app.db.models import BillingPlan, PlanEntitlement
+from app.db.models import BillingPlan, PaymentOrder, PlanEntitlement
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
 from app.schemas.billing import (
@@ -44,6 +45,7 @@ from app.services.payment_orders import (
 from app.services.payment_provider import PaymentProvider
 from app.services.storage_capacity import measure_storage_capacity
 from app.services.subscription_overview import get_subscription_overview
+from app.services.tenant_activation import spawn_activation_worker
 from app.services.wechat_pay import (
     WechatPayConfigurationError,
     WechatPayProtocolError,
@@ -51,9 +53,11 @@ from app.services.wechat_pay import (
     wechat_pay_is_enabled,
 )
 from app.web import render_template
-from app.web.sidenav import render_sidenav
+from app.web.sidenav import render_provisioning_sidenav, render_sidenav
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 def get_payment_provider() -> PaymentProvider:
@@ -83,19 +87,6 @@ def _raise_order_error(error: Exception) -> None:
     raise error
 
 
-def _provisioning_sidenav() -> str:
-    return """<nav class="side-nav">
-  <div class="side-nav-brand"><img class="side-nav-logo" src="/web/static/brand/icon-tile-24.svg" alt="康冠时代" width="24" height="24"><div class="side-nav-title">组织自助开通</div></div>
-  <div class="side-nav-scroll">
-    <div class="side-nav-group">开通步骤</div>
-    <a class="side-nav-item" href="/admin/provisioning">组织状态</a>
-    <a class="side-nav-item active" href="/admin/billing" aria-current="page">开始 15 天免费试用</a>
-    <a class="side-nav-item" href="/admin/provisioning/settings">配置准备</a>
-  </div>
-  <div class="side-nav-user"><button class="btn-logout" onclick="doLogout()">退出登录</button></div>
-</nav>"""
-
-
 @router.get("/admin/billing", response_class=HTMLResponse)
 def billing_page(
     request: Request,
@@ -103,7 +94,7 @@ def billing_page(
 ) -> HTMLResponse:
     paths = {route.path for route in request.app.routes if hasattr(route, "path")}
     sidenav = (
-        _provisioning_sidenav()
+        render_provisioning_sidenav("billing")
         if context.session_scope == "provisioning"
         else render_sidenav("billing", paths)
     )
@@ -336,8 +327,7 @@ async def wechat_payment_notification(
     raw_body = await request.body()
     try:
         event = provider.verify_and_parse_notification(request.headers, raw_body)
-        apply_trusted_payment(_factory(db), provider, event)
-        return Response(status_code=204)
+        summary = apply_trusted_payment(_factory(db), provider, event)
     except PaymentActivationPendingError:
         return JSONResponse(
             status_code=500,
@@ -348,3 +338,18 @@ async def wechat_payment_notification(
             status_code=400,
             content={"code": "FAIL", "message": "invalid notification"},
         )
+    # RND-388 auto-activation trigger: the subscription is committed, so a
+    # provisioning tenant that already passed the other gates can now
+    # activate without a human. Best-effort and detached — the 204 must not
+    # wait for the gate evaluation (which probes WeCom connectivity).
+    try:
+        order = db.scalar(
+            select(PaymentOrder).where(PaymentOrder.id == summary.order_id)
+        )
+        if order is not None:
+            spawn_activation_worker(
+                db.get_bind(), order.tenant_id, actor="payment_notify"
+            )
+    except Exception:  # noqa: BLE001 -- activation is best-effort by contract
+        logger.exception("activation trigger after payment notify failed")
+    return Response(status_code=204)

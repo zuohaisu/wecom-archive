@@ -111,3 +111,31 @@ def extract_encrypt(xml_body: bytes) -> str | None:
         return match.group(1).decode("utf-8")
     except UnicodeDecodeError as exc:
         raise CallbackInputError from exc
+
+
+def extract_outer_corp_id(xml_body: bytes) -> str | None:
+    """Extract the plaintext outer XML ToUserName (receiver corp id).
+
+    WeCom writes the receiving corp id in the outer XML in plaintext (the
+    encrypted envelope carries it again, and that inner value is the
+    authoritative check).  Same DOCTYPE/parse guards as extract_encrypt: the
+    receiver id is still request-controlled input and must never reach logs
+    or responses.
+    """
+    if b"<!DOCTYPE" in xml_body.upper():
+        raise CallbackInputError
+    try:
+        ElementTree.fromstring(xml_body)
+    except (ElementTree.ParseError, UnicodeDecodeError, ValueError) as exc:
+        raise CallbackInputError from exc
+    match = re.search(
+        rb"<ToUserName>\s*<!\[CDATA\[(.*?)\]\]>\s*</ToUserName>",
+        xml_body,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    try:
+        return match.group(1).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CallbackInputError from exc

@@ -93,3 +93,37 @@ def render_sidenav(active_id: str, registered_paths: Iterable[str]) -> str:
         )
     )
     return "\n".join(out)
+
+
+# Restricted navigation for provisioning tenants (RND-348). Shared by the
+# provisioning pages and the owner billing page so the wizard steps stay in
+# one place.
+_PROVISIONING_NAV_ITEMS = (
+    ("organization", "/admin/provisioning", "组织状态"),
+    ("billing", "/admin/billing", "开始 15 天免费试用"),
+    ("settings", "/admin/provisioning/settings", "配置准备"),
+)
+
+
+def render_provisioning_sidenav(active_id: str) -> str:
+    """Render the restricted provisioning-side navigation."""
+    out = [
+        '<nav class="side-nav">',
+        '  <div class="side-nav-brand"><img class="side-nav-logo" src="/web/static/brand/icon-tile-24.svg" alt="康冠时代" width="24" height="24"><div class="side-nav-title">组织自助开通</div></div>',
+        '  <div class="side-nav-scroll">',
+        '    <div class="side-nav-group">开通步骤</div>',
+    ]
+    for item_id, href, label in _PROVISIONING_NAV_ITEMS:
+        active = " active" if item_id == active_id else ""
+        current = ' aria-current="page"' if item_id == active_id else ""
+        out.append(
+            f'    <a class="side-nav-item{active}" href="{href}"{current}>{label}</a>'
+        )
+    out.extend(
+        (
+            '  </div>',
+            '  <div class="side-nav-user"><button class="btn-logout" onclick="doLogout()">退出登录</button></div>',
+            '</nav>',
+        )
+    )
+    return "\n".join(out)

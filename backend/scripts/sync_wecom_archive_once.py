@@ -19,6 +19,11 @@ Usage (from backend/):
 Required environment variables:
     DATABASE_URL          PostgreSQL connection string
     WECOM_SDK_LIB_PATH    Absolute path to libWeWorkFinanceSdk_C.so
+
+    Either the per-tenant mode:
+    WECOM_TENANT_ID       Resolves the active tenant config row and uses its
+                          stored CorpID / archive secret (FIELD_ENCRYPTION_KEY
+                          must be set), or the legacy single-corp mode:
     WECOM_CORP_ID         WeCom corporation ID
     WECOM_ARCHIVE_SECRET  WeCom conversation archive secret
 
@@ -47,6 +52,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.crypto import FieldDecryptionError
 from app.db.models import TenantWecomConfig
 from app.sdk import wecom_sdk
 from app.services.sync_worker import (  # noqa: F401 -- re-exported for backward-compat imports
@@ -54,6 +60,7 @@ from app.services.sync_worker import (  # noqa: F401 -- re-exported for backward
     _upsert_seq,
     run_sync_once,
 )
+from app.services.tenant_credentials import config_for_tenant
 
 
 # ---------------------------------------------------------------------------
@@ -129,17 +136,32 @@ def main() -> None:
     # --- 1. Load environment ---
     database_url = _require_env("DATABASE_URL")
     lib_path = _require_env("WECOM_SDK_LIB_PATH")
-    corp_id = _require_env("WECOM_CORP_ID")
-    secret = _require_env("WECOM_ARCHIVE_SECRET")
     limit = _optional_int_env("WECOM_CHAT_LIMIT", 500)
 
-    # --- 2. Resolve tenant (before SDK init) ---
-    # Fail fast: exit non-zero if no active tenant config exists for this corp.
-    # This prevents any archive writes with tenant_id=None.
     engine = create_engine(database_url)
 
-    with Session(engine) as session:
-        tenant_id: str = _require_tenant_id(session, corp_id)
+    # --- 2. Resolve credentials and tenant (before SDK init) ---
+    # Fail fast: exit non-zero if no active tenant/tenant config exists, so no
+    # archive write can ever happen with a wrong or missing tenant_id.
+    tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
+    if tenant_id_env:
+        with Session(engine) as session:
+            config = config_for_tenant(session, tenant_id_env)
+            if config is None:
+                print("[FAIL] No active tenant config found for this tenant", flush=True)
+                sys.exit(1)
+            try:
+                corp_id = config.corp_id
+                secret = config.decrypted_app_secret
+                tenant_id = config.tenant_id
+            except FieldDecryptionError:
+                print("[FAIL] Stored archive secret cannot be decrypted", flush=True)
+                sys.exit(1)
+    else:
+        corp_id = _require_env("WECOM_CORP_ID")
+        secret = _require_env("WECOM_ARCHIVE_SECRET")
+        with Session(engine) as session:
+            tenant_id: str = _require_tenant_id(session, corp_id)
 
     # --- 3. Initialise WeCom SDK ---
     try:

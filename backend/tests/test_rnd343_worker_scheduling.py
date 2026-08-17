@@ -51,6 +51,7 @@ def test_successful_archive_dispatches_media_only_after_archive_lock_releases(
     worker = _module()
     calls: list[str] = []
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
+    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
     monkeypatch.setenv("ARCHIVE_WORKER_TRIGGER_SOURCE", "callback")
     monkeypatch.setattr(worker, "_run_script", lambda _path, label: calls.append(label))
     monkeypatch.setattr(worker, "_run_best_effort_reachability_automation", lambda: calls.append("reachability"))
@@ -85,6 +86,7 @@ def test_archive_failure_never_dispatches_media(monkeypatch, tmp_path, failing_l
     worker = _module()
     dispatched: list[object] = []
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
+    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
     monkeypatch.setattr(
         worker,
         "_run_script",
@@ -113,6 +115,7 @@ def test_archive_unexpected_failure_is_redacted_and_has_final_lifecycle(
     worker = _module()
     unsafe_detail = "SENTINEL private_path=/srv/private?sig=fixture-only"
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
+    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
     monkeypatch.setattr(
         worker,
         "_run_script",

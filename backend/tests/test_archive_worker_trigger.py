@@ -49,7 +49,7 @@ def test_burst_is_coalesced_and_dispatch_returns_before_worker_finishes(monkeypa
     finished = Event()
     runs: list[str] = []
 
-    def _blocking_worker(*, trigger_source: str) -> bool:
+    def _blocking_worker(*, trigger_source: str, tenant_id: str | None = None) -> bool:
         runs.append(trigger_source)
         started.set()
         assert release.wait(timeout=1)

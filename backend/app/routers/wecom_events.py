@@ -20,19 +20,22 @@ from app.services.archive_worker_trigger import (
     ArchiveWorkerDispatch,
     dispatch_archive_worker,
 )
+from app.services.tenant_callback_resolution import (
+    CallbackCredentialCandidate,
+    CallbackResolution,
+    callback_candidates,
+)
 from app.services.wecom_callback_crypto import (
-    CallbackConfigurationError as _CallbackConfigurationError,
     CallbackInputError as _CallbackInputError,
-    decode_aes_key as _decode_aes_key,
     decrypt_envelope as _decrypt_echostr,
     extract_encrypt as _extract_encrypt,
+    extract_outer_corp_id as _extract_outer_corp_id,
     parse_plaintext_envelope as _parse_wecom_plaintext,
     verify_signature as _verify_signature,
 )
 from app.services.external_contact_refresh_trigger import (
     dispatch_external_contact_refresh,
 )
-from app.settings import get_wecom_callback_settings
 
 logger = logging.getLogger(__name__)
 
@@ -89,24 +92,6 @@ def _parse_external_contact_change_event(message: bytes) -> str | None:
     return external_userid
 
 
-def _get_token() -> str:
-    token = get_wecom_callback_settings().wecom_callback_token.strip()
-    if not token:
-        raise _CallbackConfigurationError
-    return token
-
-
-def _get_aes_key() -> bytes:
-    raw = get_wecom_callback_settings().wecom_callback_encoding_aes_key.strip()
-    if not raw:
-        raise _CallbackConfigurationError
-    return _decode_aes_key(raw)
-
-
-def _get_corp_id() -> str:
-    return get_wecom_callback_settings().wecom_corp_id.strip()
-
-
 def _active_tenant_for_corp(corp_id: str) -> str | None:
     """Resolve callback configuration to an active tenant without exposing DB errors."""
     if not corp_id:
@@ -123,9 +108,66 @@ def _active_tenant_for_corp(corp_id: str) -> str | None:
         return None
 
 
+def _resolve_callback_candidates(outer_corp_id: str | None) -> CallbackResolution:
+    """Ordered env-first candidates; DB resolution must never break the env path."""
+    try:
+        with Session(get_engine()) as db:
+            return callback_candidates(db, outer_corp_id)
+    except Exception:  # noqa: BLE001 -- fail closed to the env candidate only
+        return callback_candidates(None, outer_corp_id)
+
+
 # ---------------------------------------------------------------------------
 # GET — URL verification (WeCom 接收事件服务器)
 # ---------------------------------------------------------------------------
+
+
+def _authenticate_callback(
+    resolution: CallbackResolution,
+    timestamp: str,
+    nonce: str,
+    payload: str,
+    msg_signature: str,
+) -> tuple[CallbackCredentialCandidate, str, str]:
+    """Decrypt ``payload`` with the first candidate that authenticates it.
+
+    A candidate authenticates when its token verifies the signature, its AES
+    key decrypts the envelope, and the plaintext receiver id matches its
+    corp_id (or it configures no corp_id — the legacy env behavior).  Returns
+    ``(candidate, message, decrypted_corp_id)``; when no candidate matches,
+    the failure maps to the fixed safe status codes and never leaks request
+    or configuration data.
+    """
+    signature_matched = False
+    payload_invalid = False
+    for candidate in resolution.candidates:
+        if not _verify_signature(
+            candidate.token, timestamp, nonce, payload, msg_signature
+        ):
+            continue
+        signature_matched = True
+        try:
+            plaintext = _decrypt_echostr(payload, candidate.aes_key)
+            message, decrypted_corp_id = _parse_wecom_plaintext(plaintext)
+            message_text = message.decode("utf-8")
+        except (UnicodeDecodeError, _CallbackInputError):
+            payload_invalid = True
+            continue
+        if candidate.corp_id and decrypted_corp_id != candidate.corp_id:
+            continue
+        return candidate, message_text, decrypted_corp_id
+
+    if payload_invalid:
+        _log_rejected("invalid_callback_payload")
+        raise HTTPException(status_code=400, detail="Invalid callback request")
+    if resolution.env_configuration_error:
+        _log_rejected("configuration_error")
+        raise HTTPException(status_code=500, detail="Callback configuration error")
+    if signature_matched:
+        _log_rejected("corp_id_mismatch")
+        raise HTTPException(status_code=403, detail="Corp ID mismatch")
+    _log_rejected("invalid_signature")
+    raise HTTPException(status_code=403, detail="Invalid signature")
 
 
 @router.get("/api/wecom/archive/events")
@@ -141,33 +183,13 @@ def wecom_callback_get(
     Called by WeCom when configuring the event server URL.
     Decrypts the echostr and returns the plaintext message.
     """
-    try:
-        token = _get_token()
-        aes_key = _get_aes_key()
-    except _CallbackConfigurationError:
-        _log_rejected("configuration_error")
-        raise HTTPException(status_code=500, detail="Callback configuration error")
-    corp_id = _get_corp_id()
-
-    # 1. Verify signature: SHA1(sort(token, timestamp, nonce, echostr)).
-    if not _verify_signature(token, timestamp, nonce, echostr, msg_signature):
-        _log_rejected("invalid_signature")
-        raise HTTPException(status_code=403, detail="Invalid signature")
-
-    # 2. Decrypt and parse only request-controlled data as a safe 400.
-    try:
-        plaintext = _decrypt_echostr(echostr, aes_key)
-        msg, decrypted_corp_id = _parse_wecom_plaintext(plaintext)
-        message = msg.decode("utf-8")
-    except (UnicodeDecodeError, _CallbackInputError):
-        _log_rejected("invalid_callback_payload")
-        raise HTTPException(status_code=400, detail="Invalid callback request")
-
-    # 3. Verify corp_id if configured.
-    if corp_id and decrypted_corp_id != corp_id:
-        _log_rejected("corp_id_mismatch")
-        raise HTTPException(status_code=403, detail="Corp ID mismatch")
-
+    _candidate, message, _decrypted_corp_id = _authenticate_callback(
+        _resolve_callback_candidates(None),
+        timestamp,
+        nonce,
+        echostr,
+        msg_signature,
+    )
     logger.info("wecom_callback accepted method=GET")
     return PlainTextResponse(content=message, media_type="text/plain")
 
@@ -189,17 +211,17 @@ async def wecom_callback_post(
 
     RND-107 keeps the acknowledgement independent from worker completion;
     RND-170 additionally queues one bounded targeted profile refresh for an
-    external-contact change event.
+    external-contact change event.  The plaintext outer ToUserName narrows
+    the stored per-tenant credential candidates before decryption.
     """
     try:
-        token = _get_token()
-        aes_key = _get_aes_key()
-    except _CallbackConfigurationError:
-        _log_rejected("configuration_error")
-        raise HTTPException(status_code=500, detail="Callback configuration error")
-
+        body = await request.body()
+        outer_corp_id = _extract_outer_corp_id(body)
+    except _CallbackInputError:
+        _log_rejected("invalid_callback_payload")
+        raise HTTPException(status_code=400, detail="Invalid callback request")
     try:
-        encrypt_content = _extract_encrypt(await request.body())
+        encrypt_content = _extract_encrypt(body)
     except _CallbackInputError:
         _log_rejected("invalid_callback_payload")
         raise HTTPException(status_code=400, detail="Invalid callback request")
@@ -207,41 +229,38 @@ async def wecom_callback_post(
         _log_rejected("missing_encrypt")
         raise HTTPException(status_code=400, detail="Missing <Encrypt> element")
 
-    if not _verify_signature(token, timestamp, nonce, encrypt_content, msg_signature):
-        _log_rejected("invalid_signature")
-        raise HTTPException(status_code=403, detail="Invalid signature")
+    candidate, message, decrypted_corp_id = _authenticate_callback(
+        _resolve_callback_candidates(outer_corp_id),
+        timestamp,
+        nonce,
+        encrypt_content,
+        msg_signature,
+    )
 
-    # POST callbacks carry an encrypted XML event envelope. Decrypt and
-    # validate its CorpID before doing any work; the old RND-107 path only
-    # authenticated the outer ciphertext and could not act on event details.
-    configured_corp_id = _get_corp_id()
+    # The decrypted plaintext is still request-controlled input; a malformed
+    # event is rejected without leaking parser detail.
     try:
-        plaintext = _decrypt_echostr(encrypt_content, aes_key)
-        message, decrypted_corp_id = _parse_wecom_plaintext(plaintext)
-        external_userid = _parse_external_contact_change_event(message)
+        external_userid = _parse_external_contact_change_event(message.encode("utf-8"))
     except _CallbackInputError:
         _log_rejected("invalid_callback_payload")
         raise HTTPException(status_code=400, detail="Invalid callback request")
 
-    if configured_corp_id and decrypted_corp_id != configured_corp_id:
-        _log_rejected("corp_id_mismatch")
-        raise HTTPException(status_code=403, detail="Corp ID mismatch")
-
-    # The callback configuration must resolve to one active tenant before the
-    # environment-scoped worker may run. The resolved ID stays in-process and
-    # is never put in responses, logs, or child-process arguments.
-    tenant_id = _active_tenant_for_corp(configured_corp_id)
+    # The callback must resolve to one active tenant before the shared worker
+    # may run.  The resolved id stays in-process and is never put in
+    # responses, logs, or child-process arguments.
+    tenant_id = candidate.tenant_id or _active_tenant_for_corp(decrypted_corp_id)
     if tenant_id is None:
         logger.error("wecom_callback archive_worker=unavailable")
         raise HTTPException(status_code=503, detail="Callback worker unavailable")
 
+    matched_corp_id = candidate.corp_id or decrypted_corp_id
     if external_userid:
         refresh_dispatch = dispatch_external_contact_refresh(
-            tenant_id, configured_corp_id, external_userid
+            tenant_id, matched_corp_id, external_userid
         )
         logger.info("wecom_callback external_contact_refresh=%s", refresh_dispatch.value)
 
-    dispatch = dispatch_archive_worker()
+    dispatch = dispatch_archive_worker(trigger_source="callback", tenant_id=tenant_id)
     if dispatch is ArchiveWorkerDispatch.FAILED:
         raise HTTPException(status_code=503, detail="Callback worker unavailable")
 
