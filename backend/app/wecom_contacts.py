@@ -30,6 +30,15 @@ _TIMEOUT_SECONDS = 10.0
 
 
 @dataclass(frozen=True)
+class MemberProfile:
+    """Minimal user/get profile facts needed for the avatar cache."""
+
+    name: Optional[str]
+    avatar_url: Optional[str]
+    active: bool
+
+
+@dataclass(frozen=True)
 class GroupChatMetadataLookup:
     """Safe result envelope for customer-group metadata lookup.
 
@@ -66,6 +75,32 @@ def fetch_member_display_name(access_token: str, userid: str) -> Optional[str]:
         return None
 
     return _clean(data.get("name"))
+
+
+def fetch_member_profile(access_token: str, userid: str) -> Optional[MemberProfile]:
+    """Return a current internal-member avatar source, or ``None`` safely.
+
+    The upstream avatar URL remains server-side only. ``active`` is strict:
+    WeCom status 1 is the only status this application may expose as an
+    employee avatar; disabled, unactivated, and departed users fail closed.
+    """
+    try:
+        with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
+            resp = client.get(
+                "https://qyapi.weixin.qq.com/cgi-bin/user/get",
+                params={"access_token": access_token, "userid": userid},
+            )
+        data = resp.json()
+    except Exception:
+        logger.warning("fetch_member_profile: request failed (userid not logged)")
+        return None
+    if not isinstance(data, dict) or data.get("errcode", -1) != 0:
+        return None
+    return MemberProfile(
+        name=_clean(data.get("name")),
+        avatar_url=_clean(data.get("avatar")),
+        active=data.get("status") == 1,
+    )
 
 
 def fetch_external_contact_display_name(

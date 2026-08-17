@@ -174,6 +174,17 @@ the count.
 |--------|------|-------|----------|
 | `GET` | `/api/contacts` | none | Array of contact summary objects |
 
+### Controlled contact avatars
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| `GET` | `/api/admin/avatars/{internal|external}/{avatar_id}` | none | Authenticated cached image bytes or indistinguishable `404` |
+
+List/detail/timeline avatar fields expose only this application endpoint plus
+safe cache state. They never expose a WeCom source URL, a token, signed object
+URL, or storage key. The endpoint authenticates and scopes the numeric profile
+ID to the active tenant before reading private storage.
+
 ### External contacts
 
 | Method | Path | Query | Response |

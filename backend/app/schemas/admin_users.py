@@ -16,10 +16,16 @@ class AdminUserListItem(BaseModel):
     wecom_user_id: str
     email: Optional[str] = None
     department: Optional[str] = None
+    avatar_url: Optional[str] = None
+    avatar_status: str = "missing"
     role: Role
     status: UserStatus
     last_active_at: Optional[str] = None
     msg_count_30d: int = 0
+
+
+class AdminUserDetail(AdminUserListItem):
+    last_login_at: Optional[str] = None
 
 
 class AdminUserListOut(BaseModel):

@@ -15,6 +15,8 @@ class MonitoredAccountOut(BaseModel):
     display_name: str
     staff_id: str
     raw_id: str
+    avatar_url: Optional[str] = None
+    avatar_status: str = "missing"
     seat_status: str  # "active" | "history" | "unknown"
     is_active_archive_seat: bool
     latest_message_time: Optional[int] = None
@@ -28,6 +30,8 @@ class ContactOut(BaseModel):
     contact_id: str
     display_name: str
     raw_id: str
+    avatar_url: Optional[str] = None
+    avatar_status: str = "missing"
 
 
 class ConversationOut(BaseModel):
@@ -65,6 +69,8 @@ class ConversationParticipantOut(BaseModel):
     raw_id: str
     display_name: str
     role: str  # "staff" | "contact"
+    avatar_url: Optional[str] = None
+    avatar_status: str = "missing"
 
 
 class ConversationDetailOut(BaseModel):

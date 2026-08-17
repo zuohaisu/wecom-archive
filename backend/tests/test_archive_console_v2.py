@@ -249,12 +249,26 @@ def test_rnd240_detail_aggregation_matches_full_row_computation(client, db) -> N
         (b for b in old_buckets if b["conversation_id"] == room), old_buckets[0]
     )
     old_participants = [
-        {"id": sid, "raw_id": sid, "display_name": name, "role": "staff"}
+        {
+            "id": sid,
+            "raw_id": sid,
+            "display_name": name,
+            "role": "staff",
+            "avatar_url": None,
+            "avatar_status": "missing",
+        }
         for sid, name in zip(
             old_bucket["monitored_account_ids"], old_bucket["monitored_account_display_names"]
         )
     ] + [
-        {"id": cid, "raw_id": cid, "display_name": name, "role": "contact"}
+        {
+            "id": cid,
+            "raw_id": cid,
+            "display_name": name,
+            "role": "contact",
+            "avatar_url": None,
+            "avatar_status": "missing",
+        }
         for cid, name in zip(old_bucket["contact_ids"], old_bucket["contact_display_names"])
     ]
     old_decrypted_count = sum(1 for m in old_messages if m.decrypt_status == "success")

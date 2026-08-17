@@ -43,6 +43,11 @@ class ExternalContactListItem(BaseModel):
     name: Optional[str] = None
     display_name: str
     current_nickname: Optional[str] = None
+    # Always a tenant-scoped application endpoint, never the upstream WeCom
+    # URL or a storage-provider URL.
+    avatar_url: Optional[str] = None
+    avatar_status: str = "missing"
+    avatar_synced_at: Optional[datetime] = None
     follow_remarks: list[ExternalContactFollowRemark] = Field(default_factory=list)
     search_matches: list[ExternalContactSearchMatch] = Field(default_factory=list)
     company: Optional[str] = None

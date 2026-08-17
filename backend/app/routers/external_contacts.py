@@ -20,6 +20,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name
 from app.schemas.external_contact import ExternalContactDetail, ExternalContactListPage
+from app.services.avatar_sync import external_avatar_presentation
 from app.services.external_contact_identity import (
     external_contact_search_predicate,
     load_external_contact_search_matches,
@@ -125,12 +126,16 @@ def _item_payload(
     search_matches: list[dict],
     owner_names: dict[str, Optional[str]],
 ) -> dict:
+    avatar = external_avatar_presentation(contact)
     return {
         "id": contact.id,
         "external_userid": contact.external_userid,
         "name": contact.name,
         "display_name": _display_name(contact),
         "current_nickname": _current_nickname(contact),
+        "avatar_url": avatar.url,
+        "avatar_status": avatar.status,
+        "avatar_synced_at": avatar.synced_at,
         "follow_remarks": follow_remarks,
         "search_matches": search_matches,
         "company": contact.company,

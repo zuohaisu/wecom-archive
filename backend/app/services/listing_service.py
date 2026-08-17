@@ -35,6 +35,10 @@ from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.schemas.listing import ContactOut, MonitoredAccountOut
+from app.services.avatar_sync import (
+    external_avatar_presentations,
+    internal_avatar_presentations,
+)
 from app.services.external_contact_identity import external_contact_display_names
 
 
@@ -989,6 +993,7 @@ def list_monitored_accounts(
         return []
 
     display_names = _load_display_names_for_ids(db, tenant_id, staff_ids)
+    avatars = internal_avatar_presentations(db, tenant_id, staff_ids)
     latest_times = _batch_latest_own_participation_time(db, tenant_id, staff_ids)
     conversation_counts = (
         _batch_count_entity_conversations(db, tenant_id, staff_ids, staff_ids)
@@ -1029,6 +1034,8 @@ def list_monitored_accounts(
                 staff_id=sid,
                 raw_id=sid,
                 display_name=resolve_person_display_name(sid, display_names.get(sid)),
+                avatar_url=avatars[sid].url,
+                avatar_status=avatars[sid].status,
                 seat_status="active" if is_active else "history",
                 is_active_archive_seat=is_active,
                 latest_message_time=seat["latest_message_time"],
@@ -1052,6 +1059,10 @@ def list_contacts(db: Session, tenant_id: str) -> list[ContactOut]:
     staff_ids = _collect_staff_ids(db, tenant_id, participant_ids)
     contact_ids = participant_ids - staff_ids
     display_names = _load_display_names_for_ids(db, tenant_id, contact_ids)
+    avatars = internal_avatar_presentations(db, tenant_id, contact_ids)
+    # An external identity's customer-level avatar supersedes the archive
+    # registry's generic Contact cache without using a display name as a key.
+    avatars.update(external_avatar_presentations(db, tenant_id, contact_ids))
     # No employee context exists in contact-centered selection, so the
     # identity helper intentionally uses a real nickname or opaque fallback,
     # never a randomly selected employee remark.
@@ -1061,6 +1072,8 @@ def list_contacts(db: Session, tenant_id: str) -> list[ContactOut]:
             contact_id=cid,
             display_name=resolve_person_display_name(cid, display_names.get(cid)),
             raw_id=cid,
+            avatar_url=avatars[cid].url,
+            avatar_status=avatars[cid].status,
         )
         for cid in sorted(contact_ids)
     ]

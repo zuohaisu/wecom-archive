@@ -22,6 +22,10 @@ from app.db.models import (
     ExternalContact,
     TenantWecomConfig,
 )
+from app.services.avatar_sync import (
+    reconcile_internal_contact_avatars,
+    sync_external_contact_avatar,
+)
 from app.services.external_contact_identity import (
     IdentitySyncResult,
     safe_display_nickname,
@@ -214,6 +218,10 @@ def _persist_external_contact_detail(
         **values,
     )
     identity_result = sync_external_contact_identity(session, contact, detail)
+    # Avatar failure is fully contained by sync_external_contact_avatar(): it
+    # changes only this ancillary cache state and never invalidates identity,
+    # remarks, or the surrounding external-contact transaction.
+    sync_external_contact_avatar(contact, tenant_id, detail)
     return existed, identity_result
 
 
@@ -362,9 +370,6 @@ def main() -> int:
         return 1
 
     external_secret = os.environ.get("WECOM_EXTERNAL_CONTACT_SECRET", "").strip()
-    if not external_secret:
-        logger.info("External-contact API is not enabled; sync skipped")
-        return 0
 
     from sqlalchemy import create_engine
 
@@ -372,12 +377,26 @@ def main() -> int:
     try:
         with Session(engine) as session:
             tenant_id = _require_tenant_id(session, corp_id)
-            summary = sync_external_contacts(
+            summary = (
+                sync_external_contacts(
+                    session,
+                    tenant_id,
+                    corp_id,
+                    external_secret,
+                    commit_every=100,
+                )
+                if external_secret
+                else RunSummary()
+            )
+            # The existing daily reconciliation unit is also the bounded
+            # fallback for internal archive-seat avatars. It never runs in
+            # archive/decrypt request paths and degrades to initials when the
+            # OAuth credential or an individual profile is unavailable.
+            internal_avatars = reconcile_internal_contact_avatars(
                 session,
                 tenant_id,
                 corp_id,
-                external_secret,
-                commit_every=100,
+                os.environ.get("WECOM_OAUTH_SECRET", ""),
             )
             session.commit()
     except Exception as exc:
@@ -386,7 +405,8 @@ def main() -> int:
 
     logger.info(
         "External-contact sync complete: total=%d inserted=%d updated=%d skipped=%d "
-        "failed=%d nickname_changes=%d follow_relationship_changes=%d",
+        "failed=%d nickname_changes=%d follow_relationship_changes=%d "
+        "internal_avatar_selected=%d internal_avatar_ready=%d internal_avatar_unavailable=%d",
         summary.total,
         summary.inserted,
         summary.updated,
@@ -394,6 +414,9 @@ def main() -> int:
         summary.failed,
         summary.nickname_changes,
         summary.follow_relationship_changes,
+        internal_avatars.selected,
+        internal_avatars.ready,
+        internal_avatars.unavailable,
     )
     return 0
 
