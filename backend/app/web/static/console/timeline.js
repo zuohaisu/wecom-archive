@@ -123,6 +123,7 @@ function loadOlderAutomatically(){
   var beforeHeight2=body?body.scrollHeight:0;
   fetchOlderMessages(requestConvId,timelineNextBefore).then(function(){
     if(timelineConvId!==requestConvId||timelineRequestGen!==requestGen)return;
+    if(typeof window!=='undefined'&&window.ProductAnalytics)window.ProductAnalytics.track('product.conversation.older_messages_loaded.v1');
     timelineLoadingOlder=false;
     renderTimeline(false);
     startHistoryObserver();

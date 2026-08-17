@@ -45,7 +45,7 @@ function renderEntityList(items){
       var seatLabel=item.seat_status==='active'?I18N.t('console.seatActive'):I18N.t('console.seatHistory');
       seatBadge='<span class="seat-badge '+seatCls+'">'+esc(seatLabel)+'</span>';
     }
-    html+='<div class="entity-item" data-id="'+esc(id)+'" data-name="'+esc(name)+'" onclick="onEntityClick(this)">'
+    html+='<div class="entity-item" data-id="'+esc(id)+'" data-name="'+esc(name)+'" onclick="selectEntityWithTracking(this)">'
       +av+'<span class="entity-name">'+esc(name)+secondary+'</span>'+seatBadge+'</div>';
   });
   body.innerHTML=html;
@@ -66,6 +66,12 @@ function maybeAutoSelectEntity(items){
   }
   var last=readLastEntity();
   if(last&&items.some(function(it){return it.staff_id===last;}))selectEntityIfPresent(last);
+}
+function selectEntityWithTracking(el){
+  if(typeof window!=='undefined'&&window.ProductAnalytics){
+    window.ProductAnalytics.track('product.directory.subject_selected.v1',{subject_kind:mode==='staff'?'employee':'contact'});
+  }
+  onEntityClick(el);
 }
 function onEntityClick(el){
   selEntityId=el.dataset.id; selEntityName=el.dataset.name; selConvId=null; selConvName=null;
@@ -137,7 +143,7 @@ function renderConvList(convs){
     var rawId=c.raw_id||c.room_raw_id||'';
     var secondary=(rawId&&rawId!==c.display_name)
       ?'<div class="conv-secondary" title="'+esc(rawId)+'">'+esc(rawId)+'</div>':'';
-    html+='<div class="conv-card" data-id="'+esc(c.conversation_id)+'" data-name="'+esc(c.display_name)+'" data-type="'+esc(c.conversation_type)+'" onclick="onConvClick(this)">'
+    html+='<div class="conv-card" data-id="'+esc(c.conversation_id)+'" data-name="'+esc(c.display_name)+'" data-type="'+esc(c.conversation_type)+'" onclick="openConversationWithTracking(this)">'
       +'<div class="conv-top"><span class="conv-name" title="'+esc(rawId)+'">'+esc(c.display_name)+'</span><span class="conv-time">'+esc(t)+'</span></div>'
       +secondary
       +(snip?'<div class="conv-snippet">'+snip+'</div>':'')
@@ -150,6 +156,12 @@ function renderConvList(convs){
       el.classList.toggle('active',el.dataset.id===selConvId);
     });
   }
+}
+function openConversationWithTracking(el){
+  if(typeof window!=='undefined'&&window.ProductAnalytics){
+    window.ProductAnalytics.track('product.conversation.detail_opened.v1');
+  }
+  onConvClick(el);
 }
 function onConvClick(el){
   selConvId=el.dataset.id; selConvName=el.dataset.name;

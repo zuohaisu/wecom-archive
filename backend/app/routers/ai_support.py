@@ -38,6 +38,8 @@ from app.services.ai.answer_service import answer_query
 from app.services.ai.feedback_notify import notify_new_feedback
 from app.services.ai.handoff import build_redacted_summary
 from app.services.ai.llm_provider import ai_support_is_enabled
+from app.services import product_analytics
+from app.schemas.product_analytics import FEEDBACK_SUBMITTED
 from app.services.ai_tools import handlers as ai_tool_handlers  # noqa: F401 - populates the tool registry
 from app.services.ai_tools.registry import ToolContext, ToolResultStatus, ToolScope, invoke_tool
 from app.web import render_template
@@ -323,5 +325,11 @@ def submit_user_feedback(
     )
     db.add(feedback)
     db.commit()
+    product_analytics.record_backend_event_best_effort(
+        db,
+        event_name=FEEDBACK_SUBMITTED,
+        tenant_id=tenant_id,
+        admin_user_id=user.id,
+    )
     notify_new_feedback(feedback_id=feedback.id, tenant_id=tenant_id, feedback_type=feedback.feedback_type)
     return UserFeedbackOut(id=feedback.id, status=feedback.status)

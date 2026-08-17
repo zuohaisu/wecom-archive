@@ -22,6 +22,7 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 | `tenant_wecom_configs` | Per-tenant WeCom app credentials |
 | `admin_users` | WeCom employees who have authenticated |
 | `admin_sessions` | Active login sessions |
+| `product_analytics_events` | Versioned, privacy-minimal product-use facts for PlatformAdmin-only aggregates; never audit evidence or archive content |
 | `billing_plans` | Server-authoritative price, period and storage quota |
 | `plan_entitlements` | Normalized boolean capabilities attached to a plan |
 | `subscriptions` | One authoritative current subscription per tenant |

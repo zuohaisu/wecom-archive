@@ -137,6 +137,25 @@ a failed refund submission may safely retry its already-reserved stable
 Responses never expose full provider references, payer accounts, CorpID,
 UserID, archive content, raw callbacks or keys.
 
+### Platform product analytics
+
+`POST /api/product-analytics/events` accepts only the versioned, browser-safe
+allowlist in [`product-analytics-events-v1.md`](product-analytics-events-v1.md).
+It derives tenant and admin identity from the authenticated tenant session,
+responds `202` even when best-effort collection is unavailable, and never
+accepts content, query values, media identifiers or credentials.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/product-analytics/events` | Tenant-session, asynchronous first-party product-use event collection |
+| `GET` | `/api/platform/operations/product-analytics/overview` | PlatformAdmin-only active/inactive tenant, login and function-adoption aggregates |
+| `GET` | `/api/platform/operations/product-analytics/tenants` | PlatformAdmin-only, paginated active/inactive tenant summaries |
+| `GET` | `/api/platform/operations/product-analytics/tenants/{tenant_id}` | PlatformAdmin-only aggregate usage detail for one tenant |
+
+The three reads support bounded time ranges and an optional canonical event
+filter. They return no raw event payloads, archive content, search terms,
+contact identifiers, media information or authentication data.
+
 `GET /api/billing/capacity` measures only this tenant's successfully downloaded
 `media_files` bytes and joins that fact to the effective subscription quota.
 States are `normal`, `warning_80`, `warning_90`, `full`, `over_limit`, and

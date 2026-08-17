@@ -134,7 +134,9 @@ __SIDENAV__
   </div>
 </main>
 </div></div>
+<script src="/web/static/product-analytics.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/settings.js?v=__STATIC_VERSION__"></script>
+<script>if(window.ProductAnalytics)window.ProductAnalytics.track('product.settings.opened.v1');</script>
 <script src="/web/static/branding.js?v=__STATIC_VERSION__"></script>
 <script>
 (function () {
@@ -223,6 +225,7 @@ __SIDENAV__
     if (!option) return;
     I18N.setLocale(option.dataset.locale);
     document.getElementById('lang-menu').style.display = 'none';
+    fetch('/api/auth/me/preferences', {method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({locale: option.dataset.locale})}).catch(function () {});
   });
   I18N.onChange(langMenu);
   langMenu();

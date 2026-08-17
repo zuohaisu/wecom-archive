@@ -1414,6 +1414,59 @@ class AuditLog(Base):
     )
 
 
+class ProductAnalyticsEvent(Base):
+    """One privacy-minimal, versioned product-use event (RND-162).
+
+    This is deliberately separate from ``AuditLog``: it is only an
+    allowlisted analytics fact and never compliance evidence.  No archive
+    identifiers, request metadata, free text, browser identifiers, or media
+    references belong in ``attributes``.
+    """
+
+    __tablename__ = "product_analytics_events"
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('frontend', 'backend')",
+            name="ck_product_analytics_events_source",
+        ),
+        CheckConstraint(
+            "event_class IN ('authentication', 'core_workflow', 'secondary_workflow')",
+            name="ck_product_analytics_events_class",
+        ),
+        Index(
+            "ix_product_analytics_events_tenant_occurred",
+            "tenant_id",
+            "occurred_at",
+        ),
+        Index(
+            "ix_product_analytics_events_name_occurred",
+            "event_name",
+            "occurred_at",
+        ),
+        Index("ix_product_analytics_events_occurred", "occurred_at"),
+    )
+
+    # The client-generated UUID is the idempotency key.  Replayed browser
+    # submissions and retried queue deliveries therefore cannot inflate a
+    # product metric.
+    event_id = Column(String(36), primary_key=True)
+    event_name = Column(String(96), nullable=False)
+    schema_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    event_class = Column(String(32), nullable=False)
+    source = Column(String(16), nullable=False)
+    tenant_id = Column(
+        String(36), ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True
+    )
+    admin_user_id = Column(
+        String(36), ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True
+    )
+    attributes = Column(JSONB, nullable=False, default=dict)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 # —— RND-306 (B1-1) 平台超管实体（独立于 admin_users，tenant-less）——
 class PlatformAdmin(Base):
     """Platform super-admin, isolated from per-tenant admin_users.

@@ -214,6 +214,16 @@ def get_self_service_trial_settings() -> SelfServiceTrialSettings:
     return SelfServiceTrialSettings()
 
 
+class ProductAnalyticsSettings(BaseSettings):
+    """Closed-by-default collection switch for RND-162 product events."""
+
+    product_analytics_enabled: str = "false"
+
+
+def get_product_analytics_settings() -> ProductAnalyticsSettings:
+    return ProductAnalyticsSettings()
+
+
 class AiSettings(BaseSettings):
     """AI support (RND-354 epic) configuration. ai_support_enabled is the
     single kill switch every AI surface (T2 answer service, T3 UI, T5
