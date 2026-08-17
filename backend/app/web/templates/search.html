@@ -163,12 +163,12 @@ __SIDENAV__
 </div>
 </div>
 </div>
-<script>var RND216_MSGTYPE_OPTIONS = __MSGTYPE_OPTIONS_JSON__;</script><script src="/web/static/search.js?v=__STATIC_VERSION__"></script>
+<script>var RND216_MSGTYPE_OPTIONS = __MSGTYPE_OPTIONS_JSON__;</script><script src="/web/static/product-analytics.js?v=__STATIC_VERSION__"></script><script src="/web/static/search.js?v=__STATIC_VERSION__"></script>
 <script>
 (function(){
   function langMenu(){var menu=document.getElementById('lang-menu');if(!menu)return;menu.textContent='';I18N.availableLocales().forEach(function(locale){var option=document.createElement('div');option.className='lang-option'+(locale.code===I18N.getLocale()?' active':'');option.dataset.locale=locale.code;option.textContent=locale.nativeName;menu.appendChild(option);});}
   window.toggleLangMenu=function(){var menu=document.getElementById('lang-menu');if(!menu)return;menu.style.display=menu.style.display==='none'?'block':'none';langMenu();};
-  document.addEventListener('click',function(event){var option=event.target.closest('.lang-option');if(option){I18N.setLocale(option.dataset.locale);document.getElementById('lang-menu').style.display='none';}});
+  document.addEventListener('click',function(event){var option=event.target.closest('.lang-option');if(option){I18N.setLocale(option.dataset.locale);document.getElementById('lang-menu').style.display='none';fetch('/api/auth/me/preferences',{method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:option.dataset.locale})}).catch(function(){});}});
   I18N.onChange(langMenu);langMenu();
 }());
 </script>

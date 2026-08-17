@@ -43,6 +43,31 @@
     </form>
     <div class="card-bd table-wrap"><table><thead><tr><th>租户</th><th>服务</th><th>套餐 / 到期</th><th>渠道净收入</th><th>异常</th><th>媒体 / 存储</th><th>操作</th></tr></thead><tbody id="tenant-rows"></tbody></table><div class="pager"><button id="previous-page" class="btn" type="button">上一页</button><button id="next-page" class="btn" type="button">下一页</button></div></div>
   </section>
+  <section class="card tenant-card product-analytics-card" aria-labelledby="product-analytics-title">
+    <div class="card-hd"><div><h2 id="product-analytics-title">产品使用分析</h2><span class="muted">仅统计产品行为；不展示归档聊天内容、搜索词或媒体信息</span></div></div>
+    <form id="product-analytics-filters" class="filter-grid">
+      <label>开始日期<input id="product-start" type="date" required></label>
+      <label>结束日期<input id="product-end" type="date" required></label>
+      <label>租户<select id="product-tenant"><option value="">全部租户</option></select></label>
+      <label>事件类型<select id="product-event"><option value="">全部产品事件</option><option value="product.auth.login_succeeded.v1">登录成功</option><option value="product.auth.login_failed.v1">登录失败</option><option value="product.conversation.review_opened.v1">打开会话查阅</option><option value="product.directory.view_selected.v1">切换员工 / 联系人视图</option><option value="product.directory.subject_selected.v1">选择员工 / 联系人</option><option value="product.conversation.detail_opened.v1">打开会话</option><option value="product.conversation.older_messages_loaded.v1">加载更早消息</option><option value="product.search.executed.v1">执行搜索</option><option value="product.search.filter_applied.v1">使用筛选器</option><option value="product.media.preview_opened.v1">打开媒体预览</option><option value="product.settings.opened.v1">打开设置</option><option value="product.settings.language_changed.v1">修改语言</option><option value="product.feedback.submitted.v1">提交反馈</option></select></label>
+      <label>活跃状态<select id="product-activity"><option value="all">全部</option><option value="active">近期活跃</option><option value="inactive">近期未使用</option></select></label>
+      <div class="filter-actions"><button class="btn btn-primary" type="submit">应用产品分析筛选</button></div>
+    </form>
+    <div class="card-bd">
+      <div class="metric-grid product-metric-grid" aria-label="产品使用核心指标">
+        <article class="card metric"><span>已开通租户</span><strong id="product-provisioned">—</strong><small id="product-active">—</small></article>
+        <article class="card metric"><span>近期未使用</span><strong id="product-inactive">—</strong><small>基于核心产品行为</small></article>
+        <article class="card metric"><span>活跃管理员</span><strong id="product-active-admins">—</strong><small>仅核心产品行为</small></article>
+        <article class="card metric"><span>登录成功 / 失败</span><strong id="product-login-counts">—</strong><small id="product-failure-rate">—</small></article>
+      </div>
+      <div class="platform-grid product-analysis-grid">
+        <section class="card"><div class="card-hd"><h3>核心功能采用</h3></div><div class="card-bd"><ul id="product-adoption" class="summary-list"></ul></div></section>
+        <section class="card"><div class="card-hd"><h3>登录与使用趋势</h3></div><div class="card-bd table-wrap"><table><thead><tr><th>日期</th><th>登录成功</th><th>登录失败</th><th>活跃租户</th><th>事件量</th></tr></thead><tbody id="product-trends"></tbody></table></div></section>
+      </div>
+      <section class="card"><div class="card-hd"><h3>租户活跃情况</h3><span id="product-pagination" class="muted"></span></div><div class="card-bd table-wrap"><table><thead><tr><th>租户</th><th>状态</th><th>最近登录</th><th>最近产品行为</th><th>活跃管理员</th><th>事件量</th><th>操作</th></tr></thead><tbody id="product-tenant-rows"></tbody></table></div></section>
+    </div>
+  </section>
+  <aside id="product-analytics-detail" class="card tenant-detail" hidden aria-live="polite"></aside>
   <aside id="tenant-detail" class="card tenant-detail" hidden aria-live="polite"></aside>
 </main>
 <script src="/web/static/platform-operations.js?v=__STATIC_VERSION__"></script>

@@ -386,8 +386,8 @@ __SIDENAV__
         </button>
         <div class="scope-popover" id="scope-popover" style="display:none">
           <div class="mode-tabs">
-            <button class="mode-tab active" id="tab-staff" onclick="setMode('staff')" data-i18n="nav.staff">员工</button>
-            <button class="mode-tab" id="tab-contact" onclick="setMode('contact')" data-i18n="nav.contact">联系人</button>
+            <button class="mode-tab active" id="tab-staff" onclick="selectModeWithTracking('staff')" data-i18n="nav.staff">员工</button>
+            <button class="mode-tab" id="tab-contact" onclick="selectModeWithTracking('contact')" data-i18n="nav.contact">联系人</button>
           </div>
           <div class="col-header" id="entity-header" data-i18n="console.monitoredAccounts">存档员工</div>
           <div class="scope-popover-body" id="entity-body"><div class="loading" data-i18n="console.loading">加载中…</div></div>
@@ -434,6 +434,7 @@ __SIDENAV__
 </div>
 </div>
 
+<script src="/web/static/product-analytics.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/console-state.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/api-client.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/avatar.js?v=__STATIC_VERSION__"></script>

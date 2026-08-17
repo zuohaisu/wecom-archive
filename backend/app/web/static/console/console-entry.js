@@ -27,6 +27,9 @@ function selectLocale(code){
   var menu=document.getElementById('lang-menu');
   if(menu)menu.style.display='none';
   applyLocale();
+  // Preference persistence and analytics are both best-effort. The visible
+  // locale must never wait for either request.
+  fetch('/api/auth/me/preferences',{method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:code})}).catch(function(){});
 }
 function applyLocale(){
   applyStaticI18n();
@@ -93,6 +96,12 @@ document.addEventListener('click',function(e){
   var menu=document.getElementById('lang-menu');
   if(sw&&menu&&!sw.contains(e.target))menu.style.display='none';
 });
+function selectModeWithTracking(m){
+  if(typeof window!=='undefined'&&window.ProductAnalytics){
+    window.ProductAnalytics.track('product.directory.view_selected.v1',{view_kind:m==='staff'?'employee':'contact'});
+  }
+  return setMode(m);
+}
 function setMode(m){
   mode=m; selEntityId=null; selConvId=null; selEntityName=null; selConvName=null;
   if(typeof updateConversationExportButton==='function')updateConversationExportButton();
@@ -169,8 +178,16 @@ function renderSearchFilters(){
     +'</div>';
   el.innerHTML=html;
 }
-function setSearchDateRange(v){searchDateRange=v;renderSearchFilters();forceSearch();}
-function setSearchAllTypes(v){searchAllTypes=v;renderSearchFilters();forceSearch();}
+function setSearchDateRange(v){
+  searchDateRange=v;renderSearchFilters();
+  if(window.ProductAnalytics)window.ProductAnalytics.track('product.search.filter_applied.v1',{filter_dimension:'date',filter_action:v?'applied':'cleared'});
+  forceSearch();
+}
+function setSearchAllTypes(v){
+  searchAllTypes=v;renderSearchFilters();
+  if(window.ProductAnalytics)window.ProductAnalytics.track('product.search.filter_applied.v1',{filter_dimension:'message_type',filter_action:v?'applied':'cleared'});
+  forceSearch();
+}
 function forceSearch(){searchLastQ=null;doSearch();}
 function updateConversationExportButton(){
   var button=document.getElementById('btn-export-conversation');
@@ -253,6 +270,7 @@ function doSearch(){
     }
     results.innerHTML=html;
     attachSearchItemEvents();
+    if(window.ProductAnalytics)window.ProductAnalytics.track('product.search.executed.v1',{search_scope:'combined'});
   }
   contactDone=false;msgDone=false;contactError=false;msgError=false;
   contactData=null;msgData=null;
@@ -590,4 +608,5 @@ applyLocale();
 loadCurrentUser();
 setMode('staff');
 initializeSyncStatus();
+if(typeof window!=='undefined'&&window.ProductAnalytics)window.ProductAnalytics.track('product.conversation.review_opened.v1');
 readFocusFromUrl();

@@ -180,7 +180,7 @@ function renderDatePopover(){
 function setDateFilter(v){
   FILTERS.dateRange=v||null;
   closeAllPopovers();
-  applyFilters();
+  applyFilters('date',FILTERS.dateRange?'applied':'cleared');
 }
 function renderMultiPopover(kind){
   var entityType=kind==='user'?'contact':'staff';
@@ -240,7 +240,7 @@ function toggleMultiFilter(kind,value,checked){
   var idx=arr.indexOf(value);
   if(checked&&idx===-1)arr.push(value);
   if(!checked&&idx>=0)arr.splice(idx,1);
-  applyFilters();
+  applyFilters(kind==='msgtype'?'message_type':'person',checked?'applied':'cleared');
 }
 function removeFilter(kind,value){
   if(kind==='date'){FILTERS.dateRange=null;}
@@ -248,7 +248,7 @@ function removeFilter(kind,value){
     var idx=FILTERS[kind].indexOf(value);
     if(idx>=0)FILTERS[kind].splice(idx,1);
   }
-  applyFilters();
+  applyFilters(kind==='msgtype'?'message_type':kind==='date'?'date':'person','cleared');
 }
 function clearAllFilters(){
   FILTERS={dateRange:null,user:[],staff:[],msgtype:[]};
@@ -282,7 +282,10 @@ function runSearchOrShowHint(){
     showLanding();
   }
 }
-function applyFilters(){
+function applyFilters(filterDimension,filterAction){
+  if(filterDimension&&window.ProductAnalytics){
+    window.ProductAnalytics.track('product.search.filter_applied.v1',{filter_dimension:filterDimension,filter_action:filterAction});
+  }
   updateFilterUI();
   syncUrlFromState();
   runSearchOrShowHint();
@@ -328,6 +331,7 @@ function doSearch(){
     refreshParticipantCache();
     updateFilterUI();
     render();
+    if(window.ProductAnalytics)window.ProductAnalytics.track('product.search.executed.v1',{search_scope:'message_content'});
   }).catch(function(){showError();});
 }
 function render(){var list=document.getElementById('resultsList');var empty=document.getElementById('stateEmpty');var err=document.getElementById('stateError');var landing=document.getElementById('stateLanding');empty.style.display='none';err.style.display='none';landing.style.display='none';var rows=ALL.slice();var exportButton=document.getElementById('export-search-results');if(exportButton)exportButton.disabled=!rows.length;var sort=document.getElementById('sortSel').value;rows=rows.slice().sort(function(a,b){return sort==='time_asc'?(a.msgtime||0)-(b.msgtime||0):(b.msgtime||0)-(a.msgtime||0);});document.getElementById('resultCount').textContent='共 '+rows.length+' 条消息匹配';if(rows.length===0){list.innerHTML='';if(!KEYWORD&&!hasActiveFilters()){document.getElementById('resultCount').textContent='';landing.style.display='flex';return;}empty.style.display='block';document.getElementById('emptyHint').textContent=hasActiveFilters()?'试试调整或清除筛选条件':'换个关键词试试';return;}list.innerHTML=rows.map(function(r){var badge=r.conversation_type==='group'?'<span class="rc-badge group">群聊</span>':'<span class="rc-badge direct">单聊</span>';var senderClass=r.entity_type==='staff'?'rc-sender staff':'rc-sender';var params=['focus='+encodeURIComponent(r.msgid),'conv='+encodeURIComponent(r.conversation_id),'convType='+encodeURIComponent(r.conversation_type),'entityId='+encodeURIComponent(r.entity_id||''),'entityType='+encodeURIComponent(r.entity_type||'')].join('&');return '<div class="result-card" data-href="/admin/conversations?'+params+'"><div class="rc-context">'+badge+'<span class="rc-conv" title="'+esc(r.conversation_name)+'">'+esc(r.conversation_name)+'</span><span class="'+senderClass+'">'+esc(r.sender_display_name)+'</span><span class="rc-time">'+esc(fmtTime(r.msgtime))+'</span></div><div class="rc-snippet">'+highlight(r.content_snippet||'')+'</div><div class="rc-foot"><span class="rc-route">员工 <b>'+esc(r.entity_id||'-')+'</b> <span class="arrow">·</span> 客户 <b>'+esc(r.sender||'-')+'</b> <span class="arrow">·</span> '+esc(msgtypeLabel(r.msgtype))+'</span><span class="rc-jump">查看上下文 ↗</span></div></div>';}).join('');Array.prototype.forEach.call(list.querySelectorAll('.result-card'),function(el){el.addEventListener('click',function(){window.location.href=el.getAttribute('data-href');});});}

@@ -73,6 +73,8 @@ from app.schemas.auth import (
     PreferencesUpdate,
 )
 from app.session_lifecycle import cleanup_expired_sessions
+from app.services import product_analytics
+from app.schemas.product_analytics import LANGUAGE_CHANGED, LOGIN_FAILED, LOGIN_SUCCEEDED
 from app.settings import (
     get_auth_settings,
     get_email_settings,
@@ -948,6 +950,13 @@ def password_login(
         except Exception:
             db.rollback()
             logger.error("password_login: failed-login audit commit failed")
+        product_analytics.record_backend_event_best_effort(
+            db,
+            event_name=LOGIN_FAILED,
+            tenant_id=tenant.id,
+            admin_user_id=None,
+            occurred_at=now,
+        )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     resolved_user.last_login_at = now
@@ -976,6 +985,13 @@ def password_login(
         detail={"mode": "password"},
     )
     db.commit()
+    product_analytics.record_backend_event_best_effort(
+        db,
+        event_name=LOGIN_SUCCEEDED,
+        tenant_id=resolved_user.tenant_id,
+        admin_user_id=resolved_user.id,
+        occurred_at=now,
+    )
     cleanup_expired_sessions(db)
 
     logger.info("password_login: success, session created (id not logged)")
@@ -1437,6 +1453,13 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
         )
         logger.info("wecom_callback: login success, session created (id not logged)")
         db.commit()
+        product_analytics.record_backend_event_best_effort(
+            db,
+            event_name=LOGIN_SUCCEEDED,
+            tenant_id=tenant_id,
+            admin_user_id=user.id,
+            occurred_at=now,
+        )
         cleanup_expired_sessions(db)
     except Exception as exc:
         # Log only the exception type — DBAPI errors often embed bound
@@ -1596,12 +1619,20 @@ def put_me_preferences(
     if user is None:
         raise HTTPException(status_code=401, detail="not_authenticated")
 
+    locale_changed = payload.locale is not None and payload.locale != user.ui_locale
     if payload.theme is not None:
         user.ui_theme = payload.theme
     if payload.locale is not None:
         user.ui_locale = payload.locale
     db.commit()
     db.refresh(user)
+    if locale_changed:
+        product_analytics.record_backend_event_best_effort(
+            db,
+            event_name=LANGUAGE_CHANGED,
+            tenant_id=user.tenant_id,
+            admin_user_id=user.id,
+        )
     return PreferencesOut(
         theme=user.ui_theme or DEFAULT_THEME,
         locale=user.ui_locale or DEFAULT_LOCALE,

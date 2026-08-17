@@ -372,7 +372,9 @@ def test_router_count() -> None:
     # RND-359 adds the internal-staff handoff-resolution route.
     # RND-408 adds the 7 public AI support page/API routes.
     # RND-371 adds the controlled avatar and user-detail routes.
-    assert route_count == 171
+    # RND-162 adds one tenant-scoped collection route and three
+    # PlatformAdmin-only aggregate Product Analytics routes.
+    assert route_count == 175
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -493,6 +495,9 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/branding/domains",
             "/api/platform/branding/domain-metrics",
             "/api/platform/operations/dashboard",
+            "/api/platform/operations/product-analytics/overview",
+            "/api/platform/operations/product-analytics/tenants",
+            "/api/platform/operations/product-analytics/tenants/{tenant_id}",
             "/api/platform/operations/tenants",
             "/api/platform/operations/tenants/{tenant_id}",
             "/api/platform/operations/tenants/{tenant_id}/financial-transactions",
@@ -525,6 +530,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/ai/public/support/sessions/{chat_session_id}/handoff/preview",
             "/api/ai/public/support/sessions/{chat_session_id}/handoff",
             "/api/payments/wechat/notify",
+            "/api/product-analytics/events",
             "/api/provisioning/activate",
             "/api/provisioning/config",
             "/api/provisioning/config/test",
@@ -904,6 +910,30 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/platform/operations/tenants/{tenant_id}/refunds/{refund_id}/query",
             frozenset({"POST"}),
             "RefundOut",
+            "None",
+        ),
+        (
+            "/api/product-analytics/events",
+            frozenset({"POST"}),
+            "ProductAnalyticsEventAcceptedOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/product-analytics/overview",
+            frozenset({"GET"}),
+            "ProductAnalyticsOverviewOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/product-analytics/tenants",
+            frozenset({"GET"}),
+            "ProductAnalyticsTenantListOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/product-analytics/tenants/{tenant_id}",
+            frozenset({"GET"}),
+            "ProductAnalyticsTenantDetailOut",
             "None",
         ),
         ("/api/platform/tenants", frozenset({"POST"}), "TenantProvisionOut", "None"),

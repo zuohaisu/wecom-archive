@@ -106,6 +106,10 @@ function refreshViewerLabels(){
 }
 function openViewer(items,startIndex){
   viewerItems=items||[];
+  var selected=viewerItems[startIndex||0];
+  if(selected&&selected.kind!=='chatrecord'&&typeof window!=='undefined'&&window.ProductAnalytics){
+    window.ProductAnalytics.track('product.media.preview_opened.v1');
+  }
   viewerGen++;
   viewerFocusTrigger=typeof document!=='undefined'?document.activeElement:null;
   var root=ensureViewerRoot();

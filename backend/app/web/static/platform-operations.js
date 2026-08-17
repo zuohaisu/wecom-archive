@@ -265,10 +265,142 @@
     }).catch(function (err) { error(err.message || '详情加载失败'); });
   }
 
+  var PRODUCT_EVENT_LABELS = {
+    'product.auth.login_succeeded.v1': '登录成功',
+    'product.auth.login_failed.v1': '登录失败',
+    'product.conversation.review_opened.v1': '打开会话查阅',
+    'product.directory.view_selected.v1': '切换员工 / 联系人视图',
+    'product.directory.subject_selected.v1': '选择员工 / 联系人',
+    'product.conversation.detail_opened.v1': '打开会话',
+    'product.conversation.older_messages_loaded.v1': '加载更早消息',
+    'product.search.executed.v1': '执行搜索',
+    'product.search.filter_applied.v1': '使用筛选器',
+    'product.media.preview_opened.v1': '打开媒体预览',
+    'product.settings.opened.v1': '打开设置',
+    'product.settings.language_changed.v1': '修改语言',
+    'product.feedback.submitted.v1': '提交反馈'
+  };
+
+  function productEventLabel(eventName) { return PRODUCT_EVENT_LABELS[eventName] || eventName; }
+  function productDateInput(value) { return value.toISOString().slice(0, 10); }
+  function initialiseProductAnalyticsDates() {
+    var end = new Date(), start = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
+    el('product-start').value = productDateInput(start);
+    el('product-end').value = productDateInput(end);
+  }
+  function productQuery() {
+    var params = new URLSearchParams();
+    var start = el('product-start').value, end = el('product-end').value;
+    if (start) { params.set('starts_at', start + 'T00:00:00+08:00'); }
+    if (end) { params.set('ends_at', end + 'T23:59:59.999+08:00'); }
+    if (el('product-tenant').value) { params.set('tenant_id', el('product-tenant').value); }
+    if (el('product-event').value) { params.set('event_name', el('product-event').value); }
+    return params;
+  }
+  function productRequestPath(path, includeActivity) {
+    var params = productQuery();
+    if (includeActivity) { params.set('activity_status', el('product-activity').value); params.set('page_size', '100'); }
+    return path + '?' + params.toString();
+  }
+  function appendProductTenantOptions(items) {
+    var select = el('product-tenant'), selected = select.value, known = {};
+    Array.prototype.forEach.call(select.options, function (option) { known[option.value] = true; });
+    (items || []).forEach(function (item) {
+      if (known[item.tenant_id]) { return; }
+      var option = document.createElement('option');
+      option.value = item.tenant_id;
+      option.textContent = item.tenant_name;
+      select.appendChild(option);
+    });
+    select.value = selected;
+  }
+  function renderProductOverview(data) {
+    el('product-provisioned').textContent = number(data.provisioned_tenant_count);
+    el('product-active').textContent = '近期活跃 ' + number(data.active_tenant_count) + ' 个';
+    el('product-inactive').textContent = number(data.inactive_tenant_count);
+    el('product-active-admins').textContent = number(data.active_admin_count);
+    el('product-login-counts').textContent = number(data.login.success_count) + ' / ' + number(data.login.failure_count);
+    el('product-failure-rate').textContent = data.login.failure_rate === null ? '无登录尝试' : '失败率 ' + (data.login.failure_rate * 100).toFixed(2) + '%';
+    list(el('product-adoption'), data.function_adoption, function (item) {
+      return textPair(productEventLabel(item.event_name), number(item.tenant_count) + ' 个租户 · ' + number(item.admin_count) + ' 位管理员 · ' + number(item.event_count) + ' 次');
+    }, '当前筛选范围内暂无功能使用事件');
+    var body = el('product-trends');
+    clear(body);
+    data.trends.forEach(function (item) {
+      var eventTotal = Object.keys(item.event_counts || {}).filter(function (name) {
+        return name !== 'product.auth.login_succeeded.v1' && name !== 'product.auth.login_failed.v1';
+      }).reduce(function (total, name) { return total + Number(item.event_counts[name] || 0); }, 0);
+      var row = document.createElement('tr');
+      [item.date, number(item.login_success_count), number(item.login_failure_count), number(item.active_tenant_count), number(eventTotal)].forEach(function (value) {
+        var cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell);
+      });
+      body.appendChild(row);
+    });
+    if (!data.trends.length) {
+      var emptyRow = document.createElement('tr'), emptyCell = document.createElement('td');
+      emptyCell.colSpan = 5; emptyCell.className = 'muted'; emptyCell.textContent = '当前筛选范围内暂无趋势数据'; emptyRow.appendChild(emptyCell); body.appendChild(emptyRow);
+    }
+  }
+  function renderProductTenants(data) {
+    appendProductTenantOptions(data.items);
+    var body = el('product-tenant-rows');
+    clear(body);
+    if (!data.items.length) {
+      var emptyRow = document.createElement('tr'), emptyCell = document.createElement('td');
+      emptyCell.colSpan = 7; emptyCell.className = 'muted'; emptyCell.textContent = '没有符合筛选条件的租户'; emptyRow.appendChild(emptyCell); body.appendChild(emptyRow);
+    }
+    data.items.forEach(function (item) {
+      var row = document.createElement('tr');
+      [item.tenant_name + ' · ' + item.tenant_slug, item.activity_status === 'active' ? '近期活跃' : '近期未使用', date(item.last_login_at), date(item.last_product_event_at), number(item.active_admin_count), number(item.event_count)].forEach(function (value) {
+        var cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell);
+      });
+      var actionCell = document.createElement('td');
+      actionCell.appendChild(actionButton('使用详情', function () { loadProductTenantDetail(item.tenant_id); }));
+      row.appendChild(actionCell); body.appendChild(row);
+    });
+    el('product-pagination').textContent = '显示 ' + number(data.items.length) + ' / ' + number(data.total) + ' 个租户';
+  }
+  function productDetailMetric(grid, labelText, valueText) { addDetailMetric(grid, labelText, valueText); }
+  function renderProductTenantDetail(item) {
+    var panel = el('product-analytics-detail'); panel.hidden = false; clear(panel);
+    var title = document.createElement('div'), heading = document.createElement('h2'), close = actionButton('关闭', function () { panel.hidden = true; });
+    title.className = 'card-hd'; heading.textContent = item.tenant_name + ' · 产品使用详情'; title.appendChild(heading); title.appendChild(close); panel.appendChild(title);
+    var grid = document.createElement('div'); grid.className = 'detail-grid';
+    productDetailMetric(grid, '产品活跃状态', item.activity_status === 'active' ? '近期活跃' : '近期未使用');
+    productDetailMetric(grid, '最近登录', date(item.last_login_at));
+    productDetailMetric(grid, '最近产品行为', date(item.last_product_event_at));
+    productDetailMetric(grid, '活跃管理员', number(item.active_admin_count));
+    productDetailMetric(grid, '登录成功 / 失败', number(item.login.success_count) + ' / ' + number(item.login.failure_count));
+    productDetailMetric(grid, '登录失败率', item.login.failure_rate === null ? '无登录尝试' : (item.login.failure_rate * 100).toFixed(2) + '%');
+    panel.appendChild(grid);
+    evidenceSection(panel, '功能采用情况', ['功能', '租户数', '管理员数', '事件量'], item.function_adoption, function (entry) {
+      return rowFrom([productEventLabel(entry.event_name), number(entry.tenant_count), number(entry.admin_count), number(entry.event_count)]);
+    }, '当前筛选范围内暂无功能使用事件');
+    evidenceSection(panel, '登录与使用趋势', ['日期', '登录成功', '登录失败', '活跃租户'], item.trends, function (entry) {
+      return rowFrom([entry.date, number(entry.login_success_count), number(entry.login_failure_count), number(entry.active_tenant_count)]);
+    }, '当前筛选范围内暂无趋势数据');
+  }
+  function loadProductTenantDetail(tenantId) {
+    return request(productRequestPath('/api/platform/operations/product-analytics/tenants/' + encodeURIComponent(tenantId), false)).then(renderProductTenantDetail).catch(function (err) { error(err.message || '产品使用详情加载失败'); });
+  }
+  function loadProductAnalytics() {
+    return Promise.all([
+      request(productRequestPath('/api/platform/operations/product-analytics/overview', false)),
+      request(productRequestPath('/api/platform/operations/product-analytics/tenants', true))
+    ]).then(function (results) { renderProductOverview(results[0]); renderProductTenants(results[1]); });
+  }
+
+  var originalRefresh = refresh;
+  refresh = function () {
+    error('');
+    return Promise.all([originalRefresh(), loadProductAnalytics()]).catch(function (err) { error(err.message || '加载失败'); });
+  };
+  initialiseProductAnalyticsDates();
   el('refresh').addEventListener('click', refresh);
   el('tenant-filters').addEventListener('submit', function (event) { event.preventDefault(); state.page = 1; loadTenants().catch(function (err) { error(err.message); }); });
   el('reset-filters').addEventListener('click', function () { el('tenant-filters').reset(); state.page = 1; loadTenants().catch(function (err) { error(err.message); }); });
   el('previous-page').addEventListener('click', function () { if (state.page > 1) { state.page -= 1; loadTenants().catch(function (err) { error(err.message); }); } });
   el('next-page').addEventListener('click', function () { if (state.page * state.pageSize < state.total) { state.page += 1; loadTenants().catch(function (err) { error(err.message); }); } });
+  el('product-analytics-filters').addEventListener('submit', function (event) { event.preventDefault(); loadProductAnalytics().catch(function (err) { error(err.message || '产品使用分析加载失败'); }); });
   refresh();
 }());
