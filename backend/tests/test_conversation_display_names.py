@@ -200,7 +200,17 @@ def test_group_messages_endpoint_includes_sender_and_recipient_display_fields(
         tenant_id=_TENANT_A,
     )
     _insert_recipient(db, msg.id, "staff_yingzi", tenant_id=_TENANT_A)
-    db.add(Contact(wecom_userid="contact_zhangsan", name="张三", tenant_id=_TENANT_A))
+    db.add(
+        Contact(
+            wecom_userid="contact_zhangsan",
+            name="张三",
+            tenant_id=_TENANT_A,
+            avatar_storage_backend="local",
+            avatar_storage_ref="tenants/tenant-a/avatars/internal-contact_zhangsan.jpg",
+            avatar_content_type="image/jpeg",
+            avatar_status="ready",
+        )
+    )
     db.flush()
 
     def _override_db():
@@ -219,6 +229,8 @@ def test_group_messages_endpoint_includes_sender_and_recipient_display_fields(
         assert m["sender"] == "contact_zhangsan"
         assert m["sender_display_name"] == "张三"
         assert m["sender_raw_id"] == "contact_zhangsan"
+        assert m["sender_avatar_url"].startswith("/api/admin/avatars/internal/")
+        assert m["sender_avatar_status"] == "ready"
         assert m["recipients"] == ["staff_yingzi"]
         # No Contact row for staff_yingzi -> fallback is the raw ID, never blank.
         assert m["recipient_display_names"] == ["staff_yingzi"]
@@ -252,7 +264,7 @@ def test_group_messages_endpoint_still_requires_auth(client) -> None:
 
 def test_contacts_endpoint_includes_raw_id_field(client) -> None:
     from app.auth import get_current_user
-    from app.db.models import AdminUser, Contact
+    from app.db.models import AdminUser, Contact, ExternalContact
     from app.db.session import get_db
     from app.main import app
 
@@ -276,6 +288,9 @@ def test_contacts_endpoint_includes_raw_id_field(client) -> None:
         contact_q = MagicMock()
         contact_q.filter.return_value = contact_q
         contact_q.all.return_value = [contact_row]
+        external_q = MagicMock()
+        external_q.filter.return_value = external_q
+        external_q.all.return_value = []
 
         # No admin_users rows for this tenant — _collect_staff_ids() falls
         # back to the "staff_" prefix signal alone, which finds nothing
@@ -293,6 +308,8 @@ def test_contacts_endpoint_includes_raw_id_field(client) -> None:
                 return recipient_q
             if target is Contact:
                 return contact_q
+            if target is ExternalContact:
+                return external_q
             if key == "wecom_user_id" or target is AdminUser:
                 return admin_user_q
             raise AssertionError(f"unexpected query target: {target}")

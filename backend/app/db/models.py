@@ -2360,6 +2360,14 @@ class Contact(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    # RND-371: controlled avatar cache metadata. The upstream URL and image
+    # bytes are deliberately never persisted in the relational database.
+    avatar_storage_backend = Column(String(32), nullable=True)
+    avatar_storage_ref = Column(Text, nullable=True)
+    avatar_content_type = Column(String(32), nullable=True)
+    avatar_source = Column(String(32), nullable=True)
+    avatar_synced_at = Column(DateTime(timezone=True), nullable=True)
+    avatar_status = Column(String(16), nullable=True)
 
 
 class ExternalContact(Base):
@@ -2422,6 +2430,14 @@ class ExternalContact(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    # RND-371: controlled avatar cache metadata. The WeCom source URL is
+    # intentionally transient and must never be returned to a browser.
+    avatar_storage_backend = Column(String(32), nullable=True)
+    avatar_storage_ref = Column(Text, nullable=True)
+    avatar_content_type = Column(String(32), nullable=True)
+    avatar_source = Column(String(32), nullable=True)
+    avatar_synced_at = Column(DateTime(timezone=True), nullable=True)
+    avatar_status = Column(String(16), nullable=True)
 
 
 class ExternalContactRefreshTask(Base):

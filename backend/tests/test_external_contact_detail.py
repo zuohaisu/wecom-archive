@@ -33,6 +33,8 @@ def db() -> Session:
             "current_nickname_display TEXT, current_nickname_observed_at TEXT, "
             "company TEXT, tags TEXT, source TEXT, "
             "owner_wecom_userid TEXT, last_interaction_at TEXT, message_count INTEGER, "
+            "avatar_storage_backend TEXT, avatar_storage_ref TEXT, avatar_content_type TEXT, "
+            "avatar_source TEXT, avatar_synced_at TEXT, avatar_status TEXT, "
             "tenant_id TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TEXT DEFAULT CURRENT_TIMESTAMP)"
         )

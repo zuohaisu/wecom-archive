@@ -97,6 +97,9 @@ a{color:var(--link-color)}
 .entity-item:hover{background:#f0f5ff}
 .entity-item.active{background:#e6f4ff;color:#0958d9}
 .entity-avatar{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#fff;flex-shrink:0}
+.avatar-controlled{position:relative;overflow:hidden;isolation:isolate}
+.avatar-fallback{display:flex;width:100%;height:100%;align-items:center;justify-content:center;line-height:1}
+.avatar-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border:0;background:transparent}
 .entity-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .entity-raw{color:#bbb;font-weight:400}
 .seat-badge{font-size:.62rem;padding:.05rem .35rem;border-radius:2px;margin-left:.3rem;font-weight:600;flex-shrink:0}
@@ -173,6 +176,7 @@ a{color:var(--link-color)}
 .tl-row-other{align-items:flex-start}
 .tl-row.audit-selected{background:#f8fafd}
 .tl-meta{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
+.tl-avatar{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1677ff;color:#fff;font-size:9px;font-weight:700;flex-shrink:0}
 .tl-sender{font-size:.78rem;font-weight:600;color:#555}
 .tl-staff{color:#0958d9}
 .tl-sender-raw{font-size:.7rem;color:#bbb;font-weight:400}
@@ -432,6 +436,7 @@ __SIDENAV__
 
 <script src="/web/static/console/console-state.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/api-client.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/avatar.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/conversation-list.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/timeline.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/message-renderers.js?v=__STATIC_VERSION__"></script>

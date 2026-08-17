@@ -16,6 +16,8 @@ class TimelineMessageOut(BaseModel):
     sender: Optional[str] = None
     sender_display_name: Optional[str] = None
     sender_raw_id: Optional[str] = None
+    sender_avatar_url: Optional[str] = None
+    sender_avatar_status: str = "missing"
     recipients: list[str]
     recipient_display_names: list[str] = []
     recipient_raw_ids: list[str] = []

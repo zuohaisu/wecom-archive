@@ -49,7 +49,9 @@ CREATE TABLE archive_message_recipients (
 );
 CREATE TABLE contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, wecom_userid TEXT NOT NULL,
-    name TEXT, tenant_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    name TEXT, tenant_id TEXT, avatar_storage_backend TEXT, avatar_storage_ref TEXT,
+    avatar_content_type TEXT, avatar_source TEXT, avatar_synced_at TEXT, avatar_status TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE media_files (
@@ -369,7 +371,8 @@ def test_router_count() -> None:
     # RND-161 adds the proactive user-feedback route.
     # RND-359 adds the internal-staff handoff-resolution route.
     # RND-408 adds the 7 public AI support page/API routes.
-    assert route_count == 169
+    # RND-371 adds the controlled avatar and user-detail routes.
+    assert route_count == 171
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -406,6 +409,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/access-requests/{request_id}/link",
             "/api/admin/access-requests/{request_id}/create-account",
             "/api/admin/audit-logs",
+            "/api/admin/avatars/{identity_type}/{avatar_id}",
             "/api/admin/dashboard",
             "/api/admin/export/approve",
             "/api/admin/export/execute",
@@ -589,6 +593,12 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/operations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
+        (
+            "/api/admin/avatars/{identity_type}/{avatar_id}",
+            frozenset({"GET"}),
+            "None",
+            "None",
+        ),
         ("/api/admin/dashboard", frozenset({"GET"}), "DashboardOut", "None"),
         ("/api/admin/export/approve", frozenset({"POST"}), "None", "None"),
         ("/api/admin/export/execute", frozenset({"POST"}), "None", "None"),
@@ -691,6 +701,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/users/accept", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite-batch", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/users/{user_id}", frozenset({"GET"}), "AdminUserDetail", "None"),
         ("/api/admin/users/{user_id}", frozenset({"PATCH"}), "None", "None"),
         (
             "/api/admin/users/{user_id}/role",

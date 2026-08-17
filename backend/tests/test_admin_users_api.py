@@ -10,6 +10,8 @@ from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app.db.models import Contact
+
 
 _NOW = datetime.now(timezone.utc)
 _RECENT_MS = int((_NOW - timedelta(days=29)).timestamp() * 1000)
@@ -64,6 +66,7 @@ def db() -> Session:
                 """
             )
         )
+    Contact.__table__.create(engine)
     session = Session(engine)
     yield session
     session.close()
@@ -162,6 +165,8 @@ def test_list_admin_users_is_tenant_scoped_and_counts_sent_messages(client: Test
                 "wecom_user_id": "alice-id",
                 "email": None,
                 "department": "Legal",
+                "avatar_url": None,
+                "avatar_status": "missing",
                 "role": "admin",
                 "status": "active",
                 "last_active_at": _NOW.isoformat(),

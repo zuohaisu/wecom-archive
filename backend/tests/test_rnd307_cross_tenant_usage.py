@@ -53,7 +53,9 @@ CREATE TABLE media_files (
 );
 CREATE TABLE contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, wecom_userid TEXT NOT NULL, name TEXT,
-    tenant_id TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tenant_id TEXT, avatar_storage_backend TEXT, avatar_storage_ref TEXT,
+    avatar_content_type TEXT, avatar_source TEXT, avatar_synced_at DATETIME,
+    avatar_status TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME
 );
 CREATE TABLE sync_states (

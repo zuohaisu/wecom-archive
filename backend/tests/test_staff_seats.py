@@ -107,6 +107,9 @@ CREATE TABLE contacts (
     wecom_userid TEXT NOT NULL,
     name TEXT,
     tenant_id TEXT,
+    avatar_storage_backend TEXT, avatar_storage_ref TEXT,
+    avatar_content_type TEXT, avatar_source TEXT, avatar_synced_at TEXT,
+    avatar_status TEXT,
     created_at TEXT,
     updated_at TEXT
 );

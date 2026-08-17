@@ -192,7 +192,7 @@ function timelineSignature(msgs){
     var rcptSig=m.roomid?rcptNames.length:rcptNames;
     return [
       m.msgid,m.msgtime,m.msgtype,m.sender,m.roomid,
-      m.sender_display_name,m.sender_raw_id,rcptSig,
+      m.sender_display_name,m.sender_raw_id,m.sender_avatar_url,m.sender_avatar_status,rcptSig,
       m.content_text,m.media_status,m.media_access_url,
       // RND-207: stable endpoint path + intrinsic dims, NOT the signed URL
       // (which still never enters the signature). Included so a backfilled
@@ -246,6 +246,9 @@ function timelineRowHtml(m){
   var senderName=m.sender_display_name||m.sender||'?';
   var senderRaw=m.sender_raw_id||m.sender;
   var senderSecondary=(senderRaw&&senderRaw!==senderName)?' <span class="tl-sender-raw">('+esc(senderRaw)+')</span>':'';
+  var senderAvatar=(typeof ArchiveAvatar!=='undefined'&&ArchiveAvatar.html)
+    ?ArchiveAvatar.html(m.sender_avatar_url,senderName,'tl-avatar')
+    :'<span class="tl-avatar">'+esc((senderName||'?').charAt(0).toUpperCase())+'</span>';
   var rcptNames=(m.recipient_display_names&&m.recipient_display_names.length)?m.recipient_display_names:(m.recipients||[]);
   var rcpt='';
   if(m.roomid){
@@ -256,7 +259,7 @@ function timelineRowHtml(m){
     rcpt='<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>';
   }
   return '<div class="'+rowCls+'" data-msgid="'+esc(m.msgid)+'" data-msgsig="'+esc(timelineSignature([m]))+'" onclick="selectMessageForAudit(&quot;'+esc(m.msgid)+'&quot;)">'
-    +'<div class="tl-meta"><span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
+    +'<div class="tl-meta">'+senderAvatar+'<span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
     +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+revokedBadge+'</div>'
     +bodyHtml
     +rcpt+auditLine+'</div>';

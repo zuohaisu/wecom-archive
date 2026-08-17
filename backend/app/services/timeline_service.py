@@ -49,6 +49,10 @@ from app.media_storage import (
 from app.message_type_registry import describe_message_type
 from app.revoke_reconciliation import display_status as _revoke_display_status
 from app.schemas.timeline import ConversationMessagesOut, PaginationOut, TimelineMessageOut
+from app.services.avatar_sync import (
+    external_avatar_presentations,
+    internal_avatar_presentations,
+)
 
 
 def attach_group_chat_display_name(
@@ -906,6 +910,10 @@ def resolve_timeline_page(
                 if isinstance(card_fields, dict) and card_fields.get("userid"):
                     participant_ids.add(card_fields["userid"])
     display_names = _load_display_names_for_ids(db, tenant_id, participant_ids)
+    avatars = internal_avatar_presentations(db, tenant_id, participant_ids)
+    # Customer-level external identities override the generic archive-contact
+    # cache; the map is keyed solely by tenant-scoped stable IDs.
+    avatars.update(external_avatar_presentations(db, tenant_id, participant_ids))
 
     media_files_map = _load_media_files_map(db, tenant_id, [m.id for m in page])
     revocations = _load_revocations_map(db, tenant_id, [m.id for m in page])
@@ -1163,6 +1171,8 @@ def resolve_timeline_page(
                     else None
                 ),
                 sender_raw_id=msg.sender,
+                sender_avatar_url=(avatars[msg.sender].url if msg.sender else None),
+                sender_avatar_status=(avatars[msg.sender].status if msg.sender else "missing"),
                 recipients=recipients,
                 recipient_display_names=[
                     resolve_person_display_name(r, display_names.get(r)) for r in recipients
