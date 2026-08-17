@@ -44,7 +44,8 @@ FastAPI application and worker scripts ──► PostgreSQL
 The application code is under `backend/app/`; migrations and operational
 scripts are under `backend/alembic/` and `backend/scripts/`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and data-flow
-reference.
+reference. See [contact-avatar privacy and update behavior](docs/contact-avatars.md)
+for the controlled profile-image contract.
 
 ## Quick start
 

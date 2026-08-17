@@ -100,7 +100,7 @@ def resolve_ingestable_sources(
     """The single allowlist gate a downstream indexer must call before
     ingesting anything. An entry is ingestable only if:
       1. status == APPROVED (draft/deprecated are never a current answer basis)
-      2. access_level in {CUSTOMER, INTERNAL} (FORBIDDEN is always rejected)
+      2. access_level in {PUBLIC, CUSTOMER, INTERNAL} (FORBIDDEN is always rejected)
       3. its file content has no sensitive-pattern finding
 
     Rejections are returned, not silently dropped, so governance tests and

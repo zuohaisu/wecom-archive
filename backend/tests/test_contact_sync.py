@@ -285,8 +285,6 @@ def test_resolve_display_name_handles_missing_metadata_safely(monkeypatch) -> No
 def test_collect_participant_ids_skips_blank_and_dedupes() -> None:
     mod = _load_sync_script_module()
 
-    from app.db.models import ArchiveMessage, ArchiveMessageRecipient
-
     session = MagicMock()
 
     sender_q = MagicMock()
@@ -343,7 +341,11 @@ def test_contacts_still_requires_auth(client) -> None:
 
 def test_get_contacts_returns_display_name_from_contact_name(client) -> None:
     from app.auth import get_current_user
-    from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact
+    from app.db.models import (
+        AdminUser,
+        Contact,
+        ExternalContact,
+    )
     from app.db.session import get_db
     from app.main import app
 
@@ -367,6 +369,9 @@ def test_get_contacts_returns_display_name_from_contact_name(client) -> None:
         contact_q = MagicMock()
         contact_q.filter.return_value = contact_q
         contact_q.all.return_value = [contact_row]
+        external_q = MagicMock()
+        external_q.filter.return_value = external_q
+        external_q.all.return_value = []
 
         # No admin_users rows for this tenant — _collect_staff_ids() falls
         # back to the "staff_" prefix signal alone (see RND-132), which
@@ -384,6 +389,8 @@ def test_get_contacts_returns_display_name_from_contact_name(client) -> None:
                 return recipient_q
             if target is Contact:
                 return contact_q
+            if target is ExternalContact:
+                return external_q
             if key == "wecom_user_id" or target is AdminUser:
                 return admin_user_q
             raise AssertionError(f"unexpected query target: {target}")

@@ -114,6 +114,8 @@ def test_list_filters_exact_tags_and_resolves_owner_display_names(client: TestCl
     items = {item["external_userid"]: item for item in payload["items"]}
     assert items["external-vip"]["tags"] == ["VIP", "重点客户"]
     assert items["external-vip"]["owner_display_name"] == "张三"
+    assert items["external-vip"]["avatar_url"] is None
+    assert items["external-vip"]["avatar_status"] == "missing"
     assert items["external-vip"]["owner_display_name"] != "tenant-a"
     # A missing Contact name must fall back to the raw owner ID, not tenant_id.
     assert items["external-vip2026"]["owner_display_name"] == "staff-missing"

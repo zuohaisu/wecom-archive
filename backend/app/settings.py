@@ -217,7 +217,13 @@ def get_self_service_trial_settings() -> SelfServiceTrialSettings:
 class AiSettings(BaseSettings):
     """AI support (RND-354 epic) configuration. ai_support_enabled is the
     single kill switch every AI surface (T2 answer service, T3 UI, T5
-    eval/handoff) reads — never duplicate this flag elsewhere."""
+    eval/handoff) reads — never duplicate this flag elsewhere.
+
+    RND-408 adds ai_public_support_enabled: a separate switch for the
+    anonymous visitor pre-sales chat. It is gated by ai_support_enabled
+    (public cannot be on while overall AI support is off) and has its own
+    daily token budgets so visitor traffic never consumes tenant quotas.
+    """
 
     ai_support_enabled: str = "false"
     ai_llm_provider: str = ""  # "" | "deepseek" | "fake"
@@ -229,6 +235,12 @@ class AiSettings(BaseSettings):
     # calls (still serves the deterministic disabled/insufficient-evidence
     # paths). Empty/unset = no cap.
     ai_daily_token_budget_per_tenant: str = ""
+    # RND-408 public AI support kill switch and budgets. Default closed.
+    ai_public_support_enabled: str = "false"
+    # Total public-token budget across all anonymous visitors per UTC day.
+    ai_public_support_daily_token_budget: str = ""
+    # Per-visitor daily token budget (still UTC day). Empty/unset = no cap.
+    ai_public_support_daily_token_budget_per_visitor: str = ""
 
 
 def get_ai_settings() -> AiSettings:

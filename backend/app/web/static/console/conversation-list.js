@@ -1,6 +1,6 @@
 function entityListSignature(items){
   return JSON.stringify((items||[]).map(function(it){
-    return [mode==='staff'?it.staff_id:it.contact_id,it.raw_id,it.display_name,it.seat_status];
+    return [mode==='staff'?it.staff_id:it.contact_id,it.raw_id,it.display_name,it.avatar_url,it.avatar_status,it.seat_status];
   }));
 }
 function convListSignature(convs){
@@ -35,8 +35,9 @@ function renderEntityList(items){
     var id=mode==='staff'?item.staff_id:item.contact_id;
     var rawId=item.raw_id||id;
     var name=item.display_name||id;
-    var av=esc(name.charAt(0).toUpperCase());
-    var bg=mode==='staff'?'#1890ff':'#389e0d';
+    var av=(typeof ArchiveAvatar!=='undefined'&&ArchiveAvatar.html)
+      ?ArchiveAvatar.html(item.avatar_url,name,'entity-avatar')
+      :'<div class="entity-avatar" style="background:'+(mode==='staff'?'#1890ff':'#389e0d')+'">'+esc(name.charAt(0).toUpperCase())+'</div>';
     var secondary=(rawId&&rawId!==name)?'<span class="entity-raw"> · '+esc(rawId)+'</span>':'';
     var seatBadge='';
     if(mode==='staff'&&item.seat_status){
@@ -45,8 +46,7 @@ function renderEntityList(items){
       seatBadge='<span class="seat-badge '+seatCls+'">'+esc(seatLabel)+'</span>';
     }
     html+='<div class="entity-item" data-id="'+esc(id)+'" data-name="'+esc(name)+'" onclick="onEntityClick(this)">'
-      +'<div class="entity-avatar" style="background:'+bg+'">'+av+'</div>'
-      +'<span class="entity-name">'+esc(name)+secondary+'</span>'+seatBadge+'</div>';
+      +av+'<span class="entity-name">'+esc(name)+secondary+'</span>'+seatBadge+'</div>';
   });
   body.innerHTML=html;
   if(selEntityId){
@@ -225,7 +225,10 @@ function renderPanelInfo(detail){
     var name=p.display_name||p.raw_id||p.id;
     var tagCls=p.role==='staff'?'panel-participant-tag-staff':'panel-participant-tag-contact';
     var tagLabel=p.role==='staff'?I18N.t('panel.role.staff'):I18N.t('panel.role.contact');
-    return '<div class="panel-participant"><div style="'+av(name,i)+'">'+esc((name||'?').charAt(0).toUpperCase())+'</div>'
+    var avatar=(typeof ArchiveAvatar!=='undefined'&&ArchiveAvatar.html)
+      ?ArchiveAvatar.html(p.avatar_url,name,'tl-avatar')
+      :'<div style="'+av(name,i)+'">'+esc((name||'?').charAt(0).toUpperCase())+'</div>';
+    return '<div class="panel-participant">'+avatar
       +'<span class="panel-participant-name">'+esc(name)+'</span>'
       +'<span class="panel-participant-tag '+tagCls+'">'+esc(tagLabel)+'</span></div>';
   }).join('');

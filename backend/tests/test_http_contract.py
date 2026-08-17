@@ -49,7 +49,9 @@ CREATE TABLE archive_message_recipients (
 );
 CREATE TABLE contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, wecom_userid TEXT NOT NULL,
-    name TEXT, tenant_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    name TEXT, tenant_id TEXT, avatar_storage_backend TEXT, avatar_storage_ref TEXT,
+    avatar_content_type TEXT, avatar_source TEXT, avatar_synced_at TEXT, avatar_status TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE media_files (
@@ -368,7 +370,9 @@ def test_router_count() -> None:
     # RND-357 adds the 8 AI support page/API routes.
     # RND-161 adds the proactive user-feedback route.
     # RND-359 adds the internal-staff handoff-resolution route.
-    assert route_count == 162
+    # RND-408 adds the 7 public AI support page/API routes.
+    # RND-371 adds the controlled avatar and user-detail routes.
+    assert route_count == 171
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -405,6 +409,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/access-requests/{request_id}/link",
             "/api/admin/access-requests/{request_id}/create-account",
             "/api/admin/audit-logs",
+            "/api/admin/avatars/{identity_type}/{avatar_id}",
             "/api/admin/dashboard",
             "/api/admin/export/approve",
             "/api/admin/export/execute",
@@ -512,6 +517,13 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/ai/support/sessions/{chat_session_id}/handoff",
             "/api/ai/support/feedback",
             "/api/platform/ai/handoffs/{handoff_id}/resolve",
+            "/public/support",
+            "/api/ai/public/support/status",
+            "/api/ai/public/support/sessions",
+            "/api/ai/public/support/sessions/{chat_session_id}",
+            "/api/ai/public/support/sessions/{chat_session_id}/messages",
+            "/api/ai/public/support/sessions/{chat_session_id}/handoff/preview",
+            "/api/ai/public/support/sessions/{chat_session_id}/handoff",
             "/api/payments/wechat/notify",
             "/api/provisioning/activate",
             "/api/provisioning/config",
@@ -581,6 +593,12 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/operations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
+        (
+            "/api/admin/avatars/{identity_type}/{avatar_id}",
+            frozenset({"GET"}),
+            "None",
+            "None",
+        ),
         ("/api/admin/dashboard", frozenset({"GET"}), "DashboardOut", "None"),
         ("/api/admin/export/approve", frozenset({"POST"}), "None", "None"),
         ("/api/admin/export/execute", frozenset({"POST"}), "None", "None"),
@@ -683,6 +701,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/users/accept", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite", frozenset({"POST"}), "None", "None"),
         ("/api/admin/users/invite-batch", frozenset({"POST"}), "None", "None"),
+        ("/api/admin/users/{user_id}", frozenset({"GET"}), "AdminUserDetail", "None"),
         ("/api/admin/users/{user_id}", frozenset({"PATCH"}), "None", "None"),
         (
             "/api/admin/users/{user_id}/role",
@@ -950,6 +969,18 @@ def test_route_snapshot_with_real_model_names() -> None:
             "None",
         ),
         ("/api/ai/support/feedback", frozenset({"POST"}), "UserFeedbackOut", "None"),
+        ("/public/support", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/api/ai/public/support/status", frozenset({"GET"}), "_AiPublicSupportStatusOut", "None"),
+        ("/api/ai/public/support/sessions", frozenset({"POST"}), "_AiPublicChatSessionOut", "None"),
+        ("/api/ai/public/support/sessions/{chat_session_id}", frozenset({"DELETE"}), "None", "None"),
+        ("/api/ai/public/support/sessions/{chat_session_id}/messages", frozenset({"POST"}), "None", "None"),
+        (
+            "/api/ai/public/support/sessions/{chat_session_id}/handoff/preview",
+            frozenset({"POST"}),
+            "_HandoffPreviewOut",
+            "None",
+        ),
+        ("/api/ai/public/support/sessions/{chat_session_id}/handoff", frozenset({"POST"}), "_HandoffOut", "None"),
         ("/api/refunds/wechat/notify", frozenset({"POST"}), "None", "None"),
         (
             "/api/search/contacts",

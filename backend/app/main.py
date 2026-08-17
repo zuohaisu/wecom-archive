@@ -12,7 +12,9 @@ from app.routers.admin_contacts_page import router as admin_contacts_page_router
 from app.routers.admin_media_page import router as admin_media_page_router
 from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.ai_support import router as ai_support_router
+from app.routers.public_ai_support import router as public_ai_support_router
 from app.routers.audit import router as audit_router
+from app.routers.avatars import router as avatars_router
 from app.routers.auth import router as auth_router
 from app.routers.billing import router as billing_router
 from app.routers.branding import router as branding_router
@@ -142,6 +144,7 @@ def create_app() -> FastAPI:
     app.include_router(sync_router, prefix="/api/admin")
     app.include_router(audit_router, prefix="/api/admin")
     app.include_router(users_router, prefix="/api/admin")
+    app.include_router(avatars_router, prefix="/api/admin")
     app.include_router(settings_router, prefix="/api/admin")
     app.include_router(media_library_router, prefix="/api/admin")
     app.include_router(external_contacts_router, prefix="/api/admin")
@@ -166,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(platform_operations_router)
     app.include_router(provisioning_router)
     app.include_router(ai_support_router)
+    app.include_router(public_ai_support_router)
 
     @app.get("/health/live")
     def health_live():

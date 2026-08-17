@@ -1,0 +1,13 @@
+[Unit]
+Description=WeCom Archive Public AI Support Chat Session Retention Sweep Timer
+
+[Timer]
+# Daily — public retention windows are measured in days (AI_PUBLIC_RETENTION_DAYS,
+# default 7), so a daily sweep is frequent enough that expired sessions
+# never linger more than ~24h past their window.
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+Unit=wecom-ai-public-retention-sweep.service
+
+[Install]
+WantedBy=timers.target

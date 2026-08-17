@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI 售前咨询</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="manifest" href="/api/branding/manifest.webmanifest">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/public_support.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="public-support-shell">
+  <header class="public-support-header">
+    <h1>AI 售前咨询</h1>
+    <p>基于公开产品资料为你解答功能、价格、试用与开通流程；无法确定时可转人工。</p>
+  </header>
+
+  <main class="public-support-main">
+    <div id="support-disabled" class="notice notice-warning hidden" role="status">
+      AI 售前咨询当前未启用。
+    </div>
+
+    <div id="support-chat" class="support-chat">
+      <section id="support-messages" class="support-messages" aria-live="polite" aria-label="对话记录">
+        <div class="support-bubble support-bubble-assistant">
+          <div class="support-bubble-content">
+            你好！我可以为你解答 365 企微会话存档的产品功能、价格套餐、试用规则、购买续费、企业微信接入准备与开通流程。
+            <br><br>
+            请勿在此输入企业微信密钥、聊天记录截图、身份证号、手机号等敏感信息。
+          </div>
+        </div>
+      </section>
+
+      <form id="support-composer" class="support-composer">
+        <div class="support-input-row">
+          <label class="sr-only" for="support-input">输入你的问题</label>
+          <textarea id="support-input" class="input" rows="2" placeholder="例如：年度套餐多少钱？如何试用？"></textarea>
+          <div class="support-actions">
+            <button type="submit" class="btn btn-primary" id="support-send">发送</button>
+            <button type="button" class="btn hidden" id="support-stop">停止生成</button>
+            <button type="button" class="btn btn-ghost" id="support-retry" disabled>重试</button>
+            <button type="button" class="btn btn-ghost" id="support-clear">清空会话</button>
+          </div>
+        </div>
+        <p id="support-status" class="field-help" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </main>
+</div>
+
+<div id="handoff-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="handoff-title">
+  <div class="modal-body">
+    <h2 id="handoff-title">转人工联系</h2>
+    <p>以下是根据本次对话生成的摘要，仅包含你在此对话中输入的内容，可自行编辑后再提交。</p>
+    <label for="handoff-summary">提交给商务的摘要</label>
+    <textarea id="handoff-summary" class="input" rows="10"></textarea>
+    <label for="handoff-contact">联系方式（可选）</label>
+    <input id="handoff-contact" class="input" type="text" placeholder="手机号 / 邮箱 / 微信">
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="handoff-cancel">取消</button>
+      <button type="button" class="btn btn-primary" id="handoff-confirm">确认提交</button>
+    </div>
+    <p id="handoff-status" class="field-help" role="status" aria-live="polite"></p>
+  </div>
+</div>
+
+<script src="/web/static/public_support.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

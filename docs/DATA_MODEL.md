@@ -481,6 +481,13 @@ Lightweight cache of WeCom user identities encountered in the archive. Populated
 
 Indexes: unique on `(tenant_id, wecom_userid)` — tenant-scoped deduplication.
 
+RND-371 adds the same controlled avatar-cache metadata to `contacts` and
+`external_contacts`: `avatar_storage_backend`, `avatar_storage_ref`,
+`avatar_content_type`, `avatar_source`, `avatar_synced_at`, and
+`avatar_status`. These store only an opaque private-storage reference and
+bounded state (`ready`, `missing`, `invalid`, `unavailable`, or `inactive`),
+never image bytes or an upstream WeCom URL.
+
 ---
 
 ### External-contact identity (RND-170)

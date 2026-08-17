@@ -23,7 +23,8 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.email import send_password_reset_email
-from app.schemas.admin_users import AdminUserListItem, AdminUserListOut
+from app.schemas.admin_users import AdminUserDetail, AdminUserListItem, AdminUserListOut
+from app.services.avatar_sync import internal_avatar_presentations
 from app.settings import get_email_settings, get_wecom_oauth_settings
 
 users_router = APIRouter()
@@ -91,6 +92,9 @@ def list_admin_users(
         .all()
     )
     msg_counts = {sender: count for sender, count in aggregates}
+    avatars = internal_avatar_presentations(
+        db, tenant_id, {user.wecom_user_id for user in rows}
+    )
 
     return AdminUserListOut(
         items=[
@@ -100,6 +104,8 @@ def list_admin_users(
                 wecom_user_id=user.wecom_user_id,
                 email=user.email,
                 department=user.department,
+                avatar_url=avatars[user.wecom_user_id].url,
+                avatar_status=avatars[user.wecom_user_id].status,
                 role=user.role,
                 status=user.status,
                 last_active_at=(
@@ -112,6 +118,45 @@ def list_admin_users(
         total=total,
         page=page,
         per_page=per_page,
+    )
+
+
+@users_router.get("/users/{user_id}", response_model=AdminUserDetail)
+def get_admin_user_detail(
+    user_id: str,
+    auth: tuple[AdminUser, str] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AdminUserDetail:
+    """Return one tenant-scoped console employee profile for the detail drawer."""
+    _, tenant_id = auth
+    user = _resolve_target(db, user_id, tenant_id)
+    avatar = internal_avatar_presentations(db, tenant_id, {user.wecom_user_id})[
+        user.wecom_user_id
+    ]
+    cutoff_ms = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp() * 1000)
+    msg_count = (
+        db.query(func.count(ArchiveMessage.id))
+        .filter(
+            ArchiveMessage.tenant_id == tenant_id,
+            ArchiveMessage.sender == user.wecom_user_id,
+            ArchiveMessage.msgtime >= cutoff_ms,
+        )
+        .scalar()
+        or 0
+    )
+    return AdminUserDetail(
+        id=user.id,
+        name=user.name,
+        wecom_user_id=user.wecom_user_id,
+        email=user.email,
+        department=user.department,
+        avatar_url=avatar.url,
+        avatar_status=avatar.status,
+        role=user.role,
+        status=user.status,
+        last_active_at=user.last_active_at.isoformat() if user.last_active_at else None,
+        msg_count_30d=int(msg_count),
+        last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
     )
 
 

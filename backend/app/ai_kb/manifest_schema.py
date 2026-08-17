@@ -56,6 +56,7 @@ _REQUIRED_FIELDS = (
 
 
 class AccessLevel(str, Enum):
+    PUBLIC = "public"  # approved for anonymous pre-sales visitors (RND-408)
     CUSTOMER = "customer"
     INTERNAL = "internal"
     FORBIDDEN = "forbidden"

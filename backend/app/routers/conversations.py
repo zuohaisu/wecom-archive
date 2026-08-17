@@ -106,6 +106,10 @@ from app.schemas.listing import (
     MonitoredAccountOut,
 )
 from app.services import listing_service
+from app.services.avatar_sync import (
+    external_avatar_presentations,
+    internal_avatar_presentations,
+)
 from app.services.external_contact_identity import external_contact_display_names
 from app.services.listing_service import (
     # RND-219: monitored-accounts / contacts / conversation-list logic moved
@@ -601,13 +605,29 @@ def get_conversation_detail(
         buckets[0],
     )
 
+    avatars = internal_avatar_presentations(db, tenant_id, participant_ids)
+    avatars.update(external_avatar_presentations(db, tenant_id, participant_ids))
     participants = [
-        ConversationParticipantOut(id=sid, raw_id=sid, display_name=name, role="staff")
+        ConversationParticipantOut(
+            id=sid,
+            raw_id=sid,
+            display_name=name,
+            role="staff",
+            avatar_url=avatars[sid].url,
+            avatar_status=avatars[sid].status,
+        )
         for sid, name in zip(
             bucket["monitored_account_ids"], bucket["monitored_account_display_names"]
         )
     ] + [
-        ConversationParticipantOut(id=cid, raw_id=cid, display_name=name, role="contact")
+        ConversationParticipantOut(
+            id=cid,
+            raw_id=cid,
+            display_name=name,
+            role="contact",
+            avatar_url=avatars[cid].url,
+            avatar_status=avatars[cid].status,
+        )
         for cid, name in zip(bucket["contact_ids"], bucket["contact_display_names"])
     ]
 
