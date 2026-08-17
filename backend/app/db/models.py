@@ -2785,6 +2785,93 @@ class AiToolInvocation(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class AiPublicChatSession(Base):
+    """One anonymous visitor's pre-sales AI conversation. Deliberately
+    isolated from tenant-scoped ai_chat_sessions: no tenant_id, no
+    admin_user_id, only an opaque visitor_id cookie."""
+
+    __tablename__ = "ai_public_chat_sessions"
+    __table_args__ = (
+        Index("ix_ai_public_chat_sessions_visitor_created", "visitor_id", "created_at", "id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    visitor_id = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="active")  # active | closed
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_activity_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AiPublicChatMessage(Base):
+    """One turn of an anonymous visitor's pre-sales AI conversation."""
+
+    __tablename__ = "ai_public_chat_messages"
+    __table_args__ = (
+        Index("ix_ai_public_chat_messages_session_created", "session_id", "created_at", "id"),
+        Index("ix_ai_public_chat_messages_visitor", "visitor_id"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), ForeignKey("ai_public_chat_sessions.id"), nullable=False)
+    visitor_id = Column(String(64), nullable=False)
+    role = Column(String(16), nullable=False)  # user | assistant | system
+    content = Column(Text, nullable=False)
+    citations = Column(JSONB, nullable=True)
+    response_status = Column(String(32), nullable=True)
+    index_version_id = Column(BigInteger, ForeignKey("kb_index_versions.id"), nullable=True)
+    model_provider = Column(String(64), nullable=True)
+    model_name = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AiPublicQueryAuditLog(Base):
+    """Redacted audit trail for public AI support queries. No tenant_id,
+    no admin_user_id, no diagnostic values — only what the public
+    answer_service itself retrieved and returned."""
+
+    __tablename__ = "ai_public_query_audit_logs"
+    __table_args__ = (
+        Index("ix_ai_public_query_audit_logs_visitor_created", "visitor_id", "created_at", "id"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    visitor_id = Column(String(64), nullable=False)
+    session_id = Column(String(36), ForeignKey("ai_public_chat_sessions.id", ondelete="SET NULL"), nullable=True)
+    query_text = Column(Text, nullable=False)
+    retrieved_chunk_ids = Column(JSONB, nullable=False, default=list)
+    index_version_id = Column(BigInteger, ForeignKey("kb_index_versions.id"), nullable=True)
+    model_provider = Column(String(64), nullable=True)
+    model_name = Column(String(128), nullable=True)
+    response_status = Column(String(32), nullable=False)
+    latency_ms = Column(Integer, nullable=True)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AiPublicHandoff(Base):
+    """One anonymous visitor-confirmed escalation-to-human request.
+    Mirrors AiHandoff but is visitor-scoped, not tenant-scoped."""
+
+    __tablename__ = "ai_public_handoff"
+    __table_args__ = (
+        Index("ix_ai_public_handoff_visitor_created", "visitor_id", "created_at", "id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    visitor_id = Column(String(64), nullable=False)
+    session_id = Column(String(36), ForeignKey("ai_public_chat_sessions.id", ondelete="SET NULL"), nullable=True)
+    redacted_summary = Column(Text, nullable=False)
+    contact = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="pending")  # pending | in_review | resolved
+    reason = Column(String(32), nullable=True)
+    resolution_category = Column(String(32), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ExternalContactNicknameHistory(Base):
     """Observed transitions of a customer's own WeCom nickname."""
 
