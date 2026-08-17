@@ -8,6 +8,7 @@
   var pollTimer = null;
   var busy = false;
   var billingMode = document.body.dataset.billingMode || 'admin';
+  var canOrder = document.body.dataset.billingCanOrder === 'true';
   var terminal = { succeeded: true, closed: true, failed: true };
   var activeOrder = { creating: true, pending: true, paid_activation_pending: true };
 
@@ -147,13 +148,15 @@
     var unavailable = node('payment-unavailable');
     var next = node('billing-next-step');
     setup.hidden = policy.kind !== 'setup';
-    create.hidden = policy.kind !== 'payment';
+    create.hidden = !canOrder || policy.kind !== 'payment';
     create.disabled = busy;
     create.textContent = t(policy.labelKey, {
       amount: money(plan.amount_cents, plan.currency)
     });
     unavailable.hidden = plan.payment_enabled || policy.kind === 'setup';
-    next.textContent = t(policy.nextStepKey);
+    next.textContent = canOrder
+      ? t(policy.nextStepKey)
+      : t('billing.next.readonly');
   }
 
   function renderPlan() {
@@ -239,7 +242,8 @@
     var close = node('close-order');
     var hasLiveOrder = Boolean(order && activeOrder[order.status]);
     var validQr = Boolean(
-      order
+      canOrder
+      && order
       && order.status === 'pending'
       && order.qr_available
       && new Date(order.expires_at) > new Date()
@@ -270,8 +274,8 @@
       status.textContent = t(statusKey(order.status));
       status.className = statusClass(order.status);
     }
-    refresh.hidden = !hasLiveOrder;
-    close.hidden = !(order && (order.status === 'creating' || order.status === 'pending'));
+    refresh.hidden = !hasLiveOrder || !canOrder;
+    close.hidden = !(order && (order.status === 'creating' || order.status === 'pending')) || !canOrder;
     refresh.disabled = busy || Boolean(plan && !plan.payment_enabled);
     close.disabled = busy || Boolean(plan && !plan.payment_enabled);
     renderActions();

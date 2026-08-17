@@ -15,7 +15,12 @@ from qrcode.constants import ERROR_CORRECT_M
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.auth import BillingOwnerContext, get_billing_owner
+from app.auth import (
+    BILLING_MANAGER_ROLES,
+    BillingAccessContext,
+    get_billing_manager,
+    get_billing_viewer,
+)
 from app.db.models import BillingPlan, PaymentOrder, PlanEntitlement
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
@@ -71,8 +76,17 @@ def _factory(db: Session):
     return sessionmaker(bind=db.get_bind(), expire_on_commit=False)
 
 
-def _out(summary: PaymentOrderSummary) -> PaymentOrderOut:
-    return PaymentOrderOut(**asdict(summary))
+def _out(
+    summary: PaymentOrderSummary,
+    context: Optional[BillingAccessContext] = None,
+) -> PaymentOrderOut:
+    out = PaymentOrderOut(**asdict(summary))
+    # RND-407: read-only roles may inspect an order's status but must not be
+    # able to pay it; hide the checkout QR flag so the client never renders
+    # a payment surface for them.
+    if context is not None and context.role not in BILLING_MANAGER_ROLES:
+        out.qr_available = False
+    return out
 
 
 def _raise_order_error(error: Exception) -> None:
@@ -90,7 +104,7 @@ def _raise_order_error(error: Exception) -> None:
 @router.get("/admin/billing", response_class=HTMLResponse)
 def billing_page(
     request: Request,
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_viewer),
 ) -> HTMLResponse:
     paths = {route.path for route in request.app.routes if hasattr(route, "path")}
     sidenav = (
@@ -104,13 +118,16 @@ def billing_page(
             i18n_script=I18N_SCRIPT_TAG,
             sidenav=sidenav,
             billing_mode=context.session_scope,
+            billing_can_order=(
+                "true" if context.role in BILLING_MANAGER_ROLES else "false"
+            ),
         )
     )
 
 
 @router.get("/api/billing/plan", response_model=BillingPlanOut)
 def billing_plan(
-    _context: BillingOwnerContext = Depends(get_billing_owner),
+    _context: BillingAccessContext = Depends(get_billing_viewer),
     db: Session = Depends(get_db),
 ) -> BillingPlanOut:
     plan = db.scalar(
@@ -147,7 +164,7 @@ def billing_plan(
 
 @router.get("/api/billing/capacity", response_model=StorageCapacityOut)
 def billing_capacity(
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_viewer),
     db: Session = Depends(get_db),
 ) -> StorageCapacityOut:
     # Serialize the first daily-rollup insert with media writers and other
@@ -170,7 +187,7 @@ def billing_capacity(
 
 @router.get("/api/billing/subscription", response_model=SubscriptionOverviewOut)
 def billing_subscription(
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_viewer),
     db: Session = Depends(get_db),
 ) -> SubscriptionOverviewOut:
     overview = get_subscription_overview(db, context.tenant_id)
@@ -194,21 +211,21 @@ def billing_subscription(
 
 @router.get("/api/billing/orders/latest", response_model=Optional[PaymentOrderOut])
 def latest_payment_order(
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_viewer),
     db: Session = Depends(get_db),
 ) -> Optional[PaymentOrderOut]:
     summary = get_latest_order(db, context.tenant_id)
-    return _out(summary) if summary is not None else None
+    return _out(summary, context) if summary is not None else None
 
 
 @router.get("/api/billing/orders/{order_id}", response_model=PaymentOrderOut)
 def payment_order(
     order_id: str,
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_viewer),
     db: Session = Depends(get_db),
 ) -> PaymentOrderOut:
     try:
-        return _out(get_order(db, context.tenant_id, order_id))
+        return _out(get_order(db, context.tenant_id, order_id), context)
     except Exception as error:
         _raise_order_error(error)
         raise
@@ -218,7 +235,7 @@ def payment_order(
 def create_order(
     payload: CreatePaymentOrderIn,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_manager),
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
 ) -> PaymentOrderOut:
@@ -233,7 +250,7 @@ def create_order(
                 now=datetime.now(timezone.utc),
             ),
         )
-        return _out(summary)
+        return _out(summary, context)
     except Exception as error:
         _raise_order_error(error)
         raise
@@ -242,7 +259,7 @@ def create_order(
 @router.get("/api/billing/orders/{order_id}/qr")
 def payment_order_qr(
     order_id: str,
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_manager),
     db: Session = Depends(get_db),
 ) -> Response:
     try:
@@ -275,7 +292,7 @@ def payment_order_qr(
 @router.post("/api/billing/orders/{order_id}/refresh", response_model=PaymentOrderOut)
 def refresh_payment_order(
     order_id: str,
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_manager),
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
 ) -> PaymentOrderOut:
@@ -287,7 +304,8 @@ def refresh_payment_order(
                 context.tenant_id,
                 order_id,
                 now=datetime.now(timezone.utc),
-            )
+            ),
+            context,
         )
     except PaymentActivationPendingError as error:
         raise HTTPException(status_code=503, detail="payment_activation_pending") from error
@@ -299,7 +317,7 @@ def refresh_payment_order(
 @router.post("/api/billing/orders/{order_id}/close", response_model=PaymentOrderOut)
 def close_payment_order(
     order_id: str,
-    context: BillingOwnerContext = Depends(get_billing_owner),
+    context: BillingAccessContext = Depends(get_billing_manager),
     db: Session = Depends(get_db),
     provider: PaymentProvider = Depends(get_payment_provider),
 ) -> PaymentOrderOut:
@@ -311,7 +329,8 @@ def close_payment_order(
                 context.tenant_id,
                 order_id,
                 now=datetime.now(timezone.utc),
-            )
+            ),
+            context,
         )
     except Exception as error:
         _raise_order_error(error)

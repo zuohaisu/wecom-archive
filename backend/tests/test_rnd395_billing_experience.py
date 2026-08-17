@@ -119,8 +119,9 @@ def test_qr_and_duplicate_order_guards_use_provider_and_expiry_truth() -> None:
     assert "order.qr_available" in script
     assert "new Date(order.expires_at) > new Date()" in script
     assert "activeOrder[order && order.status]" in script
-    assert "create.hidden = policy.kind !== 'payment'" in script
-    assert "refresh.hidden = !hasLiveOrder" in script
+    assert "var canOrder = document.body.dataset.billingCanOrder === 'true'" in script
+    assert "create.hidden = !canOrder || policy.kind !== 'payment'" in script
+    assert "refresh.hidden = !hasLiveOrder || !canOrder" in script
     assert "plan.payment_enabled" in script
     assert "unavailable.hidden = plan.payment_enabled || policy.kind === 'setup'" in script
     assert "checkout_url" not in script

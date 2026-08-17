@@ -171,6 +171,14 @@ def _setup(monkeypatch):
                     role="admin",
                     status="active",
                 ),
+                AdminUser(
+                    id="compliance-other",
+                    tenant_id="tenant-other",
+                    wecom_user_id="compliance-other",
+                    name="Compliance",
+                    role="compliance",
+                    status="active",
+                ),
                 AdminSession(
                     id="session-provisioning",
                     admin_user_id="owner-provisioning",
@@ -194,6 +202,15 @@ def _setup(monkeypatch):
                     admin_user_id="admin-other",
                     tenant_id="tenant-other",
                     wecom_user_id="admin-other",
+                    session_scope="admin",
+                    expires_at=NOW + timedelta(hours=1),
+                    is_revoked=False,
+                ),
+                AdminSession(
+                    id="session-compliance",
+                    admin_user_id="compliance-other",
+                    tenant_id="tenant-other",
+                    wecom_user_id="compliance-other",
                     session_scope="admin",
                     expires_at=NOW + timedelta(hours=1),
                     is_revoked=False,
@@ -401,19 +418,56 @@ def test_capacity_is_unavailable_before_payment_then_uses_activated_plan_without
     assert other.get("/api/billing/subscription").json()["plan_code"] is None
 
 
-def test_order_status_and_qr_are_tenant_scoped_and_owner_only(monkeypatch) -> None:
+def test_order_status_and_qr_are_tenant_scoped_and_role_gated(monkeypatch) -> None:
     base, _factory, _provider = _setup(monkeypatch)
     provisioning = _client_with_session(base, "session-provisioning")
     other = _client_with_session(base, "session-other")
     admin = _client_with_session(base, "session-admin")
-    order_id = _create(provisioning).json()["order_id"]
+    compliance = _client_with_session(base, "session-compliance")
+    other_order_id = _create(other).json()["order_id"]
 
-    assert other.get(f"/api/billing/orders/{order_id}").status_code == 404
-    assert other.get(f"/api/billing/orders/{order_id}/qr").status_code == 404
-    assert admin.get("/admin/billing").status_code == 403
-    assert admin.get("/api/billing/plan").status_code == 403
-    assert admin.get("/api/billing/capacity").status_code == 403
-    assert admin.get("/api/billing/subscription").status_code == 403
+    # Tenant isolation is unchanged: a different tenant can neither read nor
+    # pay for this order.
+    assert provisioning.get(f"/api/billing/orders/{other_order_id}").status_code == 404
+    assert provisioning.get(f"/api/billing/orders/{other_order_id}/qr").status_code == 404
+
+    # RND-407: admins may view the whole billing surface and create orders.
+    assert admin.get("/admin/billing").status_code == 200
+    assert admin.get("/api/billing/plan").status_code == 200
+    assert admin.get("/api/billing/capacity").status_code == 200
+    assert admin.get("/api/billing/subscription").status_code == 200
+    assert (
+        admin.post(
+            "/api/billing/orders",
+            headers={"Idempotency-Key": "rnd380-admin-order"},
+            json={"plan_code": ANNUAL_PLAN_CODE},
+        ).status_code
+        == 201
+    )
+
+    # RND-407: read-only roles can view the surface and order status, but
+    # cannot create orders or fetch the payment QR; order payloads are
+    # sanitized so the client never renders a payment surface.
+    assert compliance.get("/admin/billing").status_code == 200
+    assert compliance.get("/api/billing/plan").status_code == 200
+    assert compliance.get("/api/billing/capacity").status_code == 200
+    assert compliance.get("/api/billing/subscription").status_code == 200
+    assert compliance.get("/api/billing/orders/latest").status_code == 200
+    assert compliance.get(f"/api/billing/orders/{other_order_id}").status_code == 200
+    assert (
+        compliance.get(f"/api/billing/orders/{other_order_id}").json()["qr_available"]
+        is False
+    )
+    assert compliance.get(f"/api/billing/orders/{other_order_id}/qr").status_code == 403
+    assert (
+        compliance.post(
+            "/api/billing/orders",
+            headers={"Idempotency-Key": "rnd380-compliance-blocked"},
+            json={"plan_code": ANNUAL_PLAN_CODE},
+        ).status_code
+        == 403
+    )
+
     assert base.get("/admin/billing").status_code == 401
     assert base.get("/api/billing/subscription").status_code == 401
 
