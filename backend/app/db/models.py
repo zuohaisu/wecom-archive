@@ -2703,6 +2703,39 @@ class AiHandoff(Base):
 
 
 # ---------------------------------------------------------------------------
+# RND-161 (T6) — proactive user feedback, submitted independently of any AI
+# conversation. Feeds the same human-processing/knowledge-gap closed loop
+# as AiHandoff (RND-359 unifies triage for both), but is a distinct
+# record: a user reporting a bug/suggestion never implies an AI turn
+# happened, and vice versa.
+# ---------------------------------------------------------------------------
+
+
+class AiFeedback(Base):
+    """One user-submitted feedback record. product_version/page_id, when
+    present, come only from the RND-358 read-only tool registry
+    (product_version / current_page) — this table never grows its own
+    parallel diagnostic-collection logic."""
+
+    __tablename__ = "ai_feedback"
+    __table_args__ = (
+        Index("ix_ai_feedback_tenant_created", "tenant_id", "created_at", "id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    feedback_type = Column(String(16), nullable=False)  # bug | question | suggestion | other
+    body = Column(Text, nullable=False)
+    contact = Column(Text, nullable=True)
+    product_version = Column(String(64), nullable=True)
+    page_id = Column(String(64), nullable=True)
+    browser_info = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="new")  # new | in_review | resolved
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
 # RND-358 (T4) — read-only diagnostic tool invocation audit.
 # ---------------------------------------------------------------------------
 

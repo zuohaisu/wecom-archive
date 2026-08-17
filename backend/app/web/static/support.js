@@ -258,6 +258,45 @@
     }
   }
 
+  function switchTab(target) {
+    var isChat = target === 'chat';
+    node('tab-chat').classList.toggle('active', isChat);
+    node('tab-chat').setAttribute('aria-selected', String(isChat));
+    node('tab-feedback').classList.toggle('active', !isChat);
+    node('tab-feedback').setAttribute('aria-selected', String(!isChat));
+    node('support-chat-panel').classList.toggle('hidden', !isChat);
+    node('support-feedback-panel').classList.toggle('hidden', isChat);
+  }
+
+  function submitFeedback(evt) {
+    evt.preventDefault();
+    var statusEl = node('feedback-status');
+    var body = node('feedback-body').value;
+    if (!body || !body.trim()) { return; }
+    statusEl.textContent = t('support.feedbackSubmitting');
+    fetch('/api/ai/support/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        feedback_type: node('feedback-type').value,
+        body: body,
+        contact: node('feedback-contact').value || null,
+        page_id: document.body.getAttribute('data-page-id') || null,
+        include_diagnostics: node('feedback-include-diagnostics').checked,
+        browser_info: navigator.userAgent
+      })
+    })
+      .then(function (r) {
+        if (!r.ok) { throw new Error('feedback_failed'); }
+        return r.json();
+      })
+      .then(function () {
+        statusEl.textContent = t('support.feedbackSubmitted');
+        node('feedback-form').reset();
+      })
+      .catch(function () { statusEl.textContent = t('support.networkError'); });
+  }
+
   function init() {
     fetch('/api/ai/support/status')
       .then(function (r) { return r.json(); })
@@ -294,6 +333,10 @@
         closeHandoffModal();
       }
     });
+
+    node('tab-chat').addEventListener('click', function () { switchTab('chat'); });
+    node('tab-feedback').addEventListener('click', function () { switchTab('feedback'); });
+    node('feedback-form').addEventListener('submit', submitFeedback);
   }
 
   if (document.readyState === 'loading') {

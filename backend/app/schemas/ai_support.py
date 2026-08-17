@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -52,5 +52,19 @@ class HandoffSubmitIn(BaseModel):
 
 
 class HandoffOut(BaseModel):
+    id: str
+    status: str
+
+
+class UserFeedbackIn(BaseModel):
+    feedback_type: Literal["bug", "question", "suggestion", "other"]
+    body: str
+    contact: Optional[str] = None
+    page_id: Optional[str] = None
+    include_diagnostics: bool = False
+    browser_info: Optional[str] = None
+
+
+class UserFeedbackOut(BaseModel):
     id: str
     status: str

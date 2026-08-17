@@ -289,6 +289,102 @@ def test_delete_session_removes_session_and_messages(client, db: Session) -> Non
     assert message_rows == []
 
 
+def test_submit_feedback_without_prior_ai_conversation(client, db: Session) -> None:
+    """RND-161 AC: feedback never requires an existing chat/session."""
+    c, tenant_id, user_id = client
+    response = c.post(
+        "/api/ai/support/feedback",
+        json={"feedback_type": "bug", "body": "导出按钮点击无反应", "contact": "a@b.com"},
+    )
+    assert response.status_code == 201
+    feedback_id = response.json()["id"]
+    assert response.json()["status"] == "new"
+
+    row = db.execute(
+        text(
+            "SELECT tenant_id, admin_user_id, feedback_type, body, contact "
+            "FROM ai_feedback WHERE id = :id"
+        ),
+        {"id": feedback_id},
+    ).fetchone()
+    assert row.tenant_id == tenant_id
+    assert row.admin_user_id == user_id
+    assert row.feedback_type == "bug"
+    assert row.body == "导出按钮点击无反应"
+    assert row.contact == "a@b.com"
+
+
+def test_submit_feedback_rejects_invalid_type(client) -> None:
+    c, _tenant_id, _user_id = client
+    response = c.post(
+        "/api/ai/support/feedback", json={"feedback_type": "not_a_real_type", "body": "x"}
+    )
+    assert response.status_code == 422
+
+
+def test_submit_feedback_page_id_is_allowlist_validated(client, db: Session) -> None:
+    c, _tenant_id, _user_id = client
+    response = c.post(
+        "/api/ai/support/feedback",
+        json={"feedback_type": "question", "body": "问题", "page_id": "../../etc/passwd"},
+    )
+    assert response.status_code == 201
+    feedback_id = response.json()["id"]
+    row = db.execute(text("SELECT page_id FROM ai_feedback WHERE id = :id"), {"id": feedback_id}).fetchone()
+    assert row.page_id == "unknown"
+
+
+def test_submit_feedback_without_diagnostics_omits_product_version(client, db: Session) -> None:
+    c, _tenant_id, _user_id = client
+    response = c.post(
+        "/api/ai/support/feedback",
+        json={"feedback_type": "suggestion", "body": "建议", "include_diagnostics": False},
+    )
+    feedback_id = response.json()["id"]
+    row = db.execute(
+        text("SELECT product_version FROM ai_feedback WHERE id = :id"), {"id": feedback_id}
+    ).fetchone()
+    assert row.product_version is None
+
+
+def test_submit_feedback_with_diagnostics_includes_product_version(client, db: Session) -> None:
+    c, _tenant_id, _user_id = client
+    response = c.post(
+        "/api/ai/support/feedback",
+        json={"feedback_type": "suggestion", "body": "建议", "include_diagnostics": True},
+    )
+    feedback_id = response.json()["id"]
+    row = db.execute(
+        text("SELECT product_version FROM ai_feedback WHERE id = :id"), {"id": feedback_id}
+    ).fetchone()
+    assert row.product_version is not None
+
+
+def test_submit_feedback_never_stores_archived_chat_fields(client, db: Session) -> None:
+    """No column on ai_feedback can hold chat content — this is a schema-
+    shape guard, not a behavioral one, but it is the cheapest possible
+    regression check against RND-161's "默认不采集归档聊天正文" constraint."""
+    columns = {
+        row.column_name
+        for row in db.execute(
+            text("SELECT column_name FROM information_schema.columns WHERE table_name = 'ai_feedback'")
+        ).fetchall()
+    }
+    assert columns == {
+        "id",
+        "tenant_id",
+        "admin_user_id",
+        "feedback_type",
+        "body",
+        "contact",
+        "product_version",
+        "page_id",
+        "browser_info",
+        "status",
+        "created_at",
+    }
+
+
 def test_delete_other_tenants_session_is_404(client, db: Session) -> None:
     c, _tenant_id, _user_id = client
     other_tenant_id = str(uuid.uuid4())

@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_html_session
-from app.db.models import AiChatMessage, AiChatSession, AiHandoff
+from app.db.models import AiChatMessage, AiChatSession, AiFeedback, AiHandoff
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
 from app.schemas.ai_support import (
@@ -29,8 +29,11 @@ from app.schemas.ai_support import (
     HandoffPreviewOut,
     HandoffSubmitIn,
     SendMessageIn,
+    UserFeedbackIn,
+    UserFeedbackOut,
 )
 from app.services.ai.answer_service import answer_query
+from app.services.ai.feedback_notify import notify_new_feedback
 from app.services.ai.handoff import build_redacted_summary
 from app.services.ai.llm_provider import ai_support_is_enabled
 from app.services.ai_tools import handlers as ai_tool_handlers  # noqa: F401 - populates the tool registry
@@ -79,6 +82,24 @@ def _collect_diagnostic_context(db: Session, tenant_id: str, admin_user_id: str,
         if result.status == ToolResultStatus.SUCCESS:
             collected[name] = result.data
     return collected
+
+
+def _allowlisted_page_id(db: Session, tenant_id: str, admin_user_id: str, page_id: Optional[str]) -> Optional[str]:
+    """Always run client-supplied page_id through RND-358's current_page
+    tool — it is routing metadata, not sensitive diagnostic content, so
+    this is cheap allowlist validation rather than a consent-gated read;
+    never store an arbitrary client-supplied string verbatim."""
+    context = ToolContext(
+        tenant_id=tenant_id, admin_user_id=admin_user_id, scope=ToolScope.TENANT_ADMIN, page_context={"page_id": page_id}
+    )
+    result = invoke_tool(db, "current_page", context, consent_given=True)
+    return result.data.get("page_id") if result.status == ToolResultStatus.SUCCESS else None
+
+
+def _diagnostic_product_version(db: Session, tenant_id: str, admin_user_id: str) -> Optional[str]:
+    context = ToolContext(tenant_id=tenant_id, admin_user_id=admin_user_id, scope=ToolScope.TENANT_ADMIN, page_context={})
+    result = invoke_tool(db, "product_version", context, consent_given=True)
+    return result.data.get("version") if result.status == ToolResultStatus.SUCCESS else None
 
 
 def _own_session(db: Session, chat_session_id: str, tenant_id: str) -> AiChatSession:
@@ -243,3 +264,34 @@ def submit_handoff(
     db.add(handoff)
     db.commit()
     return HandoffOut(id=handoff.id, status=handoff.status)
+
+
+@router.post("/api/ai/support/feedback", response_model=UserFeedbackOut, status_code=201)
+def submit_user_feedback(
+    payload: UserFeedbackIn,
+    auth: tuple = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserFeedbackOut:
+    """RND-161 (T6): proactive feedback, independent of any AI conversation
+    — this endpoint never requires an existing chat session."""
+    user, tenant_id = auth
+
+    page_id = _allowlisted_page_id(db, tenant_id, user.id, payload.page_id)
+    product_version = _diagnostic_product_version(db, tenant_id, user.id) if payload.include_diagnostics else None
+
+    feedback = AiFeedback(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
+        admin_user_id=user.id,
+        feedback_type=payload.feedback_type,
+        body=payload.body,
+        contact=payload.contact,
+        product_version=product_version,
+        page_id=page_id,
+        browser_info=payload.browser_info,
+        status="new",
+    )
+    db.add(feedback)
+    db.commit()
+    notify_new_feedback(feedback_id=feedback.id, tenant_id=tenant_id, feedback_type=feedback.feedback_type)
+    return UserFeedbackOut(id=feedback.id, status=feedback.status)
