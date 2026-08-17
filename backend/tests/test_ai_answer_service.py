@@ -119,6 +119,43 @@ def test_disabled_returns_disabled_status_without_calling_provider(
     assert result.citations == []
 
 
+def test_disabled_still_persists_messages_when_session_id_given(
+    db: Session, tenant_and_user, use_ai_settings
+) -> None:
+    """Regression: the disabled path returned before T3's fix without
+    calling _maybe_persist_messages, so a chat session that hit AI-disabled
+    mid-conversation would silently drop the turn from its own history."""
+    tenant_id, user_id = tenant_and_user
+    use_ai_settings(ai_support_enabled="false")
+    session_id = str(uuid.uuid4())
+    db.execute(
+        text(
+            "INSERT INTO ai_chat_sessions (id, tenant_id, admin_user_id, status) "
+            "VALUES (:id, :tenant_id, :user_id, 'active')"
+        ),
+        {"id": session_id, "tenant_id": tenant_id, "user_id": user_id},
+    )
+    db.commit()
+
+    answer_query(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=user_id,
+        query="怎么设置存储配额",
+        access_levels=["customer"],
+        locale="zh-CN",
+        session_id=session_id,
+        provider=_ExplodingProvider(),
+        retriever=_StubRetriever([_chunk()]),
+    )
+
+    rows = db.execute(
+        text("SELECT role, content FROM ai_chat_messages WHERE session_id = :s ORDER BY id"),
+        {"s": session_id},
+    ).fetchall()
+    assert [r.role for r in rows] == ["user", "assistant"]
+
+
 def test_no_retrieved_chunks_is_deterministic_insufficient_evidence(
     db: Session, tenant_and_user, use_ai_settings
 ) -> None:
@@ -235,6 +272,21 @@ def test_build_messages_wraps_chunk_content_and_includes_anti_injection_instruct
     # ...but the wrapping delimiter plus the system instruction is what tells
     # the model it's data, not a live instruction to obey.
     assert "</document>" in user_message.content
+
+
+def test_build_messages_includes_diagnostic_context_when_provided() -> None:
+    messages = _build_messages(
+        "存储快满了吗", [_chunk()], diagnostic_context={"used_bytes": 900, "quota_bytes": 1000}
+    )
+    user_message = messages[1]
+    assert "<system_state>" in user_message.content
+    assert "used_bytes: 900" in user_message.content
+    assert "</system_state>" in user_message.content
+
+
+def test_build_messages_omits_system_state_tag_when_no_diagnostic_context() -> None:
+    messages = _build_messages("怎么设置存储配额", [_chunk()])
+    assert "<system_state>" not in messages[1].content
 
 
 def test_full_query_writes_audit_log_row(db: Session, tenant_and_user, use_ai_settings) -> None:

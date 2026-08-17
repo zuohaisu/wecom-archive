@@ -365,7 +365,8 @@ def test_router_count() -> None:
     # RND-405 adds one controlled platform payment-recovery route.
     # RND-386 adds three provisioning config-wizard routes.
     # RND-388 adds one self-service activation route.
-    assert route_count == 152
+    # RND-357 adds the 8 AI support page/API routes.
+    assert route_count == 160
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -499,6 +500,14 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/tenants/{tenant_id}/connectivity-check",
             "/api/platform/tenants/{tenant_id}/branding/certificate-status",
             "/api/platform/wecom/third-party/suite-ticket-status",
+            "/admin/support",
+            "/api/ai/support/status",
+            "/api/ai/support/sessions",
+            "/api/ai/support/sessions/{chat_session_id}",
+            "/api/ai/support/sessions/{chat_session_id}/messages",
+            "/api/ai/support/messages/{message_id}/feedback",
+            "/api/ai/support/sessions/{chat_session_id}/handoff/preview",
+            "/api/ai/support/sessions/{chat_session_id}/handoff",
             "/api/payments/wechat/notify",
             "/api/provisioning/activate",
             "/api/provisioning/config",
@@ -917,6 +926,19 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/provisioning/config", frozenset({"PUT"}), "dict", "None"),
         ("/api/provisioning/config/test", frozenset({"POST"}), "dict", "None"),
         ("/api/provisioning/status", frozenset({"GET"}), "dict", "None"),
+        ("/admin/support", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/api/ai/support/status", frozenset({"GET"}), "AiSupportStatusOut", "None"),
+        ("/api/ai/support/sessions", frozenset({"POST"}), "AiChatSessionOut", "None"),
+        ("/api/ai/support/sessions/{chat_session_id}", frozenset({"DELETE"}), "None", "None"),
+        ("/api/ai/support/sessions/{chat_session_id}/messages", frozenset({"POST"}), "None", "None"),
+        ("/api/ai/support/messages/{message_id}/feedback", frozenset({"POST"}), "dict", "None"),
+        (
+            "/api/ai/support/sessions/{chat_session_id}/handoff/preview",
+            frozenset({"POST"}),
+            "HandoffPreviewOut",
+            "None",
+        ),
+        ("/api/ai/support/sessions/{chat_session_id}/handoff", frozenset({"POST"}), "HandoffOut", "None"),
         ("/api/refunds/wechat/notify", frozenset({"POST"}), "None", "None"),
         (
             "/api/search/contacts",

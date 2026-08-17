@@ -2632,6 +2632,9 @@ class AiChatMessage(Base):
     index_version_id = Column(BigInteger, ForeignKey("kb_index_versions.id"), nullable=True)
     model_provider = Column(String(64), nullable=True)
     model_name = Column(String(128), nullable=True)
+    # RND-357 (T3): "有帮助/无帮助" feedback on one assistant message.
+    helpful = Column(Boolean, nullable=True)
+    feedback_note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -2649,7 +2652,11 @@ class AiQueryAuditLog(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    session_id = Column(String(36), ForeignKey("ai_chat_sessions.id"), nullable=True)
+    # ondelete=SET NULL: this audit row must survive deletion of the chat
+    # session it was generated for (RND-357's user-initiated session
+    # deletion must never be blocked by, or cascade into deleting, the
+    # separately-retained audit trail — see RND-359's retention policy).
+    session_id = Column(String(36), ForeignKey("ai_chat_sessions.id", ondelete="SET NULL"), nullable=True)
     admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
     query_text = Column(Text, nullable=False)
     retrieved_chunk_ids = Column(JSONB, nullable=False, default=list)
@@ -2660,6 +2667,38 @@ class AiQueryAuditLog(Base):
     latency_ms = Column(Integer, nullable=True)
     prompt_tokens = Column(Integer, nullable=True)
     completion_tokens = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# RND-357 (T3) — escalate-to-human handoff record.
+#
+# This is a first, minimal shape covering T3's own AC ("转人工时生成脱敏摘要；
+# 用户可预览并确认提交内容"). RND-359 (T5) owns the real triage/classification
+# pipeline and will ALTER this table to add reason/resolution_category/
+# resolved_at/resolved_by columns rather than replace it.
+# ---------------------------------------------------------------------------
+
+
+class AiHandoff(Base):
+    """One user-confirmed escalation-to-human request. redacted_summary is
+    always the text the user actually saw and approved in the preview —
+    never regenerated silently after submission."""
+
+    __tablename__ = "ai_handoff"
+    __table_args__ = (
+        Index("ix_ai_handoff_tenant_created", "tenant_id", "created_at", "id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    # ondelete=SET NULL: a submitted handoff must survive deletion of the
+    # originating chat session — see AiQueryAuditLog.session_id above.
+    session_id = Column(String(36), ForeignKey("ai_chat_sessions.id", ondelete="SET NULL"), nullable=True)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    redacted_summary = Column(Text, nullable=False)
+    contact = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="pending")  # pending | in_review | resolved
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

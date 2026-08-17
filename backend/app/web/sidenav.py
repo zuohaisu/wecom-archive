@@ -43,6 +43,12 @@ NAV = (
             {"id": "settings", "key": "nav.settings", "path": "/admin/settings"},
         ),
     },
+    {
+        "group_key": "nav.group.help",
+        "items": (
+            {"id": "support", "key": "nav.support", "path": "/admin/support"},
+        ),
+    },
 )
 
 
