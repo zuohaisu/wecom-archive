@@ -8,6 +8,7 @@
 - `WECOM_THIRD_PARTY_CALLBACK_URL`
 - `WECOM_THIRD_PARTY_INSTRUCTION_TOKEN`
 - `WECOM_THIRD_PARTY_INSTRUCTION_ENCODING_AES_KEY`
+- `WECOM_THIRD_PARTY_CORP_ID`
 - `FIELD_ENCRYPTION_KEY`
 
 `WECOM_THIRD_PARTY_CALLBACK_URL` 必须精确指向
@@ -32,11 +33,23 @@ RND-350 提供独立 HTTPS 指令回调：
 `/api/wecom/archive/events` 的 Token/AESKey。反向代理访问日志必须对完整 query string
 脱敏。
 
+**信封 receiver 与明文 SuiteId 的校验边界（RND-410）**：企业微信在第三方应用指令回调
+（至少 URL 验证阶段）将 AES 信封的 receiver id 填充为**服务商 CorpID**，而不是 SuiteID。
+两者不可混用：
+
+- AES 信封 receiver id ⟷ `WECOM_THIRD_PARTY_CORP_ID`（服务商 CorpID，ww 开头 18 位，见
+  企业微信服务商后台“服务商信息”）。GET URL 验证与 POST 指令均以此比较；不匹配拒绝
+  403 `Corp ID mismatch`。
+- POST 指令体内的明文 `<SuiteId>` 字段 ⟷ `WECOM_THIRD_PARTY_SUITE_ID`（保持 RND-350 原有
+  语义不变）。不匹配拒绝 403 `Suite ID mismatch`。
+- `WECOM_THIRD_PARTY_CORP_ID` 缺失或与 `WECOM_THIRD_PARTY_SUITE_ID` 等配置一并校验；
+  缺失时 GET/POST 均 fail-closed 返回 503 `configuration_error`，不做任何解密或落库。
+
 服务只接受配置 `suite_id` 的 `suite_ticket` 指令，校验签名、请求时间、AES 信封中的
-receiver id、明文 `SuiteId` 和事件时间。ticket 按 `suite_id` 在
-`wecom_suite_ticket_states` 中以 Fernet 密文原子保存；相同或更旧事件不会覆盖较新的权威
-记录。`WECOM_THIRD_PARTY_SUITE_TICKET` 已废止，禁止把 ticket 放入环境、日志、Linear、
-聊天或截图。
+receiver id（服务商 CorpID）、明文 `SuiteId`（SuiteID）和事件时间。ticket 按 `suite_id`
+在 `wecom_suite_ticket_states` 中以 Fernet 密文原子保存；相同或更旧事件不会覆盖较新的
+权威记录。`WECOM_THIRD_PARTY_SUITE_TICKET` 已废止，禁止把 ticket 放入环境、日志、
+Linear、聊天或截图。
 
 授权服务只读取数据库中的最新 ticket：
 

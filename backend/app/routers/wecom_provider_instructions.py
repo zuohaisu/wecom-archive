@@ -43,6 +43,7 @@ _MAX_CLOCK_SKEW_SECONDS = 5 * 60
 _REJECTION_REASONS = frozenset(
     {
         "configuration_error",
+        "corp_id_mismatch",
         "invalid_callback_payload",
         "invalid_signature",
         "missing_encrypt",
@@ -58,14 +59,17 @@ def _log_rejected(reason: str) -> None:
     logger.info("wecom_provider_instruction rejected reason=%s", reason)
 
 
-def _callback_configuration() -> tuple[str, str, bytes]:
+def _callback_configuration() -> tuple[str, str, str, bytes]:
     settings = get_wecom_third_party_settings()
     suite_id = settings.wecom_third_party_suite_id.strip()
+    corp_id = settings.wecom_third_party_corp_id.strip()
     token = settings.wecom_third_party_instruction_token.strip()
     encoded_key = settings.wecom_third_party_instruction_encoding_aes_key.strip()
     if (
         not suite_id
         or len(suite_id) > 128
+        or not corp_id
+        or len(corp_id) > 128
         or not token
         or len(token) > 32
         or not token.isascii()
@@ -73,7 +77,7 @@ def _callback_configuration() -> tuple[str, str, bytes]:
         or not encoded_key
     ):
         raise CallbackConfigurationError
-    return suite_id, token, decode_aes_key(encoded_key)
+    return suite_id, corp_id, token, decode_aes_key(encoded_key)
 
 
 def _current_callback_timestamp(raw: str) -> int:
@@ -131,7 +135,7 @@ def verify_provider_instruction_url(
 ):
     """Verify the dedicated provider instruction URL without touching state."""
     try:
-        suite_id, token, aes_key = _callback_configuration()
+        _suite_id, corp_id, token, aes_key = _callback_configuration()
     except CallbackConfigurationError:
         _log_rejected("configuration_error")
         raise HTTPException(status_code=503, detail="Callback unavailable")
@@ -151,9 +155,9 @@ def verify_provider_instruction_url(
     except (CallbackInputError, UnicodeDecodeError):
         _log_rejected("invalid_callback_payload")
         raise HTTPException(status_code=400, detail="Invalid callback request")
-    if receiver_id != suite_id:
-        _log_rejected("suite_id_mismatch")
-        raise HTTPException(status_code=403, detail="Suite ID mismatch")
+    if receiver_id != corp_id:
+        _log_rejected("corp_id_mismatch")
+        raise HTTPException(status_code=403, detail="Corp ID mismatch")
     logger.info("wecom_provider_instruction accepted method=GET")
     return PlainTextResponse(plaintext, media_type="text/plain")
 
@@ -168,7 +172,7 @@ async def receive_provider_instruction(
 ):
     """Validate, decrypt and atomically retain a newest suite_ticket event."""
     try:
-        suite_id, token, aes_key = _callback_configuration()
+        suite_id, corp_id, token, aes_key = _callback_configuration()
         validate_field_encryption_configuration()
     except (CallbackConfigurationError, FieldEncryptionConfigurationError):
         _log_rejected("configuration_error")
@@ -209,7 +213,10 @@ async def receive_provider_instruction(
     except CallbackInputError:
         _log_rejected("invalid_callback_payload")
         raise HTTPException(status_code=400, detail="Invalid callback request")
-    if receiver_id != suite_id or event_suite_id != suite_id:
+    if receiver_id != corp_id:
+        _log_rejected("corp_id_mismatch")
+        raise HTTPException(status_code=403, detail="Corp ID mismatch")
+    if event_suite_id != suite_id:
         _log_rejected("suite_id_mismatch")
         raise HTTPException(status_code=403, detail="Suite ID mismatch")
     if abs(source_timestamp - query_timestamp) > _MAX_CLOCK_SKEW_SECONDS:
