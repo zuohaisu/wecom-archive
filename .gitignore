@@ -36,6 +36,10 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# RND-359: generated AI support gap reports contain real operational
+# content (unresolved query text, feedback) — never commit actual output.
+docs/ai/reports/*.md
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

@@ -1,0 +1,21 @@
+{
+  "version": "2026-08-17.1",
+  "cases": [
+    {"id": "install-1", "category": "installation", "query": "这个产品支持自己部署吗", "expected_topic_ids": ["self-hosting-guide"]},
+    {"id": "install-2", "category": "installation", "query": "自托管升级需要注意什么", "expected_topic_ids": ["self-hosting-guide"]},
+    {"id": "wecom-1", "category": "wecom_integration", "query": "授权企业微信的时候一直失败怎么办", "expected_topic_ids": ["wecom-integration"]},
+    {"id": "wecom-2", "category": "wecom_integration", "query": "登录后提示 organization_not_found 是什么原因", "expected_topic_ids": ["wecom-integration"]},
+    {"id": "permissions-1", "category": "permissions", "query": "普通员工能看到审计日志吗", "expected_topic_ids": ["user-guide"]},
+    {"id": "sync-1", "category": "sync", "query": "会话同步一直失败怎么排查", "expected_topic_ids": ["troubleshooting"]},
+    {"id": "media-1", "category": "media", "query": "图片和语音消息下载不了怎么办", "expected_topic_ids": ["troubleshooting"]},
+    {"id": "search-1", "category": "search", "query": "怎么在归档记录里全局搜索关键字", "expected_topic_ids": ["user-guide"]},
+    {"id": "storage-1", "category": "storage", "query": "存储配额快满了会有什么提示", "expected_topic_ids": ["troubleshooting", "faq"]},
+    {"id": "storage-2", "category": "storage", "query": "存储配额具体是多少", "expected_topic_ids": ["faq"]},
+    {"id": "billing-1", "category": "billing", "query": "年费多少钱，包含多少存储空间", "expected_topic_ids": ["faq"]},
+    {"id": "billing-2", "category": "billing", "query": "座席数量有没有上限", "expected_topic_ids": ["faq"]},
+    {"id": "errors-1", "category": "common_errors", "query": "登录提示 config_error 怎么处理", "expected_topic_ids": ["wecom-integration"]},
+    {"id": "config-1", "category": "configuration", "query": "后台设置页面里哪些配置项是必填的", "expected_topic_ids": ["configuration"]},
+    {"id": "oos-1", "category": "out_of_scope", "query": "今天北京天气怎么样", "expected_topic_ids": []},
+    {"id": "oos-2", "category": "out_of_scope", "query": "帮我写一首关于秋天的诗", "expected_topic_ids": []}
+  ]
+}

@@ -32,6 +32,10 @@ Versioned in this repository:
 | Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Pending/retryable reconciliation every 30 minutes by default (`:15`, `:45`) |
 | Export worker unit/timer | `deploy/systemd/wecom-export-jobs.{service,timer}` | Generate queued ZIPs, retry email delivery, and delete seven-day artifacts every five minutes |
 | Billing notification unit/timer | `deploy/systemd/wecom-billing-notifications.{service,timer}` | Schedule and retry lifecycle, payment-activation and refund-anomaly notices every five minutes |
+| AI KB reindex unit/timer | `deploy/systemd/wecom-ai-kb-reindex.{service,timer}` | Rebuild the AI support knowledge-base index from `backend/app/ai_kb/manifest.json` hourly (`:15`); no-op if `AI_SUPPORT_ENABLED` is unset (RND-356) |
+| AI KB eval unit/timer | `deploy/systemd/wecom-ai-kb-eval.{service,timer}` | Daily (05:00) retrieval-quality launch gate against the fixed eval set; records `ai_eval_runs`, exits non-zero on a blocked run (RND-359) |
+| AI KB gap report unit/timer | `deploy/systemd/wecom-ai-kb-gap-report.{service,timer}` | Weekly (Mon 06:00) Markdown candidate-improvement report under `docs/ai/reports/` — never writes Linear (RND-359) |
+| AI retention sweep unit/timer | `deploy/systemd/wecom-ai-retention-sweep.{service,timer}` | Daily (03:30) deletes AI chat sessions/messages past `AI_RETENTION_DAYS` (default 90) (RND-359) |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
 | GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
 | Controlled non-production deployment | `.github/workflows/deploy-nonprod.yml`, `scripts/deploy_nonprod.sh`, `deploy/systemd/wecom-archive-365-nonprod.service` | Manually deploys an exact `main` SHA only to the isolated staging instance; see [operations/nonproduction-deployment.md](operations/nonproduction-deployment.md) |

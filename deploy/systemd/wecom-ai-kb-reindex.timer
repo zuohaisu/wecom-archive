@@ -1,0 +1,13 @@
+[Unit]
+Description=WeCom Archive AI Support Knowledge-Base Reindex Timer
+
+[Timer]
+# Knowledge-base docs change far less often than billing/sync state; hourly
+# is frequent enough to pick up an approved doc edit promptly without
+# rebuilding the whole (small) index needlessly.
+OnCalendar=*:15
+Persistent=true
+Unit=wecom-ai-kb-reindex.service
+
+[Install]
+WantedBy=timers.target

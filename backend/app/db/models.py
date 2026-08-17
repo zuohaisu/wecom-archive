@@ -2518,6 +2518,273 @@ class ExternalContactFollow(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# RND-356 (T2) — AI support knowledge-base index, chat, and audit log.
+#
+# The allowlist these tables are ever populated from lives in
+# backend/app/ai_kb/manifest.json (RND-355) — nothing here scans a
+# directory directly. See app/services/ai/ingestion.py.
+# ---------------------------------------------------------------------------
+
+
+class KbIndexVersion(Base):
+    """One row per index build (full rebuild or incremental run). Chunks
+    reference the version that produced them, which is what makes "roll
+    back to the previous index" a metadata flip (mark this version
+    rolled_back, chunks with status!=active stop being retrieved) rather
+    than a destructive delete-and-hope-for-the-best."""
+
+    __tablename__ = "kb_index_versions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    status = Column(String(16), nullable=False, default="active")  # active | superseded | rolled_back
+    triggered_by = Column(String(64), nullable=False)  # e.g. "manual", "scheduled_reindex"
+    plan_summary = Column(JSONB, nullable=True)  # counts of add/update/remove/noop, no content
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    rolled_back_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class KbDocumentChunk(Base):
+    """One retrievable unit of an approved knowledge source (RND-355
+    manifest entry), split by heading. access_level/locale are denormalized
+    from the manifest entry at index time so retrieval filtering never has
+    to join back to the manifest file on the hot path."""
+
+    __tablename__ = "kb_document_chunks"
+    __table_args__ = (
+        Index(
+            "ix_kb_document_chunks_source_chunk",
+            "source_id", "chunk_index",
+        ),
+        Index(
+            "ix_kb_document_chunks_access_locale_version",
+            "access_level", "locale", "index_version_id",
+        ),
+        # pg_trgm GIN index, NOT to_tsvector — Postgres's 'simple' FTS
+        # config tokenizes an entire run of CJK characters as one lexeme
+        # (no Chinese word segmenter shipped), so it cannot match a query
+        # phrase against a sub-phrase of a longer chunk. See
+        # app/services/ai/retriever.py's module docstring for the
+        # empirical verification. Mirrors the existing
+        # ix_archive_messages_content_text_trgm precedent.
+        Index(
+            "ix_kb_document_chunks_content_text_trgm",
+            "content_text",
+            postgresql_using="gin",
+            postgresql_ops={"content_text": "gin_trgm_ops"},
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    index_version_id = Column(BigInteger, ForeignKey("kb_index_versions.id"), nullable=False)
+    source_id = Column(String(128), nullable=False)  # matches ai_kb manifest source_id
+    topic_id = Column(String(128), nullable=False)
+    title = Column(String(255), nullable=False)
+    heading_path = Column(Text, nullable=False)  # e.g. "配置说明 > 存储配额"
+    chunk_index = Column(Integer, nullable=False)
+    content_text = Column(Text, nullable=False)
+    access_level = Column(String(16), nullable=False)  # customer | internal (never "forbidden")
+    locale = Column(String(16), nullable=False)
+    doc_version = Column(String(32), nullable=False)
+    doc_path = Column(String(512), nullable=False)  # repo-relative, for the citation link
+    content_hash = Column(String(64), nullable=False)  # sha256 of the whole source file; drives compute_index_plan diffing
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AiChatSession(Base):
+    """One AI support conversation. Retention/deletion policy owned by
+    RND-359 (T5); this table only records session identity and lifecycle."""
+
+    __tablename__ = "ai_chat_sessions"
+    __table_args__ = (
+        Index("ix_ai_chat_sessions_tenant_admin_user", "tenant_id", "admin_user_id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    status = Column(String(16), nullable=False, default="active")  # active | closed
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_activity_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AiChatMessage(Base):
+    """One turn of an AI support conversation. `citations` holds only
+    {source_id, title, heading_path, doc_path} objects for chunks the
+    answering request was itself permitted to retrieve — never a raw
+    document excerpt, and never anything the answer_service didn't already
+    have server-side evidence for (see app/services/ai/answer_service.py)."""
+
+    __tablename__ = "ai_chat_messages"
+    __table_args__ = (
+        Index("ix_ai_chat_messages_session_created", "session_id", "created_at", "id"),
+        Index("ix_ai_chat_messages_tenant", "tenant_id"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), ForeignKey("ai_chat_sessions.id"), nullable=False)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    role = Column(String(16), nullable=False)  # user | assistant | system
+    content = Column(Text, nullable=False)
+    citations = Column(JSONB, nullable=True)
+    response_status = Column(String(32), nullable=True)  # answered | insufficient_evidence | escalated | error
+    index_version_id = Column(BigInteger, ForeignKey("kb_index_versions.id"), nullable=True)
+    model_provider = Column(String(64), nullable=True)
+    model_name = Column(String(128), nullable=True)
+    # RND-357 (T3): "有帮助/无帮助" feedback on one assistant message.
+    helpful = Column(Boolean, nullable=True)
+    feedback_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AiQueryAuditLog(Base):
+    """Redacted audit trail of every AI support query: what was retrieved
+    and returned, never the sensitive values a tool call or config read
+    might have touched. query_text is the admin's own typed question — not
+    archived customer chat content — and is retained under the same policy
+    as the owning chat session (RND-359)."""
+
+    __tablename__ = "ai_query_audit_logs"
+    __table_args__ = (
+        Index("ix_ai_query_audit_logs_tenant_created", "tenant_id", "created_at", "id"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    # ondelete=SET NULL: this audit row must survive deletion of the chat
+    # session it was generated for (RND-357's user-initiated session
+    # deletion must never be blocked by, or cascade into deleting, the
+    # separately-retained audit trail — see RND-359's retention policy).
+    session_id = Column(String(36), ForeignKey("ai_chat_sessions.id", ondelete="SET NULL"), nullable=True)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    query_text = Column(Text, nullable=False)
+    retrieved_chunk_ids = Column(JSONB, nullable=False, default=list)
+    index_version_id = Column(BigInteger, ForeignKey("kb_index_versions.id"), nullable=True)
+    model_provider = Column(String(64), nullable=True)
+    model_name = Column(String(128), nullable=True)
+    response_status = Column(String(32), nullable=False)
+    latency_ms = Column(Integer, nullable=True)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# RND-357 (T3) — escalate-to-human handoff record.
+#
+# This is a first, minimal shape covering T3's own AC ("转人工时生成脱敏摘要；
+# 用户可预览并确认提交内容"). RND-359 (T5) owns the real triage/classification
+# pipeline and will ALTER this table to add reason/resolution_category/
+# resolved_at/resolved_by columns rather than replace it.
+# ---------------------------------------------------------------------------
+
+
+class AiHandoff(Base):
+    """One user-confirmed escalation-to-human request. redacted_summary is
+    always the text the user actually saw and approved in the preview —
+    never regenerated silently after submission."""
+
+    __tablename__ = "ai_handoff"
+    __table_args__ = (
+        Index("ix_ai_handoff_tenant_created", "tenant_id", "created_at", "id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    # ondelete=SET NULL: a submitted handoff must survive deletion of the
+    # originating chat session — see AiQueryAuditLog.session_id above.
+    session_id = Column(String(36), ForeignKey("ai_chat_sessions.id", ondelete="SET NULL"), nullable=True)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    redacted_summary = Column(Text, nullable=False)
+    contact = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="pending")  # pending | in_review | resolved
+    # RND-359 (T5) triage fields, added by migration 0062.
+    reason = Column(String(32), nullable=True)  # why escalation.should_escalate (or the user) triggered this
+    resolution_category = Column(String(32), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    # Free-text, not an AdminUser FK: resolved by whichever internal staff
+    # member triaged it, who has no account in this tenant-scoped table.
+    resolved_by = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AiEvalRun(Base):
+    """One offline evaluation run (RND-359). metrics is a JSON summary
+    (hit rate, over-permission count, latency) — never per-case raw model
+    output, keeping this table cheap to query for a launch-gate trend."""
+
+    __tablename__ = "ai_eval_runs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    dataset_version = Column(String(32), nullable=False)
+    metrics = Column(JSONB, nullable=False)
+    passed = Column(Boolean, nullable=False)
+    triggered_by = Column(String(64), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# RND-161 (T6) — proactive user feedback, submitted independently of any AI
+# conversation. Feeds the same human-processing/knowledge-gap closed loop
+# as AiHandoff (RND-359 unifies triage for both), but is a distinct
+# record: a user reporting a bug/suggestion never implies an AI turn
+# happened, and vice versa.
+# ---------------------------------------------------------------------------
+
+
+class AiFeedback(Base):
+    """One user-submitted feedback record. product_version/page_id, when
+    present, come only from the RND-358 read-only tool registry
+    (product_version / current_page) — this table never grows its own
+    parallel diagnostic-collection logic."""
+
+    __tablename__ = "ai_feedback"
+    __table_args__ = (
+        Index("ix_ai_feedback_tenant_created", "tenant_id", "created_at", "id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    feedback_type = Column(String(16), nullable=False)  # bug | question | suggestion | other
+    body = Column(Text, nullable=False)
+    contact = Column(Text, nullable=True)
+    product_version = Column(String(64), nullable=True)
+    page_id = Column(String(64), nullable=True)
+    browser_info = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="new")  # new | in_review | resolved
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# RND-358 (T4) — read-only diagnostic tool invocation audit.
+# ---------------------------------------------------------------------------
+
+
+class AiToolInvocation(Base):
+    """One audited call through app.services.ai_tools.registry.invoke_tool.
+    fields_returned holds only the returned FIELD NAMES (a JSON array of
+    strings) — never values — so this table can reconstruct "who read what
+    kind of data when" without being able to reconstruct any actual
+    configuration value or diagnostic content."""
+
+    __tablename__ = "ai_tool_invocations"
+    __table_args__ = (
+        Index("ix_ai_tool_invocations_tenant_created", "tenant_id", "created_at", "id"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    tool_name = Column(String(64), nullable=False)
+    consent_given = Column(Boolean, nullable=False)
+    fields_returned = Column(JSONB, nullable=False, default=list)
+    result_status = Column(String(32), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ExternalContactNicknameHistory(Base):
     """Observed transitions of a customer's own WeCom nickname."""
 

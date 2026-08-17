@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI 客服</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="manifest" href="/api/branding/manifest.webmanifest">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/support.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="support.breadcrumbHelp">帮助</span><span class="sep">/</span><span class="cur" data-i18n="support.pageTitle">AI 客服</span></div></header>
+  <main class="page support-page">
+    <div class="page-hd">
+      <div>
+        <h1 data-i18n="support.pageTitle">AI 客服</h1>
+        <p data-i18n="support.description">基于产品文档回答使用问题；无法确定时会建议转人工。</p>
+      </div>
+    </div>
+
+    <div class="support-tabs" role="tablist">
+      <button type="button" class="btn support-tab active" id="tab-chat" role="tab" aria-selected="true" aria-controls="support-chat-panel" data-i18n="support.tabChat">AI 问答</button>
+      <button type="button" class="btn btn-ghost support-tab" id="tab-feedback" role="tab" aria-selected="false" aria-controls="support-feedback-panel" data-i18n="support.tabFeedback">提交反馈</button>
+    </div>
+
+    <div id="support-disabled" class="notice notice-warning hidden" role="status">
+      <span data-i18n="support.disabledNotice">AI 客服当前未启用。如需启用，请联系管理员配置 AI 服务。</span>
+    </div>
+
+    <div id="support-chat-panel" role="tabpanel" aria-labelledby="tab-chat">
+      <div id="support-chat" class="support-chat">
+        <section id="support-messages" class="support-messages" aria-live="polite" aria-label="对话记录"></section>
+
+        <form id="support-composer" class="support-composer">
+          <label class="support-consent">
+            <input type="checkbox" id="support-include-diagnostics">
+            <span data-i18n="support.includeDiagnostics">附带当前页面、产品版本与非敏感运行状态（不含归档聊天内容）</span>
+          </label>
+          <div class="support-input-row">
+            <label class="sr-only" for="support-input" data-i18n="support.inputLabel">输入你的问题</label>
+            <textarea id="support-input" class="input" rows="2" data-i18n-placeholder="support.inputPlaceholder" placeholder="输入你的问题…"></textarea>
+            <div class="support-actions">
+              <button type="submit" class="btn btn-primary" id="support-send" data-i18n="support.send">发送</button>
+              <button type="button" class="btn hidden" id="support-stop" data-i18n="support.stop">停止生成</button>
+              <button type="button" class="btn btn-ghost" id="support-retry" data-i18n="support.retry" disabled>重试</button>
+              <button type="button" class="btn btn-ghost" id="support-clear" data-i18n="support.clear">清空会话</button>
+            </div>
+          </div>
+          <p id="support-status" class="field-help" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </div>
+
+    <div id="support-feedback-panel" role="tabpanel" aria-labelledby="tab-feedback" class="hidden">
+      <form id="feedback-form" class="feedback-form">
+        <p data-i18n="support.feedbackIntro">不需要先向 AI 提问，也可以直接提交问题、Bug 或建议。</p>
+        <label for="feedback-type" data-i18n="support.feedbackTypeLabel">反馈类型</label>
+        <select id="feedback-type" class="select">
+          <option value="question" data-i18n="support.feedbackType.question">使用问题</option>
+          <option value="bug" data-i18n="support.feedbackType.bug">Bug / 异常</option>
+          <option value="suggestion" data-i18n="support.feedbackType.suggestion">产品建议</option>
+          <option value="other" data-i18n="support.feedbackType.other">其他</option>
+        </select>
+        <label for="feedback-body" data-i18n="support.feedbackBodyLabel">反馈内容</label>
+        <textarea id="feedback-body" class="input" rows="6" required></textarea>
+        <label for="feedback-contact" data-i18n="support.feedbackContactLabel">联系方式（可选）</label>
+        <input id="feedback-contact" class="input" type="text">
+        <label class="support-consent">
+          <input type="checkbox" id="feedback-include-diagnostics">
+          <span data-i18n="support.includeDiagnostics">附带当前页面、产品版本与非敏感运行状态（不含归档聊天内容）</span>
+        </label>
+        <button type="submit" class="btn btn-primary" data-i18n="support.feedbackSubmit">提交反馈</button>
+        <p id="feedback-status" class="field-help" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </main>
+</div></div>
+
+<div id="handoff-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="handoff-title">
+  <div class="modal-body">
+    <h2 id="handoff-title" data-i18n="support.handoffTitle">转人工确认</h2>
+    <p data-i18n="support.handoffDescription">以下是根据本次对话生成的摘要，仅包含你在此对话中输入的内容，可自行编辑后再提交。</p>
+    <label for="handoff-summary" data-i18n="support.handoffSummaryLabel">提交给人工的摘要</label>
+    <textarea id="handoff-summary" class="input" rows="10"></textarea>
+    <label for="handoff-contact" data-i18n="support.handoffContactLabel">联系方式（可选）</label>
+    <input id="handoff-contact" class="input" type="text">
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="handoff-cancel" data-i18n="support.handoffCancel">取消</button>
+      <button type="button" class="btn btn-primary" id="handoff-confirm" data-i18n="support.handoffConfirm">确认提交</button>
+    </div>
+    <p id="handoff-status" class="field-help" role="status" aria-live="polite"></p>
+  </div>
+</div>
+
+<script src="/web/static/support.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

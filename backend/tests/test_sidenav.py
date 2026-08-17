@@ -31,7 +31,7 @@ def test_design_system_is_a_new_copy_of_the_design_source() -> None:
 
 def test_navigation_includes_shared_data_export_page() -> None:
     items = [item for group in NAV for item in group["items"]]
-    assert len(items) == 11
+    assert len(items) == 12
     assert any(item["id"] == "exports" and item["path"] == "/admin/exports" for item in items)
     assert {item["id"] for item in items} == {
         "dashboard",
@@ -45,6 +45,7 @@ def test_navigation_includes_shared_data_export_page() -> None:
         "contacts",
         "diagnostics",
         "settings",
+        "support",
     }
     assert "audit-log" not in {item["id"] for item in items}
     assert "/admin/audit-logs" not in {item["path"] for item in items}
