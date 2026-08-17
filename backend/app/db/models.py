@@ -2699,7 +2699,30 @@ class AiHandoff(Base):
     redacted_summary = Column(Text, nullable=False)
     contact = Column(Text, nullable=True)
     status = Column(String(16), nullable=False, default="pending")  # pending | in_review | resolved
+    # RND-359 (T5) triage fields, added by migration 0062.
+    reason = Column(String(32), nullable=True)  # why escalation.should_escalate (or the user) triggered this
+    resolution_category = Column(String(32), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    # Free-text, not an AdminUser FK: resolved by whichever internal staff
+    # member triaged it, who has no account in this tenant-scoped table.
+    resolved_by = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AiEvalRun(Base):
+    """One offline evaluation run (RND-359). metrics is a JSON summary
+    (hit rate, over-permission count, latency) — never per-case raw model
+    output, keeping this table cheap to query for a launch-gate trend."""
+
+    __tablename__ = "ai_eval_runs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    dataset_version = Column(String(32), nullable=False)
+    metrics = Column(JSONB, nullable=False)
+    passed = Column(Boolean, nullable=False)
+    triggered_by = Column(String(64), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=False)
 
 
 # ---------------------------------------------------------------------------

@@ -49,11 +49,27 @@ class HandoffPreviewOut(BaseModel):
 class HandoffSubmitIn(BaseModel):
     summary: str
     contact: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class HandoffOut(BaseModel):
     id: str
     status: str
+
+
+class HandoffResolveIn(BaseModel):
+    resolution_category: Literal[
+        "doc_missing", "doc_stale", "product_bug", "config_issue",
+        "external_platform", "model_issue", "user_misunderstanding",
+    ]
+    resolved_by: str
+
+
+class HandoffResolveOut(BaseModel):
+    id: str
+    status: str
+    resolution_category: str
+    resolved_at: datetime
 
 
 class UserFeedbackIn(BaseModel):

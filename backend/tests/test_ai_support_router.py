@@ -263,12 +263,112 @@ def test_handoff_submit_persists_user_edited_summary(client, db: Session) -> Non
     assert response.json()["status"] == "pending"
 
     row = db.execute(
-        text("SELECT tenant_id, redacted_summary, contact FROM ai_handoff WHERE id = :id"),
+        text("SELECT tenant_id, redacted_summary, contact, reason FROM ai_handoff WHERE id = :id"),
         {"id": handoff_id},
     ).fetchone()
     assert row.tenant_id == tenant_id
     assert row.redacted_summary == "用户编辑后的摘要"
     assert row.contact == "test@example.com"
+    assert row.reason == "user_requested"
+
+
+def test_handoff_submit_stores_explicit_reason(client, db: Session) -> None:
+    c, _tenant_id, _user_id = client
+    session_id = c.post("/api/ai/support/sessions").json()["id"]
+
+    response = c.post(
+        f"/api/ai/support/sessions/{session_id}/handoff",
+        json={"summary": "摘要", "reason": "low_confidence"},
+    )
+    handoff_id = response.json()["id"]
+    row = db.execute(text("SELECT reason FROM ai_handoff WHERE id = :id"), {"id": handoff_id}).fetchone()
+    assert row.reason == "low_confidence"
+
+
+def test_resolve_handoff_requires_platform_admin(client) -> None:
+    c, _tenant_id, _user_id = client
+    session_id = c.post("/api/ai/support/sessions").json()["id"]
+    handoff_id = c.post(f"/api/ai/support/sessions/{session_id}/handoff", json={"summary": "摘要"}).json()["id"]
+
+    response = c.post(
+        f"/api/platform/ai/handoffs/{handoff_id}/resolve",
+        json={"resolution_category": "doc_missing", "resolved_by": "staff@example.com"},
+    )
+    assert response.status_code == 401
+
+
+def test_resolve_handoff_succeeds_for_platform_admin(client, db: Session) -> None:
+    from app.auth import require_platform_admin
+    from app.db.models import PlatformAdmin
+    from app.main import app
+
+    c, _tenant_id, _user_id = client
+    session_id = c.post("/api/ai/support/sessions").json()["id"]
+    handoff_id = c.post(f"/api/ai/support/sessions/{session_id}/handoff", json={"summary": "摘要"}).json()["id"]
+
+    fake_admin = PlatformAdmin(id="platform-1", email="staff@example.com", password_hash="x", status="active")
+    app.dependency_overrides[require_platform_admin] = lambda: fake_admin
+    try:
+        response = c.post(
+            f"/api/platform/ai/handoffs/{handoff_id}/resolve",
+            json={"resolution_category": "doc_missing", "resolved_by": "staff@example.com"},
+        )
+    finally:
+        del app.dependency_overrides[require_platform_admin]
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "resolved"
+    assert response.json()["resolution_category"] == "doc_missing"
+
+    row = db.execute(
+        text("SELECT status, resolution_category, resolved_by, resolved_at FROM ai_handoff WHERE id = :id"),
+        {"id": handoff_id},
+    ).fetchone()
+    assert row.status == "resolved"
+    assert row.resolution_category == "doc_missing"
+    assert row.resolved_by == "staff@example.com"
+    assert row.resolved_at is not None
+
+
+def test_resolve_handoff_rejects_invalid_category(client) -> None:
+    from app.auth import require_platform_admin
+    from app.db.models import PlatformAdmin
+    from app.main import app
+
+    c, _tenant_id, _user_id = client
+    session_id = c.post("/api/ai/support/sessions").json()["id"]
+    handoff_id = c.post(f"/api/ai/support/sessions/{session_id}/handoff", json={"summary": "摘要"}).json()["id"]
+
+    fake_admin = PlatformAdmin(id="platform-1", email="staff@example.com", password_hash="x", status="active")
+    app.dependency_overrides[require_platform_admin] = lambda: fake_admin
+    try:
+        response = c.post(
+            f"/api/platform/ai/handoffs/{handoff_id}/resolve",
+            json={"resolution_category": "not_a_real_category", "resolved_by": "staff@example.com"},
+        )
+    finally:
+        del app.dependency_overrides[require_platform_admin]
+
+    assert response.status_code == 422
+
+
+def test_resolve_unknown_handoff_is_404(client) -> None:
+    from app.auth import require_platform_admin
+    from app.db.models import PlatformAdmin
+    from app.main import app
+
+    c, _tenant_id, _user_id = client
+    fake_admin = PlatformAdmin(id="platform-1", email="staff@example.com", password_hash="x", status="active")
+    app.dependency_overrides[require_platform_admin] = lambda: fake_admin
+    try:
+        response = c.post(
+            "/api/platform/ai/handoffs/does-not-exist/resolve",
+            json={"resolution_category": "doc_missing", "resolved_by": "staff@example.com"},
+        )
+    finally:
+        del app.dependency_overrides[require_platform_admin]
+
+    assert response.status_code == 404
 
 
 def test_delete_session_removes_session_and_messages(client, db: Session) -> None:

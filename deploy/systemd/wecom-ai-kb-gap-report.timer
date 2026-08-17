@@ -1,0 +1,12 @@
+[Unit]
+Description=WeCom Archive AI Support Knowledge-Gap Report Timer
+
+[Timer]
+# Weekly — matches RND-359's "按周期产出高频问题/文档缺口清单" cadence;
+# more frequent than this would mostly just repeat the same open items.
+OnCalendar=Mon *-*-* 06:00:00
+Persistent=true
+Unit=wecom-ai-kb-gap-report.service
+
+[Install]
+WantedBy=timers.target

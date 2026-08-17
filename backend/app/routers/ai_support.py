@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_html_session
+from app.auth import get_current_user, require_html_session, require_platform_admin
 from app.db.models import AiChatMessage, AiChatSession, AiFeedback, AiHandoff
 from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
@@ -27,6 +27,8 @@ from app.schemas.ai_support import (
     FeedbackIn,
     HandoffOut,
     HandoffPreviewOut,
+    HandoffResolveIn,
+    HandoffResolveOut,
     HandoffSubmitIn,
     SendMessageIn,
     UserFeedbackIn,
@@ -260,10 +262,38 @@ def submit_handoff(
         redacted_summary=payload.summary,
         contact=payload.contact,
         status="pending",
+        reason=payload.reason or "user_requested",
     )
     db.add(handoff)
     db.commit()
     return HandoffOut(id=handoff.id, status=handoff.status)
+
+
+@router.post("/api/platform/ai/handoffs/{handoff_id}/resolve", response_model=HandoffResolveOut)
+def resolve_handoff(
+    handoff_id: str,
+    payload: HandoffResolveIn,
+    _platform_admin=Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> HandoffResolveOut:
+    """RND-359 (T5): internal-staff-only triage action — resolution_category
+    is exactly the taxonomy the gap-report aggregation groups by. Never
+    reachable by a tenant AdminUser session; this is cross-tenant by design
+    (an internal reviewer triages handoffs from any tenant)."""
+    handoff = db.get(AiHandoff, handoff_id)
+    if handoff is None:
+        raise HTTPException(status_code=404, detail="handoff_not_found")
+    handoff.status = "resolved"
+    handoff.resolution_category = payload.resolution_category
+    handoff.resolved_by = payload.resolved_by
+    handoff.resolved_at = datetime.now(timezone.utc)
+    db.commit()
+    return HandoffResolveOut(
+        id=handoff.id,
+        status=handoff.status,
+        resolution_category=handoff.resolution_category,
+        resolved_at=handoff.resolved_at,
+    )
 
 
 @router.post("/api/ai/support/feedback", response_model=UserFeedbackOut, status_code=201)

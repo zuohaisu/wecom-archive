@@ -224,6 +224,11 @@ class AiSettings(BaseSettings):
     ai_llm_model: str = ""
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
+    # RND-359 (T5) cost cap: total prompt+completion tokens a single tenant
+    # may spend per UTC day before answer_service refuses further LLM
+    # calls (still serves the deterministic disabled/insufficient-evidence
+    # paths). Empty/unset = no cap.
+    ai_daily_token_budget_per_tenant: str = ""
 
 
 def get_ai_settings() -> AiSettings:

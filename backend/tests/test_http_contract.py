@@ -367,7 +367,8 @@ def test_router_count() -> None:
     # RND-388 adds one self-service activation route.
     # RND-357 adds the 8 AI support page/API routes.
     # RND-161 adds the proactive user-feedback route.
-    assert route_count == 161
+    # RND-359 adds the internal-staff handoff-resolution route.
+    assert route_count == 162
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -510,6 +511,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/ai/support/sessions/{chat_session_id}/handoff/preview",
             "/api/ai/support/sessions/{chat_session_id}/handoff",
             "/api/ai/support/feedback",
+            "/api/platform/ai/handoffs/{handoff_id}/resolve",
             "/api/payments/wechat/notify",
             "/api/provisioning/activate",
             "/api/provisioning/config",
@@ -941,6 +943,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "None",
         ),
         ("/api/ai/support/sessions/{chat_session_id}/handoff", frozenset({"POST"}), "HandoffOut", "None"),
+        (
+            "/api/platform/ai/handoffs/{handoff_id}/resolve",
+            frozenset({"POST"}),
+            "HandoffResolveOut",
+            "None",
+        ),
         ("/api/ai/support/feedback", frozenset({"POST"}), "UserFeedbackOut", "None"),
         ("/api/refunds/wechat/notify", frozenset({"POST"}), "None", "None"),
         (

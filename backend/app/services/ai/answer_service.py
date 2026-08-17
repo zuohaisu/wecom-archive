@@ -14,8 +14,10 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import AiChatMessage, AiQueryAuditLog
@@ -29,7 +31,7 @@ from app.services.ai.llm_provider import (
     get_llm_provider,
 )
 from app.services.ai.retriever import ChunkResult, PostgresFtsRetriever, Retriever, get_active_index_version_id
-from app.settings import get_ai_settings
+from app.settings import AiSettings, get_ai_settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ _INSUFFICIENT_EVIDENCE_TEXT = (
     "建议转人工确认，或换一种方式描述你的问题。"
 )
 _DISABLED_TEXT = "AI 客服当前未启用。"
+_BUDGET_EXCEEDED_TEXT = "今日 AI 客服用量已达到上限，请稍后再试或转人工。"
 
 _SYSTEM_PROMPT = """你是本产品管理后台内的 AI 客服助手。严格规则：
 1. 只能依据下面在 <document> 标签内提供的内容回答，不得使用你自己的先验知识补充具体的产品行为、价格或配置细节。
@@ -185,7 +188,24 @@ def answer_query(
             completion_tokens=0,
             retrieved_chunk_ids=[],
             index_version_id=index_version_id,
-            escalation_reason=should_escalate(retrieved_chunks=[], response_status="insufficient_evidence", response_text=""),
+            escalation_reason=should_escalate(retrieved_chunks=[], response_status="insufficient_evidence", response_text="", query=query),
+        )
+        _write_audit_log(db, tenant_id, session_id, admin_user_id, query, result, latency_ms=_elapsed_ms(start))
+        _maybe_persist_messages(db, session_id, tenant_id, query, result)
+        return result
+
+    if _tenant_over_daily_token_budget(db, tenant_id, settings):
+        result = AnswerResult(
+            text=_BUDGET_EXCEEDED_TEXT,
+            citations=[],
+            response_status="budget_exceeded",
+            provider=active_provider.name,
+            model="none",
+            prompt_tokens=0,
+            completion_tokens=0,
+            retrieved_chunk_ids=[c.chunk_id for c in chunks],
+            index_version_id=index_version_id,
+            escalation_reason="daily_budget_exceeded",
         )
         _write_audit_log(db, tenant_id, session_id, admin_user_id, query, result, latency_ms=_elapsed_ms(start))
         _maybe_persist_messages(db, session_id, tenant_id, query, result)
@@ -242,11 +262,33 @@ def answer_query(
         completion_tokens=response.usage.completion_tokens,
         retrieved_chunk_ids=[c.chunk_id for c in chunks],
         index_version_id=index_version_id,
-        escalation_reason=should_escalate(retrieved_chunks=chunks, response_status=response_status, response_text=text),
+        escalation_reason=should_escalate(retrieved_chunks=chunks, response_status=response_status, response_text=text, query=query),
     )
     _write_audit_log(db, tenant_id, session_id, admin_user_id, query, result, latency_ms=_elapsed_ms(start))
     _maybe_persist_messages(db, session_id, tenant_id, query, result)
     return result
+
+
+def _tenant_over_daily_token_budget(db: Session, tenant_id: str, settings: AiSettings) -> bool:
+    raw = settings.ai_daily_token_budget_per_tenant.strip()
+    if not raw:
+        return False
+    try:
+        budget = int(raw)
+    except ValueError:
+        logger.warning("AI_DAILY_TOKEN_BUDGET_PER_TENANT=%r not an int; treating as unlimited", raw)
+        return False
+    if budget <= 0:
+        return False
+
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    spent = db.execute(
+        select(
+            func.coalesce(func.sum(AiQueryAuditLog.prompt_tokens), 0)
+            + func.coalesce(func.sum(AiQueryAuditLog.completion_tokens), 0)
+        ).where(AiQueryAuditLog.tenant_id == tenant_id, AiQueryAuditLog.created_at >= today_start)
+    ).scalar_one()
+    return int(spent or 0) >= budget
 
 
 def _elapsed_ms(start: float) -> int:

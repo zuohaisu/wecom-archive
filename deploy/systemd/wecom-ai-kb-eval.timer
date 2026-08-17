@@ -1,0 +1,12 @@
+[Unit]
+Description=WeCom Archive AI Support Knowledge-Base Evaluation Timer
+
+[Timer]
+# Daily — cheap (pure retrieval, no LLM calls) and catches an index/doc
+# regression well before a human notices via low-quality answers.
+OnCalendar=*-*-* 05:00:00
+Persistent=true
+Unit=wecom-ai-kb-eval.service
+
+[Install]
+WantedBy=timers.target

@@ -253,6 +253,54 @@ def test_provider_error_is_reported_and_never_fabricates_an_answer(
     assert result.citations == []
 
 
+def test_daily_token_budget_blocks_further_calls(db: Session, tenant_and_user, use_ai_settings) -> None:
+    tenant_id, user_id = tenant_and_user
+    _make_index_version(db)
+    use_ai_settings(ai_support_enabled="true", ai_llm_provider="fake", ai_daily_token_budget_per_tenant="10")
+    db.execute(
+        text(
+            "INSERT INTO ai_query_audit_logs "
+            "(tenant_id, admin_user_id, query_text, retrieved_chunk_ids, response_status, prompt_tokens, completion_tokens) "
+            "VALUES (:t, :u, 'prior query', '[]', 'answered', 8, 5)"
+        ),
+        {"t": tenant_id, "u": user_id},
+    )
+    db.commit()
+
+    result = answer_query(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=user_id,
+        query="怎么设置存储配额",
+        access_levels=["customer"],
+        locale="zh-CN",
+        provider=_ExplodingProvider(),
+        retriever=_StubRetriever([_chunk()]),
+    )
+
+    assert result.response_status == "budget_exceeded"
+    assert result.escalation_reason == "daily_budget_exceeded"
+
+
+def test_no_budget_configured_never_blocks(db: Session, tenant_and_user, use_ai_settings) -> None:
+    tenant_id, user_id = tenant_and_user
+    _make_index_version(db)
+    use_ai_settings(ai_support_enabled="true", ai_llm_provider="fake", ai_daily_token_budget_per_tenant="")
+
+    result = answer_query(
+        db,
+        tenant_id=tenant_id,
+        admin_user_id=user_id,
+        query="怎么设置存储配额",
+        access_levels=["customer"],
+        locale="zh-CN",
+        provider=FakeProvider("回答"),
+        retriever=_StubRetriever([_chunk()]),
+    )
+
+    assert result.response_status == "answered"
+
+
 def test_citations_are_deduplicated_by_source_id() -> None:
     chunks = [_chunk(source_id="doc-a"), _chunk(source_id="doc-a"), _chunk(source_id="doc-b")]
     citations = _citations_from_chunks(chunks)
