@@ -2663,6 +2663,33 @@ class AiQueryAuditLog(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+# ---------------------------------------------------------------------------
+# RND-358 (T4) — read-only diagnostic tool invocation audit.
+# ---------------------------------------------------------------------------
+
+
+class AiToolInvocation(Base):
+    """One audited call through app.services.ai_tools.registry.invoke_tool.
+    fields_returned holds only the returned FIELD NAMES (a JSON array of
+    strings) — never values — so this table can reconstruct "who read what
+    kind of data when" without being able to reconstruct any actual
+    configuration value or diagnostic content."""
+
+    __tablename__ = "ai_tool_invocations"
+    __table_args__ = (
+        Index("ix_ai_tool_invocations_tenant_created", "tenant_id", "created_at", "id"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=False)
+    tool_name = Column(String(64), nullable=False)
+    consent_given = Column(Boolean, nullable=False)
+    fields_returned = Column(JSONB, nullable=False, default=list)
+    result_status = Column(String(32), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ExternalContactNicknameHistory(Base):
     """Observed transitions of a customer's own WeCom nickname."""
 
