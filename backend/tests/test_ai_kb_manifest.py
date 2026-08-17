@@ -46,6 +46,8 @@ def test_real_manifest_loads_and_validates() -> None:
     assert len(entries) >= 6
     customer_entries = [e for e in entries if e.access_level == AccessLevel.CUSTOMER]
     assert len(customer_entries) >= 6
+    public_entries = [e for e in entries if e.access_level == AccessLevel.PUBLIC]
+    assert len(public_entries) >= 4
     assert any(e.access_level == AccessLevel.INTERNAL for e in entries)
     assert any(e.access_level == AccessLevel.FORBIDDEN for e in entries)
 
@@ -78,7 +80,7 @@ def test_missing_required_field_rejected(tmp_path: Path) -> None:
 
 def test_invalid_access_level_rejected(tmp_path: Path) -> None:
     bad_entry = dict(_VALID_ENTRY)
-    bad_entry["access_level"] = "public"  # not a real level
+    bad_entry["access_level"] = "external"  # not a real level
     manifest_path = _write_manifest(tmp_path, [bad_entry])
 
     with pytest.raises(ManifestValidationError) as exc_info:
@@ -142,7 +144,7 @@ def test_missing_file_rejected_when_check_files_exist(tmp_path: Path) -> None:
 
 def test_all_issues_reported_not_just_first(tmp_path: Path) -> None:
     bad_entry_one = dict(_VALID_ENTRY)
-    bad_entry_one["access_level"] = "public"
+    bad_entry_one["access_level"] = "external"
     bad_entry_two = dict(_VALID_ENTRY)
     bad_entry_two["status"] = "archived"
     manifest_path = _write_manifest(tmp_path, [bad_entry_one, bad_entry_two])

@@ -140,6 +140,15 @@ def test_internal_access_level_is_ingestable_but_distinct(tmp_path: Path) -> Non
     assert resolution.ingestable == [entry]
 
 
+def test_public_access_level_is_ingestable(tmp_path: Path) -> None:
+    (tmp_path / "doc.md").write_text("公开产品功能说明", encoding="utf-8")
+    entry = _entry(access_level=AccessLevel.PUBLIC, path="doc.md")
+
+    resolution = resolve_ingestable_sources([entry], repo_root=tmp_path)
+
+    assert resolution.ingestable == [entry]
+
+
 # ---------------------------------------------------------------------------
 # Locale fallback
 # ---------------------------------------------------------------------------

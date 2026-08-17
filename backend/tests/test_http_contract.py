@@ -368,7 +368,8 @@ def test_router_count() -> None:
     # RND-357 adds the 8 AI support page/API routes.
     # RND-161 adds the proactive user-feedback route.
     # RND-359 adds the internal-staff handoff-resolution route.
-    assert route_count == 162
+    # RND-408 adds the 7 public AI support page/API routes.
+    assert route_count == 169
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -512,6 +513,13 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/ai/support/sessions/{chat_session_id}/handoff",
             "/api/ai/support/feedback",
             "/api/platform/ai/handoffs/{handoff_id}/resolve",
+            "/public/support",
+            "/api/ai/public/support/status",
+            "/api/ai/public/support/sessions",
+            "/api/ai/public/support/sessions/{chat_session_id}",
+            "/api/ai/public/support/sessions/{chat_session_id}/messages",
+            "/api/ai/public/support/sessions/{chat_session_id}/handoff/preview",
+            "/api/ai/public/support/sessions/{chat_session_id}/handoff",
             "/api/payments/wechat/notify",
             "/api/provisioning/activate",
             "/api/provisioning/config",
@@ -950,6 +958,18 @@ def test_route_snapshot_with_real_model_names() -> None:
             "None",
         ),
         ("/api/ai/support/feedback", frozenset({"POST"}), "UserFeedbackOut", "None"),
+        ("/public/support", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/api/ai/public/support/status", frozenset({"GET"}), "_AiPublicSupportStatusOut", "None"),
+        ("/api/ai/public/support/sessions", frozenset({"POST"}), "_AiPublicChatSessionOut", "None"),
+        ("/api/ai/public/support/sessions/{chat_session_id}", frozenset({"DELETE"}), "None", "None"),
+        ("/api/ai/public/support/sessions/{chat_session_id}/messages", frozenset({"POST"}), "None", "None"),
+        (
+            "/api/ai/public/support/sessions/{chat_session_id}/handoff/preview",
+            frozenset({"POST"}),
+            "_HandoffPreviewOut",
+            "None",
+        ),
+        ("/api/ai/public/support/sessions/{chat_session_id}/handoff", frozenset({"POST"}), "_HandoffOut", "None"),
         ("/api/refunds/wechat/notify", frozenset({"POST"}), "None", "None"),
         (
             "/api/search/contacts",

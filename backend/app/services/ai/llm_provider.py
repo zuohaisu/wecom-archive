@@ -172,6 +172,16 @@ def ai_support_is_enabled(settings: Optional[AiSettings] = None) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def ai_public_support_is_enabled(settings: Optional[AiSettings] = None) -> bool:
+    """RND-408: public AI support is enabled only when both the overall
+    AI kill switch AND the public-specific switch are on."""
+    source = settings or get_ai_settings()
+    if not ai_support_is_enabled(source):
+        return False
+    raw = source.ai_public_support_enabled.strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def get_llm_provider(settings: Optional[AiSettings] = None) -> LLMProvider:
     """Single factory every caller (answer_service, eval scripts) must use
     instead of constructing a provider directly — this is what makes
