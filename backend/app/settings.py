@@ -90,6 +90,7 @@ class WecomThirdPartySettings(BaseSettings):
     wecom_third_party_callback_url: str = ""
     wecom_third_party_instruction_token: str = ""
     wecom_third_party_instruction_encoding_aes_key: str = ""
+    wecom_third_party_corp_id: str = ""
 
 
 def get_wecom_third_party_settings() -> WecomThirdPartySettings:

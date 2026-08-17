@@ -44,6 +44,7 @@ from app.services.wecom_suite_ticket import (
 from app.settings import WecomThirdPartySettings
 
 _SUITE_ID = "ww-provider-suite-test"
+_CORP_ID = "ww-provider-corp-test"
 _TOKEN = "ProviderCallbackToken350"
 _KEY = bytes(range(32))
 _AES_KEY = base64.b64encode(_KEY).decode("ascii").rstrip("=")
@@ -63,7 +64,7 @@ def _signature(timestamp: str, nonce: str, payload: str) -> str:
     return hashlib.sha1("".join(values).encode("utf-8")).hexdigest()
 
 
-def _encrypt_envelope(message: bytes, receiver_id: str = _SUITE_ID) -> str:
+def _encrypt_envelope(message: bytes, receiver_id: str = _CORP_ID) -> str:
     plaintext = (
         b"r" * 16
         + struct.pack("!I", len(message))
@@ -104,7 +105,7 @@ def _post(
     *,
     ticket: str = "provider-ticket-sensitive",
     suite_id: str = _SUITE_ID,
-    receiver_id: str = _SUITE_ID,
+    receiver_id: str = _CORP_ID,
     info_type: str = "suite_ticket",
     source_timestamp: int | None = None,
     signature: str | None = None,
@@ -138,6 +139,7 @@ def _post(
 def instruction_client(monkeypatch):
     monkeypatch.setenv("FIELD_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("WECOM_THIRD_PARTY_SUITE_ID", _SUITE_ID)
+    monkeypatch.setenv("WECOM_THIRD_PARTY_CORP_ID", _CORP_ID)
     monkeypatch.setenv("WECOM_THIRD_PARTY_INSTRUCTION_TOKEN", _TOKEN)
     monkeypatch.setenv(
         "WECOM_THIRD_PARTY_INSTRUCTION_ENCODING_AES_KEY",
@@ -225,14 +227,66 @@ def test_valid_ticket_is_encrypted_and_newest_signed_event_wins(
 
 
 @pytest.mark.parametrize(
-    ("suite_id", "receiver_id"),
-    [("another-suite", _SUITE_ID), (_SUITE_ID, "another-suite")],
+    ("suite_id", "receiver_id", "expected_detail"),
+    [
+        ("another-suite", _CORP_ID, "Suite ID mismatch"),
+        (_SUITE_ID, "another-corp", "Corp ID mismatch"),
+        (_SUITE_ID, _SUITE_ID, "Corp ID mismatch"),
+    ],
 )
-def test_wrong_suite_id_fails_closed(instruction_client, suite_id, receiver_id):
+def test_wrong_suite_id_or_corp_id_fails_closed(
+    instruction_client, suite_id, receiver_id, expected_detail
+):
     client, factory = instruction_client
     response = _post(client, suite_id=suite_id, receiver_id=receiver_id)
     assert response.status_code == 403
-    assert response.json() == {"detail": "Suite ID mismatch"}
+    assert response.json() == {"detail": expected_detail}
+    with factory() as db:
+        assert db.query(WecomSuiteTicketState).count() == 0
+
+
+def test_get_url_verification_rejects_suite_id_as_receiver(instruction_client):
+    client, _factory = instruction_client
+    now = str(int(datetime.now(timezone.utc).timestamp()))
+    nonce = "verify-nonce-wrong-receiver"
+    encrypted = _encrypt_envelope(b"verification-plaintext", receiver_id=_SUITE_ID)
+    response = client.get(
+        _PATH,
+        params={
+            "msg_signature": _signature(now, nonce, encrypted),
+            "timestamp": now,
+            "nonce": nonce,
+            "echostr": encrypted,
+        },
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Corp ID mismatch"}
+
+
+def test_missing_corp_id_configuration_fails_closed_on_get_and_post(
+    instruction_client, monkeypatch
+):
+    client, factory = instruction_client
+    monkeypatch.delenv("WECOM_THIRD_PARTY_CORP_ID")
+
+    now = str(int(datetime.now(timezone.utc).timestamp()))
+    nonce = "verify-nonce-missing-corp"
+    encrypted = _encrypt_envelope(b"verification-plaintext")
+    get_response = client.get(
+        _PATH,
+        params={
+            "msg_signature": _signature(now, nonce, encrypted),
+            "timestamp": now,
+            "nonce": nonce,
+            "echostr": encrypted,
+        },
+    )
+    assert get_response.status_code == 503
+    assert get_response.json() == {"detail": "Callback unavailable"}
+
+    post_response = _post(client)
+    assert post_response.status_code == 503
+    assert post_response.json() == {"detail": "Callback unavailable"}
     with factory() as db:
         assert db.query(WecomSuiteTicketState).count() == 0
 
