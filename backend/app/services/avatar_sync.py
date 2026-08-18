@@ -2,9 +2,10 @@
 
 Upstream avatar URLs are treated as untrusted, short-lived inputs. They are
 never returned by an API, logged, or retained in the database: this module
-accepts only documented WeCom CDN hosts over HTTPS, verifies the response
-before caching a small image through the existing private storage boundary,
-and records only an opaque storage reference.
+accepts only documented WeCom CDN hosts over HTTPS (http:// URLs on those
+hosts are upgraded to https before the allow-list check), verifies the
+response before caching a small image through the existing private storage
+boundary, and records only an opaque storage reference.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Literal, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from sqlalchemy.exc import OperationalError
@@ -88,6 +89,26 @@ def _now() -> datetime:
 
 def _clean_url(value: object) -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _upgrade_wecom_http(url: str) -> str:
+    """Upgrade http:// URLs on the trusted WeCom CDN hosts to https.
+
+    WeCom's ``externalcontact/get`` returns external-contact avatar URLs as
+    ``http://wx.qlogo.cn/...``, while this module's download path is strictly
+    https-only. The same CDN also serves those images over https, so upgrade
+    only the allow-listed hosts and leave every other URL untouched — the
+    https-only + host allow-list boundary stays in force for all other
+    sources.
+    """
+    parsed = urlsplit(url)
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme.lower() == "http" and any(
+        hostname == suffix or hostname.endswith(f".{suffix}")
+        for suffix in _ALLOWED_WECOM_AVATAR_HOST_SUFFIXES
+    ):
+        return urlunsplit(("https", parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+    return url
 
 
 def _source_is_allowed(source_url: str) -> bool:
@@ -194,6 +215,7 @@ def sync_avatar_from_source(
     if not url:
         _mark_avatar(profile, source=source, status="missing")
         return False
+    url = _upgrade_wecom_http(url)
 
     if not _source_is_allowed(url):
         _mark_avatar(profile, source=source, status="invalid")
