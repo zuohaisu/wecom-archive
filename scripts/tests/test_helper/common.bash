@@ -49,6 +49,7 @@ EOF
 	cp "$TEST_HELPER_DIR/mock_curl.sh" "$MOCK_BIN_DIR/curl"
 	cp "$TEST_HELPER_DIR/mock_flock.sh" "$MOCK_BIN_DIR/flock"
 	cp "$TEST_HELPER_DIR/mock_mv.sh" "$MOCK_BIN_DIR/mock_mv" # NOT wired as MV_BIN by default -- see mv-failure regression test
+	cp "$TEST_HELPER_DIR/mock_sudo.sh" "$MOCK_BIN_DIR/sudo" # NOT wired as SUDO_BIN by default (stays "") -- see step 10 tests
 	chmod +x "$MOCK_BIN_DIR"/*
 	ORIGINAL_PATH="$PATH"
 	PATH="$MOCK_BIN_DIR:$PATH"
@@ -82,6 +83,7 @@ EOF
 	export MOCK_CURL_LOG="$CMD_LOG"
 	export MOCK_FLOCK_LOG="$CMD_LOG"
 	export MOCK_MV_LOG="$CMD_LOG"
+	export MOCK_SUDO_LOG="$CMD_LOG"
 	export CMD_LOG
 
 	# ── deploy_server.sh configuration overrides ─────────────────────
@@ -106,6 +108,9 @@ EOF
 	# and three consecutive production breakages shipped through a green suite.
 	export SHARED_DST="$TEST_TMPDIR/shared_www"
 	export NGINX_DST="$TEST_TMPDIR/nginx_root"
+	# Step 10 (managed systemd units) target — never a real /etc/systemd/system.
+	export SYSTEMD_UNIT_DIR="$TEST_TMPDIR/systemd_units"
+	mkdir -p "$SYSTEMD_UNIT_DIR"
 	export INTERNAL_HEALTH="http://mock-host/internal-health"
 	export PUBLIC_HEALTH="http://mock-host/public-health"
 	export HEALTH_RETRIES=3
@@ -127,6 +132,7 @@ EOF
 	export MOCK_MV_MODE=ok # only relevant if a test opts into MV_BIN="$MOCK_BIN_DIR/mock_mv"
 	export MOCK_CURL_INTERNAL_MODE=always_ok
 	export MOCK_CURL_PUBLIC_MODE=always_ok
+	export MOCK_SUDO_MODE=ok # only relevant if a test opts into SUDO_BIN="sudo"
 }
 
 deploy_common_teardown() {
@@ -208,4 +214,36 @@ known_good() {
 seed_known_good() {
 	mkdir -p "$DEPLOY_STATE_DIR"
 	echo "$1" >"$DEPLOY_STATE_DIR/last_known_good_sha"
+}
+
+# seed_managed_units — create deploy/systemd/MANAGED_UNITS plus a fake
+# <name>.service/.timer pair under $DEPLOY_DIR, mirroring the real
+# wecom-external-contact-reconcile.{service,timer} shape closely enough for
+# step 10's install/enable logic to exercise both file kinds.
+seed_managed_units() {
+	local dir="$DEPLOY_DIR/deploy/systemd"
+	mkdir -p "$dir"
+	cat >"$dir/MANAGED_UNITS" <<'EOF'
+# test manifest
+demo-job.service
+demo-job.timer
+EOF
+	cat >"$dir/demo-job.service" <<'EOF'
+[Unit]
+Description=demo job
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+EOF
+	cat >"$dir/demo-job.timer" <<'EOF'
+[Unit]
+Description=demo job timer
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+
+[Install]
+WantedBy=timers.target
+EOF
 }

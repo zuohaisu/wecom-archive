@@ -297,7 +297,74 @@
       .catch(function () { statusEl.textContent = t('support.networkError'); });
   }
 
+  function applyI18n() {
+    document.documentElement.lang = I18N.getLocale();
+    document.querySelectorAll('[data-i18n]').forEach(function (element) {
+      element.textContent = t(element.getAttribute('data-i18n'));
+    });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(function (element) {
+      element.placeholder = t(element.getAttribute('data-i18n-placeholder'));
+    });
+    document.title = t('support.pageTitle');
+  }
+
+  function renderLangMenu() {
+    var menu = node('lang-menu');
+    if (!menu) { return; }
+    menu.textContent = '';
+    I18N.availableLocales().forEach(function (locale) {
+      var option = document.createElement('div');
+      option.className = 'lang-option' + (locale.code === I18N.getLocale() ? ' active' : '');
+      option.dataset.locale = locale.code;
+      option.textContent = locale.nativeName;
+      menu.appendChild(option);
+    });
+  }
+
+  function loadCurrentUser() {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(function (r) {
+        if (!r.ok) { throw new Error('auth_failed'); }
+        return r.json();
+      })
+      .then(function (user) {
+        var current = node('current-user');
+        if (current) { current.textContent = user.email || user.username || ''; }
+      })
+      .catch(function () {});
+  }
+
+  window.toggleLangMenu = function () {
+    var menu = node('lang-menu');
+    if (!menu) { return; }
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    renderLangMenu();
+  };
+
+  window.doLogout = function () {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).finally(function () {
+      window.location = '/admin/login';
+    });
+  };
+
+  document.addEventListener('click', function (event) {
+    var option = event.target.closest('.lang-option');
+    if (option) {
+      I18N.setLocale(option.dataset.locale);
+      node('lang-menu').style.display = 'none';
+      return;
+    }
+    var sw = node('lang-switch');
+    var menu = node('lang-menu');
+    if (sw && menu && !sw.contains(event.target)) { menu.style.display = 'none'; }
+  });
+
   function init() {
+    applyI18n();
+    renderLangMenu();
+    loadCurrentUser();
+    I18N.onChange(function () { applyI18n(); renderLangMenu(); });
+
     fetch('/api/ai/support/status')
       .then(function (r) { return r.json(); })
       .then(function (data) {

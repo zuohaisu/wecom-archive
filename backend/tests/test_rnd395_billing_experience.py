@@ -68,7 +68,7 @@ def test_navigation_and_provisioning_copy_do_not_present_payment_as_first_step()
     # is enforced at those sources of truth.
     sidenav_module = (_BACKEND / "app/web/sidenav.py").read_text(encoding="utf-8")
 
-    for entry in ('"nav.billing": "续费"', '"nav.billing": "續費"', '"nav.billing": "Renewal"'):
+    for entry in ('"nav.billing": "开通/续费"', '"nav.billing": "開通/續費"', '"nav.billing": "Activate/Renew"'):
         assert entry in translations
     assert "开始 15 天免费试用" in sidenav_module
     assert "无需先付款" in translations

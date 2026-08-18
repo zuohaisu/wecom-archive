@@ -28,6 +28,17 @@
 #       ─────────────────────────────
 #       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service, /usr/bin/apt-get
 #
+#   Step 10 (sync deploy/systemd/MANAGED_UNITS) additionally needs, but
+#   degrades gracefully with a WARN (never fails the deploy) if these are
+#   absent — see that step's comment below:
+#       wecomarchive ALL=(root) NOPASSWD: \
+#         /usr/bin/cp /srv/apps/wecom-archive-365/current/deploy/systemd/*.service /etc/systemd/system/, \
+#         /usr/bin/cp /srv/apps/wecom-archive-365/current/deploy/systemd/*.timer /etc/systemd/system/, \
+#         /usr/bin/cp /srv/apps/wecom-archive-365/current/deploy/systemd/*.path /etc/systemd/system/, \
+#         /usr/bin/systemctl daemon-reload, \
+#         /usr/bin/systemctl enable --now wecom-*.timer, \
+#         /usr/bin/systemctl enable --now wecom-*.path
+#
 #   VERIFIED-ON-PRODUCTION CAVEAT (as of 2026-08-02, re-verified 2026-08-02):
 #   /etc/sudoers.d/wecom-archive-365 grants ONLY systemctl restart/status.
 #   /etc/sudoers.d/wecomarchive (created 2026-07-28) additionally grants
@@ -178,6 +189,10 @@ FLOCK_BIN="${FLOCK_BIN:-flock}"
 MV_BIN="${MV_BIN:-mv}"
 APT_GET_BIN="${APT_GET_BIN:-apt-get}"
 FFMPEG_BIN="${FFMPEG_BIN:-ffmpeg}"
+
+# Step 10 (sync deploy/systemd/MANAGED_UNITS) target directory — overridable
+# so tests never write to a real /etc/systemd/system.
+SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
 # Health gate endpoints. Internal uses /health/ready — the authoritative,
 # localhost, real readiness check (DB + schema revision — see
@@ -363,6 +378,78 @@ _publish_static_dir() {
     return 1
 }
 
+# _sync_managed_systemd_units — installs and enables the explicit allowlist
+# of background-job units in deploy/systemd/MANAGED_UNITS (RND-410-adjacent
+# fix for issue #46 bug 3: an avatar-sync timer sat in the repo, never
+# installed on the host, because installing a NEW systemd unit has always
+# been a separate manual runbook step — see docs/DEPLOYMENT.md — that this
+# CD pipeline never performed).
+#
+# Deliberately reads an explicit manifest rather than scanning
+# deploy/systemd/*.timer: that directory also holds a templated unit
+# (qiniu-ssl-renew@.timer, needs a per-instance argument to enable) and
+# manual/one-off units (e.g. wecom-thumbnail-backfill.service) that must
+# never be auto-enabled just because they exist on disk.
+#
+# Non-fatal by design, like step 9's static-site publish: this runs after
+# the backend is already restarted and health-gated, so a missing sudoers
+# grant here must WARN, never fail or roll back a deploy whose actual
+# application code is already live and healthy.
+_sync_managed_systemd_units() {
+    local manifest="$DEPLOY_DIR/deploy/systemd/MANAGED_UNITS"
+    if [ ! -f "$manifest" ]; then
+        echo "  → no deploy/systemd/MANAGED_UNITS manifest — nothing to sync."
+        return 0
+    fi
+    if [ -z "$SUDO_BIN" ]; then
+        echo "  → SUDO_BIN unset — skipping (no privilege to write $SYSTEMD_UNIT_DIR)."
+        return 0
+    fi
+
+    local changed=0 unit src
+    while IFS= read -r unit; do
+        case "$unit" in
+            ''|'#'*) continue ;;
+        esac
+        src="$DEPLOY_DIR/deploy/systemd/$unit"
+        if [ ! -f "$src" ]; then
+            echo "  WARN: MANAGED_UNITS lists $unit but $src does not exist — skipping." >&2
+            continue
+        fi
+        if [ -f "$SYSTEMD_UNIT_DIR/$unit" ] && cmp -s "$src" "$SYSTEMD_UNIT_DIR/$unit" 2>/dev/null; then
+            continue # already installed and unchanged — nothing to do
+        fi
+        if "$SUDO_BIN" -n cp "$src" "$SYSTEMD_UNIT_DIR/" 2>/dev/null; then
+            echo "  → installed/updated $unit"
+            changed=1
+        else
+            echo "  WARN: could not install $unit into $SYSTEMD_UNIT_DIR — no non-interactive sudo grant for this exact cp invocation (see the Server (sudo) Prerequisites comment at the top of this script)." >&2
+        fi
+    done <"$manifest"
+
+    if [ "$changed" -eq 1 ]; then
+        if ! "$SUDO_BIN" -n "$SYSTEMCTL_BIN" daemon-reload 2>/dev/null; then
+            echo "  WARN: systemctl daemon-reload failed or was not permitted — newly installed/updated units may not take effect yet." >&2
+        fi
+    fi
+
+    while IFS= read -r unit; do
+        case "$unit" in
+            ''|'#'*) continue ;;
+        esac
+        case "$unit" in
+            *.timer|*.path) ;;
+            *) continue ;; # only trigger units are enabled directly; the oneshot .service they target is started BY the trigger, never enabled itself
+        esac
+        if [ ! -f "$SYSTEMD_UNIT_DIR/$unit" ]; then
+            continue # install above failed or was skipped for this unit — nothing to enable
+        fi
+        if ! "$SUDO_BIN" -n "$SYSTEMCTL_BIN" enable --now "$unit" 2>/dev/null; then
+            echo "  WARN: could not enable/start $unit — no non-interactive sudo grant for this exact systemctl invocation." >&2
+        fi
+    done <"$manifest"
+}
+
 # _record_known_good <sha> — called only after this script has itself
 # proven <sha> healthy (end-to-end forward success, or a successful
 # rollback's own re-check). Returns non-zero on a persist failure — QA
@@ -494,7 +581,7 @@ _rollback_and_restart_old() {
 }
 
 # ── 1. Pull latest code (clean-tree guarded) ───────────────────────────────
-echo "[1/9] Pulling latest code from $GIT_REMOTE/$GIT_BRANCH …"
+echo "[1/10] Pulling latest code from $GIT_REMOTE/$GIT_BRANCH …"
 
 if [ ! -d "$DEPLOY_DIR" ]; then
     echo "ERROR: Deploy directory $DEPLOY_DIR does not exist." >&2
@@ -590,7 +677,7 @@ echo ""
 cd backend
 
 # ── 2. Ensure media-transcoding runtime ────────────────────────────────────
-echo "[2/9] Ensuring ffmpeg is available …"
+echo "[2/10] Ensuring ffmpeg is available …"
 if ! _ensure_ffmpeg; then
     echo "ERROR: ffmpeg installation failed." >&2
     _restore_worktree_only
@@ -598,7 +685,7 @@ if ! _ensure_ffmpeg; then
 fi
 
 # ── 3. Install / update Python dependencies ────────────────────────────────
-echo "[3/9] Installing Python dependencies …"
+echo "[3/10] Installing Python dependencies …"
 if [ ! -d .venv ]; then
     echo "ERROR: Virtual environment not found at $PWD/.venv. Run first-time setup." >&2
     _restore_worktree_only
@@ -635,7 +722,7 @@ if ! _install_deps; then
 fi
 
 # ── 4. Compile-check Python code ───────────────────────────────────────────
-echo "[4/9] Checking Python code compilation …"
+echo "[4/10] Checking Python code compilation …"
 if ! "$PYTHON_BIN" -m compileall app scripts; then
     echo "ERROR: Compile check failed." >&2
     _restore_worktree_only
@@ -643,7 +730,7 @@ if ! "$PYTHON_BIN" -m compileall app scripts; then
 fi
 
 # ── 5. Alembic migration (P0-A) ─────────────────────────────────────────────
-echo "[5/9] Running Alembic migrations (alembic upgrade head) …"
+echo "[5/10] Running Alembic migrations (alembic upgrade head) …"
 if ! "$PYTHON_BIN" -m alembic upgrade head 2>&1 | _redact; then
     echo "ERROR: Alembic migration failed. Service was NOT restarted; the old process is still running the old code." >&2
     _restore_worktree_only
@@ -651,7 +738,7 @@ if ! "$PYTHON_BIN" -m alembic upgrade head 2>&1 | _redact; then
 fi
 
 # ── 5. Verify DB revision == repository head (P0-B) ─────────────────────────
-echo "[6/9] Verifying database revision matches repository head …"
+echo "[6/10] Verifying database revision matches repository head …"
 if ! "$PYTHON_BIN" scripts/verify_alembic_head.py 2>&1 | _redact; then
     echo "ERROR: Database revision does not match repository head. Service was NOT restarted." >&2
     _restore_worktree_only
@@ -659,7 +746,7 @@ if ! "$PYTHON_BIN" scripts/verify_alembic_head.py 2>&1 | _redact; then
 fi
 
 # ── 6. Restart systemd service ──────────────────────────────────────────────
-echo "[7/9] Restarting systemd service ($SERVICE) …"
+echo "[7/10] Restarting systemd service ($SERVICE) …"
 if ! _systemctl_restart "$SERVICE"; then
     echo "ERROR: systemctl restart failed." >&2
     _rollback_and_restart_old "systemctl restart failed"
@@ -672,7 +759,7 @@ if ! _systemctl_is_active "$SERVICE" >/dev/null 2>&1; then
 fi
 
 # ── 7. Readiness health gate (P0-C / P0-D) ──────────────────────────────────
-echo "[8/9] Readiness health gate …"
+echo "[8/10] Readiness health gate …"
 if ! _wait_for_health "Internal" "$INTERNAL_HEALTH" "$HEALTH_RETRIES" "$HEALTH_RETRY_INTERVAL_SECONDS"; then
     echo "ERROR: Internal readiness check failed after $HEALTH_RETRIES attempts." >&2
     _rollback_and_restart_old "internal readiness gate failed"
@@ -703,7 +790,7 @@ fi
 # ── 8. Deploy static site + success ──────────────────────────────────────────
 # Runs only after the backend is confirmed healthy above, so a
 # successful static copy can never mask a backend deploy failure.
-echo "[9/9] Deploying company homepage static files …"
+echo "[9/10] Deploying company homepage static files …"
 STATIC_SRC="$DEPLOY_DIR/static_site/company_homepage"
 # STATIC_SITE_DIR_NAME — the directory name (under shared/www and nginx's
 # webroot) this deployment's static homepage is copied to. Set the real
@@ -767,6 +854,13 @@ if [ -d "$STATIC_SRC" ]; then
 else
     echo "  WARN: static site source not found at $STATIC_SRC — skipping"
 fi
+
+# ── 9. Sync managed systemd units ──────────────────────────────────────────
+# Same non-fatal philosophy as step 9 above: this runs after the backend is
+# already restarted and health-gated, so a missing sudoers grant here must
+# never fail or roll back a deploy whose application code is already live.
+echo "[10/10] Syncing managed systemd units …"
+_sync_managed_systemd_units
 
 if ! _record_known_good "$CURRENT_SHA"; then
     echo "ERROR: the service is healthy on $CURRENT_SHA, but the last-known-good rollback record could not be persisted — the next deploy could not reliably roll back if it fails. Treating this deploy as failed." >&2
