@@ -4,6 +4,16 @@ function loadCurrentUser(){
     if(!d.authenticated){window.location.href='/admin/login';return;}
     currentTenantId=d.tenant_id||null;
     currentUserId=d.id||null;
+    // RND-402: the server projects the authoritative tenant lifecycle so
+    // the console never renders a wall of 403s for a frozen/suspended
+    // tenant. A frozen Owner is routed to the billing/renewal surface
+    // (the recovery path); anything else non-active goes back to login.
+    // Older servers without the projection leave the field undefined and
+    // keep the previous behavior.
+    if(d.lifecycle_status!==undefined&&d.lifecycle_status!=='active'){
+      if(d.lifecycle_status==='frozen'){window.location.href='/admin/billing';return;}
+      window.location.href='/admin/login';return;
+    }
     // RND-297: server preferences take precedence; I18N/theme localStorage
     // remains the fallback until an authenticated preference is available.
     if(d.locale&&typeof I18N!=='undefined')I18N.setLocale(d.locale);

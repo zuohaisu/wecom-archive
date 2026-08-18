@@ -49,6 +49,7 @@ import resource
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 
 # Allow running this shared entrypoint directly from backend/ without an
@@ -59,8 +60,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.crypto import FieldDecryptionError
-from app.db.models import TenantWecomConfig
+from app.audit import AuditAction, AuditObjectType
+from app.db.models import AuditLog, Tenant, TenantWecomConfig
 from app.media_event_dispatch import MediaWorkerDispatch, dispatch_media_worker
+from app.services.service_access import WORKER_SYNC, tenant_service_denial
 from app.services.tenant_credentials import (
     active_tenant_configs,
     config_for_tenant,
@@ -276,15 +279,64 @@ def _tenant_env(config: TenantWecomConfig) -> dict:
     return env
 
 
+def _gate_single_tenant(db: Session, tenant_id: str, tag: str) -> None:
+    """RND-402: deny the sync capability for a frozen/suspended tenant.
+
+    Runs at tenant resolution inside the worker process, so a callback
+    or manual dispatch that already fired cannot archive for a tenant
+    whose authoritative service projection denies it. On denial it writes
+    one sanitized Audit row (stable error code + capability class +
+    lifecycle status only), prints an identifier-free info line, and
+    exits 0 as a safe no-op.
+    """
+    status = None
+    row = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if row is not None:
+        status = row.lifecycle_status
+    denial = tenant_service_denial(status, WORKER_SYNC)
+    if denial is None:
+        return
+    try:
+        db.add(
+            AuditLog(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                admin_user_id=None,
+                action=AuditAction.SERVICE_ACCESS_DENIED,
+                object_type=AuditObjectType.TENANT,
+                object_id=tenant_id,
+                detail={
+                    "capability": WORKER_SYNC,
+                    "error_code": denial,
+                    "lifecycle_status": status,
+                },
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001 -- an audit failure must never expose DB detail
+        db.rollback()
+    print(
+        f"[INFO] archive_worker tenant={tag} trigger=skipped error_code={denial}",
+        flush=True,
+    )
+    print(
+        "[PASS] tenant service gate denies archive sync — exiting without work",
+        flush=True,
+    )
+    raise ArchiveWorkerExit(0, "none", result="skipped")
+
+
 def _run_single_tenant_chain(tenant_id: str) -> None:
     """Hard-fail sync+decrypt chain for one explicit tenant."""
     tag = tenant_log_tag(tenant_id)
     try:
         with Session(_tenant_engine()) as db:
             config = config_for_tenant(db, tenant_id)
-        if config is None:
-            _fail("tenant_unavailable", f"Active config not found (tenant={tag})")
-        env = _tenant_env(config)
+            if config is None:
+                _fail("tenant_unavailable", f"Active config not found (tenant={tag})")
+            _gate_single_tenant(db, tenant_id, tag)
+            env = _tenant_env(config)
     except FieldDecryptionError:
         _fail(
             "tenant_credentials_unreadable",

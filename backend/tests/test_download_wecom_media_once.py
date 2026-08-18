@@ -560,6 +560,31 @@ def _make_sqlite_engine(tmp_path, name):
         conn.execute(
             text(
                 """
+                CREATE TABLE tenants (
+                    id TEXT PRIMARY KEY, name TEXT, slug TEXT, is_active INTEGER,
+                    lifecycle_status TEXT NOT NULL DEFAULT 'active',
+                    lifecycle_revision INTEGER NOT NULL DEFAULT 1,
+                    frozen_at DATETIME, suspended_at DATETIME,
+                    suspension_reason TEXT,
+                    suspended_by_platform_admin_id TEXT,
+                    suspension_previous_status TEXT,
+                    onboarding_completed_at TEXT,
+                    created_at TEXT, updated_at TEXT
+                )
+                """
+            )
+        )
+        # RND-402: worker gates read the tenant's lifecycle projection, so
+        # the shared fixture DB carries one active default tenant.
+        conn.execute(
+            text(
+                "INSERT INTO tenants (id, name, slug, is_active) "
+                "VALUES ('tenant-a', 'Tenant A', 'tenant-a', 1)"
+            )
+        )
+        conn.execute(
+            text(
+                """
                 CREATE TABLE archive_messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     msgid TEXT NOT NULL, seq INTEGER NOT NULL,
@@ -802,6 +827,8 @@ def test_count_only_performs_no_writes(tmp_path, monkeypatch, capsys) -> None:
     def _query(model):
         if model is script.TenantWecomConfig:
             return _query_mock(first_result=tenant_row)
+        if model is script.Tenant:
+            return _query_mock(first_result=SimpleNamespace(lifecycle_status="active"))
         if model is script.ArchiveMessage:
             return _query_mock(count_result=3)
         raise AssertionError(f"unexpected model queried in count-only mode: {model}")
@@ -859,6 +886,8 @@ def _run_main_with_one_candidate(monkeypatch, tmp_path, msgtype, chunks, extra_a
     def _query(model):
         if model is script.TenantWecomConfig:
             return _query_mock(first_result=tenant_row)
+        if model is script.Tenant:
+            return _query_mock(first_result=SimpleNamespace(lifecycle_status="active"))
         if model is MediaFile:
             return _query_mock(first_result=media_file_row)
         raise AssertionError(f"unexpected model queried: {model}")

@@ -89,13 +89,15 @@ import os
 import resource
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.audit import AuditAction, AuditObjectType
 from app.crypto import FieldDecryptionError
-from app.db.models import ArchiveMessage, MediaFile, TenantWecomConfig
+from app.db.models import ArchiveMessage, AuditLog, MediaFile, Tenant, TenantWecomConfig
 from app.media_download import (
     GENERIC_DOWNLOAD_MSGTYPES,
     count_candidates_with_existing_media_row,
@@ -117,7 +119,8 @@ from app.services.media_worker import (  # noqa: F401 -- re-exported for backwar
     build_within_window_count,
     download_media_candidates,
 )
-from app.services.tenant_credentials import config_for_tenant
+from app.services.service_access import WORKER_MEDIA, tenant_service_denial
+from app.services.tenant_credentials import config_for_tenant, tenant_log_tag
 from app.settings import get_event_media_download_settings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -155,6 +158,51 @@ def _fail(error_class: str, message: str) -> None:
     """Emit a fixed safe failure and preserve its machine-readable class."""
     print(f"[FAIL] media_worker error_class={error_class} {message}", flush=True)
     raise MediaWorkerExit(1, error_class)
+
+
+def _gate_tenant_service(session: Session, tenant_id: str) -> None:
+    """RND-402: deny the media capability for a frozen/suspended tenant.
+
+    Runs at tenant resolution, before any candidate selection or SDK
+    work. On denial it writes one sanitized Audit row (only the stable
+    error code, capability class, and lifecycle status — never message
+    content or credentials), prints an identifier-free info line, and
+    exits 0 (a safe no-op, matching the no-work path).
+    """
+    status = None
+    row = session.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if row is not None:
+        status = row.lifecycle_status
+    denial = tenant_service_denial(status, WORKER_MEDIA)
+    if denial is None:
+        return
+    try:
+        session.add(
+            AuditLog(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                admin_user_id=None,
+                action=AuditAction.SERVICE_ACCESS_DENIED,
+                object_type=AuditObjectType.TENANT,
+                object_id=tenant_id,
+                detail={
+                    "capability": WORKER_MEDIA,
+                    "error_code": denial,
+                    "lifecycle_status": status,
+                },
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        session.commit()
+    except Exception:  # noqa: BLE001 -- an audit failure must never expose DB detail
+        session.rollback()
+    print(
+        f"[INFO] media_worker tenant={tenant_log_tag(tenant_id)} trigger=skipped "
+        f"error_code={denial}",
+        flush=True,
+    )
+    print("[PASS] tenant service gate denies media downloads — exiting without work", flush=True)
+    sys.exit(0)
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +581,11 @@ def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
         else:
             corp_id = _require_env("WECOM_CORP_ID")
             tenant_id = _require_tenant_id(session, corp_id)
+
+        # RND-402: authoritative worker gate at tenant resolution. A
+        # frozen/suspended tenant never downloads, even if a signal or
+        # timer already fired for it.
+        _gate_tenant_service(session, tenant_id)
 
         since_ms = _since_ms_cutoff(args.since_hours) if args.since_hours is not None else None
 

@@ -289,6 +289,8 @@ def _run_qiniu_main_with_one_candidate(monkeypatch, tmp_path, provider, jpeg_or_
     def _query(model):
         if model is script.TenantWecomConfig:
             return _query_mock(first_result=tenant_row)
+        if model is script.Tenant:
+            return _query_mock(first_result=SimpleNamespace(lifecycle_status="active"))
         if model is MediaFile:
             return _query_mock(first_result=media_file_row)
         raise AssertionError(f"unexpected model queried: {model}")
