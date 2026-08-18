@@ -19,6 +19,7 @@ from app.auth import (
     BILLING_MANAGER_ROLES,
     BillingAccessContext,
     get_billing_manager,
+    get_billing_owner,
     get_billing_viewer,
 )
 from app.db.models import BillingPlan, PaymentOrder, PlanEntitlement
@@ -26,10 +27,18 @@ from app.db.session import get_db
 from app.i18n_assets import I18N_SCRIPT_TAG
 from app.schemas.billing import (
     BillingPlanOut,
+    CancelIntentIn,
     CreatePaymentOrderIn,
     PaymentOrderOut,
     StorageCapacityOut,
     SubscriptionOverviewOut,
+)
+from app.schemas.refunds import RefundOut
+from app.services.billing_lifecycle import (
+    BillingLifecycleAuthorizationError,
+    BillingLifecycleError,
+    BillingLifecycleNotFoundError,
+    set_cancel_at_period_end,
 )
 from app.services.entitlements import ANNUAL_PLAN_CODE, UNLIMITED_SEATS
 from app.services.payment_orders import (
@@ -48,6 +57,7 @@ from app.services.payment_orders import (
     query_and_reconcile_order,
 )
 from app.services.payment_provider import PaymentProvider
+from app.services.refunds import get_latest_refund_for_tenant
 from app.services.storage_capacity import measure_storage_capacity
 from app.services.subscription_overview import get_subscription_overview
 from app.services.tenant_activation import spawn_activation_worker
@@ -101,6 +111,37 @@ def _raise_order_error(error: Exception) -> None:
     raise error
 
 
+def _raise_lifecycle_error(error: Exception) -> None:
+    if isinstance(error, BillingLifecycleNotFoundError):
+        raise HTTPException(status_code=404, detail="subscription_not_found") from error
+    if isinstance(error, BillingLifecycleAuthorizationError):
+        raise HTTPException(status_code=403, detail="billing_access_denied") from error
+    if isinstance(error, BillingLifecycleError):
+        raise HTTPException(status_code=422, detail="invalid_lifecycle_request") from error
+    raise error
+
+
+def _overview_out(db: Session, tenant_id: str) -> SubscriptionOverviewOut:
+    overview = get_subscription_overview(db, tenant_id)
+    return SubscriptionOverviewOut(
+        plan_code=overview.plan_code,
+        plan_name=overview.plan_name,
+        stored_status=overview.stored_status,
+        effective_status=overview.effective_status,
+        display_state=overview.display_state,
+        unavailable_reason=overview.unavailable_reason,
+        is_entitled=overview.is_entitled,
+        starts_at=overview.starts_at,
+        ends_at=overview.ends_at,
+        grace_ends_at=overview.grace_ends_at,
+        cancel_at_period_end=overview.cancel_at_period_end,
+        entitlements=list(overview.entitlements),
+        renewal_count=overview.renewal_count,
+        measured_at=overview.measured_at,
+        tenant_lifecycle_status=overview.tenant_lifecycle_status,
+    )
+
+
 @router.get("/admin/billing", response_class=HTMLResponse)
 def billing_page(
     request: Request,
@@ -121,6 +162,7 @@ def billing_page(
             billing_can_order=(
                 "true" if context.role in BILLING_MANAGER_ROLES else "false"
             ),
+            billing_is_owner=("true" if context.role == "owner" else "false"),
         )
     )
 
@@ -190,23 +232,55 @@ def billing_subscription(
     context: BillingAccessContext = Depends(get_billing_viewer),
     db: Session = Depends(get_db),
 ) -> SubscriptionOverviewOut:
-    overview = get_subscription_overview(db, context.tenant_id)
-    return SubscriptionOverviewOut(
-        plan_code=overview.plan_code,
-        plan_name=overview.plan_name,
-        stored_status=overview.stored_status,
-        effective_status=overview.effective_status,
-        display_state=overview.display_state,
-        unavailable_reason=overview.unavailable_reason,
-        is_entitled=overview.is_entitled,
-        starts_at=overview.starts_at,
-        ends_at=overview.ends_at,
-        grace_ends_at=overview.grace_ends_at,
-        cancel_at_period_end=overview.cancel_at_period_end,
-        entitlements=list(overview.entitlements),
-        renewal_count=overview.renewal_count,
-        measured_at=overview.measured_at,
-    )
+    return _overview_out(db, context.tenant_id)
+
+
+@router.post(
+    "/api/billing/subscription/cancel-intent", response_model=SubscriptionOverviewOut
+)
+def billing_cancel_intent(
+    payload: CancelIntentIn,
+    context: BillingAccessContext = Depends(get_billing_owner),
+    db: Session = Depends(get_db),
+) -> SubscriptionOverviewOut:
+    """Record (or clear) a do-not-renew-at-period-end intent (RND-404).
+
+    This never shortens the current service term, never moves money, and
+    never freezes anything early — it only records an Owner's stated
+    intent for what happens once the current term ends.
+    """
+    try:
+        set_cancel_at_period_end(
+            db,
+            context.tenant_id,
+            enabled=payload.enabled,
+            owner_admin_user_id=context.user_id,
+            at=datetime.now(timezone.utc),
+        )
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        _raise_lifecycle_error(error)
+        raise
+    return _overview_out(db, context.tenant_id)
+
+
+@router.get("/api/billing/refunds/latest", response_model=Optional[RefundOut])
+def latest_refund(
+    context: BillingAccessContext = Depends(get_billing_viewer),
+    db: Session = Depends(get_db),
+) -> Optional[RefundOut]:
+    """Read-only refund status for the Owner billing page (RND-404).
+
+    Owners never initiate a refund here — only a platform admin can, via
+    the separate controlled `app.routers.refunds` surface.
+    """
+    summary = get_latest_refund_for_tenant(db, context.tenant_id)
+    if summary is None:
+        return None
+    values = asdict(summary)
+    values.pop("term_grant_id", None)
+    return RefundOut(**values)
 
 
 @router.get("/api/billing/orders/latest", response_model=Optional[PaymentOrderOut])

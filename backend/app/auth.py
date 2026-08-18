@@ -607,20 +607,32 @@ class BillingAccessContext:
     role: str
 
 
-def get_billing_context(*allowed_roles: str):
+def get_billing_context(
+    *allowed_roles: str, allowed_lifecycle: frozenset[str] | None = None
+):
     """FastAPI dependency factory for the billing surface (RND-407).
 
     Authorizes an active user whose role is in ``allowed_roles`` (default:
     every admin role, i.e. read-only visibility) and whose tenant matches
     the session's tenant with a lifecycle status consistent with the
-    session scope (``provisioning`` → provisioning, otherwise → active).
+    session scope. A ``provisioning`` session scope always requires the
+    tenant to still be ``provisioning``; an ``admin`` session scope requires
+    the tenant's lifecycle status to be a member of ``allowed_lifecycle``
+    (default: ``{"active"}``, preserving the pre-RND-404 behavior).
     Role-gate the payment-write endpoints by depending on the
     ``get_billing_manager`` instance instead.
+
+    RND-404: the Owner billing surface must stay reachable while a tenant
+    is billing-``frozen`` (ADR-0005 §2.6 — Owner billing/renewal is the one
+    surface still allowed) but never while ``suspended`` (superadmin-only
+    recovery). Callers pick the right ``allowed_lifecycle`` set per
+    endpoint instead of each router re-deriving this policy locally.
 
     Returns a :class:`BillingAccessContext`; unauthenticated callers get
     401, authenticated callers outside the role/lifecycle contract get 403.
     """
     allowed = set(allowed_roles) if allowed_roles else set(ADMIN_ROLES)
+    admin_lifecycle = allowed_lifecycle or frozenset({"active"})
 
     def _checker(
         session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
@@ -644,8 +656,10 @@ def get_billing_context(*allowed_roles: str):
                 raise HTTPException(status_code=401, detail="Not authenticated")
             user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
             tenant = db.query(Tenant).filter(Tenant.id == session.tenant_id).first()
-            expected_lifecycle = (
-                "provisioning" if session.session_scope == "provisioning" else "active"
+            lifecycle_ok = tenant is not None and (
+                tenant.lifecycle_status == "provisioning"
+                if session.session_scope == "provisioning"
+                else tenant.lifecycle_status in admin_lifecycle
             )
             if (
                 user is None
@@ -653,7 +667,7 @@ def get_billing_context(*allowed_roles: str):
                 or user.role not in allowed
                 or user.tenant_id != session.tenant_id
                 or tenant is None
-                or tenant.lifecycle_status != expected_lifecycle
+                or not lifecycle_ok
             ):
                 raise HTTPException(status_code=403, detail="Billing access denied")
             context = BillingAccessContext(
@@ -674,10 +688,24 @@ def get_billing_context(*allowed_roles: str):
     return _checker
 
 
-# Read-only billing access for every active admin role.
-get_billing_viewer = get_billing_context()
-# Payment-authorized billing access for owners and admins.
-get_billing_manager = get_billing_context(*BILLING_MANAGER_ROLES)
+# Read-only billing access for every active admin role. RND-404: readable
+# through frozen and even suspended so the page can render an accurate,
+# non-misleading status instead of an opaque 403.
+get_billing_viewer = get_billing_context(
+    allowed_lifecycle=frozenset({"active", "frozen", "suspended"})
+)
+# Payment-authorized billing access for owners and admins. RND-404: frozen
+# tenants may still pay to unfreeze; suspended tenants may not self-serve
+# any payment action (ADR-0005 §2.6 — superadmin-only recovery).
+get_billing_manager = get_billing_context(
+    *BILLING_MANAGER_ROLES, allowed_lifecycle=frozenset({"active", "frozen"})
+)
+# Owner-only billing access for the cancel-at-period-end intent endpoint
+# (RND-404): billing_lifecycle.set_cancel_at_period_end already requires an
+# active owner AdminUser row, so the role gate here matches that contract.
+get_billing_owner = get_billing_context(
+    "owner", allowed_lifecycle=frozenset({"active", "frozen"})
+)
 
 
 # Sentinel wecom_user_id prefix used for password-mode AdminUser rows.
