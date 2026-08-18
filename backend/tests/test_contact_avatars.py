@@ -240,3 +240,95 @@ def test_member_profile_reads_avatar_but_not_a_browser_url(monkeypatch: pytest.M
     assert profile == MemberProfile(
         name="Alice", avatar_url="https://wx.qlogo.cn/mmhead/alice/0", active=True
     )
+
+
+def test_upgrade_wecom_http_only_touches_allowlisted_hosts() -> None:
+    # WeCom's externalcontact/get returns external avatar URLs over plain
+    # http on the same CDN; only those allow-listed hosts may be upgraded.
+    assert (
+        avatar_sync._upgrade_wecom_http("http://wx.qlogo.cn/mmhead/a/0")
+        == "https://wx.qlogo.cn/mmhead/a/0"
+    )
+    assert (
+        avatar_sync._upgrade_wecom_http("http://qlogo.cn/mmhead/a/0")
+        == "https://qlogo.cn/mmhead/a/0"
+    )
+    assert (
+        avatar_sync._upgrade_wecom_http("http://wework.qpic.cn/a/0")
+        == "https://wework.qpic.cn/a/0"
+    )
+    # Already-https URLs and any non-allow-listed host stay untouched.
+    assert (
+        avatar_sync._upgrade_wecom_http("https://wx.qlogo.cn/mmhead/a/0")
+        == "https://wx.qlogo.cn/mmhead/a/0"
+    )
+    assert (
+        avatar_sync._upgrade_wecom_http("http://example.com/avatar.png")
+        == "http://example.com/avatar.png"
+    )
+    assert (
+        avatar_sync._upgrade_wecom_http("http://evil-qlogo.cn/avatar.png")
+        == "http://evil-qlogo.cn/avatar.png"
+    )
+    assert (
+        avatar_sync._upgrade_wecom_http("http://qlogo.cn.evil.com/avatar.png")
+        == "http://qlogo.cn.evil.com/avatar.png"
+    )
+
+
+def test_external_http_avatar_from_wecom_cdn_is_upgraded_to_https(
+    avatar_db: Session, storage: _MemoryStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contact = ExternalContact(tenant_id="tenant-a", external_userid="wm-http")
+    avatar_db.add(contact)
+    avatar_db.flush()
+    seen: list[str] = []
+    source_url = "http://wx.qlogo.cn/mmhead/example/0"
+    monkeypatch.setattr(
+        avatar_sync,
+        "_download_avatar",
+        lambda value: (
+            seen.append(value),
+            (b"\xff\xd8\xffavatar", ".jpg", "image/jpeg"),
+        )[1],
+    )
+
+    assert avatar_sync.sync_external_contact_avatar(
+        contact, "tenant-a", {"external_contact": {"avatar": source_url}}
+    )
+    assert seen == ["https://wx.qlogo.cn/mmhead/example/0"]
+    assert contact.avatar_status == "ready"
+    assert contact.avatar_storage_ref == "tenants/tenant-a/avatars/external-wm-http.jpg"
+
+
+def test_http_avatar_from_untrusted_host_stays_invalid_without_network(
+    avatar_db: Session, storage: _MemoryStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contact = Contact(
+        tenant_id="tenant-a",
+        wecom_userid="staff-a",
+        avatar_storage_backend="local",
+        avatar_storage_ref="tenants/tenant-a/avatars/internal-staff-a.jpg",
+        avatar_content_type="image/jpeg",
+        avatar_status="ready",
+    )
+    avatar_db.add(contact)
+    avatar_db.flush()
+    storage.data[contact.avatar_storage_ref] = b"old"
+    monkeypatch.setattr(
+        avatar_sync,
+        "_download_avatar",
+        lambda _value: pytest.fail("untrusted URL must not be fetched"),
+    )
+
+    assert not avatar_sync.sync_avatar_from_source(
+        contact,
+        tenant_id="tenant-a",
+        identity_kind="internal",
+        stable_identity_id="staff-a",
+        source="wecom_member",
+        source_url="http://example.com/avatar.png",
+    )
+    assert contact.avatar_status == "invalid"
+    assert contact.avatar_storage_ref is None
+    assert storage.deleted == ["tenants/tenant-a/avatars/internal-staff-a.jpg"]
