@@ -675,7 +675,7 @@ def test_two_tenants_do_not_contaminate_each_other(app_client) -> None:
     )
 
 
-def test_billing_surface_allowed_for_frozen_owner_denied_for_suspended(app_client) -> None:
+def test_billing_surface_allowed_for_frozen_and_suspended_owner(app_client) -> None:
     client, factory = app_client
     frozen_session = _session_cookie(
         factory, user_id="owner-frozen", tenant_id="tenant-frozen"
@@ -689,10 +689,11 @@ def test_billing_surface_allowed_for_frozen_owner_denied_for_suspended(app_clien
     # Frozen Owner keeps the billing/renewal recovery surface.
     response = client.get("/admin/billing", cookies={"session_id": frozen_session})
     assert response.status_code == 200
-    # A manual suspension denies billing entirely — payment can never
-    # clear it.
+    # RND-404: a manual suspension still renders the read-only billing page
+    # (an accurate status instead of an opaque 403) — payment-write actions
+    # remain gated separately via get_billing_manager/get_billing_owner.
     response = client.get("/admin/billing", cookies={"session_id": suspended_session})
-    assert response.status_code == 403
+    assert response.status_code == 200
 
 
 def test_dashboard_html_redirects_non_active_tenants(app_client) -> None:
