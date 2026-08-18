@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.models import Tenant
 from app.services.entitlements import SubscriptionSummary, get_subscription_summary
 
 EXPIRING_SOON_WINDOW = timedelta(days=30)
@@ -48,6 +50,7 @@ class SubscriptionOverview:
     entitlements: tuple[str, ...]
     renewal_count: int
     measured_at: datetime
+    tenant_lifecycle_status: str
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -95,6 +98,14 @@ def get_subscription_overview(
         summary,
         at=measured_at,
     )
+    # RND-404: Tenant service status (active/frozen/suspended) is a second,
+    # independent axis from the Subscription display state above (ADR-0005
+    # §2.5/§2.6) — the Owner billing page needs both to render an accurate
+    # frozen/suspended banner without conflating the two.
+    tenant_lifecycle_status = (
+        db.scalar(select(Tenant.lifecycle_status).where(Tenant.id == tenant_id))
+        or "active"
+    )
     if summary is None:
         return SubscriptionOverview(
             plan_code=None,
@@ -111,6 +122,7 @@ def get_subscription_overview(
             entitlements=(),
             renewal_count=0,
             measured_at=measured_at,
+            tenant_lifecycle_status=tenant_lifecycle_status,
         )
     return SubscriptionOverview(
         plan_code=summary.plan_code,
@@ -127,4 +139,5 @@ def get_subscription_overview(
         entitlements=summary.entitlements,
         renewal_count=summary.renewal_count,
         measured_at=measured_at,
+        tenant_lifecycle_status=tenant_lifecycle_status,
     )

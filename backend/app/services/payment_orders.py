@@ -223,7 +223,15 @@ def create_payment_order(
         tenant = db.scalar(
             select(Tenant).where(Tenant.id == tenant_id).with_for_update()
         )
-        if tenant is None or tenant.lifecycle_status not in {"provisioning", "active"}:
+        # RND-404: a billing-frozen tenant must still be able to create a
+        # renewal order — paying is precisely how a frozen tenant unfreezes
+        # (ADR-0005 §2.6). A manually suspended tenant stays excluded; only
+        # a superadmin can lift that.
+        if tenant is None or tenant.lifecycle_status not in {
+            "provisioning",
+            "active",
+            "frozen",
+        }:
             raise InvalidPaymentOrderError("tenant cannot purchase a plan")
         existing = db.scalar(
             select(PaymentOrder).where(

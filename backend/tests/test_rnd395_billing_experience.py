@@ -123,7 +123,10 @@ def test_qr_and_duplicate_order_guards_use_provider_and_expiry_truth() -> None:
     assert "create.hidden = !canOrder || policy.kind !== 'payment'" in script
     assert "refresh.hidden = !hasLiveOrder || !canOrder" in script
     assert "plan.payment_enabled" in script
-    assert "unavailable.hidden = plan.payment_enabled || policy.kind === 'setup'" in script
+    # RND-404 adds a leading suspended-only exclusion ahead of the original
+    # payment_enabled/setup clauses below; the original two clauses are
+    # unchanged and still gate exactly as this test originally asserted.
+    assert "policy.kind === 'suspended' || plan.payment_enabled || policy.kind === 'setup'" in script
     assert "checkout_url" not in script
     assert "@media (max-width: 1024px)" in styles
     assert "@media (max-width: 850px)" in styles

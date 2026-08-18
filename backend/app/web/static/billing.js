@@ -5,12 +5,16 @@
   var order = null;
   var capacity = null;
   var subscription = null;
+  var refund = null;
   var pollTimer = null;
   var busy = false;
+  var cancelIntentBusy = false;
   var billingMode = document.body.dataset.billingMode || 'admin';
   var canOrder = document.body.dataset.billingCanOrder === 'true';
+  var isOwner = document.body.dataset.billingIsOwner === 'true';
   var terminal = { succeeded: true, closed: true, failed: true };
   var activeOrder = { creating: true, pending: true, paid_activation_pending: true };
+  var cancelableSubscriptionStatus = { trial: true, active: true, grace: true };
 
   function t(key, values) {
     var value = I18N.t(key);
@@ -79,7 +83,18 @@
     return 'badge badge-neutral';
   }
 
-  function billingCta(displayState, unavailableReason, mode, orderStatus, paymentEnabled) {
+  function billingCta(displayState, unavailableReason, mode, orderStatus, paymentEnabled, tenantStatus) {
+    // RND-404: a manually suspended tenant is denied every self-serve
+    // payment action (ADR-0005 §2.6) — this must win over any pending
+    // order or subscription state so the CTA never implies a payment can
+    // lift the suspension.
+    if (tenantStatus === 'suspended') {
+      return {
+        kind: 'suspended',
+        labelKey: 'billing.cta.suspended',
+        nextStepKey: 'billing.next.suspended'
+      };
+    }
     if (activeOrder[orderStatus]) {
       return {
         kind: 'order',
@@ -136,7 +151,8 @@
       subscription.unavailable_reason,
       billingMode,
       order && order.status,
-      plan.payment_enabled
+      plan.payment_enabled,
+      subscription.tenant_lifecycle_status
     );
   }
 
@@ -146,6 +162,7 @@
     var create = node('create-order');
     var setup = node('complete-setup');
     var unavailable = node('payment-unavailable');
+    var suspendedNotice = node('suspended-notice');
     var next = node('billing-next-step');
     setup.hidden = policy.kind !== 'setup';
     create.hidden = !canOrder || policy.kind !== 'payment';
@@ -153,7 +170,10 @@
     create.textContent = t(policy.labelKey, {
       amount: money(plan.amount_cents, plan.currency)
     });
-    unavailable.hidden = plan.payment_enabled || policy.kind === 'setup';
+    // RND-404: suspended has its own dedicated notice; never also show the
+    // generic "payment not configured" copy for it.
+    unavailable.hidden = policy.kind === 'suspended' || plan.payment_enabled || policy.kind === 'setup';
+    suspendedNotice.hidden = policy.kind !== 'suspended';
     next.textContent = canOrder
       ? t(policy.nextStepKey)
       : t('billing.next.readonly');
@@ -192,7 +212,66 @@
     var trial = node('trial-remaining');
     trial.hidden = remaining === null;
     trial.textContent = remaining === null ? '' : t('billing.trialRemaining', { days: remaining });
+    renderTenantStatus();
+    renderCancelIntent();
     renderActions();
+  }
+
+  function renderTenantStatus() {
+    var banner = node('tenant-status-banner');
+    if (!subscription) { banner.hidden = true; return; }
+    var status = subscription.tenant_lifecycle_status;
+    if (status !== 'frozen' && status !== 'suspended') {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    banner.textContent = t('billing.tenantStatus.' + status);
+    banner.className = 'alert tenant-status-banner ' + (status === 'suspended' ? 'alert-danger' : 'alert-warning');
+  }
+
+  function renderCancelIntent() {
+    var block = node('cancel-intent');
+    var status = node('cancel-intent-status');
+    var toggle = node('cancel-intent-toggle');
+    var eligible = Boolean(
+      subscription
+      && isOwner
+      && subscription.tenant_lifecycle_status !== 'suspended'
+      && cancelableSubscriptionStatus[subscription.stored_status]
+    );
+    block.hidden = !eligible;
+    if (!eligible) { return; }
+    var canceled = Boolean(subscription.cancel_at_period_end);
+    status.textContent = t(canceled ? 'billing.cancelIntent.active' : 'billing.cancelIntent.inactive');
+    toggle.textContent = t(canceled ? 'billing.cancelIntent.restore' : 'billing.cancelIntent.set');
+    toggle.disabled = cancelIntentBusy;
+  }
+
+  function renderRefund() {
+    var card = node('refund-card');
+    if (!refund) { card.hidden = true; return; }
+    card.hidden = false;
+    var status = node('refund-status');
+    status.textContent = t('billing.refund.status.' + refund.status);
+    status.className = 'badge ' + (
+      refund.status === 'succeeded'
+        ? 'badge-success'
+        : refund.status === 'abnormal' || refund.status === 'manual_recovery_required'
+          ? 'badge-danger'
+          : refund.status === 'closed'
+            ? 'badge-neutral'
+            : 'badge-warning'
+    );
+    node('refund-amount').textContent = money(refund.amount_cents, refund.currency);
+    node('refund-requested').textContent = date(refund.requested_at);
+    node('refund-succeeded').textContent = date(refund.succeeded_at);
+    var note = node('refund-note');
+    var noteKey = refund.status === 'abnormal' || refund.status === 'manual_recovery_required'
+      ? 'billing.refund.note.needsRecovery'
+      : '';
+    note.textContent = noteKey ? t(noteKey) : '';
+    note.hidden = !noteKey;
   }
 
   function renderCapacity() {
@@ -274,8 +353,12 @@
       status.textContent = t(statusKey(order.status));
       status.className = statusClass(order.status);
     }
-    refresh.hidden = !hasLiveOrder || !canOrder;
-    close.hidden = !(order && (order.status === 'creating' || order.status === 'pending')) || !canOrder;
+    // RND-404: a suspended tenant's write endpoints 403 server-side; hide
+    // the buttons proactively so the Owner never sees a failed request for
+    // an action that was never going to be allowed.
+    var suspended = Boolean(subscription && subscription.tenant_lifecycle_status === 'suspended');
+    refresh.hidden = !hasLiveOrder || !canOrder || suspended;
+    close.hidden = !(order && (order.status === 'creating' || order.status === 'pending')) || !canOrder || suspended;
     refresh.disabled = busy || Boolean(plan && !plan.payment_enabled);
     close.disabled = busy || Boolean(plan && !plan.payment_enabled);
     renderActions();
@@ -285,12 +368,15 @@
   function loadAccountState() {
     return Promise.all([
       request('/api/billing/subscription'),
-      request('/api/billing/capacity')
+      request('/api/billing/capacity'),
+      request('/api/billing/refunds/latest')
     ]).then(function (values) {
       subscription = values[0];
       capacity = values[1];
+      refund = values[2];
       renderSubscription();
       renderCapacity();
+      renderRefund();
     });
   }
 
@@ -312,17 +398,20 @@
       request('/api/billing/plan'),
       request('/api/billing/orders/latest'),
       request('/api/billing/subscription'),
-      request('/api/billing/capacity')
+      request('/api/billing/capacity'),
+      request('/api/billing/refunds/latest')
     ]).then(function (values) {
       plan = values[0];
       order = values[1];
       subscription = values[2];
       capacity = values[3];
+      refund = values[4];
       sessionStorage.removeItem('billing_create_key');
       renderPlan();
       renderSubscription();
       renderOrder();
       renderCapacity();
+      renderRefund();
     }).catch(function (error) {
       showError(error.status === 401 ? t('billing.error.auth') : t('billing.error.load'));
     });
@@ -408,6 +497,28 @@
     renderSubscription();
     renderOrder();
     renderCapacity();
+    renderRefund();
+  }
+
+  function toggleCancelIntent() {
+    if (!subscription || !isOwner || cancelIntentBusy) { return; }
+    cancelIntentBusy = true;
+    showError('');
+    renderCancelIntent();
+    var nextEnabled = !subscription.cancel_at_period_end;
+    request('/api/billing/subscription/cancel-intent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: nextEnabled })
+    }).then(function (value) {
+      subscription = value;
+      renderSubscription();
+    }).catch(function () {
+      showError(t('billing.error.cancelIntent'));
+    }).finally(function () {
+      cancelIntentBusy = false;
+      renderCancelIntent();
+    });
   }
 
   window.doLogout = function () {
@@ -418,6 +529,7 @@
   node('create-order').addEventListener('click', createOrder);
   node('refresh-order').addEventListener('click', refreshOrder);
   node('close-order').addEventListener('click', closeOrder);
+  node('cancel-intent-toggle').addEventListener('click', toggleCancelIntent);
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible' && order && activeOrder[order.status]) {
       loadOrder(order.order_id);

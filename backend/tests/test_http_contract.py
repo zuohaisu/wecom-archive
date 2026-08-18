@@ -387,7 +387,9 @@ def test_router_count() -> None:
     # RND-371 adds the controlled avatar and user-detail routes.
     # RND-162 adds one tenant-scoped collection route and three
     # PlatformAdmin-only aggregate Product Analytics routes.
-    assert route_count == 175
+    # RND-404 adds two Owner billing routes: cancel-at-period-end intent
+    # and read-only latest-refund status.
+    assert route_count == 177
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -477,12 +479,14 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/billing/orders",
             "/api/billing/capacity",
             "/api/billing/subscription",
+            "/api/billing/subscription/cancel-intent",
             "/api/billing/orders/latest",
             "/api/billing/orders/{order_id}",
             "/api/billing/orders/{order_id}/close",
             "/api/billing/orders/{order_id}/qr",
             "/api/billing/orders/{order_id}/refresh",
             "/api/billing/plan",
+            "/api/billing/refunds/latest",
             "/api/branding",
             "/api/branding/logo",
             "/api/branding/favicon",
@@ -764,6 +768,18 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/billing/subscription",
             frozenset({"GET"}),
             "SubscriptionOverviewOut",
+            "None",
+        ),
+        (
+            "/api/billing/subscription/cancel-intent",
+            frozenset({"POST"}),
+            "SubscriptionOverviewOut",
+            "None",
+        ),
+        (
+            "/api/billing/refunds/latest",
+            frozenset({"GET"}),
+            "Optional[RefundOut]",
             "None",
         ),
         (

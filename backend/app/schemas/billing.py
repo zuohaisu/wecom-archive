@@ -50,6 +50,11 @@ class SubscriptionOverviewOut(BaseModel):
     entitlements: list[str]
     renewal_count: int
     measured_at: datetime
+    tenant_lifecycle_status: str
+
+
+class CancelIntentIn(BaseModel):
+    enabled: bool
 
 
 class PaymentOrderOut(BaseModel):

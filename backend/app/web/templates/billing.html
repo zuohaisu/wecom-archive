@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <link rel="stylesheet" href="/web/static/billing.css?v=__STATIC_VERSION__">
 </head>
-<body data-billing-mode="__BILLING_MODE__" data-billing-can-order="__BILLING_CAN_ORDER__">
+<body data-billing-mode="__BILLING_MODE__" data-billing-can-order="__BILLING_CAN_ORDER__" data-billing-is-owner="__BILLING_IS_OWNER__">
 __I18N_SCRIPT__
 <div class="shell">
 __SIDENAV__
@@ -24,6 +24,7 @@ __SIDENAV__
           <span class="eyebrow" data-i18n="billing.subscriptionTitle">当前服务状态</span>
           <div class="subscription-title-row"><h2 id="subscription-title"><span id="current-plan">—</span></h2><span id="subscription-badge" class="badge badge-neutral">—</span></div>
           <div id="subscription-state" class="subscription-message" role="status" aria-live="polite"></div>
+          <div id="tenant-status-banner" class="alert tenant-status-banner" role="alert" hidden></div>
           <div id="trial-remaining" class="trial-remaining" hidden></div>
         </div>
         <dl class="subscription-deadline">
@@ -69,9 +70,30 @@ __SIDENAV__
             <button id="close-order" class="btn btn-danger" type="button" hidden data-i18n="billing.close">关闭订单</button>
           </div>
           <p id="payment-unavailable" class="payment-unavailable" hidden data-i18n="billing.unavailable">微信支付尚未配置，当前不能创建真实订单。</p>
+          <div id="suspended-notice" class="alert alert-danger suspended-notice" role="alert" hidden>
+            <p data-i18n="billing.suspended.notice">账号已被平台风控暂停，续费不会自动解封；请联系平台处理。</p>
+            <a id="suspended-contact" class="btn btn-primary" href="/admin/support" data-i18n="billing.suspended.contact">联系平台</a>
+          </div>
+          <div id="cancel-intent" class="cancel-intent" hidden>
+            <p id="cancel-intent-status" class="cancel-intent-status"></p>
+            <button id="cancel-intent-toggle" class="btn" type="button"></button>
+          </div>
         </div>
       </section>
     </div>
+
+    <section class="card refund-card" id="refund-card" aria-labelledby="refund-title" hidden>
+      <div class="card-hd"><div><span class="eyebrow" data-i18n="billing.refund.label">退款</span><h2 id="refund-title" data-i18n="billing.refund.title">退款进度</h2></div></div>
+      <div class="card-bd">
+        <div id="refund-status" class="badge badge-neutral"></div>
+        <dl class="refund-meta">
+          <div><dt data-i18n="billing.refund.amount">退款金额</dt><dd id="refund-amount">—</dd></div>
+          <div><dt data-i18n="billing.refund.requestedAt">申请时间</dt><dd id="refund-requested">—</dd></div>
+          <div><dt data-i18n="billing.refund.succeededAt">完成时间</dt><dd id="refund-succeeded">—</dd></div>
+        </dl>
+        <p id="refund-note" class="refund-note"></p>
+      </div>
+    </section>
 
     <section class="card capacity-card" aria-labelledby="capacity-title">
       <div class="card-hd"><div><span class="eyebrow" data-i18n="billing.operationsLabel">运行信息</span><h2 id="capacity-title" data-i18n="billing.capacityTitle">存储容量</h2></div></div>

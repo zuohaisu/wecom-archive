@@ -34,6 +34,7 @@
   color: var(--color-info-fg);
   font-weight: var(--weight-semibold);
 }
+.tenant-status-banner { margin-top: var(--space-4); }
 .subscription-deadline { display: grid; gap: var(--space-3); }
 .subscription-deadline > div {
   padding: var(--space-3);
@@ -123,6 +124,34 @@
   font-size: var(--text-sm);
   line-height: var(--leading-loose);
 }
+.suspended-notice {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.cancel-intent {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.cancel-intent-status { color: var(--color-text-3); font-size: var(--text-sm); margin: 0; }
+.refund-card { margin-top: var(--space-5); }
+.refund-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px var(--space-3);
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+}
+.refund-meta dt { color: var(--color-text-4); }
+.refund-meta dd { color: var(--color-text-2); }
+.refund-note { margin-top: var(--space-3); color: var(--color-text-3); font-size: var(--text-sm); line-height: var(--leading-loose); }
 .capacity-card { margin-top: var(--space-5); }
 .capacity-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
 .capacity-value { display: block; font-size: var(--text-2xl); font-weight: var(--weight-semibold); margin-top: 4px; }
@@ -149,6 +178,6 @@
   .billing-grid { gap: var(--space-4); }
   .checkout-qr { width: 220px; height: 220px; }
   .billing-actions { display: grid; }
-  .billing-actions .btn, #complete-setup { width: 100%; }
+  .billing-actions .btn, #complete-setup, #suspended-contact, #cancel-intent-toggle { width: 100%; }
   .card-footnote { padding-left: var(--space-4); padding-right: var(--space-4); }
 }

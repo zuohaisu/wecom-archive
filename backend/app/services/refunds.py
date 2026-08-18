@@ -153,6 +153,26 @@ def get_refund_summary(
     return _summary(refund)
 
 
+def get_latest_refund_for_tenant(
+    db: Session,
+    tenant_id: str,
+) -> RefundSummary | None:
+    """Read-only: the tenant's most recently requested refund, or None.
+
+    RND-404: backs the Owner billing page's read-only refund status display
+    (processing/succeeded/abnormal/manual_recovery_required). Owners never
+    initiate a refund through this path — only platform admins can, via
+    ``app.routers.refunds`` — so this stays a plain scoped read.
+    """
+    refund = db.scalar(
+        select(RefundOrder)
+        .where(RefundOrder.tenant_id == _safe_id(tenant_id, "tenant_id"))
+        .order_by(RefundOrder.requested_at.desc())
+        .limit(1)
+    )
+    return _summary(refund) if refund is not None else None
+
+
 def _audit(
     db: Session,
     refund: RefundOrder,
