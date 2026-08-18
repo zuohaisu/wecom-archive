@@ -109,6 +109,10 @@ _ERROR_MESSAGES: dict[str, tuple[str, str]] = {
         "login.error.organizationExists",
         "该组织已存在，请使用已有组织登录。",
     ),
+    "service_suspended": (
+        "login.error.serviceSuspended",
+        "该企业服务已被暂停，请联系服务商。",
+    ),
 }
 
 # The QR iframe is only useful once WeCom OAuth is actually configured —
@@ -407,9 +411,35 @@ function doLogin(e){{
 @router.get("/", response_class=RedirectResponse, include_in_schema=False)
 def product_entry(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     """Route the product origin to the appropriate entry for its session."""
-    if _resolve_session_user(request, db) is not None:
+    user = _resolve_session_user(request, db)
+    if user is not None:
+        # RND-402: a billing-frozen tenant's Owner belongs on the renewal
+        # surface, not on the (now gated) business console.
+        lifecycle = _session_tenant_lifecycle(request, db)
+        if lifecycle == "frozen":
+            return RedirectResponse("/admin/billing", status_code=302)
         return RedirectResponse("/dashboard", status_code=302)
     return RedirectResponse(url=request.app.url_path_for("admin_login_page"), status_code=302)
+
+
+def _session_tenant_lifecycle(request: Request, db: Session) -> Optional[str]:
+    """The authenticated session's tenant lifecycle, or None when absent."""
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if not session_id:
+        return None
+    now = datetime.now(timezone.utc)
+    session = (
+        db.query(AdminSession)
+        .filter(
+            AdminSession.id == session_id,
+            AdminSession.expires_at > now,
+            AdminSession.is_revoked.is_(False),
+        )
+        .first()
+    )
+    if session is None:
+        return None
+    return db.query(Tenant.lifecycle_status).filter(Tenant.id == session.tenant_id).scalar()
 
 
 @router.get("/admin/login", response_class=HTMLResponse)
@@ -442,7 +472,19 @@ def admin_login_page(
             .first()
         )
         if session and session.session_scope == "admin":
-            return RedirectResponse("/dashboard", status_code=302)
+            # RND-402: a billing-frozen tenant's Owner lands on the
+            # renewal surface; a suspended tenant stays on the login page
+            # (business pages and billing are both gated for it, so the
+            # usual /dashboard bounce would loop forever).
+            tenant_status = (
+                db.query(Tenant.lifecycle_status)
+                .filter(Tenant.id == session.tenant_id)
+                .scalar()
+            )
+            if tenant_status == "frozen":
+                return RedirectResponse("/admin/billing", status_code=302)
+            if tenant_status == "active":
+                return RedirectResponse("/dashboard", status_code=302)
         if session and session.session_scope == "provisioning":
             tenant_status = (
                 db.query(Tenant.lifecycle_status)
@@ -889,16 +931,27 @@ def password_login(
 
     # Resolve default tenant — bound to slug='default' created by RND-111 bootstrap.
     # Must NEVER fall back to any other tenant: password-mode sessions are only
-    # ever valid for the RND-111 default tenant. If it's missing or inactive,
-    # fail closed rather than binding to an arbitrary active tenant.
+    # ever valid for the RND-111 default tenant. If it's missing, fail closed
+    # rather than binding to an arbitrary tenant. RND-402: the legacy
+    # is_active filter is intentionally not applied here — a billing-frozen
+    # tenant has is_active=False but its Owner must still be able to log in
+    # for the billing/renewal recovery surface; only a manual suspension
+    # denies login below.
     tenant = (
         db.query(Tenant)
-        .filter(Tenant.slug == "default", Tenant.is_active.is_(True))
+        .filter(Tenant.slug == "default")
         .first()
     )
     if tenant is None:
-        logger.error("password_login: default tenant missing or inactive — run bootstrap_default_tenant.py")
+        logger.error("password_login: default tenant missing — run bootstrap_default_tenant.py")
         raise HTTPException(status_code=500, detail="Server configuration error")
+
+    # RND-402: a manually suspended tenant must not be able to create new
+    # sessions at all — payment can never clear a suspension, so no login
+    # path may exist for it. Frozen tenants may still log in: the Owner
+    # needs the billing/renewal surface (recovery path).
+    if tenant.lifecycle_status == "suspended":
+        raise HTTPException(status_code=403, detail="service_suspended")
 
     now = datetime.now(timezone.utc)
     submitted = body.username.strip()
@@ -1354,6 +1407,17 @@ def _resolve_and_sign_wecom_session(code: str, db: Session) -> RedirectResponse:
 
         tenant_id: str = config.tenant_id
 
+        # RND-402: a manually suspended tenant cannot create sessions by
+        # any login path — payment can never clear a suspension.
+        tenant_lifecycle = (
+            db.query(Tenant.lifecycle_status).filter(Tenant.id == tenant_id).scalar()
+        )
+        if tenant_lifecycle == "suspended":
+            logger.info("wecom_callback: tenant suspended, rejecting login")
+            return RedirectResponse(
+                "/admin/login?error=service_suspended", status_code=302
+            )
+
         # 7. Resolve the login identity. This table — not
         # AdminUser.wecom_user_id — is authoritative for "who may this
         # scan sign a session for" (see AdminLoginIdentity's docstring and
@@ -1594,6 +1658,23 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
     is_password_user = user.wecom_user_id.startswith(PASSWORD_MODE_WECOM_PREFIX)
     exposed_wecom_id = None if is_password_user else user.wecom_user_id
 
+    # RND-402: project the authoritative tenant lifecycle so the console
+    # can route a frozen Owner to the billing surface instead of showing a
+    # wall of API errors. Best-effort: this endpoint must keep returning
+    # its 200 contract shape even when the projection cannot be read, and
+    # only a real string status is ever serialized.
+    lifecycle_status = None
+    try:
+        projected = (
+            db.query(Tenant.lifecycle_status)
+            .filter(Tenant.id == user.tenant_id)
+            .scalar()
+        )
+        if isinstance(projected, str):
+            lifecycle_status = projected
+    except Exception as exc:
+        logger.error("auth_me: tenant lifecycle lookup failed: %s", type(exc).__name__)
+
     return JSONResponse(
         {
             "authenticated": True,
@@ -1604,6 +1685,7 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
             "role": user.role,
             "theme": user.ui_theme or DEFAULT_THEME,
             "locale": user.ui_locale or DEFAULT_LOCALE,
+            "lifecycle_status": lifecycle_status,
         }
     )
 

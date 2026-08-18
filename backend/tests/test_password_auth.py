@@ -159,6 +159,11 @@ def _mock_db_for_authenticated_session(
             return q
 
         mock.query.side_effect = _query
+        # RND-402: get_current_user re-checks the tenant's authoritative
+        # service projection, so the fixture must present an active tenant.
+        tenant_mock = MagicMock()
+        tenant_mock.lifecycle_status = "active"
+        mock.get.return_value = tenant_mock
         yield mock
 
     return _override

@@ -41,6 +41,10 @@ from sqlalchemy.orm import Session
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.db.models import AdminSession, AdminUser, PasswordResetToken, PlatformAdmin, Tenant
 from app.db.session import get_db
+from app.services.service_access import (
+    INTERACTIVE,
+    tenant_service_denial,
+)
 from app.session_lifecycle import touch_last_active
 from app.settings import get_auth_settings
 
@@ -477,6 +481,24 @@ def get_current_user(
     if user.status != "active":
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    # RND-402: the tenant's authoritative service projection is re-checked
+    # on every request, exactly like the account status above. A frozen or
+    # suspended tenant loses admin-console business access immediately,
+    # even with a still-valid session; grace is already folded into the
+    # "active" projection by the billing lifecycle service, so no time
+    # logic is needed here. Owner billing stays reachable through the
+    # separate get_billing_context dependency.
+    try:
+        tenant = db.get(Tenant, session.tenant_id)
+    except Exception as exc:
+        logger.error("get_current_user: tenant lookup failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    denial = tenant_service_denial(
+        tenant.lifecycle_status if tenant is not None else None, INTERACTIVE
+    )
+    if denial is not None:
+        raise HTTPException(status_code=403, detail=denial)
+
     if isinstance(user, AdminUser):
         touch_last_active(user, db)
     return user, session.tenant_id
@@ -553,6 +575,21 @@ def require_html_session(
     if user is None or user.status != "active":
         return None
 
+    # RND-402: HTML admin console entry shares the same authoritative
+    # interactive gate as the API dependency. A frozen/suspended tenant's
+    # business pages redirect to login; the login page then routes a
+    # frozen Owner to the billing surface, so there is no redirect loop.
+    try:
+        tenant = db.get(Tenant, session.tenant_id)
+    except Exception as exc:
+        logger.error("require_html_session: tenant lookup failed: %s", type(exc).__name__)
+        return None
+    denial = tenant_service_denial(
+        tenant.lifecycle_status if tenant is not None else None, INTERACTIVE
+    )
+    if denial is not None:
+        return None
+
     touch_last_active(user, db)
     return session.tenant_id
 
@@ -619,6 +656,11 @@ def get_billing_context(
     tenant to still be ``provisioning``; an ``admin`` session scope requires
     the tenant's lifecycle status to be a member of ``allowed_lifecycle``
     (default: ``{"active"}``, preserving the pre-RND-404 behavior).
+    RND-402: a billing-frozen tenant's Owner keeps the billing / renewal /
+    payment-query surface (the recovery path), while a manually
+    ``suspended`` tenant is denied — payment must never clear a manual
+    suspension; ``get_billing_manager``/``get_billing_owner`` set
+    ``allowed_lifecycle`` to ``{"active", "frozen"}`` accordingly.
     Role-gate the payment-write endpoints by depending on the
     ``get_billing_manager`` instance instead.
 
@@ -666,7 +708,6 @@ def get_billing_context(
                 or user.status != "active"
                 or user.role not in allowed
                 or user.tenant_id != session.tenant_id
-                or tenant is None
                 or not lifecycle_ok
             ):
                 raise HTTPException(status_code=403, detail="Billing access denied")

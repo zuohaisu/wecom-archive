@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.db.models import ExternalContactRefreshTask, TenantWecomConfig
+from app.db.models import ExternalContactRefreshTask, Tenant, TenantWecomConfig
 from app.services.external_contact_sync import refresh_external_contact
 
 _MAX_RETRY_DELAY = timedelta(hours=24)
@@ -44,9 +44,13 @@ def _retry_at(attempt_count: int, now: datetime) -> datetime:
 def _active_tenant_id(session: Session, corp_id: str) -> str | None:
     row = (
         session.query(TenantWecomConfig.tenant_id)
+        .join(Tenant, Tenant.id == TenantWecomConfig.tenant_id)
         .filter(
             TenantWecomConfig.corp_id == corp_id,
             TenantWecomConfig.is_active.is_(True),
+            # RND-402: contact refresh is part of the archive sync
+            # pipeline; a frozen/suspended tenant must not refresh.
+            Tenant.lifecycle_status == "active",
         )
         .first()
     )

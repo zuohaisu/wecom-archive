@@ -1,0 +1,13 @@
+[Unit]
+Description=WeCom Archive Billing Lifecycle Timer
+
+[Timer]
+# Subscription ends_at / grace_ends_at boundaries are UTC-authoritative;
+# the five-minute cadence (offset from the notification timer's :02) keeps
+# grace->frozen transitions prompt without contending with it.
+OnCalendar=*:07/5
+Persistent=true
+Unit=wecom-billing-lifecycle.service
+
+[Install]
+WantedBy=timers.target

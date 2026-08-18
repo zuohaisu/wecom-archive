@@ -108,7 +108,10 @@ def analytics_client(monkeypatch) -> Generator[tuple[TestClient, sessionmaker], 
                     admin_user_id="tenant-a-admin",
                     tenant_id="tenant-a",
                     wecom_user_id="internal-a",
-                    expires_at=NOW + timedelta(days=1),
+                    # Session expiry is validated against the wall clock,
+                    # not the fixed NOW — a fixture date in the past must
+                    # never expire the fixture session.
+                    expires_at=datetime.now(timezone.utc) + timedelta(days=1),
                     is_revoked=False,
                 ),
                 PlatformAdmin(
