@@ -167,6 +167,21 @@ Health endpoints (RND-227):
 
 ## 5. Worker / Timer Installation
 
+**Units listed in `deploy/systemd/MANAGED_UNITS` are now installed and
+enabled automatically by `scripts/deploy_server.sh` on every deploy to
+main** — see that script's step 10. This closes the gap where a *new* unit
+committed to `deploy/systemd/` (e.g. the external-contact reconcile timer
+below, added for RND-371 avatar sync) sat in the repo but was never
+actually installed on the host, because CD only ever restarted the main
+app service; installing a new systemd unit had always been this separate,
+easy-to-forget manual step. It needs a one-time sudoers grant (see the
+"Server (sudo) Prerequisites" comment at the top of `deploy_server.sh`) —
+without it, step 10 logs a WARN per unit and the deploy still succeeds, it
+just does not self-heal the missing unit. Only add a unit to
+`MANAGED_UNITS` when you want it kept in sync and enabled automatically on
+every future deploy; templated (`@`) and manual/one-off units must stay
+out of that file and keep using the manual steps below.
+
 Archive worker:
 
 ```bash
@@ -176,16 +191,21 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now wecom-archive-worker.timer
 ```
 
-External-contact refresh and daily reconciliation (operator action only):
+External-contact refresh and daily reconciliation:
 
 ```bash
 sudo cp deploy/systemd/wecom-external-contact-refresh.{service,path,timer} /etc/systemd/system/
-sudo cp deploy/systemd/wecom-external-contact-reconcile.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now wecom-external-contact-refresh.path
 sudo systemctl enable --now wecom-external-contact-refresh.timer
-sudo systemctl enable --now wecom-external-contact-reconcile.timer
 ```
+
+`wecom-external-contact-reconcile.{service,timer}` — the daily job that also
+drives internal/external contact **avatar sync** (RND-371) — is listed in
+`deploy/systemd/MANAGED_UNITS`, so `scripts/deploy_server.sh` installs and
+enables it automatically; no manual `cp`/`enable --now` step is needed for
+it once the step-10 sudoers grant exists. The commands above remain for
+`wecom-external-contact-refresh.*`, which is not in that manifest.
 
 The 30-minute archive timer continues to sync/decrypt messages; it no longer
 calls the full external-contact API. Callback events and direct inbound

@@ -589,3 +589,110 @@ EOF
 	assert_output_contains "could not publish the homepage"
 	assert_output_not_contains "nginx root OK"
 }
+
+# ---------------------------------------------------------------------
+# Step 10 — Managed systemd units (issue #46 bug 3 fix)
+#
+# A new background-job unit (deploy/systemd/wecom-external-contact-
+# reconcile.{service,timer}) sat in the repo, never installed on the host,
+# because installing a NEW systemd unit was always a separate manual
+# runbook step this CD pipeline never performed -- so the avatar-sync
+# timer it drives never ran, for any tenant, ever. This step closes that
+# gap for any unit explicitly listed in deploy/systemd/MANAGED_UNITS.
+# ---------------------------------------------------------------------
+
+@test "step 10: no MANAGED_UNITS manifest — step is a clean no-op" {
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "no deploy/systemd/MANAGED_UNITS manifest"
+}
+
+@test "step 10: SUDO_BIN unset — skips without attempting to write SYSTEMD_UNIT_DIR" {
+	seed_managed_units
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "SUDO_BIN unset"
+	[ ! -e "$SYSTEMD_UNIT_DIR/demo-job.service" ]
+}
+
+@test "step 10: installs both units, reloads once, and enables --now only the .timer" {
+	export SUDO_BIN="sudo" # resolved via the mocked PATH (test_helper/mock_sudo.sh)
+	seed_managed_units
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "installed/updated demo-job.service"
+	assert_output_contains "installed/updated demo-job.timer"
+
+	[ -f "$SYSTEMD_UNIT_DIR/demo-job.service" ]
+	[ -f "$SYSTEMD_UNIT_DIR/demo-job.timer" ]
+
+	# The oneshot .service is installed so its .timer can trigger it, but is
+	# never enabled/started directly -- only the .timer is.
+	grep -q "systemctl enable --now demo-job.timer" "$CMD_LOG"
+	! grep -q "systemctl enable --now demo-job.service" "$CMD_LOG"
+
+	# daemon-reload runs exactly once even though two units changed. Matched
+	# anchored (not a bare substring grep): CMD_LOG has one line from the
+	# sudo mock logging its own invocation ("sudo -n systemctl daemon-
+	# reload") and a second from the execed systemctl mock logging its own
+	# argv ("systemctl daemon-reload") -- a bare substring grep matches
+	# both lines for what is really only one daemon-reload call.
+	[ "$(grep -c '^systemctl daemon-reload$' "$CMD_LOG")" -eq 1 ]
+}
+
+@test "step 10: an already-installed, unchanged unit is left alone (no redundant cp/reload)" {
+	export SUDO_BIN="sudo"
+	seed_managed_units
+	cp "$DEPLOY_DIR/deploy/systemd/demo-job.service" "$SYSTEMD_UNIT_DIR/demo-job.service"
+	cp "$DEPLOY_DIR/deploy/systemd/demo-job.timer" "$SYSTEMD_UNIT_DIR/demo-job.timer"
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_not_contains "installed/updated demo-job"
+	# Nothing changed, so daemon-reload must not run at all.
+	! grep -q "systemctl daemon-reload" "$CMD_LOG"
+	# The timer is still (re-)enabled --now every deploy -- enable --now is
+	# idempotent and this is the only way a unit that was manually disabled
+	# gets re-armed without a human noticing.
+	grep -q "systemctl enable --now demo-job.timer" "$CMD_LOG"
+}
+
+@test "step 10: a changed unit is re-copied and triggers exactly one daemon-reload" {
+	export SUDO_BIN="sudo"
+	seed_managed_units
+	printf 'stale on disk\n' >"$SYSTEMD_UNIT_DIR/demo-job.service"
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "installed/updated demo-job.service"
+	[ "$(cat "$SYSTEMD_UNIT_DIR/demo-job.service")" != "stale on disk" ]
+}
+
+@test "step 10: sudo denied (no NOPASSWD grant) WARNs per unit but never fails or rolls back the deploy" {
+	export SUDO_BIN="sudo"
+	export MOCK_SUDO_MODE=deny
+	seed_managed_units
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "could not install demo-job.service into"
+	assert_output_contains "could not install demo-job.timer into"
+	[ ! -e "$SYSTEMD_UNIT_DIR/demo-job.service" ]
+	# The rollback record is still written -- a missing sudoers grant for
+	# an auxiliary timer must never cost the next deploy its rollback target.
+	[ "$(known_good)" = "$NEW_SHA" ]
+}
+
+@test "step 10: a manifest entry with no matching file on disk WARNs and does not abort the deploy" {
+	export SUDO_BIN="sudo"
+	seed_managed_units
+	rm "$DEPLOY_DIR/deploy/systemd/demo-job.timer"
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Deploy complete"
+	assert_output_contains "MANAGED_UNITS lists demo-job.timer but"
+	assert_output_contains "does not exist"
+	# The .service that DID exist still installs normally.
+	[ -f "$SYSTEMD_UNIT_DIR/demo-job.service" ]
+}

@@ -1,0 +1,14 @@
+# Units listed here are synced into /etc/systemd/system/ by
+# scripts/deploy_server.sh on every deploy to main, and (for .timer/.path
+# triggers only) enabled --now. This is a deliberate, explicit allowlist —
+# NOT every file under deploy/systemd/ — because that directory also holds
+# templated (@) units (qiniu-ssl-renew@.*) and manual/one-off units (e.g.
+# wecom-thumbnail-backfill.service) that must never be auto-enabled.
+#
+# To add a new auto-managed background job: list both its .service and its
+# .timer/.path here. List the .service even though it is never enabled
+# directly — it still needs to land in /etc/systemd/system/ for its
+# .timer/.path to be able to trigger it. Units NOT listed here keep
+# following the manual install steps in docs/DEPLOYMENT.md.
+wecom-external-contact-reconcile.service
+wecom-external-contact-reconcile.timer
