@@ -17,13 +17,14 @@ from enum import Enum
 
 from sqlalchemy.orm import Session
 
-from app.db.models import TenantWecomConfig
+from app.db.models import Tenant, TenantWecomConfig
 from app.db.session import get_engine
 from app.media_download import (
     GENERIC_DOWNLOAD_MSGTYPES,
     build_candidate_query,
     select_nested_media_candidates,
 )
+from app.services.service_access import WORKER_MEDIA, tenant_service_denial
 from app.services.tenant_credentials import tenant_log_tag as _tenant_tag
 from app.settings import get_event_media_download_settings
 
@@ -38,6 +39,9 @@ class MediaWorkerDispatch(str, Enum):
 
     ACCEPTED = "accepted"
     NO_WORK = "no-work"
+    # RND-402: the tenant's authoritative service projection denies the
+    # media capability (frozen / suspended) — no signal is emitted.
+    SKIPPED = "skipped"
     FAILED = "dispatch-failed"
 
 
@@ -150,6 +154,24 @@ def _signal_media_worker() -> bool:
         return False
 
 
+def _tenant_service_gate(tenant_id: str) -> str | None:
+    """Stable denial code for the media capability, or None when allowed."""
+    try:
+        with Session(get_engine()) as session:
+            status = (
+                session.query(Tenant.lifecycle_status)
+                .filter(Tenant.id == tenant_id)
+                .scalar()
+            )
+    except Exception:  # noqa: BLE001 -- dispatch must fail closed without DB detail
+        logger.error(
+            "media_worker tenant=%s trigger=dispatch-failed error_class=tenant_unavailable",
+            _tenant_tag(tenant_id),
+        )
+        return "service_unavailable"
+    return tenant_service_denial(status, WORKER_MEDIA)
+
+
 def dispatch_media_worker(
     trigger_source: str = "archive-complete", tenant_id: str | None = None
 ) -> MediaWorkerDispatch:
@@ -173,6 +195,19 @@ def dispatch_media_worker(
     if tenant_id is None:
         logger.error("media_worker trigger_source=%s trigger=dispatch-failed error_class=tenant_unavailable", source)
         return MediaWorkerDispatch.FAILED
+
+    # RND-402: gate at tenant resolution — a frozen/suspended tenant must
+    # never wake the media worker (authoritative gate stays in the worker
+    # CLI itself; this only avoids emitting a pointless signal).
+    denial = _tenant_service_gate(tenant_id)
+    if denial is not None:
+        logger.info(
+            "media_worker tenant=%s trigger_source=%s trigger=skipped error_code=%s",
+            _tenant_tag(tenant_id),
+            source,
+            denial,
+        )
+        return MediaWorkerDispatch.SKIPPED
 
     try:
         pending = _pending_media_check(tenant_id)

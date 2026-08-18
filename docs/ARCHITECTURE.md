@@ -375,6 +375,8 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 | `wecom-export-jobs.timer` | timer | — | Activates above; download authorization still expires at the exact seven-day timestamp |
 | `wecom-billing-notifications.service` | oneshot | `*:02/5` | Plans durable billing intents and delivers one bounded, retryable email batch |
 | `wecom-billing-notifications.timer` | timer | — | Activates above; all lifecycle thresholds are evaluated in UTC |
+| `wecom-billing-lifecycle.service` | oneshot | `*:07/5` | Advances grace/expired/frozen projections for commercial tenants only (row-locked, idempotent, failure-isolated); legacy/self-host tenants are never scanned |
+| `wecom-billing-lifecycle.timer` | timer | — | Activates above; all lifecycle thresholds are evaluated in UTC |
 
 The repository does **not** currently version:
 

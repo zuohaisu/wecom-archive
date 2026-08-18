@@ -74,6 +74,11 @@ class AuditAction:
     TENANT_BILLING_RESTORED = "tenant.billing_restored"
     PLATFORM_TENANT_SUSPENDED = "platform.tenant_suspended"
     PLATFORM_TENANT_RESUMED = "platform.tenant_resumed"
+    # RND-402: a background worker (sync/media/export) denied a tenant's
+    # work because the authoritative lifecycle projection is frozen or
+    # suspended. Detail carries only the stable error code and capability
+    # class — never message content or credentials.
+    SERVICE_ACCESS_DENIED = "service.access_denied"
     PLATFORM_CONTROL_AUTHORIZED = "platform.control_authorized"
     REFUND_REQUESTED = "refund.requested"
     REFUND_PROCESSING = "refund.processing"
@@ -163,6 +168,7 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     ),
     AuditAction.TENANT_BILLING_FROZEN: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
     AuditAction.TENANT_BILLING_RESTORED: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
+    AuditAction.SERVICE_ACCESS_DENIED: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
     AuditAction.PLATFORM_TENANT_SUSPENDED: (
         AuditCategory.SECURITY,
         AuditObjectType.TENANT,

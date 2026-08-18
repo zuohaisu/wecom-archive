@@ -32,6 +32,7 @@ Versioned in this repository:
 | Media timer | `deploy/systemd/wecom-archive-media-download.timer` | Pending/retryable reconciliation every 30 minutes by default (`:15`, `:45`) |
 | Export worker unit/timer | `deploy/systemd/wecom-export-jobs.{service,timer}` | Generate queued ZIPs, retry email delivery, and delete seven-day artifacts every five minutes |
 | Billing notification unit/timer | `deploy/systemd/wecom-billing-notifications.{service,timer}` | Schedule and retry lifecycle, payment-activation and refund-anomaly notices every five minutes |
+| Billing lifecycle unit/timer | `deploy/systemd/wecom-billing-lifecycle.{service,timer}` | Advance grace/expired/frozen projections for commercial tenants (row-locked, idempotent, failure-isolated) every five minutes (RND-402) |
 | AI KB reindex unit/timer | `deploy/systemd/wecom-ai-kb-reindex.{service,timer}` | Rebuild the AI support knowledge-base index from `backend/app/ai_kb/manifest.json` hourly (`:15`); no-op if `AI_SUPPORT_ENABLED` is unset (RND-356) |
 | AI KB eval unit/timer | `deploy/systemd/wecom-ai-kb-eval.{service,timer}` | Daily (05:00) retrieval-quality launch gate against the fixed eval set; records `ai_eval_runs`, exits non-zero on a blocked run (RND-359) |
 | AI KB gap report unit/timer | `deploy/systemd/wecom-ai-kb-gap-report.{service,timer}` | Weekly (Mon 06:00) Markdown candidate-improvement report under `docs/ai/reports/` — never writes Linear (RND-359) |
@@ -266,6 +267,17 @@ RND-360 incident mitigation. The effective worker environment must select
 `qiniu_kodo`; otherwise new media-export jobs fail closed instead of creating a
 local final ZIP. No production unit is installed, enabled, or changed by
 repository changes alone.
+
+Billing lifecycle state transitions (RND-402; operator action only) — scans only
+commercial tenants that already have a Subscription; legacy/self-host tenants are
+never touched:
+
+```bash
+sudo cp deploy/systemd/wecom-billing-lifecycle.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-billing-lifecycle.timer
+sudo systemctl status wecom-billing-lifecycle.timer --no-pager
+```
 
 Billing lifecycle and anomaly notifications (RND-401; operator action only):
 

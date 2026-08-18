@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import AdminUser, ExportJob, MediaFile
+from app.db.models import AdminUser, ExportJob, MediaFile, Tenant
 from app.email import send_export_ready_email
 from app.media_storage import (
     LocalStorageProvider,
@@ -56,6 +56,9 @@ class ExportMaintenanceSummary:
     notifications_failed: int = 0
     expired: int = 0
     cleanup_pending: int = 0
+    # RND-402: claimable jobs left untouched because their tenant's
+    # authoritative service projection denies the export capability.
+    blocked: int = 0
 
 
 @dataclass(frozen=True)
@@ -410,7 +413,7 @@ def _poll_qiniu_media_exports(
     """Advance submitted Dora jobs without rebuilding their ZIPs locally."""
     ready = retried = failed = 0
     jobs = db.scalars(
-        select(ExportJob)
+        _active_tenant_job_join()
         .where(
             ExportJob.status == "processing",
             ExportJob.storage_backend == "qiniu_kodo",
@@ -462,20 +465,37 @@ def _poll_qiniu_media_exports(
     return ready, retried, failed
 
 
+def _claimable_job_condition(now: datetime):
+    """Queued or lease-expired processing jobs (the claim candidate set)."""
+    return or_(
+        ExportJob.status == "queued",
+        (
+            (ExportJob.status == "processing")
+            & (ExportJob.provider_operation_id.is_(None))
+            & (ExportJob.lease_expires_at.is_not(None))
+            & (ExportJob.lease_expires_at <= now)
+        ),
+    )
+
+
+def _active_tenant_job_join():
+    """Join that restricts export work to tenants whose authoritative
+    service projection still allows the export capability (RND-402).
+
+    Frozen/suspended tenants' jobs are deliberately left untouched: they
+    are neither claimed, polled, nor notified, and resume after the
+    tenant is renewed or resumed — no export data is fabricated or
+    deleted.
+    """
+    return select(ExportJob).join(Tenant, Tenant.id == ExportJob.tenant_id).where(
+        Tenant.lifecycle_status == "active"
+    )
+
+
 def _claim_next_job(db: Session, now: datetime) -> ExportJob | None:
     job = db.scalar(
-        select(ExportJob)
-        .where(
-            or_(
-                ExportJob.status == "queued",
-                (
-                    (ExportJob.status == "processing")
-                    & (ExportJob.provider_operation_id.is_(None))
-                    & (ExportJob.lease_expires_at.is_not(None))
-                    & (ExportJob.lease_expires_at <= now)
-                ),
-            )
-        )
+        _active_tenant_job_join()
+        .where(_claimable_job_condition(now))
         .order_by(ExportJob.requested_at.asc())
         .with_for_update(skip_locked=True)
         .limit(1)
@@ -557,8 +577,10 @@ def send_pending_export_notifications(
     for _ in range(max(1, limit)):
         # Keep the row lock through the SMTP attempt. A second manually
         # started worker skips the row instead of sending a duplicate mail.
+        # RND-402: ready jobs of frozen/suspended tenants are not notified;
+        # they resume after the tenant is renewed or resumed.
         job = db.scalar(
-            select(ExportJob)
+            _active_tenant_job_join()
             .where(
                 ExportJob.status == "ready",
                 ExportJob.expires_at > checked_at,
@@ -716,6 +738,20 @@ def run_export_maintenance_once(
 ) -> ExportMaintenanceSummary:
     checked_at = _utc(now)
     claimed = failed = 0
+
+    # RND-402: count claimable jobs whose tenant denies the export
+    # capability so operations can observe the frozen queue without any
+    # identifier escaping the summary.
+    blocked = db.scalar(
+        select(func.count())
+        .select_from(ExportJob)
+        .join(Tenant, Tenant.id == ExportJob.tenant_id)
+        .where(
+            Tenant.lifecycle_status != "active",
+            _claimable_job_condition(checked_at),
+        )
+    )
+
     ready, retried, failed = _poll_qiniu_media_exports(
         db, now=checked_at, limit=generation_limit
     )
@@ -748,4 +784,5 @@ def run_export_maintenance_once(
         notifications_failed=notifications_failed,
         expired=expired,
         cleanup_pending=cleanup_pending + terminal_work_pending,
+        blocked=int(blocked or 0),
     )

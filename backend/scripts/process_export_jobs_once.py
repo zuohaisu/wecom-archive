@@ -40,7 +40,8 @@ def main() -> int:
         f"retried={summary.retried} failed={summary.failed} "
         f"notifications_sent={summary.notifications_sent} "
         f"notifications_failed={summary.notifications_failed} "
-        f"expired={summary.expired} cleanup_pending={summary.cleanup_pending}",
+        f"expired={summary.expired} cleanup_pending={summary.cleanup_pending} "
+        f"blocked={summary.blocked}",
         flush=True,
     )
     return 0

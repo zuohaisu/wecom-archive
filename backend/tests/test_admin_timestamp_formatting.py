@@ -175,6 +175,12 @@ def _db_with_session_and_messages(tenant_id: str, messages):
         user_q.filter.return_value = user_q
         user_q.first.return_value = user_mock
 
+        # RND-402: require_html_session re-checks the tenant's authoritative
+        # service projection, so the fixture must present an active tenant.
+        tenant_mock = MagicMock()
+        tenant_mock.lifecycle_status = "active"
+        mock.get.return_value = tenant_mock
+
         msg_q = MagicMock()
         msg_q.filter.return_value = msg_q
 

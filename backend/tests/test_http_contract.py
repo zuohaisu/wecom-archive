@@ -29,6 +29,14 @@ _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
     slug TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1,
+    lifecycle_status TEXT NOT NULL DEFAULT 'active',
+    lifecycle_revision INTEGER NOT NULL DEFAULT 1,
+    frozen_at DATETIME,
+    suspended_at DATETIME,
+    suspension_reason TEXT,
+    suspended_by_platform_admin_id TEXT,
+    suspension_previous_status TEXT,
+    onboarding_completed_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -221,6 +229,11 @@ def _mock_db_with_session() -> Generator:
         return q
 
     mock.query.side_effect = _query
+    # RND-402: require_html_session re-checks the tenant's authoritative
+    # service projection, so the fixture must present an active tenant.
+    mock_tenant = MagicMock()
+    mock_tenant.lifecycle_status = "active"
+    mock.get.return_value = mock_tenant
     yield mock
 
 
