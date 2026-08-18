@@ -105,7 +105,7 @@ def _post(
     *,
     ticket: str = "provider-ticket-sensitive",
     suite_id: str = _SUITE_ID,
-    receiver_id: str = _CORP_ID,
+    receiver_id: str = _SUITE_ID,
     info_type: str = "suite_ticket",
     source_timestamp: int | None = None,
     signature: str | None = None,
@@ -229,9 +229,13 @@ def test_valid_ticket_is_encrypted_and_newest_signed_event_wins(
 @pytest.mark.parametrize(
     ("suite_id", "receiver_id", "expected_detail"),
     [
-        ("another-suite", _CORP_ID, "Suite ID mismatch"),
-        (_SUITE_ID, "another-corp", "Corp ID mismatch"),
-        (_SUITE_ID, _SUITE_ID, "Corp ID mismatch"),
+        # POST stage contract (production-verified 2026-08-18): the AES
+        # envelope receiver is the SuiteID, unlike GET verification which
+        # uses the provider CorpID. So a wrong SuiteId in the plaintext, a
+        # wrong envelope receiver, or a CorpID envelope must all fail closed.
+        ("another-suite", _SUITE_ID, "Suite ID mismatch"),
+        (_SUITE_ID, "another-receiver", "Suite ID mismatch"),
+        (_SUITE_ID, _CORP_ID, "Suite ID mismatch"),
     ],
 )
 def test_wrong_suite_id_or_corp_id_fails_closed(

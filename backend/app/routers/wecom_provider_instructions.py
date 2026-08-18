@@ -172,7 +172,7 @@ async def receive_provider_instruction(
 ):
     """Validate, decrypt and atomically retain a newest suite_ticket event."""
     try:
-        suite_id, corp_id, token, aes_key = _callback_configuration()
+        suite_id, _corp_id, token, aes_key = _callback_configuration()
         validate_field_encryption_configuration()
     except (CallbackConfigurationError, FieldEncryptionConfigurationError):
         _log_rejected("configuration_error")
@@ -213,9 +213,13 @@ async def receive_provider_instruction(
     except CallbackInputError:
         _log_rejected("invalid_callback_payload")
         raise HTTPException(status_code=400, detail="Invalid callback request")
-    if receiver_id != corp_id:
-        _log_rejected("corp_id_mismatch")
-        raise HTTPException(status_code=403, detail="Corp ID mismatch")
+    # WeCom pushes suite_ticket instructions with the SuiteID in the AES
+    # envelope receiver (GET URL verification uses the provider CorpID instead
+    # — verified in production 2026-08-18). Keep the two stages asymmetric:
+    # POST receiver must match suite_id; the plaintext SuiteId must too.
+    if receiver_id != suite_id:
+        _log_rejected("suite_id_mismatch")
+        raise HTTPException(status_code=403, detail="Suite ID mismatch")
     if event_suite_id != suite_id:
         _log_rejected("suite_id_mismatch")
         raise HTTPException(status_code=403, detail="Suite ID mismatch")
