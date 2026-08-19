@@ -21,6 +21,13 @@ jobs:
   test:
     name: CI Test Suite
     runs-on: ubuntu-latest
+    # RND-412 hotfix: this job normally finishes in ~12 minutes. Without an
+    # explicit timeout it inherits GitHub's 360-minute default, so a single
+    # hung step (observed: `apt-get install ffmpeg` blocked indefinitely,
+    # twice, burning a full 6h before being force-cancelled) silently occupies
+    # a runner and the required check for the entire default window instead
+    # of failing fast and visibly.
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -45,18 +52,55 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          # RND-412: no step in this job previously cached pip downloads, so
+          # every run cold-installs 15+ packages (several with native
+          # extensions: cryptography, psycopg2-binary, Pillow) from scratch.
+          # setup-python's built-in cache keys on a hash of these two files,
+          # so it invalidates automatically whenever a dependency changes.
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Install system test dependencies and ffmpeg
-        # shellcheck ships preinstalled on the ubuntu-latest runner image;
-        # --no-install-recommends skips ffmpeg's optional hardware-accel
-        # (VA-API/VDPAU/mesa) and audio-backend (PulseAudio/JACK/pocketsphinx)
-        # packages, which a headless CI transcode test never touches.
-        run: sudo apt-get update -qq && sudo apt-get install -yqq --no-install-recommends bats ffmpeg
+      - name: Install ffmpeg (static build, no apt)
+        # RND-412: apt-get install ffmpeg pulls the full apt dependency
+        # resolver over the Ubuntu archive mirror and was observed to hang
+        # indefinitely (twice) rather than fail fast. A static binary from
+        # BtbN's GitHub Releases (hosted on GitHub's own CDN, not a
+        # third-party mirror) sidesteps apt entirely; only
+        # tests/test_voice_transcode.py's single real-conversion smoke test
+        # needs the actual binary (it already self-skips via
+        # `skipif(shutil.which("ffmpeg") is None)` if this step is ever
+        # unavailable, so this never became a hard requirement for the rest
+        # of the suite to pass).
+        timeout-minutes: 5
+        run: |
+          curl -fsSL --retry 3 --max-time 120 -o /tmp/ffmpeg.tar.xz \
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+          mkdir -p /tmp/ffmpeg-extract
+          tar -xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-extract --strip-components=1
+          sudo install -m 0755 /tmp/ffmpeg-extract/bin/ffmpeg /usr/local/bin/ffmpeg
+          sudo install -m 0755 /tmp/ffmpeg-extract/bin/ffprobe /usr/local/bin/ffprobe
+          rm -rf /tmp/ffmpeg.tar.xz /tmp/ffmpeg-extract
+          ffmpeg -version | head -1
+
+      - name: Install bats
+        # shellcheck ships preinstalled on the ubuntu-latest runner image.
+        # DEBIAN_FRONTEND=noninteractive rules out a debconf prompt as a
+        # hang cause; the per-command `timeout` is a hard backstop against a
+        # stalled mirror even though this step's own timeout-minutes already
+        # bounds the whole thing.
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          timeout 120 sudo apt-get update -qq
+          timeout 120 sudo apt-get install -yqq --no-install-recommends bats
 
       - name: Install Python dependencies
         run: |
