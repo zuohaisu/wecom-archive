@@ -1500,6 +1500,32 @@ class PlatformAdmin(Base):
     last_active_at = Column(DateTime(timezone=True), nullable=True)
 
 
+# —— RND-413 (B1-2) 平台超管登录会话 ——
+class PlatformAdminSession(Base):
+    """Active platform-admin login session; the cookie value is the PK.
+
+    Distinct from AdminSession (tenant admins): platform admins are
+    tenant-less, so their session rows must not pretend to belong to a
+    tenant. TTL and revocation are enforced server-side on every request,
+    mirroring AdminSession semantics (RND-413).
+    """
+
+    __tablename__ = "platform_admin_sessions"
+    __table_args__ = (
+        Index("ix_platform_admin_sessions_expires_at", "expires_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    platform_admin_id = Column(
+        String(36), ForeignKey("platform_admins.id"), nullable=False, index=True
+    )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    is_revoked = Column(Boolean, nullable=False, default=False)
+
+
 # —— RND-278 (F0-3) 密码重置令牌 ——
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"

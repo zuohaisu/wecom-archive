@@ -39,7 +39,14 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
-from app.db.models import AdminSession, AdminUser, PasswordResetToken, PlatformAdmin, Tenant
+from app.db.models import (
+    AdminSession,
+    AdminUser,
+    PasswordResetToken,
+    PlatformAdmin,
+    PlatformAdminSession,
+    Tenant,
+)
 from app.db.session import get_db
 from app.services.service_access import (
     INTERACTIVE,
@@ -51,6 +58,7 @@ from app.settings import get_auth_settings
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE = "session_id"
+PLATFORM_SESSION_COOKIE = "platform_session_id"
 DEFAULT_SESSION_TTL_HOURS = 8
 # Compatibility default for existing imports; new sessions use the configured value.
 SESSION_TTL_HOURS = DEFAULT_SESSION_TTL_HOURS
@@ -192,12 +200,95 @@ def verify_platform_admin(db, email: str, password: str):
     return admin
 
 
+# —— RND-413 (B1-2) 平台超管登录会话 ——
+# Browser login issues a platform_session_id cookie backed by
+# platform_admin_sessions rows; HTTP Basic remains the API-client path.
+PLATFORM_BASIC_REALM = "platform admin"
+_WWW_AUTHENTICATE_HEADERS = {"WWW-Authenticate": f'Basic realm="{PLATFORM_BASIC_REALM}"'}
+
+
+def create_platform_admin_session(
+    db: Session, admin: PlatformAdmin, ttl_hours: int | None = None
+) -> tuple[str, int]:
+    """Create and flush a platform-admin session row; return (cookie id, ttl).
+
+    The caller commits and sets the cookie. TTL follows the same configured
+    ``SESSION_TTL_HOURS`` used by tenant-admin sessions. Never log the raw id.
+    """
+    ttl_hours = ttl_hours or get_session_ttl_hours()
+    session_id = str(uuid.uuid4())
+    db.add(
+        PlatformAdminSession(
+            id=session_id,
+            platform_admin_id=admin.id,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=ttl_hours),
+            is_revoked=False,
+        )
+    )
+    db.flush()
+    return session_id, ttl_hours
+
+
+def _platform_admin_from_session(
+    session_id: str, db: Session
+) -> Optional[PlatformAdmin]:
+    """Resolve an active PlatformAdmin from a valid session id, else None.
+
+    Deny-by-default, mirroring get_current_user: a DB failure, unknown or
+    expired/revoked row, or a disabled account all resolve to None. Only
+    the exception type is logged — DBAPI errors embed bound parameters
+    (here, the session token) in their string repr.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        row = (
+            db.query(PlatformAdminSession)
+            .filter(
+                PlatformAdminSession.id == session_id,
+                PlatformAdminSession.expires_at > now,
+                PlatformAdminSession.is_revoked.is_(False),
+            )
+            .first()
+        )
+    except Exception as exc:
+        logger.error(
+            "_platform_admin_from_session: lookup failed: %s", type(exc).__name__
+        )
+        return None
+    if row is None:
+        return None
+    admin = db.get(PlatformAdmin, row.platform_admin_id)
+    if admin is None or admin.status != "active":
+        return None
+    return admin
+
+
+async def require_platform_admin_optional(
+    request: Request, db: Session = Depends(get_db)
+) -> Optional[PlatformAdmin]:
+    """Resolve the platform admin from session cookie, then HTTP Basic.
+
+    Returns None when neither credential is valid. HTML routes use this to
+    redirect to /platform/login instead of surfacing the strict 401, while
+    ``require_platform_admin`` wraps it for API endpoints.
+    """
+    session_id = request.cookies.get(PLATFORM_SESSION_COOKIE)
+    if session_id:
+        admin = _platform_admin_from_session(session_id, db)
+        if admin is not None:
+            return admin
+    credentials = await _platform_admin_basic(request)
+    if credentials is not None:
+        return verify_platform_admin(db, credentials.username, credentials.password)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # RND-305 (B1-2) — platform-admin cross-tenant scope
 # ---------------------------------------------------------------------------
-# This helper is the sole temporary HTTP Basic integration point. B1 can
-# replace it with a platform-admin session-cookie resolver without touching
-# require_platform_admin or any consumer of the cross-tenant scope primitive.
+# HTTP Basic remains the API-client credential path; the session-cookie
+# resolver (RND-413) is tried first by require_platform_admin and
+# require_platform_admin_optional above.
 _platform_admin_basic = HTTPBasic(auto_error=False)
 
 
@@ -209,21 +300,40 @@ def _get_platform_admin_credentials(
 
 
 def require_platform_admin(
+    session_id: Optional[str] = Cookie(default=None, alias=PLATFORM_SESSION_COOKIE),
     credentials: Optional[HTTPBasicCredentials] = Depends(_get_platform_admin_credentials),
     db: Session = Depends(get_db),
 ) -> PlatformAdmin:
     """Return an authenticated active PlatformAdmin, or raise HTTP 401.
 
+    Resolution order (RND-413): platform session cookie first, then HTTP
+    Basic. Both 401 branches carry ``WWW-Authenticate: Basic`` so the
+    credential challenge is never silent — API clients get the native
+    browser dialog instead of an opaque 401 JSON body.
+
     Platform-admin credentials are deliberately independent of tenant admin
-    sessions: a ``session_id`` cookie and any tenant role cannot satisfy this
-    dependency.
+    sessions: a ``session_id`` cookie and any tenant role cannot satisfy
+    this dependency.
     """
+    if session_id:
+        admin = _platform_admin_from_session(session_id, db)
+        if admin is not None:
+            return admin
+
     if credentials is None:
-        raise HTTPException(status_code=401, detail="Platform admin authentication required")
+        raise HTTPException(
+            status_code=401,
+            detail="Platform admin authentication required",
+            headers=_WWW_AUTHENTICATE_HEADERS,
+        )
 
     admin = verify_platform_admin(db, credentials.username, credentials.password)
     if admin is None:
-        raise HTTPException(status_code=401, detail="Invalid platform admin credentials")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid platform admin credentials",
+            headers=_WWW_AUTHENTICATE_HEADERS,
+        )
     return admin
 
 

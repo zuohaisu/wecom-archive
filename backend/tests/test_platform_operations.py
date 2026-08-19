@@ -578,10 +578,13 @@ def test_operations_html_is_not_a_tenant_admin_surface(
 ) -> None:
     client, _factory = operations_client
 
-    denied = client.get("/platform/operations")
+    denied = client.get("/platform/operations", follow_redirects=False)
     allowed = client.get("/platform/operations", headers=_basic())
 
-    assert denied.status_code == 401
+    # RND-413: unauthenticated browsers go to the platform login page
+    # instead of an opaque 401; API clients keep HTTP Basic.
+    assert denied.status_code == 302
+    assert denied.headers["location"] == "/platform/login"
     assert allowed.status_code == 200
     assert "平台运营" in allowed.text
     assert "不展示聊天内容" in allowed.text

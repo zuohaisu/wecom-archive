@@ -6,12 +6,12 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.audit import AuditAction, AuditObjectType, write_audit
-from app.auth import require_platform_admin
+from app.auth import require_platform_admin, require_platform_admin_optional
 from app.db.models import PlatformAdmin
 from app.db.session import get_db
 from app.schemas.platform_operations import (
@@ -91,8 +91,15 @@ def _record_operation_audit(
 
 
 @router.get("/platform/operations", response_class=HTMLResponse)
-def operations_page(_admin: PlatformAdmin = Depends(require_platform_admin)) -> HTMLResponse:
-    """Internal-only HTML shell. Browser HTTP Basic auth remains platform-only."""
+def operations_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Optional[PlatformAdmin] = Depends(require_platform_admin_optional),
+) -> HTMLResponse:
+    """Internal-only HTML shell. Unauthenticated browsers go to the
+    platform login page (RND-413); API clients keep using HTTP Basic."""
+    if admin is None:
+        return RedirectResponse("/platform/login", status_code=302)
     return HTMLResponse(render_template("platform_operations"))
 
 

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>平台管理员登录 — 365 Archive</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<style>
+.auth{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--space-6)}
+.auth-card{width:100%;max-width:400px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:var(--space-6);box-shadow:var(--shadow-2)}
+.auth-title{font-size:var(--text-2xl);font-weight:var(--weight-semibold);letter-spacing:-.01em;margin-bottom:6px}
+.auth-sub{font-size:var(--text-sm);color:var(--color-text-4);margin-bottom:var(--space-6)}
+.auth-legal{font-size:var(--text-xs);color:var(--color-text-4);text-align:center;margin-top:var(--space-6)}
+.alert:empty{display:none}
+</style>
+</head>
+<body>
+<div class="auth">
+  <main class="auth-card">
+    <div class="auth-title">平台运营控制台</div>
+    <p class="auth-sub">仅限内部平台管理员登录</p>
+    <div class="alert alert-danger" id="login-error" role="alert"></div>
+    <form id="login-form">
+      <div class="field">
+        <label class="field-label" for="email">邮箱</label>
+        <input class="input" type="email" id="email" name="email" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label class="field-label" for="password">密码</label>
+        <input class="input" type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn-primary btn-block" type="submit" id="submit-btn">登录</button>
+    </form>
+    <p class="auth-legal">不展示聊天内容 · 所有操作均写入审计日志</p>
+  </main>
+</div>
+<script>
+(function () {
+  var form = document.getElementById('login-form');
+  var err = document.getElementById('login-error');
+  var btn = document.getElementById('submit-btn');
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    err.textContent = '';
+    btn.disabled = true;
+    fetch('/platform/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email: form.email.value, password: form.password.value})
+    }).then(function (r) {
+      if (r.ok) { window.location.href = '/platform/operations'; return; }
+      return r.json().then(function (d) {
+        err.textContent = (d && d.detail === 'invalid_credentials')
+          ? '邮箱或密码不正确。'
+          : '登录失败，请稍后重试。';
+        btn.disabled = false;
+      });
+    }).catch(function () {
+      err.textContent = '网络错误，请稍后重试。';
+      btn.disabled = false;
+    });
+  });
+})();
+</script>
+</body>
+</html>
