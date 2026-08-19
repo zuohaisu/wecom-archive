@@ -389,7 +389,9 @@ def test_router_count() -> None:
     # PlatformAdmin-only aggregate Product Analytics routes.
     # RND-404 adds two Owner billing routes: cancel-at-period-end intent
     # and read-only latest-refund status.
-    assert route_count == 177
+    # RND-413 adds three platform-auth routes: login page GET/POST and
+    # logout POST.
+    assert route_count == 180
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -563,6 +565,8 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/health/live",
             "/health/ready",
             "/openapi.json",
+            "/platform/login",
+            "/platform/logout",
             "/platform/operations",
             "/redoc",
         ]
@@ -614,6 +618,9 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/settings/init", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/login", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/login", frozenset({"POST"}), "None", "HTMLResponse"),
+        ("/platform/logout", frozenset({"POST"}), "None", "None"),
         ("/platform/operations", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         (
