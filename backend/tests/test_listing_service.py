@@ -543,21 +543,30 @@ def test_list_conversations_group_wins_collision() -> None:
         result = svc.list_conversations(db, _TENANT_A, "staff_a")
         assert len(result) == 1
         assert result[0]["conversation_type"] == "group"
+        assert result[0]["avatar_url"] is None
+        assert result[0]["avatar_status"] == "missing"
         assert result[0]["last_message_time"] == 200
     finally:
         db.close()
 
 
-def test_list_conversations_resolves_display_names() -> None:
+def test_list_conversations_resolves_display_names_and_controlled_direct_avatar() -> None:
     db = _make_session()
     try:
         m1 = _insert_message(db, sender="staff_a", msgtime=100, roomid=None)
         _insert_recipient(db, m1.id, "contact_zhangsan")
-        _insert_contact(db, "contact_zhangsan", "Zhang San")
+        contact = _insert_contact(db, "contact_zhangsan", "Zhang San")
+        contact.avatar_storage_backend = "local"
+        contact.avatar_storage_ref = "tenants/tenant-a/avatars/internal-contact_zhangsan.jpg"
+        contact.avatar_content_type = "image/jpeg"
+        contact.avatar_status = "ready"
+        db.flush()
 
         result = svc.list_conversations(db, _TENANT_A, "staff_a")
         assert len(result) == 1
         assert result[0]["display_name"] == "Zhang San"
+        assert result[0]["avatar_url"] == f"/api/admin/avatars/internal/{contact.id}"
+        assert result[0]["avatar_status"] == "ready"
     finally:
         db.close()
 

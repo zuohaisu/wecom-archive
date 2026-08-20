@@ -562,6 +562,89 @@ def test_conv_type_filter_direct_only() -> None:
     assert _run_conv_type_filter(convs, "direct") == ["d1"]
 
 
+def _render_conversation_cards(convs: list[dict]) -> str:
+    """Run the real conversation-card renderer with a controlled-avatar stub."""
+    assert NODE, "node executable not found"
+    i18n_core_src = _extract(r"/\* I18N_CORE_START.*?I18N_CORE_END \*/", "I18N core")
+    esc_src = _extract(r"function esc\(s\)\{.*?\n\}", "esc()")
+    fmt_time_src = _extract(r"function fmtTime\(ms\)\{.*?\n\}", "fmtTime()")
+    pad_src = _extract(r"function pad\(n\)\{.*?\}", "pad()")
+    conv_list_signature_src = _extract(
+        r"function convListSignature\(convs\)\{.*?\n\}", "convListSignature()"
+    )
+    apply_conv_type_filter_src = _extract(
+        r"function applyConvTypeFilter\(convs\)\{.*?\n\}", "applyConvTypeFilter()"
+    )
+    render_conv_list_src = _extract(r"function renderConvList\(convs\)\{.*?\n\}", "renderConvList()")
+    harness = f"""
+{i18n_core_src}
+{esc_src}
+{fmt_time_src}
+{pad_src}
+{conv_list_signature_src}
+{apply_conv_type_filter_src}
+{render_conv_list_src}
+var mode = 'staff';
+var selConvId = null;
+var convTypeFilter = 'all';
+var ArchiveAvatar = {{
+  html: function(url,name,className) {{
+    return '<span class="'+className+' avatar-controlled" data-avatar-url="'+esc(url||'')+'" aria-label="'+esc(name)+'"></span>';
+  }}
+}};
+var bodyEl = {{
+  _html: '',
+  set innerHTML(value) {{ this._html = value; }},
+  querySelectorAll: function() {{ return []; }}
+}};
+var document = {{
+  getElementById: function(id) {{
+    if (id === 'conv-body') return bodyEl;
+    throw new Error('unexpected getElementById(' + id + ')');
+  }}
+}};
+renderConvList({json.dumps(convs)});
+process.stdout.write(bodyEl._html);
+"""
+    result = run_node(harness)
+    assert result.returncode == 0, f"node harness failed: {result.stderr}"
+    return result.stdout
+
+
+def test_conversation_cards_render_controlled_direct_and_generic_group_avatars() -> None:
+    html = _render_conversation_cards(
+        [
+            {
+                "conversation_id": "direct__alice___bob",
+                "conversation_type": "direct",
+                "display_name": "Alice",
+                "raw_id": "alice",
+                "avatar_url": "/api/admin/avatars/internal/1",
+                "avatar_status": "ready",
+                "last_message_time": 1751702400000,
+                "last_message_text": "hello",
+                "message_count": 1,
+            },
+            {
+                "conversation_id": "room-1",
+                "conversation_type": "group",
+                "display_name": "Project group",
+                "raw_id": "room-1",
+                "avatar_url": None,
+                "avatar_status": "missing",
+                "last_message_time": 1751702400000,
+                "last_message_text": "hello everyone",
+                "message_count": 2,
+            },
+        ]
+    )
+
+    assert 'class="conv-avatar avatar-controlled"' in html
+    assert 'data-avatar-url="/api/admin/avatars/internal/1"' in html
+    assert 'class="conv-avatar conv-avatar-group"' in html
+    assert '<svg viewBox="0 0 24 24"' in html
+
+
 # ---------------------------------------------------------------------------
 # Frontend: shared structured-card header
 # ---------------------------------------------------------------------------

@@ -1079,6 +1079,34 @@ def list_contacts(db: Session, tenant_id: str) -> list[ContactOut]:
     ]
 
 
+def _attach_conversation_avatars(
+    db: Session, tenant_id: str, conversations: list[dict]
+) -> list[dict]:
+    """Add a controlled counterpart avatar to each direct-conversation card.
+
+    The external identity cache overrides the generic internal Contact cache,
+    as it does in :func:`list_contacts`. Group records have no avatar source
+    in the WeCom archive API, so they intentionally retain a null URL; the
+    browser renders a generic group glyph rather than inventing or exposing
+    an untrusted image.
+    """
+    direct_ids = {
+        conversation.get("raw_id")
+        for conversation in conversations
+        if conversation.get("conversation_type") == "direct"
+        and isinstance(conversation.get("raw_id"), str)
+        and conversation["raw_id"]
+    }
+    avatars = internal_avatar_presentations(db, tenant_id, direct_ids)
+    avatars.update(external_avatar_presentations(db, tenant_id, direct_ids))
+
+    for conversation in conversations:
+        presentation = avatars.get(conversation.get("raw_id"))
+        conversation["avatar_url"] = presentation.url if presentation else None
+        conversation["avatar_status"] = presentation.status if presentation else "missing"
+    return conversations
+
+
 def list_conversations(
     db: Session,
     tenant_id: str,
@@ -1094,7 +1122,11 @@ def list_conversations(
     the original inline get_conversations() body did.
     """
     if not include_participant_metadata:
-        return _list_compact_staff_conversations(db, tenant_id, entity_id)
+        return _attach_conversation_avatars(
+            db,
+            tenant_id,
+            _list_compact_staff_conversations(db, tenant_id, entity_id),
+        )
 
     # RND-158 Phase 2: compact-projection fetch — see
     # _fetch_compact_messages_for_entity / _load_recipients_map_compact
@@ -1136,10 +1168,14 @@ def list_conversations(
     room_display_names = load_group_chat_display_names(
         db, tenant_id, (message.roomid for message in messages)
     )
-    return _build_conversation_list(
-        messages,
-        recipients_map,
-        display_names,
-        staff_ids,
-        room_display_names,
+    return _attach_conversation_avatars(
+        db,
+        tenant_id,
+        _build_conversation_list(
+            messages,
+            recipients_map,
+            display_names,
+            staff_ids,
+            room_display_names,
+        ),
     )

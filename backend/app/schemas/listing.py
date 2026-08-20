@@ -39,6 +39,11 @@ class ConversationOut(BaseModel):
     conversation_type: str
     display_name: str
     raw_id: str
+    # Direct conversations expose the displayed counterpart's controlled,
+    # tenant-scoped avatar. Group conversations deliberately leave these
+    # empty; the review console renders its non-identifying group glyph.
+    avatar_url: Optional[str] = None
+    avatar_status: str = "missing"
     roomid: Optional[str] = None
     monitored_account_ids: list[str]
     monitored_account_raw_ids: list[str]

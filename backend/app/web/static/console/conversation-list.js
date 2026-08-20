@@ -5,8 +5,8 @@ function entityListSignature(items){
 }
 function convListSignature(convs){
   return JSON.stringify((convs||[]).map(function(c){
-    return [c.conversation_id,c.conversation_type,c.display_name,c.last_message_text,
-      c.last_message_time,c.message_count,c.raw_id||c.room_raw_id||null,
+    return [c.conversation_id,c.conversation_type,c.display_name,c.avatar_url,c.avatar_status,
+      c.last_message_text,c.last_message_time,c.message_count,c.raw_id||c.room_raw_id||null,
       (c.monitored_account_display_names||c.monitored_account_ids||[]).join(',')];
   }));
 }
@@ -143,12 +143,21 @@ function renderConvList(convs){
     var rawId=c.raw_id||c.room_raw_id||'';
     var secondary=(rawId&&rawId!==c.display_name)
       ?'<div class="conv-secondary" title="'+esc(rawId)+'">'+esc(rawId)+'</div>':'';
+    // The archive API contains no group image. Use a clear generic group
+    // glyph there; direct conversations can use the controlled counterpart
+    // avatar returned by the tenant-scoped listing endpoint.
+    var avatar=c.conversation_type==='group'
+      ?'<span class="conv-avatar conv-avatar-group" role="img" aria-label="'+esc(c.display_name)+'"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3"></circle><circle cx="16.5" cy="9.5" r="2.25"></circle><path d="M3.75 19c.55-3.15 2.35-4.75 5.25-4.75s4.7 1.6 5.25 4.75"></path><path d="M14.25 15.25c2.8-.05 4.45 1.2 5 3.75"></path></svg></span>'
+      :((typeof ArchiveAvatar!=='undefined'&&ArchiveAvatar.html)
+        ?ArchiveAvatar.html(c.avatar_url,c.display_name,'conv-avatar')
+        :'<span class="conv-avatar">'+esc((c.display_name||'?').charAt(0).toUpperCase())+'</span>');
     html+='<div class="conv-card" data-id="'+esc(c.conversation_id)+'" data-name="'+esc(c.display_name)+'" data-type="'+esc(c.conversation_type)+'" onclick="openConversationWithTracking(this)">'
+      +avatar+'<div class="conv-card-body">'
       +'<div class="conv-top"><span class="conv-name" title="'+esc(rawId)+'">'+esc(c.display_name)+'</span><span class="conv-time">'+esc(t)+'</span></div>'
       +secondary
       +(snip?'<div class="conv-snippet">'+snip+'</div>':'')
       +'<div class="conv-meta">'+tb+' <span class="badge badge-count">'+esc(c.message_count)+' '+esc(I18N.t('convList.messagesSuffix'))+'</span>'+acct+'</div>'
-      +'</div>';
+      +'</div></div>';
   });
   body.innerHTML=html;
   if(selConvId){
