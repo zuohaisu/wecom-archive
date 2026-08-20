@@ -391,7 +391,12 @@ def test_router_count() -> None:
     # and read-only latest-refund status.
     # RND-413 adds three platform-auth routes: login page GET/POST and
     # logout POST.
-    assert route_count == 180
+    # RND-414 adds the 9-item platform-console side nav: /platform (new
+    # canonical dashboard URL — /platform/operations already counted
+    # towards the RND-413 baseline and is now just a second route on the
+    # same handler, not a new one) plus 8 new HTML shells — tenants
+    # list/detail/new, usage, ledger, infra, analytics, audit.
+    assert route_count == 189
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -565,9 +570,18 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/health/live",
             "/health/ready",
             "/openapi.json",
+            "/platform",
             "/platform/login",
             "/platform/logout",
             "/platform/operations",
+            "/platform/tenants",
+            "/platform/tenants/new",
+            "/platform/tenants/{tenant_id}",
+            "/platform/usage",
+            "/platform/ledger",
+            "/platform/infra",
+            "/platform/analytics",
+            "/platform/audit",
             "/redoc",
         ]
     )
@@ -618,10 +632,19 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/settings/init", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/login", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/login", frozenset({"POST"}), "None", "HTMLResponse"),
         ("/platform/logout", frozenset({"POST"}), "None", "None"),
         ("/platform/operations", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/tenants", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/tenants/new", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/tenants/{tenant_id}", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/usage", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/ledger", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/infra", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/analytics", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/audit", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         (
             "/api/admin/avatars/{identity_type}/{avatar_id}",

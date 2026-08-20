@@ -6,7 +6,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -42,8 +42,53 @@ from app.services.wechat_pay import (
     get_wechat_pay_provider,
 )
 from app.web import render_template
+from app.web.sidenav import render_platform_admin_bar, render_platform_sidenav, render_platform_topbar
 
 router = APIRouter(tags=["platform-operations"])
+
+# RND-414: (template name, side-nav active id, topbar breadcrumb) per platform
+# page. Every route below is a thin, data-free HTML shell — all rendering is
+# client-side, matching the existing platform-operations.js convention; see
+# the per-page static/platform-*.js files for the actual API calls.
+_PLATFORM_PAGES = {
+    # "/platform" itself is registered separately below (operations_page) —
+    # it carries a legacy-redirect note and is the one page reachable by
+    # its old /platform/operations URL too.
+    "/platform/tenants": ("platform_tenants", "tenants", "租户商业状态"),
+    "/platform/tenants/new": ("platform_tenant_new", "tenant-new", "新建租户"),
+    "/platform/usage": ("platform_usage", "usage", "用量与配额"),
+    "/platform/ledger": ("platform_ledger", "ledger", "手工账本"),
+    "/platform/infra": ("platform_infra", "infra", "连通性 / 域名 / 渠道"),
+    "/platform/analytics": ("platform_analytics", "analytics", "产品使用分析"),
+    "/platform/audit": ("platform_audit", "audit", "全局审计"),
+}
+
+
+def _render_platform_page(template: str, active_id: str, breadcrumb: str, admin: PlatformAdmin) -> HTMLResponse:
+    return HTMLResponse(
+        render_template(
+            template,
+            sidenav=render_platform_sidenav(active_id),
+            admin_bar=render_platform_admin_bar(admin.email),
+            topbar=render_platform_topbar(breadcrumb),
+        )
+    )
+
+
+def _platform_page_route(path: str, template: str, active_id: str, breadcrumb: str):
+    @router.get(path, response_class=HTMLResponse, name=f"platform_page_{active_id}")
+    def _page(
+        admin: Optional[PlatformAdmin] = Depends(require_platform_admin_optional),
+    ) -> HTMLResponse:
+        if admin is None:
+            return RedirectResponse("/platform/login", status_code=302)
+        return _render_platform_page(template, active_id, breadcrumb, admin)
+
+    return _page
+
+
+for _path, (_template, _active_id, _breadcrumb) in _PLATFORM_PAGES.items():
+    _platform_page_route(_path, _template, _active_id, _breadcrumb)
 
 
 def get_operations_payment_provider() -> PaymentProvider:
@@ -90,17 +135,35 @@ def _record_operation_audit(
         raise HTTPException(status_code=500, detail="operation_audit_failed")
 
 
-@router.get("/platform/operations", response_class=HTMLResponse)
+@router.get("/platform", response_class=HTMLResponse)
+@router.get("/platform/operations", response_class=HTMLResponse, include_in_schema=False)
 def operations_page(
-    request: Request,
-    db: Session = Depends(get_db),
     admin: Optional[PlatformAdmin] = Depends(require_platform_admin_optional),
 ) -> HTMLResponse:
-    """Internal-only HTML shell. Unauthenticated browsers go to the
-    platform login page (RND-413); API clients keep using HTTP Basic."""
+    """Internal-only HTML shell for the operations dashboard. RND-414 added
+    the 9-item side nav and moved the canonical URL to ``/platform``, but
+    ``/platform/operations`` (RND-413's original route) stays a first-class
+    alias to the same handler rather than a redirect — a redirect would
+    turn the existing "unauthenticated /platform/operations goes straight
+    to /platform/login" contract into a two-hop redirect through /platform,
+    which is an unrelated behavior change this ticket has no reason to
+    make. Unauthenticated browsers go to the platform login page (RND-413);
+    API clients keep using HTTP Basic."""
     if admin is None:
         return RedirectResponse("/platform/login", status_code=302)
-    return HTMLResponse(render_template("platform_operations"))
+    return _render_platform_page("platform_dashboard", "dashboard", "运营看板", admin)
+
+
+@router.get("/platform/tenants/{tenant_id}", response_class=HTMLResponse)
+def tenant_detail_page(
+    tenant_id: str,
+    admin: Optional[PlatformAdmin] = Depends(require_platform_admin_optional),
+) -> HTMLResponse:
+    """RND-414 tenant-detail shell (5 tabs, rendered client-side). The
+    side nav highlights "tenants" — list and detail share one nav item."""
+    if admin is None:
+        return RedirectResponse("/platform/login", status_code=302)
+    return _render_platform_page("platform_tenant_detail", "tenants", "租户商业状态", admin)
 
 
 @router.get(

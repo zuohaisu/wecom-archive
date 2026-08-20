@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>新建租户 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>新建租户</h1><p>人工开通兜底流程。仅在自助开通失败或合同直签时使用；创建即写入审计。</p></div>
+    <a class="btn" href="/platform/tenants">取消</a>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <div class="wizard-layout">
+    <aside class="card wizard-rail">
+      <ol class="wizard-steps" id="wizard-steps">
+        <li data-step="1"><span class="wizard-step-n">1</span><span>基本信息</span></li>
+        <li data-step="2"><span class="wizard-step-n">2</span><span>WeCom 凭据</span></li>
+        <li data-step="3"><span class="wizard-step-n">3</span><span>复核并创建</span></li>
+        <li data-step="4"><span class="wizard-step-n">4</span><span>创建结果</span></li>
+      </ol>
+      <div class="alert alert-neutral" style="margin-top:var(--space-4)"><span class="alert-ico">i</span><div>凭据仅在第 2 步输入，提交后不可回看。离开页面即清除。</div></div>
+    </aside>
+
+    <section class="card" id="wizard-panel-1">
+      <div class="card-hd"><h2>第 1 / 4 步 · 基本信息</h2></div>
+      <div class="card-bd">
+        <div class="form-grid">
+          <div class="field"><label class="field-label">租户名称<span class="req">*</span></label><input class="input" id="w-name" type="text"><p class="field-help">与合同主体一致，展示在租户端与账单上。</p></div>
+          <div class="field"><label class="field-label">slug<span class="req">*</span></label><input class="input mono" id="w-slug" type="text"><p class="field-help">小写字母、数字与连字符；创建后不可修改。</p></div>
+          <div class="field"><label class="field-label">管理员邮箱<span class="req">*</span></label><input class="input" id="w-admin-email" type="email"><p class="field-help">首个后台管理员账号。</p></div>
+          <div class="field"><label class="field-label">Owner 邮箱<span class="req">*</span></label><input class="input" id="w-owner-email" type="email"><p class="field-help">接收开通邀请与账单通知。</p></div>
+          <div class="field"><label class="field-label">回调域名</label><input class="input mono" id="w-callback-domain" type="text"><p class="field-help">留空则使用平台默认域名。</p></div>
+          <div class="field"><label class="field-label">开通原因<span class="req">*</span></label>
+            <select class="select" id="w-reason">
+              <option value="">请选择…</option>
+              <option value="manual_provisioning">自助开通失败</option>
+              <option value="contract_direct">合同直签</option>
+              <option value="migration">存量迁移</option>
+            </select>
+            <p class="field-help">写入审计记录。</p>
+          </div>
+        </div>
+      </div>
+      <div class="card-ft" style="justify-content:flex-end;gap:var(--space-2)">
+        <button class="btn btn-primary" type="button" id="w-step1-next">下一步：凭据</button>
+      </div>
+    </section>
+
+    <section class="card" id="wizard-panel-2" hidden>
+      <div class="card-hd"><h2>第 2 / 4 步 · WeCom 凭据</h2><span class="badge badge-pending">一次性录入</span></div>
+      <div class="card-bd">
+        <div class="alert alert-danger" style="margin-bottom:var(--space-4)"><span class="alert-ico">!</span><div>secret 与私钥为一次性输入。仅支持粘贴，提交后加密存储、永不回显、不写日志、不进入截图或导出。如需变更只能重新录入。</div></div>
+        <div class="form-grid">
+          <div class="field"><label class="field-label">corp_id<span class="req">*</span></label><input class="input mono" id="w-corp-id" type="text"></div>
+          <div class="field"><label class="field-label">agent_id<span class="req">*</span></label><input class="input mono" id="w-agent-id" type="text"></div>
+        </div>
+        <div class="field"><label class="field-label">secret<span class="req">*</span></label><input class="input" id="w-secret" type="password" autocomplete="off"><p class="field-help" id="w-secret-help">粘贴录入 · 不可查看</p></div>
+        <div class="field"><label class="field-label">private_key_pem<span class="req">*</span></label><textarea class="textarea mono" id="w-private-key" rows="6" autocomplete="off"></textarea><p class="field-help">仅接受 PEM 粘贴 · 校验格式后即加密 · 不可查看。</p></div>
+        <label class="checkbox"><input type="checkbox" id="w-credential-confirm"> 我确认凭据来自客户官方渠道，且已在安全环境下操作</label>
+      </div>
+      <div class="card-ft" style="justify-content:flex-end;gap:var(--space-2)">
+        <button class="btn" type="button" id="w-step2-back">上一步</button>
+        <button class="btn btn-primary" type="button" id="w-step2-next">下一步：复核</button>
+      </div>
+    </section>
+
+    <section class="card" id="wizard-panel-3" hidden>
+      <div class="card-hd"><h2>第 3 / 4 步 · 复核并创建</h2></div>
+      <div class="card-bd">
+        <dl class="kv" id="w-review"></dl>
+        <div class="alert alert-warning" style="margin-top:var(--space-4)"><span class="alert-ico">!</span><div>创建将向 Owner 邮箱发送开通邀请，并写入审计记录 <span class="mono">platform.tenant.created</span>。重复提交同一幂等键不会重复创建。</div></div>
+      </div>
+      <div class="card-ft" style="justify-content:flex-end;gap:var(--space-2)">
+        <button class="btn" type="button" id="w-step3-back">上一步</button>
+        <button class="btn btn-primary" type="button" id="w-step3-submit">创建租户</button>
+      </div>
+    </section>
+
+    <section class="card" id="wizard-panel-4" hidden>
+      <div class="card-hd"><h2>第 4 / 4 步 · 创建结果</h2><span class="badge badge-success badge-dot">已创建</span></div>
+      <div class="card-bd">
+        <div class="alert alert-success" style="margin-bottom:var(--space-4)"><span class="alert-ico">✓</span><div id="w-result-summary"></div></div>
+        <dl class="kv" id="w-result"></dl>
+        <div class="alert alert-neutral" style="margin-top:var(--space-4)"><span class="alert-ico">i</span><div>建议下一步：运行连通性检查确认凭据可用，然后在租户详情页设置订阅（人工开通默认无订阅）。</div></div>
+      </div>
+      <div class="card-ft" style="justify-content:flex-end;gap:var(--space-2)">
+        <button class="btn" type="button" id="w-run-connectivity">运行连通性检查</button>
+        <a class="btn btn-primary" id="w-goto-tenant" href="#">前往租户详情</a>
+      </div>
+    </section>
+  </div>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-tenant-wizard.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

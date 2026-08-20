@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>全局审计 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>全局审计</h1><p>跨租户受控操作与系统事件流水，仅展示动作、对象与原因，不展示请求体与凭据。</p></div>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <section class="card tenant-card">
+    <div class="card-hd"><h2>筛选与结果</h2><span id="audit-pagination" class="muted"></span></div>
+    <form id="audit-filters" class="filter-grid">
+      <label>动作类型<select id="filter-action">
+        <option value="">全部</option>
+        <option value="tenant.created">tenant.created</option>
+        <option value="service.suspended">service.suspended</option>
+        <option value="service.resumed">service.resumed</option>
+        <option value="subscription.adjusted">subscription.adjusted</option>
+        <option value="ledger.entry.created">ledger.entry.created</option>
+        <option value="ledger.entry.voided">ledger.entry.voided</option>
+        <option value="payment.queried">payment.queried</option>
+        <option value="refund.submitted">refund.submitted</option>
+      </select></label>
+      <label>操作人<input id="filter-operator" type="text" placeholder="平台管理员邮箱"></label>
+      <label>租户<input id="filter-tenant" type="text" placeholder="租户名称 / slug / ID"></label>
+      <label>发生自<input id="filter-from" type="date"></label>
+      <label>发生至<input id="filter-to" type="date"></label>
+      <div class="filter-actions"><button class="btn btn-primary" type="submit">应用筛选</button><button id="reset-filters" class="btn" type="button">重置</button></div>
+    </form>
+    <div class="card-bd table-wrap">
+      <table>
+        <thead><tr><th>时间</th><th>审计 ID</th><th>动作</th><th>租户</th><th>对象</th><th>原因</th><th>幂等键</th><th>操作人</th></tr></thead>
+        <tbody id="audit-rows"></tbody>
+      </table>
+      <div class="pager"><button id="previous-page" class="btn" type="button">上一页</button><button id="next-page" class="btn" type="button">下一页</button></div>
+    </div>
+  </section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-audit.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

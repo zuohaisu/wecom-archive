@@ -578,29 +578,68 @@ def test_operations_html_is_not_a_tenant_admin_surface(
 ) -> None:
     client, _factory = operations_client
 
-    denied = client.get("/platform/operations", follow_redirects=False)
-    allowed = client.get("/platform/operations", headers=_basic())
+    # RND-414: /platform is the canonical dashboard URL under the new
+    # 9-item side nav; /platform/operations (RND-413's original route)
+    # stays a first-class alias to the exact same handler rather than a
+    # redirect, so unauthenticated browsers still go straight to
+    # /platform/login from either URL (see test_rnd413_platform_login.py).
+    for dashboard_path in ("/platform", "/platform/operations"):
+        denied = client.get(dashboard_path, follow_redirects=False)
+        assert denied.status_code == 302, dashboard_path
+        assert denied.headers["location"] == "/platform/login", dashboard_path
 
-    # RND-413: unauthenticated browsers go to the platform login page
-    # instead of an opaque 401; API clients keep HTTP Basic.
-    assert denied.status_code == 302
-    assert denied.headers["location"] == "/platform/login"
+    allowed = client.get("/platform", headers=_basic())
     assert allowed.status_code == 200
     assert "平台运营" in allowed.text
     assert "不展示聊天内容" in allowed.text
-    assert 'id="tenant-filters"' in allowed.text
+    assert "运营看板" in allowed.text
     assert "渠道确认收款" in allowed.text
     assert "手工账本单独统计" in allowed.text
+    assert 'data-plane="platform"' in allowed.text
 
     static_dir = Path(__file__).resolve().parents[1] / "app/web/static"
-    script = (static_dir / "platform-operations.js").read_text()
+    modals = (static_dir / "platform-operations-modals.js").read_text()
+    tenant_detail_script = (static_dir / "platform-tenant-detail.js").read_text()
     styles = (static_dir / "platform-operations.css").read_text()
-    assert "Idempotency-Key" in script
-    assert "controlProof" in script
-    assert "provider_order_ref_masked" in script
-    assert "innerHTML" not in script
+    theme = (static_dir / "platform-console-orange.css").read_text()
+    assert "Idempotency-Key" in modals
+    assert "provider_order_ref_masked" in tenant_detail_script
+    assert '[data-plane="platform"]' in theme
+    for path in sorted(static_dir.glob("platform-*.js")):
+        # Match actual usage (".innerHTML"), not the bare word — several of
+        # these files document the "no innerHTML" discipline in a comment.
+        assert ".innerHTML" not in path.read_text(), path
     assert "@media(max-width:1024px)" in styles
     assert "@media(max-width:720px)" in styles
+
+
+def test_all_platform_console_html_routes_reachable(
+    operations_client: tuple[TestClient, sessionmaker],
+) -> None:
+    """RND-414: every side-nav route serves its shell when authenticated and
+    redirects to /platform/login otherwise — a route missing from either
+    list would silently 404 for operators."""
+    client, _factory = operations_client
+    routes = [
+        "/platform",
+        "/platform/tenants",
+        "/platform/tenants/tenant-active",
+        "/platform/tenants/new",
+        "/platform/usage",
+        "/platform/ledger",
+        "/platform/infra",
+        "/platform/analytics",
+        "/platform/audit",
+    ]
+    for route in routes:
+        denied = client.get(route, follow_redirects=False)
+        assert denied.status_code == 302, route
+        assert denied.headers["location"] == "/platform/login", route
+
+        allowed = client.get(route, headers=_basic())
+        assert allowed.status_code == 200, route
+        assert 'data-plane="platform"' in allowed.text, route
+        assert "平台运营" in allowed.text, route
 
 
 def _rnd405_postgres_url() -> str | None:

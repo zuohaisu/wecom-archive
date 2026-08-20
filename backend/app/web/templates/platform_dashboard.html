@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>运营看板 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>运营看板</h1><p>跨租户规模、用量、商业状态与渠道资金事实。手工账本单独统计，不并入渠道净收入。当前仅有一个可购买套餐：年度基础套餐（annual_base_cny_99 · ¥99/年 · 5 GiB 存储 · 席位不限）。</p></div>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <section class="metric-grid" aria-label="核心指标">
+    <article class="card metric"><span>租户总数</span><strong id="tenant-total">—</strong><small id="tenant-states">—</small></article>
+    <article class="card metric"><span>管理员账号</span><strong id="admin-accounts">—</strong><small id="observed-users">—</small></article>
+    <article class="card metric"><span>消息总数</span><strong id="message-total">—</strong><small>仅汇总，不展示内容</small></article>
+    <article class="card metric"><span>媒体与存储</span><strong id="storage-total">—</strong><small id="media-total">—</small></article>
+    <article class="card metric"><span>渠道确认收款</span><strong id="receipt-total">—</strong><small id="net-revenue">—</small></article>
+    <article class="card metric"><span>渠道成功退款</span><strong id="refund-total">—</strong><small id="manual-financial">手工账本单独统计</small></article>
+    <article class="card metric metric-alert"><span>待处理异常</span><strong id="exception-total">—</strong><small id="exception-states">—</small></article>
+  </section>
+
+  <section class="card" style="margin-bottom:var(--space-5)">
+    <div class="card-hd"><h2>基础设施状态</h2><a class="btn btn-sm" href="/platform/infra">进入基础设施</a></div>
+    <div class="card-bd" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-4)">
+      <div id="infra-suite-ticket"></div>
+      <div id="infra-connectivity"></div>
+      <div id="infra-domains"></div>
+    </div>
+  </section>
+
+  <div class="platform-grid">
+    <section class="card"><div class="card-hd"><h2>套餐 / 订阅分布</h2></div><div class="card-bd"><ul id="subscriptions" class="summary-list"></ul></div></section>
+    <section class="card"><div class="card-hd"><h2>接近或超过存储配额</h2><a class="btn btn-sm" href="/platform/usage">查看用量</a></div><div class="card-bd"><ul id="quota-risks" class="summary-list"></ul></div></section>
+    <section class="card"><div class="card-hd"><h2>最近新增租户</h2></div><div class="card-bd"><ul id="recent-tenants" class="summary-list"></ul></div></section>
+    <section class="card"><div class="card-hd"><h2>近期受控操作</h2><a class="btn btn-sm" href="/platform/audit">查看全部审计</a></div><div class="card-bd"><ul id="recent-operations" class="summary-list"></ul></div></section>
+  </div>
+
+  <section class="card"><div class="card-hd"><h2>渠道确认收款、成功退款与净收入（月）</h2><span class="muted">不含手工账本</span></div><div class="card-bd table-wrap"><table><thead><tr><th>周期</th><th>渠道收款</th><th>成功退款</th><th>净收入</th></tr></thead><tbody id="revenue-periods"></tbody></table></div></section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-operations.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

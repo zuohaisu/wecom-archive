@@ -1,2 +1,75 @@
-.platform-header{height:52px;background:var(--color-admin-bar);color:var(--color-admin-bar-fg);display:flex;align-items:center;justify-content:space-between;padding:0 var(--space-6);border-bottom:1px solid var(--color-admin-bar-border)}.platform-header strong{font-size:var(--text-lg);margin-right:var(--space-3)}.platform-header span,.platform-header small{color:var(--color-admin-bar-muted)}.platform-page{max-width:1440px;margin:0 auto;padding:var(--space-8)}.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:var(--space-4);margin-bottom:var(--space-5)}.metric{padding:var(--space-4)}.metric span,.metric small{display:block;color:var(--color-text-4);font-size:var(--text-sm)}.metric strong{display:block;font-size:var(--text-2xl);margin:var(--space-1) 0}.metric-alert{border-color:var(--color-warning-border)}.platform-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-5);margin-bottom:var(--space-5)}.platform-grid .card{min-height:160px}.summary-list{list-style:none;display:grid;gap:var(--space-2)}.summary-list li{display:flex;justify-content:space-between;gap:var(--space-4);padding-bottom:var(--space-2);border-bottom:1px solid var(--color-border)}.summary-list li:last-child{border-bottom:0}.summary-list small{color:var(--color-text-4)}.tenant-card{margin-top:var(--space-5)}.filter-grid{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:var(--space-3);padding:var(--space-4);border-top:1px solid var(--color-border);border-bottom:1px solid var(--color-border);background:var(--color-surface-sunken)}.filter-grid label{display:grid;gap:var(--space-1);color:var(--color-text-3);font-size:var(--text-xs)}.filter-grid select,.filter-grid input{min-width:0;height:36px;padding:0 var(--space-2);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text-1)}.filter-actions{display:flex;align-items:flex-end;gap:var(--space-2)}.table-wrap{overflow:auto}.table-wrap table{width:100%;border-collapse:collapse}.table-wrap th,.table-wrap td{padding:var(--space-3);border-bottom:1px solid var(--color-border);text-align:left;vertical-align:top;white-space:nowrap}.table-wrap th{color:var(--color-text-4);font-size:var(--text-sm);font-weight:var(--weight-medium);background:var(--color-surface-sunken)}.tenant-name{font-weight:var(--weight-semibold);display:block}.tenant-slug{display:block;color:var(--color-text-4);font-size:var(--text-xs)}.action-row{display:flex;flex-wrap:wrap;gap:var(--space-2)}.btn-danger{border-color:var(--color-danger-border);color:var(--color-danger-fg)}.pager{display:flex;justify-content:flex-end;gap:var(--space-2);padding-top:var(--space-4)}.tenant-detail{margin-top:var(--space-5);padding:var(--space-5)}.detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-4);margin:var(--space-4) 0}.detail-grid>div{padding:var(--space-3);border-radius:var(--radius-md);background:var(--color-surface-sunken)}.detail-grid span{display:block;color:var(--color-text-4);font-size:var(--text-sm)}.detail-grid strong{overflow-wrap:anywhere}.evidence-section{margin-top:var(--space-6)}.evidence-section h3{margin-bottom:var(--space-2);font-size:var(--text-base)}.empty{color:var(--color-text-4);justify-content:flex-start!important}.quota-danger{color:var(--color-danger-fg)}.quota-warning{color:var(--color-warning-fg)}@media(max-width:1024px){.filter-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:720px){.platform-header{padding:0 var(--space-4)}.platform-header small{display:none}.platform-page{padding:var(--space-4)}.metric-grid,.platform-grid,.detail-grid,.filter-grid{grid-template-columns:1fr}.page-hd{gap:var(--space-3);align-items:flex-start}.page-hd .btn{flex:0 0 auto}.filter-actions{align-items:stretch}.filter-actions .btn{flex:1}.tenant-detail{padding:var(--space-3)}}
-.platform-page [hidden]{display:none!important}
+/* RND-414: the old .platform-header/.platform-page single-page shell is
+ * retired — every /platform/* page now uses the shared .shell/.side-nav/
+ * .main/.page layout (design-system.css), matching every other admin page
+ * in this app. What remains here are the platform-console-specific layout
+ * pieces design-system.css doesn't already provide: metric grids, filter
+ * bars, the tenant-detail evidence tables, the ledger/usage table chrome,
+ * the wizard rail, and the shared modal's inline alert spacing. */
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:var(--space-4);margin-bottom:var(--space-5)}
+.metric{padding:var(--space-4)}
+.metric span,.metric small{display:block;color:var(--color-text-4);font-size:var(--text-sm)}
+.metric strong{display:block;font-size:var(--text-2xl);margin:var(--space-1) 0}
+.metric-alert{border-color:var(--color-warning-border)}
+.platform-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-5);margin-bottom:var(--space-5)}
+.platform-grid .card{min-height:160px}
+.summary-list{list-style:none;display:grid;gap:var(--space-2)}
+.summary-list li{display:flex;justify-content:space-between;gap:var(--space-4);padding-bottom:var(--space-2);border-bottom:1px solid var(--color-border)}
+.summary-list li:last-child{border-bottom:0}
+.summary-list small{color:var(--color-text-4)}
+.tenant-card{margin-top:var(--space-5)}
+.filter-grid{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:var(--space-3);padding:var(--space-4);border-top:1px solid var(--color-border);border-bottom:1px solid var(--color-border);background:var(--color-surface-sunken)}
+.filter-grid label{display:grid;gap:var(--space-1);color:var(--color-text-3);font-size:var(--text-xs)}
+.filter-grid select,.filter-grid input{min-width:0;height:36px;padding:0 var(--space-2);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-surface);color:var(--color-text-1)}
+.filter-actions{display:flex;align-items:flex-end;gap:var(--space-2)}
+.table-wrap{overflow:auto}
+.table-wrap table{width:100%;border-collapse:collapse}
+.table-wrap th,.table-wrap td{padding:var(--space-3);border-bottom:1px solid var(--color-border);text-align:left;vertical-align:top;white-space:nowrap}
+.table-wrap th{color:var(--color-text-4);font-size:var(--text-sm);font-weight:var(--weight-medium);background:var(--color-surface-sunken)}
+.tenant-name{font-weight:var(--weight-semibold);display:block}
+.tenant-slug{display:block;color:var(--color-text-4);font-size:var(--text-xs)}
+.action-row{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.pager{display:flex;justify-content:flex-end;gap:var(--space-2);padding-top:var(--space-4)}
+.tenant-detail{margin-top:var(--space-5);padding:var(--space-5)}
+.detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-4);margin:var(--space-4) 0}
+.detail-grid>div{padding:var(--space-3);border-radius:var(--radius-md);background:var(--color-surface-sunken)}
+.detail-grid span{display:block;color:var(--color-text-4);font-size:var(--text-sm)}
+.detail-grid strong{overflow-wrap:anywhere}
+.evidence-section{margin-top:var(--space-6)}
+.evidence-section h3{margin-bottom:var(--space-2);font-size:var(--text-base)}
+.quota-danger{color:var(--color-danger-fg)}
+.quota-warning{color:var(--color-warning-fg)}
+
+/* -------------------------------------------------------- diff table --
+ * Spec §3 step-1 "当前 → 操作后" impact review, reused by every controlled
+ * operation's modal. */
+.diff-table td:nth-child(2){color:var(--color-text-4)}
+.diff-table td:nth-child(3){font-weight:var(--weight-semibold)}
+.diff-table .diff-changed{color:var(--color-primary-hover)}
+
+.modal-inline-alert{margin-bottom:var(--space-4)}
+
+/* --------------------------------------------------- new-tenant wizard --
+ * Spec §1 "新建租户" — left rail step list (non-clickable, numbered) + right
+ * content card, matching the approved prototype's two-column layout. */
+.wizard-layout{display:grid;grid-template-columns:220px minmax(0,720px);gap:var(--space-5);align-items:start}
+.wizard-rail{padding:var(--space-4)}
+.wizard-steps{list-style:none;display:grid;gap:var(--space-1)}
+.wizard-steps li{display:flex;align-items:center;gap:var(--space-2);padding:6px 4px;font-size:var(--text-sm);color:var(--color-text-4)}
+.wizard-steps li .wizard-step-n{width:20px;height:20px;border-radius:50%;border:1px solid var(--color-border-strong);display:flex;align-items:center;justify-content:center;font-size:var(--text-xs);flex-shrink:0}
+.wizard-steps li.current{color:var(--color-text);font-weight:var(--weight-semibold)}
+.wizard-steps li.current .wizard-step-n{background:var(--color-primary);border-color:var(--color-primary);color:var(--color-on-primary)}
+.wizard-steps li.done .wizard-step-n{background:var(--color-primary-soft);border-color:var(--color-primary-border);color:var(--color-primary-hover)}
+
+@media(max-width:1024px){
+  .filter-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}
+  .detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .wizard-layout{grid-template-columns:1fr}
+}
+@media(max-width:720px){
+  .metric-grid,.platform-grid,.detail-grid,.filter-grid{grid-template-columns:1fr}
+  .page-hd{gap:var(--space-3);align-items:flex-start}
+  .page-hd .btn{flex:0 0 auto}
+  .filter-actions{align-items:stretch}
+  .filter-actions .btn{flex:1}
+  .tenant-detail{padding:var(--space-3)}
+}

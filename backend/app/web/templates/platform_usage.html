@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>用量与配额 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>用量与配额</h1><p>跨租户消息、存储与员工席位用量，以及同步健康状况。</p></div>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <section class="metric-grid" aria-label="用量核心指标">
+    <article class="card metric"><span>消息总数</span><strong id="usage-messages">—</strong></article>
+    <article class="card metric"><span>存储总量</span><strong id="usage-storage">—</strong></article>
+    <article class="card metric"><span>员工席位</span><strong id="usage-employees">—</strong></article>
+    <article class="card metric metric-alert"><span>同步异常</span><strong id="usage-sync-issues">—</strong><small>非 healthy 状态的租户数</small></article>
+  </section>
+
+  <section class="card">
+    <div class="card-hd">
+      <h2>租户用量</h2>
+      <span class="muted" id="usage-count"></span>
+      <div class="segmented" id="usage-sort" role="group" aria-label="排序方式">
+        <button type="button" class="active" data-sort="storage_bytes">存储</button>
+        <button type="button" data-sort="message_count">消息</button>
+        <button type="button" data-sort="employee_count">员工</button>
+        <button type="button" data-sort="sync_health">同步健康</button>
+      </div>
+    </div>
+    <div class="card-bd table-wrap">
+      <table>
+        <thead><tr><th>租户</th><th>消息数</th><th>存储</th><th>员工席位</th><th>同步健康</th><th>最近同步</th><th>操作</th></tr></thead>
+        <tbody id="usage-rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-usage.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

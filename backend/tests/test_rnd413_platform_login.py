@@ -125,7 +125,9 @@ def test_operations_page_still_accepts_http_basic(
     response = client.get("/platform/operations", headers=_basic())
     assert response.status_code == 200
     assert "平台运营" in response.text
-    assert "退出登录" in response.text
+    # RND-414: the admin-bar logout affordance is now a plain "退出" button
+    # (approved design's admin-bar copy), not "退出登录".
+    assert "退出" in response.text
 
 
 def test_login_page_renders(

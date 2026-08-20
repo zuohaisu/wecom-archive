@@ -346,16 +346,20 @@ def test_platform_analytics_rejects_tenant_sessions_and_bounds_queries(
 
 
 def test_platform_operations_ui_exposes_only_aggregate_product_analytics() -> None:
+    # RND-414: the product-analytics block moved off the dashboard onto its
+    # own /platform/analytics page (platform_analytics.html /
+    # platform-analytics.js), lifted-and-shifted verbatim per the approved
+    # IA — same endpoints, same behavior, just relocated.
     root = Path(__file__).resolve().parents[1]
-    template = (root / "app/web/templates/platform_operations.html").read_text(encoding="utf-8")
-    script = (root / "app/web/static/platform-operations.js").read_text(encoding="utf-8")
+    template = (root / "app/web/templates/platform_analytics.html").read_text(encoding="utf-8")
+    script = (root / "app/web/static/platform-analytics.js").read_text(encoding="utf-8")
 
     assert "产品使用分析" in template
     assert "近期未使用" in template
     assert "product-analytics/overview" in script
     assert "product-analytics/tenants" in script
     assert "content_text" not in template
-    assert "innerHTML" not in script
+    assert ".innerHTML" not in script
 
 
 def test_retention_cleanup_and_backend_failure_are_safe(
