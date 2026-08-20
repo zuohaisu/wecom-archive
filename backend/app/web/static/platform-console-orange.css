@@ -1,0 +1,129 @@
+/* Crowntime WeCom Archive — Platform Operations Console theme (light orange)
+   RND-414. Drop-in override that loads AFTER design-system.css on
+   /platform/* routes only. Every value is a token re-point; no shared class
+   is redefined, so every shared primitive (buttons, tables, badges, nav,
+   modal) inherits the internal-plane identity for free. The two structural
+   rules at the bottom (admin-bar keyline, side-nav collapse) are scoped
+   entirely under [data-plane="platform"] and have no effect on the
+   tenant-facing blue plane.
+
+   Scoping: <html data-plane="platform"> on every /platform/* page and on
+   /platform/login. Ported from the approved design
+   (assets/platform-console-orange.css, Claude Design project
+   e1d4fcea-21fa-4a89-b4d5-2dd4704b969b). */
+
+:root[data-plane="platform"],
+[data-plane="platform"] {
+  /* ---- accent / primary ramp ------------------------------------------
+     primary is a fill colour: white text on it must clear 4.5:1, which
+     rules out the bright #ff7a1a family for anything with a label on it.
+     #c2570b + #fff = 5.29:1 (AA for body text, AAA for >=18.66px bold). */
+  --color-primary:#c2570b;
+  --color-primary-hover:#a1470a;      /* #fff = 6.62:1 */
+  --color-primary-active:#853a08;     /* #fff = 8.05:1 */
+  --color-primary-soft:#fdf2e7;       /* nav active / tag background */
+  --color-primary-soft-hover:#fbe7d4;
+  --color-primary-border:#f0c79c;     /* 1.6:1 vs surface — decorative only */
+  --color-on-primary:#ffffff;
+  --color-link:#a1470a;               /* on #fff = 6.62:1 */
+  --color-link-hover:#853a08;
+  --focus-ring:0 0 0 3px rgba(194,87,11,.26);
+
+  /* ---- surfaces: a warm neutral, 1-2 steps off the blue app's grey ---- */
+  --color-canvas:#f4f1ed;
+  --color-surface:#ffffff;
+  --color-surface-sunken:#fbf8f5;
+  --color-surface-nav:#faf6f2;
+  --color-surface-header:#fbf8f5;
+  --color-surface-hover:#f8f4f0;
+  --color-border:#f0ebe5;
+  --color-border-strong:#e6dfd7;
+  --color-border-input:#e0d8cf;
+
+  /* ---- admin chrome: warm near-black, orange keyline ------------------
+     Distinct permission plane, not a distinct product. */
+  --color-admin-bar:#1b1410;
+  --color-admin-bar-fg:#f7f1ec;       /* on #1b1410 = 14.8:1 */
+  --color-admin-bar-muted:#bda99a;    /* on #1b1410 = 7.1:1 */
+  --color-admin-bar-border:#3a2b21;
+  --color-admin-keyline:#e8853a;      /* 3px top/bottom accent only */
+
+  /* ---- status: unchanged from the shared system --------------------------
+     warning amber (#ad6800 on #fffbe6) is the one hue that can be confused
+     with the new accent, so: status colour NEVER appears as a fill, only as
+     a badge triad with a text label, and primary orange is NEVER used to
+     encode state. Contrast on their own backgrounds:
+       success #237804 on #f6ffed  8.2:1
+       danger  #cf1322 on #fff2f0  5.3:1
+       warning #ad6800 on #fffbe6  4.9:1
+       info    #0958d9 on #e6f4ff  5.6:1  */
+
+  /* ---- data-viz: one orange ramp + the shared neutral/teal ------------- */
+  --color-viz-1:#c2570b;--color-viz-2:#e0803c;--color-viz-3:#eda86f;
+  --color-viz-4:#f6cba6;--color-viz-5:#8b8279;--color-viz-6:#2f9e8f;
+  --color-grid:#f0ebe5;
+}
+
+[data-plane="platform"][data-theme="dark"] {
+  --color-primary:#ff9a4d;            /* #0b0f14 on it = 9.6:1 */
+  --color-primary-hover:#ffae70;
+  --color-primary-active:#ffc08f;
+  --color-primary-soft:#2a1a0f;
+  --color-primary-soft-hover:#38220f;
+  --color-primary-border:#5c3819;
+  --color-on-primary:#1b1410;
+  --color-link:#ffab68;
+  --color-link-hover:#ffc08f;
+  --focus-ring:0 0 0 3px rgba(255,154,77,.32);
+  --color-canvas:#14100d;
+  --color-surface:#1b1713;
+  --color-surface-sunken:#221d18;
+  --color-surface-nav:#171310;
+  --color-surface-header:#221d18;
+  --color-surface-hover:#251f1a;
+  --color-border:#2a241e;
+  --color-border-strong:#352d26;
+  --color-border-input:#3d342b;
+  --color-admin-bar:#0d0a08;
+  --color-admin-bar-fg:#efe7e0;
+  --color-admin-bar-muted:#9c8d80;
+  --color-admin-bar-border:#241c16;
+  --color-admin-keyline:#c76f2c;
+}
+
+/* ---- structural additions, scoped to the platform plane only --------- */
+[data-plane="platform"] .admin-bar { border-bottom: 3px solid var(--color-admin-keyline); }
+[data-plane="platform"] [hidden] { display: none !important; }
+
+@media (max-width: 1023px) {
+  /* Spec §5 "<1024px（平板下限）侧栏收起为顶部下拉" — collapse the fixed
+     side-nav into a top dropdown; toggled by platform-console.js. */
+  [data-plane="platform"] .shell { flex-direction: column; }
+  [data-plane="platform"] .side-nav {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    height: var(--topbar-h);
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-strong);
+    overflow: visible;
+    position: relative;
+  }
+  [data-plane="platform"] .side-nav-brand { padding: 0 var(--space-3); border-bottom: none; }
+  [data-plane="platform"] .side-nav-toggle { display: inline-flex; margin-left: auto; }
+  [data-plane="platform"] .side-nav-scroll {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 60;
+    background: var(--color-surface-nav);
+    border-bottom: 1px solid var(--color-border-strong);
+    box-shadow: var(--shadow-2);
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  [data-plane="platform"] .side-nav.is-open .side-nav-scroll { display: block; }
+  [data-plane="platform"] .side-nav-user { display: none; }
+}

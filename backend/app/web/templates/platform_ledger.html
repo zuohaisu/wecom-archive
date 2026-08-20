@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>手工账本 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>手工账本</h1><p>跨租户手工账本条目（作废制，不可硬删除）。手工账本与渠道（微信支付）收入始终分开统计。</p></div>
+    <button class="btn btn-primary" type="button" id="ledger-create">新增条目</button>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <section class="metric-grid" aria-label="账本汇总">
+    <article class="card metric"><span>手工收款（本年）</span><strong id="ledger-receipts">—</strong></article>
+    <article class="card metric"><span>手工退款（本年）</span><strong id="ledger-refunds">—</strong></article>
+    <article class="card metric"><span>手工净额</span><strong id="ledger-net">—</strong><small>不计入渠道净收入</small></article>
+    <article class="card metric"><span>渠道净收入（对照）</span><strong id="ledger-provider-net">—</strong><small>来源：微信支付</small></article>
+  </section>
+
+  <section class="card">
+    <div class="card-hd"><h2>账本条目</h2><span class="muted" id="ledger-pagination"></span></div>
+    <form id="ledger-filters" class="filter-grid">
+      <label>类型<select id="filter-kind"><option value="">全部</option><option value="receipt">receipt</option><option value="refund">refund</option></select></label>
+      <label>状态<select id="filter-state"><option value="">全部</option><option value="posted">posted</option><option value="voided">voided</option></select></label>
+      <label>发生自<input id="filter-from" type="date"></label>
+      <label>发生至<input id="filter-to" type="date"></label>
+      <div class="filter-actions"><button class="btn btn-primary" type="submit">应用筛选</button><button id="reset-filters" class="btn" type="button">重置</button></div>
+    </form>
+    <div class="card-bd table-wrap">
+      <table>
+        <thead><tr><th>发生时间</th><th>租户</th><th>类型</th><th>金额</th><th>脱敏参考号</th><th>备注</th><th>状态</th><th>操作人</th><th>操作</th></tr></thead>
+        <tbody id="ledger-rows"></tbody>
+      </table>
+      <div class="pager"><button id="previous-page" class="btn" type="button">上一页</button><button id="next-page" class="btn" type="button">下一页</button></div>
+    </div>
+  </section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-operations-modals.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-ledger.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

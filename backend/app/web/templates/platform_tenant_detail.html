@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>租户详情 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <a class="btn btn-sm" href="/platform/tenants" style="margin-bottom:var(--space-3);display:inline-flex">← 返回列表</a>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+  <div class="page-hd">
+    <div>
+      <div id="detail-badges" class="action-row" style="margin-bottom:var(--space-2)"></div>
+      <h1 id="detail-title">—</h1>
+      <p id="detail-sub" class="muted"></p>
+    </div>
+    <div class="page-hd-actions">
+      <button class="btn" type="button" id="btn-adjust-subscription">调整订阅</button>
+      <button class="btn" type="button" id="btn-new-ledger">新增账本条目</button>
+      <button class="btn btn-danger" type="button" id="btn-suspend">人工暂停服务</button>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab active" type="button" data-tab="commercial" role="tab">商业概览</button>
+    <button class="tab" type="button" data-tab="subscription" role="tab">订阅</button>
+    <button class="tab" type="button" data-tab="ledger" role="tab">手工账本</button>
+    <button class="tab" type="button" data-tab="payments" role="tab">支付与退款</button>
+    <button class="tab" type="button" data-tab="audit" role="tab">审计</button>
+  </div>
+
+  <section id="tab-commercial" data-tabpanel="commercial">
+    <div id="quota-alert" class="alert alert-warning" hidden></div>
+    <div id="commercial-grid" class="detail-grid"></div>
+    <div class="platform-grid">
+      <section class="card">
+        <div class="card-hd"><h2>连通性</h2><button class="btn btn-sm" type="button" id="btn-recheck-connectivity">重新检查</button></div>
+        <div class="card-bd"><ul id="connectivity-summary" class="summary-list"></ul></div>
+      </section>
+      <section class="card">
+        <div class="card-hd"><h2>用量（30 天）</h2></div>
+        <div class="card-bd"><ul id="usage-summary" class="summary-list"></ul></div>
+      </section>
+    </div>
+  </section>
+
+  <section id="tab-subscription" data-tabpanel="subscription" hidden>
+    <section class="card" style="margin-bottom:var(--space-5)">
+      <div class="card-hd"><h2>当前订阅</h2><span id="subscription-revision" class="muted"></span></div>
+      <div class="card-bd" id="subscription-kv"></div>
+    </section>
+    <section class="card">
+      <div class="card-hd"><h2>订阅修订历史</h2></div>
+      <div class="card-bd table-wrap"><table><thead><tr><th>修订</th><th>时间</th><th>套餐</th><th>状态</th><th>服务期</th><th>原因</th><th>操作人/审计</th></tr></thead><tbody id="subscription-history"></tbody></table></div>
+    </section>
+  </section>
+
+  <section id="tab-ledger" data-tabpanel="ledger" hidden>
+    <div class="alert alert-neutral">手工账本与渠道（微信支付）收入始终分开统计。手工条目不并入渠道净收入，仅用于线下汇款、合同调整与差错更正。参考号一律脱敏展示。</div>
+    <section class="card">
+      <div class="card-hd"><h2>手工账本条目</h2><span id="ledger-summary" class="muted"></span></div>
+      <div class="card-bd table-wrap"><table><thead><tr><th>发生时间</th><th>类型</th><th>金额</th><th>脱敏参考号</th><th>备注</th><th>操作</th></tr></thead><tbody id="ledger-rows"></tbody></table></div>
+      <div class="card-ft">作废保留原条目（不可硬删除），并生成一条反向审计记录。</div>
+    </section>
+  </section>
+
+  <section id="tab-payments" data-tabpanel="payments" hidden>
+    <section class="card" style="margin-bottom:var(--space-5)">
+      <div class="card-hd"><h2>渠道支付订单</h2></div>
+      <div class="card-bd table-wrap"><table><thead><tr><th>时间</th><th>套餐 / 金额</th><th>状态</th><th>脱敏参考号</th><th>操作</th></tr></thead><tbody id="payment-rows"></tbody></table></div>
+    </section>
+    <section class="card">
+      <div class="card-hd"><h2>渠道退款</h2></div>
+      <div class="card-bd table-wrap"><table><thead><tr><th>申请时间</th><th>金额</th><th>状态</th><th>脱敏参考号</th><th>操作</th></tr></thead><tbody id="refund-rows"></tbody></table></div>
+    </section>
+  </section>
+
+  <section id="tab-audit" data-tabpanel="audit" hidden>
+    <section class="card">
+      <div class="card-hd"><h2>受控操作与审计事件</h2><span class="muted">仅展示动作、对象与原因，不展示请求体与凭据</span></div>
+      <div class="card-bd table-wrap"><table><thead><tr><th>时间</th><th>审计 ID</th><th>动作</th><th>对象</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
+      <div class="card-ft">内联滚动 · 最近 50 条 <a class="btn-link" href="/platform/audit">在全局审计中查看全部</a></div>
+    </section>
+  </section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-operations-modals.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-tenant-detail.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

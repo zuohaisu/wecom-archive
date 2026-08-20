@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>租户商业状态 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>租户商业状态</h1><p>运营主工作台。筛选后进入租户详情页执行受控操作。</p></div>
+    <div class="page-hd-actions"><a class="btn btn-primary" href="/platform/tenants/new">新建租户</a></div>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <section class="card tenant-card">
+    <div class="card-hd"><h2>筛选与结果</h2><span id="tenant-pagination" class="muted"></span></div>
+    <form id="tenant-filters" class="filter-grid">
+      <label>服务状态<select id="filter-service"><option value="">全部</option><option value="provisioning">配置中</option><option value="active">运行中</option><option value="frozen">已冻结</option><option value="suspended">人工暂停</option></select></label>
+      <label>订阅状态<select id="filter-subscription"><option value="">全部</option><option value="trial">试用</option><option value="active">有效</option><option value="grace">宽限期</option><option value="expired">已过期</option><option value="canceled">已取消</option><option value="not_subscribed">未订阅</option></select></label>
+      <label>退款状态<select id="filter-refund"><option value="">全部</option><option value="pending">处理中</option><option value="succeeded">已成功</option><option value="abnormal">异常</option><option value="manual_recovery_required">人工恢复</option><option value="closed">已关闭</option></select></label>
+      <label>异常<select id="filter-exception"><option value="">全部</option><option value="any">仅有异常</option><option value="payment">支付/激活</option><option value="refund">退款</option><option value="none">无异常</option></select></label>
+      <label>到期自<input id="filter-ends-from" type="date"></label>
+      <label>到期至<input id="filter-ends-to" type="date"></label>
+      <label>排序<select id="filter-sort"><option value="created_desc">最近创建</option><option value="name_asc">租户名称</option><option value="ends_asc">最早到期</option><option value="ends_desc">最晚到期</option></select></label>
+      <div class="filter-actions"><button class="btn btn-primary" type="submit">应用筛选</button><button id="reset-filters" class="btn" type="button">重置</button></div>
+    </form>
+    <div class="card-bd table-wrap">
+      <table>
+        <thead><tr><th>租户</th><th>服务</th><th>套餐 / 到期</th><th>渠道净收入</th><th>手工账本</th><th>异常</th><th>媒体 / 存储</th><th>操作</th></tr></thead>
+        <tbody id="tenant-rows"></tbody>
+      </table>
+      <div class="pager"><button id="previous-page" class="btn" type="button">上一页</button><button id="next-page" class="btn" type="button">下一页</button></div>
+    </div>
+  </section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-operations-modals.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-tenants.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>
