@@ -53,6 +53,7 @@ from app.services.avatar_sync import (
     external_avatar_presentations,
     internal_avatar_presentations,
 )
+from app.services.external_contact_identity import external_contact_display_names
 
 
 def attach_group_chat_display_name(
@@ -910,6 +911,18 @@ def resolve_timeline_page(
                 if isinstance(card_fields, dict) and card_fields.get("userid"):
                     participant_ids.add(card_fields["userid"])
     display_names = _load_display_names_for_ids(db, tenant_id, participant_ids)
+    # The conversation list resolves external identities from their current
+    # nickname or the selected staff member's explicit remark. Apply that
+    # same tenant-scoped map to each timeline page so sender/recipient labels
+    # never regress to raw external IDs after selecting a named conversation.
+    display_names.update(
+        external_contact_display_names(
+            db,
+            tenant_id,
+            participant_ids,
+            follow_userid=staff_id if mode == "staff" else None,
+        )
+    )
     avatars = internal_avatar_presentations(db, tenant_id, participant_ids)
     # Customer-level external identities override the generic archive-contact
     # cache; the map is keyed solely by tenant-scoped stable IDs.
@@ -1267,6 +1280,17 @@ def _resolve_timeline_page_legacy(
 
     recipients_map = _load_recipients_map(db, tenant_id, [m.id for m in messages])
     display_names = _load_display_names(db, tenant_id)
+    participant_ids = {message.sender for message in messages if message.sender}
+    for recipients in recipients_map.values():
+        participant_ids.update(recipients)
+    display_names.update(
+        external_contact_display_names(
+            db,
+            tenant_id,
+            participant_ids,
+            follow_userid=staff_id if mode == "staff" else None,
+        )
+    )
 
     all_sorted_asc = sorted(messages, key=lambda m: (m.msgtime or 0, m.id))
     if before is not None:

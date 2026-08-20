@@ -494,8 +494,9 @@ def test_archive_worker_never_runs_full_external_contact_sync(
     ]
 
 
-def test_staff_centered_conversation_titles_use_that_staffs_remark() -> None:
+def test_staff_centered_conversation_and_timeline_labels_use_that_staffs_remark() -> None:
     from app.services.listing_service import list_conversations
+    from app.services.timeline_service import resolve_timeline_page
 
     from tests.test_http_contract import _make_session
 
@@ -545,6 +546,8 @@ def test_staff_centered_conversation_titles_use_that_staffs_remark() -> None:
         for msgid, sender, recipient, msgtime in (
             ("title-1", "staff-yingzi", "wm-title-001", 1),
             ("title-2", "staff-li", "wm-title-001", 2),
+            ("title-3", "wm-title-001", "staff-yingzi", 3),
+            ("title-4", "wm-title-001", "staff-li", 4),
         ):
             message = ArchiveMessage(
                 msgid=msgid,
@@ -576,5 +579,43 @@ def test_staff_centered_conversation_titles_use_that_staffs_remark() -> None:
         assert yingzi[0]["display_name"] == "英子备注"
         assert li[0]["display_name"] == "李四备注"
         assert customer[0]["display_name"] == "客户当前昵称"
+
+        yingzi_timeline = resolve_timeline_page(
+            db,
+            TENANT_A,
+            "direct__staff-yingzi___wm-title-001",
+            mode="staff",
+            staff_id="staff-yingzi",
+            conversation_type="direct",
+        )
+        li_timeline = resolve_timeline_page(
+            db,
+            TENANT_A,
+            "direct__staff-li___wm-title-001",
+            mode="staff",
+            staff_id="staff-li",
+            conversation_type="direct",
+        )
+        customer_timeline = resolve_timeline_page(
+            db,
+            TENANT_A,
+            "direct__staff-yingzi___wm-title-001",
+            mode="contact",
+            contact_id="wm-title-001",
+            conversation_type="direct",
+        )
+
+        assert [
+            (message.sender_display_name, message.recipient_display_names)
+            for message in yingzi_timeline.messages
+        ] == [("英子", ["英子备注"]), ("英子备注", ["英子"])]
+        assert [
+            (message.sender_display_name, message.recipient_display_names)
+            for message in li_timeline.messages
+        ] == [("李四", ["李四备注"]), ("李四备注", ["李四"])]
+        assert [
+            (message.sender_display_name, message.recipient_display_names)
+            for message in customer_timeline.messages
+        ] == [("英子", ["客户当前昵称"]), ("客户当前昵称", ["英子"])]
     finally:
         db.close()
