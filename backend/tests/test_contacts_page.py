@@ -25,6 +25,10 @@ _CONTACT_KEYS = (
     "contacts.detailTitle", "contacts.detailLoading", "contacts.detailLoadFailed",
     "contacts.remarkName", "contacts.currentNickname", "contacts.nicknameHistory",
     "contacts.noNicknameHistory", "contacts.source", "contacts.relatedConversations", "contacts.noConversations",
+    # GH-53 pagination controls
+    "contacts.paginationSummary", "contacts.paginationEmpty", "contacts.pageSize",
+    "contacts.perPageOption", "contacts.previousPage", "contacts.nextPage",
+    "contacts.goToPage", "contacts.jumpToPage", "contacts.pageUnit", "contacts.jump",
 )
 
 
@@ -99,6 +103,24 @@ def test_contacts_page_uses_compact_filters_and_a_real_tag_select() -> None:
     assert '<select class="select" id="tag-filter"' in source
     assert "renderTagOptions(data.available_tags)" in source
     assert 'id="tag-filter" type="search"' not in source
+
+
+def test_contacts_page_has_configurable_direct_pagination_controls() -> None:
+    """GH-53: pagination identifies the current position and supports direct
+    page jumps plus a server-backed page-size selection."""
+    source = _TEMPLATE.read_text(encoding="utf-8")
+    assert "function pageCount()" in source
+    assert "function goToPage(page)" in source
+    assert "Math.ceil(state.total/state.limit)" in source
+    assert "state.offset=(page-1)*state.limit;load();" in source
+    assert "visiblePages(page,pagesTotal)" in source
+    assert "[20,50,100].forEach" in source
+    assert "state.limit=Number(perPage.value);state.offset=0;load();" in source
+    assert "contacts.paginationSummary" in source
+    assert "from:state.offset+1" in source
+    assert "button.setAttribute('aria-current','page')" in source
+    assert "contacts.jumpToPage" in source
+    assert "jumpInput.type='number'" in source
 
 
 def test_contacts_page_has_detail_drawer_with_rnd170_identity_fields() -> None:
