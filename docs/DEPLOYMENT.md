@@ -110,11 +110,13 @@ Additional variables are required for:
 - Media serving/download, local-backed rows only: `STORAGE_LOCAL_PATH`
 - Media serving/download, Qiniu-backed rows only (optional — see below): `QINIU_ACCESS_KEY`, `QINIU_SECRET_KEY`, `QINIU_BUCKET`, `QINIU_DOMAIN` (full `https://` URL), `QINIU_REGION` (optional)
 - WeChat Pay annual purchase/refund (optional until production approval): set `WECHAT_PAY_ENABLED=true` plus `WECHAT_PAY_APP_ID`, `WECHAT_PAY_MCH_ID`, `WECHAT_PAY_MERCHANT_SERIAL_NO`, `WECHAT_PAY_MERCHANT_PRIVATE_KEY`, `WECHAT_PAY_API_V3_KEY`, `WECHAT_PAY_PUBLIC_KEY_ID`, `WECHAT_PAY_PUBLIC_KEY`, and the exact public HTTPS `WECHAT_PAY_NOTIFY_URL` and `WECHAT_PAY_REFUND_NOTIFY_URL`. The app fails startup when enabled configuration is incomplete or malformed.
+- Alipay PC cashier (optional until independent production approval): set `ALIPAY_ENABLED=true` plus `ALIPAY_APP_ID`, `ALIPAY_SELLER_ID`, `ALIPAY_MERCHANT_PRIVATE_KEY`, `ALIPAY_PUBLIC_KEY`, and the exact public HTTPS `ALIPAY_NOTIFY_URL` (`/api/payments/alipay/notify`) and `ALIPAY_RETURN_URL` (`/admin/billing`). The merchant key and Alipay public key/certificate are read only from the deployment secret environment; incomplete or malformed enabled configuration fails app startup. Alipay is preferred for new orders when enabled, but existing orders are always queried through their persisted provider.
 
-The reverse proxy must expose both `POST /api/payments/wechat/notify` and
-`POST /api/refunds/wechat/notify` at the exact HTTPS URLs configured above
-without browser/session authentication. Do not cache or rewrite either request
-body: API v3 signature verification uses the original raw bytes. The remaining
+The reverse proxy must expose `POST /api/payments/wechat/notify`,
+`POST /api/refunds/wechat/notify`, and `POST /api/payments/alipay/notify` at the
+exact HTTPS URLs configured above without browser/session authentication. Do
+not cache or rewrite a callback body: WeChat verification uses raw bytes and
+Alipay verification uses the submitted form fields. The remaining
 `/admin/billing` and `/api/billing/*` routes retain normal owner-session
 authentication. Refund creation and active reconciliation live only under
 `/api/platform/operations/*` and require platform-administrator authentication;

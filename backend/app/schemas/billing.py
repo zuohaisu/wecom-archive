@@ -72,4 +72,5 @@ class PaymentOrderOut(BaseModel):
     activated_at: Optional[datetime]
     subscription_ends_at: Optional[datetime]
     failure_code: Optional[str]
+    checkout_kind: Optional[str]
     qr_available: bool

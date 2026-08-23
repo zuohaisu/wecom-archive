@@ -10,7 +10,7 @@ from typing import Optional
 
 import qrcode
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from qrcode.constants import ERROR_CORRECT_M
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -41,6 +41,13 @@ from app.services.billing_lifecycle import (
     set_cancel_at_period_end,
 )
 from app.services.entitlements import ANNUAL_PLAN_CODE, UNLIMITED_SEATS
+from app.services.alipay import (
+    ALIPAY_PROVIDER,
+    AlipayConfigurationError,
+    AlipayProtocolError,
+    alipay_is_enabled,
+    get_alipay_provider,
+)
 from app.services.payment_orders import (
     CreateOrderCommand,
     InvalidPaymentOrderError,
@@ -53,6 +60,7 @@ from app.services.payment_orders import (
     create_payment_order,
     get_checkout_url,
     get_latest_order,
+    get_redirect_checkout_url,
     get_order,
     query_and_reconcile_order,
 )
@@ -62,6 +70,7 @@ from app.services.storage_capacity import measure_storage_capacity
 from app.services.subscription_overview import get_subscription_overview
 from app.services.tenant_activation import spawn_activation_worker
 from app.services.wechat_pay import (
+    WECHAT_PAY_PROVIDER,
     WechatPayConfigurationError,
     WechatPayProtocolError,
     get_wechat_pay_provider,
@@ -76,10 +85,38 @@ logger = logging.getLogger(__name__)
 
 
 def get_payment_provider() -> PaymentProvider:
+    """Prefer Alipay for new orders while retaining configured WeChat Pay."""
+    try:
+        if alipay_is_enabled():
+            return get_alipay_provider()
+        return get_wechat_pay_provider()
+    except (AlipayConfigurationError, WechatPayConfigurationError) as error:
+        raise HTTPException(status_code=503, detail="payment_unavailable") from error
+
+
+def get_wechat_payment_provider() -> PaymentProvider:
     try:
         return get_wechat_pay_provider()
     except WechatPayConfigurationError as error:
         raise HTTPException(status_code=503, detail="payment_unavailable") from error
+
+
+def get_alipay_payment_provider() -> PaymentProvider:
+    try:
+        return get_alipay_provider()
+    except AlipayConfigurationError as error:
+        raise HTTPException(status_code=503, detail="payment_unavailable") from error
+
+
+def _provider_for_order(
+    db: Session, tenant_id: str, order_id: str
+) -> PaymentProvider:
+    provider_code = get_order(db, tenant_id, order_id).provider
+    if provider_code == ALIPAY_PROVIDER:
+        return get_alipay_payment_provider()
+    if provider_code == WECHAT_PAY_PROVIDER:
+        return get_wechat_payment_provider()
+    raise PaymentOrderConflictError("unsupported payment provider")
 
 
 def _factory(db: Session):
@@ -106,7 +143,7 @@ def _raise_order_error(error: Exception) -> None:
         raise HTTPException(status_code=422, detail="invalid_payment_order") from error
     if isinstance(error, PaymentOrderConflictError):
         raise HTTPException(status_code=409, detail="payment_order_conflict") from error
-    if isinstance(error, WechatPayProtocolError):
+    if isinstance(error, (AlipayProtocolError, WechatPayProtocolError)):
         raise HTTPException(status_code=502, detail="payment_provider_failed") from error
     raise error
 
@@ -188,8 +225,8 @@ def billing_plan(
         )
     )
     try:
-        payment_enabled = wechat_pay_is_enabled()
-    except WechatPayConfigurationError as error:
+        payment_enabled = alipay_is_enabled() or wechat_pay_is_enabled()
+    except (AlipayConfigurationError, WechatPayConfigurationError) as error:
         raise HTTPException(status_code=503, detail="payment_unavailable") from error
     return BillingPlanOut(
         code=plan.code,
@@ -363,14 +400,36 @@ def payment_order_qr(
     )
 
 
+@router.get("/api/billing/orders/{order_id}/checkout", include_in_schema=False)
+def payment_order_checkout(
+    order_id: str,
+    context: BillingAccessContext = Depends(get_billing_manager),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        checkout_url = get_redirect_checkout_url(db, context.tenant_id, order_id)
+    except Exception as error:
+        _raise_order_error(error)
+        raise
+    return RedirectResponse(
+        checkout_url,
+        status_code=303,
+        headers={
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
+
+
 @router.post("/api/billing/orders/{order_id}/refresh", response_model=PaymentOrderOut)
 def refresh_payment_order(
     order_id: str,
     context: BillingAccessContext = Depends(get_billing_manager),
     db: Session = Depends(get_db),
-    provider: PaymentProvider = Depends(get_payment_provider),
 ) -> PaymentOrderOut:
     try:
+        provider = _provider_for_order(db, context.tenant_id, order_id)
         return _out(
             query_and_reconcile_order(
                 _factory(db),
@@ -393,9 +452,9 @@ def close_payment_order(
     order_id: str,
     context: BillingAccessContext = Depends(get_billing_manager),
     db: Session = Depends(get_db),
-    provider: PaymentProvider = Depends(get_payment_provider),
 ) -> PaymentOrderOut:
     try:
+        provider = _provider_for_order(db, context.tenant_id, order_id)
         return _out(
             close_order(
                 _factory(db),
@@ -415,7 +474,7 @@ def close_payment_order(
 async def wechat_payment_notification(
     request: Request,
     db: Session = Depends(get_db),
-    provider: PaymentProvider = Depends(get_payment_provider),
+    provider: PaymentProvider = Depends(get_wechat_payment_provider),
 ) -> Response:
     raw_body = await request.body()
     try:
@@ -446,3 +505,30 @@ async def wechat_payment_notification(
     except Exception:  # noqa: BLE001 -- activation is best-effort by contract
         logger.exception("activation trigger after payment notify failed")
     return Response(status_code=204)
+
+
+@router.post("/api/payments/alipay/notify", include_in_schema=False)
+async def alipay_payment_notification(
+    request: Request,
+    db: Session = Depends(get_db),
+    provider: PaymentProvider = Depends(get_alipay_payment_provider),
+) -> Response:
+    raw_body = await request.body()
+    try:
+        event = provider.verify_and_parse_notification(request.headers, raw_body)
+        summary = apply_trusted_payment(_factory(db), provider, event)
+    except PaymentActivationPendingError:
+        return PlainTextResponse("failure", status_code=500)
+    except (PaymentOrderNotFoundError, PaymentOrderConflictError, AlipayProtocolError):
+        return PlainTextResponse("failure", status_code=400)
+    try:
+        order = db.scalar(
+            select(PaymentOrder).where(PaymentOrder.id == summary.order_id)
+        )
+        if order is not None:
+            spawn_activation_worker(
+                db.get_bind(), order.tenant_id, actor="payment_notify"
+            )
+    except Exception:  # noqa: BLE001 -- activation is best-effort by contract
+        logger.exception("activation trigger after payment notify failed")
+    return PlainTextResponse("success")

@@ -15,7 +15,7 @@ __SIDENAV__
 <div class="main">
   <header class="topbar"><div class="breadcrumb"><span data-i18n="nav.group.overview">总览</span><span class="sep">/</span><span class="cur" data-i18n="nav.billing">开通/续费</span></div></header>
   <main class="page page-narrow billing-page">
-    <div class="page-hd"><div><h1 data-i18n="billing.title">续费与套餐</h1><p data-i18n="billing.description">查看当前服务期限，并在需要时创建新的微信支付订单。</p></div></div>
+    <div class="page-hd"><div><h1 data-i18n="billing.title">续费与套餐</h1><p data-i18n="billing.description">查看当前服务期限，并在需要时创建新的支付订单。</p></div></div>
     <div id="billing-error" class="alert alert-danger billing-error" role="alert" hidden></div>
 
     <section class="card subscription-hero" aria-labelledby="subscription-title">
@@ -58,6 +58,7 @@ __SIDENAV__
           <a id="complete-setup" class="btn btn-primary btn-lg" href="/admin/provisioning/settings" hidden data-i18n="billing.cta.completeSetup">完成配置，开始试用</a>
           <div id="checkout-placeholder" class="checkout-placeholder" hidden></div>
           <img id="checkout-qr" class="checkout-qr" alt="微信支付二维码" data-i18n-alt="billing.qrAlt" hidden>
+          <a id="checkout-redirect" class="btn btn-primary btn-lg" href="#" hidden data-i18n="billing.checkout.alipay">前往支付宝收银台扫码付款</a>
           <div id="billing-status" class="billing-status badge badge-neutral" role="status" aria-live="polite" hidden></div>
           <dl id="order-meta" class="order-meta" hidden>
             <dt data-i18n="billing.orderId">订单号</dt><dd id="order-id" class="mono"></dd>
@@ -69,7 +70,7 @@ __SIDENAV__
             <button id="refresh-order" class="btn" type="button" hidden data-i18n="billing.refresh">查询支付结果</button>
             <button id="close-order" class="btn btn-danger" type="button" hidden data-i18n="billing.close">关闭订单</button>
           </div>
-          <p id="payment-unavailable" class="payment-unavailable" hidden data-i18n="billing.unavailable">微信支付尚未配置，当前不能创建真实订单。</p>
+          <p id="payment-unavailable" class="payment-unavailable" hidden data-i18n="billing.unavailable">支付渠道尚未配置，当前不能创建真实订单。</p>
           <div id="suspended-notice" class="alert alert-danger suspended-notice" role="alert" hidden>
             <p data-i18n="billing.suspended.notice">账号已被平台风控暂停，续费不会自动解封；请联系平台处理。</p>
             <a id="suspended-contact" class="btn btn-primary" href="/admin/support" data-i18n="billing.suspended.contact">联系平台</a>

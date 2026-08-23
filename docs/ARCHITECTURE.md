@@ -186,8 +186,10 @@ only bridge from a trusted payment fact to subscription activation; the refund
 domain is the only authority that reverses its exact term grant. Provider
 acceptance never implies money movement success, and callback delivery is not
 assumed reliable because the platform query uses the same reconciliation path.
-This keeps a future Alipay adapter possible without changing entitlement
-authority; no Alipay adapter is implemented.
+This lets the RND-416 Alipay PC-page-pay adapter reuse the same entitlement
+authority without changing subscription policy. Its browser redirect opens the
+Alipay cashier (where the customer scans the QR code); only its RSA2-verified
+callback or signed query reaches the provider-neutral order service.
 
 ### 3.4.1 Platform commercial operations projection
 

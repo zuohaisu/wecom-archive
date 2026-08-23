@@ -198,6 +198,22 @@ def get_wechat_pay_settings() -> WechatPaySettings:
     return WechatPaySettings()
 
 
+class AlipaySettings(BaseSettings):
+    """Alipay computer-website payment configuration; values are never cached."""
+
+    alipay_enabled: str = "false"
+    alipay_app_id: str = ""
+    alipay_seller_id: str = ""
+    alipay_merchant_private_key: str = ""
+    alipay_public_key: str = ""
+    alipay_notify_url: str = ""
+    alipay_return_url: str = ""
+
+
+def get_alipay_settings() -> AlipaySettings:
+    return AlipaySettings()
+
+
 class SelfServiceTrialSettings(BaseSettings):
     """Controls visibility of the public "start 15-day trial" entry point
     (RND-396) on the login page. Defaults closed: the underlying WeCom

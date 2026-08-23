@@ -83,6 +83,7 @@ class PaymentOrderSummary:
     activated_at: datetime | None
     subscription_ends_at: datetime | None
     failure_code: str | None
+    checkout_kind: str | None
     qr_available: bool
 
 
@@ -115,8 +116,13 @@ def _safe_plan_code(raw: str) -> str:
     return normalized
 
 
-def _provider_ref() -> str:
-    return "W" + uuid.uuid4().hex[:31]
+def _provider_ref(provider_code: str) -> str:
+    prefix = "A" if provider_code == "alipay" else "W" if provider_code == "wechat_pay" else "P"
+    return prefix + uuid.uuid4().hex[:31]
+
+
+def _checkout_kind(provider_code: str) -> str | None:
+    return {"wechat_pay": "qr_code", "alipay": "redirect"}.get(provider_code)
 
 
 def _summary(db: Session, order: PaymentOrder) -> PaymentOrderSummary:
@@ -125,6 +131,7 @@ def _summary(db: Session, order: PaymentOrder) -> PaymentOrderSummary:
         activation = db.get(SubscriptionActivation, order.activation_id)
         if activation is not None and activation.applied_ends_at is not None:
             subscription_ends_at = _utc(activation.applied_ends_at)
+    checkout_kind = _checkout_kind(order.provider)
     return PaymentOrderSummary(
         order_id=order.id,
         plan_code=order.plan_code,
@@ -140,8 +147,10 @@ def _summary(db: Session, order: PaymentOrder) -> PaymentOrderSummary:
         activated_at=_utc(order.activated_at) if order.activated_at else None,
         subscription_ends_at=subscription_ends_at,
         failure_code=order.failure_code,
+        checkout_kind=checkout_kind,
         qr_available=(
-            order.status == "pending"
+            checkout_kind == "qr_code"
+            and order.status == "pending"
             and order.checkout_url is not None
             and _utc(order.expires_at) > datetime.now(timezone.utc)
         ),
@@ -182,11 +191,31 @@ def get_checkout_url(db: Session, tenant_id: str, order_id: str) -> str:
     if order is None:
         raise PaymentOrderNotFoundError("payment order does not exist")
     if (
-        order.status != "pending"
+        _checkout_kind(order.provider) != "qr_code"
+        or order.status != "pending"
         or order.checkout_url is None
         or _utc(order.expires_at) <= datetime.now(timezone.utc)
     ):
         raise PaymentOrderConflictError("payment QR code is unavailable")
+    return order.checkout_url
+
+
+def get_redirect_checkout_url(db: Session, tenant_id: str, order_id: str) -> str:
+    order = db.scalar(
+        select(PaymentOrder).where(
+            PaymentOrder.id == order_id,
+            PaymentOrder.tenant_id == tenant_id,
+        )
+    )
+    if order is None:
+        raise PaymentOrderNotFoundError("payment order does not exist")
+    if (
+        _checkout_kind(order.provider) != "redirect"
+        or order.status != "pending"
+        or order.checkout_url is None
+        or _utc(order.expires_at) <= datetime.now(timezone.utc)
+    ):
+        raise PaymentOrderConflictError("payment checkout is unavailable")
     return order.checkout_url
 
 
@@ -262,7 +291,7 @@ def create_payment_order(
             amount_cents=plan.amount_cents,
             currency=plan.currency,
             provider=provider.code,
-            provider_order_ref=_provider_ref(),
+            provider_order_ref=_provider_ref(provider.code),
             status="creating",
             idempotency_key_hash=idempotency_hash,
             created_at=now,
@@ -300,7 +329,7 @@ def create_payment_order(
         artifact = provider.create_payment(request)
         if (
             artifact.provider_order_ref != provider_order_ref
-            or artifact.kind != "qr_code"
+            or artifact.kind != _checkout_kind(provider.code)
             or not artifact.value
         ):
             raise PaymentOrderError("payment provider returned an invalid checkout")
@@ -318,7 +347,9 @@ def create_payment_order(
             raise PaymentOrderError("payment order disappeared")
         if order.status == "creating":
             order.status = "pending"
-            order.provider_state = "NOTPAY"
+            order.provider_state = (
+                "WAIT_BUYER_PAY" if provider.code == "alipay" else "NOTPAY"
+            )
             order.checkout_url = artifact.value
             db.commit()
         return _summary(db, order)

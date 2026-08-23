@@ -315,6 +315,7 @@
   function renderOrder() {
     var placeholder = node('checkout-placeholder');
     var qr = node('checkout-qr');
+    var redirect = node('checkout-redirect');
     var meta = node('order-meta');
     var status = node('billing-status');
     var refresh = node('refresh-order');
@@ -324,7 +325,15 @@
       canOrder
       && order
       && order.status === 'pending'
+      && order.checkout_kind === 'qr_code'
       && order.qr_available
+      && new Date(order.expires_at) > new Date()
+    );
+    var validRedirect = Boolean(
+      canOrder
+      && order
+      && order.status === 'pending'
+      && order.checkout_kind === 'redirect'
       && new Date(order.expires_at) > new Date()
     );
 
@@ -334,7 +343,11 @@
     } else {
       qr.removeAttribute('src');
     }
-    placeholder.hidden = !hasLiveOrder || validQr;
+    redirect.hidden = !validRedirect;
+    redirect.href = validRedirect
+      ? '/api/billing/orders/' + encodeURIComponent(order.order_id) + '/checkout'
+      : '#';
+    placeholder.hidden = !hasLiveOrder || validQr || validRedirect;
     if (!placeholder.hidden) {
       placeholder.textContent = t(
         order.status === 'paid_activation_pending'

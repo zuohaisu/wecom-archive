@@ -24,6 +24,7 @@ from app.services.refunds import (
     get_refund_summary,
 )
 from app.services.wechat_pay import (
+    WECHAT_PAY_PROVIDER,
     WechatPayConfigurationError,
     WechatPayProtocolError,
     get_wechat_pay_provider,
@@ -93,7 +94,9 @@ def submit_platform_refund(
     provider: PaymentProvider = Depends(get_refund_provider),
 ) -> RefundOut:
     try:
-        get_order(db, tenant_id, payload.payment_order_id)
+        payment = get_order(db, tenant_id, payload.payment_order_id)
+        if payment.provider != WECHAT_PAY_PROVIDER:
+            raise RefundConflictError("refund provider is not supported")
         platform_operations.authorize_platform_operation(
             db,
             tenant_id=tenant_id,
@@ -138,7 +141,9 @@ def query_platform_refund(
     provider: PaymentProvider = Depends(get_refund_provider),
 ) -> RefundOut:
     try:
-        get_refund_summary(db, tenant_id, refund_id)
+        refund = get_refund_summary(db, tenant_id, refund_id)
+        if refund.provider != WECHAT_PAY_PROVIDER:
+            raise RefundConflictError("refund provider is not supported")
         replay = platform_operations.authorize_platform_operation(
             db,
             tenant_id=tenant_id,
