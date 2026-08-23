@@ -46,10 +46,11 @@ def content_access_client() -> Generator[tuple[TestClient, Session], None, None]
         )
         conn.execute(
             text(
-                "CREATE TABLE platform_admins (id TEXT PRIMARY KEY, email TEXT NOT NULL, "
-                "password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'superadmin', "
+                "CREATE TABLE platform_admins (id TEXT PRIMARY KEY, name TEXT, email TEXT NOT NULL, "
+                "password_hash TEXT, role TEXT NOT NULL DEFAULT 'superadmin', "
                 "status TEXT NOT NULL DEFAULT 'active', "
-                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_active_at DATETIME)"
+                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_active_at DATETIME, "
+                "last_login_at DATETIME)"
             )
         )
         conn.execute(

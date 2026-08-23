@@ -16,15 +16,17 @@ from app.db.models import PlatformAdmin
 
 _COLUMNS = {
     "id",
+    "name",
     "email",
     "password_hash",
     "role",
     "status",
     "created_at",
     "last_active_at",
+    "last_login_at",
 }
 _ROLE_VALUES = ("superadmin",)
-_STATUS_VALUES = ("active", "disabled")
+_STATUS_VALUES = ("active", "disabled", "pending")
 _DB_AVAILABLE = bool(os.environ.get("DATABASE_URL", "").strip())
 
 

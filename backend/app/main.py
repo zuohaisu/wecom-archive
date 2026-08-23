@@ -31,6 +31,7 @@ from app.routers.messages import router as messages_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.platform import router as platform_router
 from app.routers.platform_access import router as platform_access_router
+from app.routers.platform_accounts import router as platform_accounts_router
 from app.routers.platform_auth import router as platform_auth_router
 from app.routers.platform_operations import router as platform_operations_router
 from app.routers.product_analytics import router as product_analytics_router
@@ -73,6 +74,8 @@ class _RedactOAuthCallbackQueryFilter(logging.Filter):
         "/api/auth/wecom/third-party/callback?",
         "/api/wecom/archive/events?",
         "/api/wecom/third-party/instructions?",
+        # RND-415: platform invitation URLs carry a one-time bearer token.
+        "/platform/accept-invite?",
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -170,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(onboarding_router)
     app.include_router(platform_router, prefix="/api/platform")
     app.include_router(platform_access_router, prefix="/api/platform")
+    app.include_router(platform_accounts_router)
     app.include_router(platform_auth_router)
     app.include_router(platform_operations_router)
     app.include_router(product_analytics_router)

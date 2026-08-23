@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>账户与安全 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-accounts.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>账户与安全</h1><p>管理自己的平台操作员密码，并查看具备 v1 <span class="mono">super_admin</span> 权限的全部操作员。</p></div>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <div class="tabs platform-tabs" role="tablist" aria-label="账户与安全页面">
+    <button class="tab active" type="button" id="password-tab" role="tab" aria-selected="true">密码</button>
+    <button class="tab" type="button" id="operators-tab" role="tab" aria-selected="false">操作员</button>
+  </div>
+
+  <section id="password-panel" role="tabpanel" aria-labelledby="password-tab" class="settings-panel">
+    <div class="card account-card">
+      <div class="card-hd"><h2>修改密码</h2></div>
+      <form id="password-form">
+        <div class="card-bd form-stack">
+          <div id="password-success" class="alert alert-success" role="status" hidden>密码已更新。</div>
+          <div class="field"><label class="field-label" for="current-password">当前密码<span class="req">*</span></label><input class="input" id="current-password" type="password" autocomplete="current-password" required></div>
+          <div class="field"><label class="field-label" for="new-password">新密码<span class="req">*</span></label><input class="input" id="new-password" type="password" autocomplete="new-password" required><p class="field-help">至少 12 位，包含大写字母、小写字母和数字；不能与最近 5 次使用过的密码相同。</p></div>
+          <div class="field"><label class="field-label" for="new-password-confirmation">确认新密码<span class="req">*</span></label><input class="input" id="new-password-confirmation" type="password" autocomplete="new-password" required></div>
+          <label class="checkbox"><input id="revoke-other-sessions" type="checkbox" checked> 更新后登出我在其他设备上的所有会话</label>
+        </div>
+        <div class="card-ft account-actions"><button class="btn btn-primary" type="submit">更新密码</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="operators-panel" role="tabpanel" aria-labelledby="operators-tab" class="settings-panel" hidden>
+    <div class="card account-card">
+      <div class="card-hd"><div><h2>平台操作员</h2><p class="muted">v1 仅有一个角色：<span class="mono">super_admin</span>。新增账号通过邮件自行设置密码。</p></div><a class="btn btn-primary" href="/platform/settings/operators/new">新增操作员</a></div>
+      <div class="card-bd table-wrap">
+        <table><thead><tr><th>姓名</th><th>邮箱</th><th>角色</th><th>状态</th><th>最近登录</th></tr></thead><tbody id="operator-rows"></tbody></table>
+      </div>
+    </div>
+  </section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-settings.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

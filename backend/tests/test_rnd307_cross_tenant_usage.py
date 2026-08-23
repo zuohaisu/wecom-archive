@@ -25,9 +25,10 @@ CREATE TABLE tenants (
     created_at DATETIME, updated_at DATETIME, onboarding_completed_at DATETIME
 );
 CREATE TABLE platform_admins (
-    id TEXT PRIMARY KEY, email TEXT NOT NULL, password_hash TEXT NOT NULL,
+    id TEXT PRIMARY KEY, name TEXT, email TEXT NOT NULL, password_hash TEXT,
     role TEXT NOT NULL DEFAULT 'superadmin', status TEXT NOT NULL DEFAULT 'active',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_active_at DATETIME
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, last_active_at DATETIME,
+    last_login_at DATETIME
 );
 CREATE TABLE archive_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, msgid TEXT NOT NULL, seq INTEGER NOT NULL,

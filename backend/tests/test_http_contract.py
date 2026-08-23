@@ -398,7 +398,10 @@ def test_router_count() -> None:
     # towards the RND-413 baseline and is now just a second route on the
     # same handler, not a new one) plus 8 new HTML shells — tenants
     # list/detail/new, usage, ledger, infra, analytics, audit.
-    assert route_count == 191
+    # RND-415 adds three platform account HTML shells and four guarded/public
+    # account APIs: list, invite, invitation acceptance, and self password
+    # rotation.
+    assert route_count == 198
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -519,6 +522,10 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/onboarding/complete",
             "/api/onboarding/status",
             "/api/platform/content-access-requests",
+            "/api/platform/account/password",
+            "/api/platform/operators",
+            "/api/platform/operators/invitations",
+            "/api/platform/operators/accept-invite",
             "/api/platform/branding/domains",
             "/api/platform/branding/domain-metrics",
             "/api/platform/operations/dashboard",
@@ -575,9 +582,12 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/health/ready",
             "/openapi.json",
             "/platform",
+            "/platform/accept-invite",
             "/platform/login",
             "/platform/logout",
             "/platform/operations",
+            "/platform/settings",
+            "/platform/settings/operators/new",
             "/platform/tenants",
             "/platform/tenants/new",
             "/platform/tenants/{tenant_id}",
@@ -637,6 +647,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/settings/init", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/users", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/accept-invite", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/login", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/login", frozenset({"POST"}), "None", "HTMLResponse"),
         ("/platform/logout", frozenset({"POST"}), "None", "None"),
@@ -649,6 +660,13 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/platform/infra", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/analytics", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/audit", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/settings", frozenset({"GET"}), "None", "HTMLResponse"),
+        (
+            "/platform/settings/operators/new",
+            frozenset({"GET"}),
+            "None",
+            "HTMLResponse",
+        ),
         ("/api/admin/audit-logs", frozenset({"GET"}), "AuditLogListOut", "None"),
         (
             "/api/admin/avatars/{identity_type}/{avatar_id}",
@@ -908,6 +926,30 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/platform/content-access-requests",
             frozenset({"POST"}),
             "ContentAccessRequestOut",
+            "None",
+        ),
+        (
+            "/api/platform/account/password",
+            frozenset({"POST"}),
+            "PlatformPasswordChangeOut",
+            "None",
+        ),
+        (
+            "/api/platform/operators",
+            frozenset({"GET"}),
+            "PlatformOperatorListOut",
+            "None",
+        ),
+        (
+            "/api/platform/operators/invitations",
+            frozenset({"POST"}),
+            "PlatformOperatorInviteOut",
+            "None",
+        ),
+        (
+            "/api/platform/operators/accept-invite",
+            frozenset({"POST"}),
+            "None",
             "None",
         ),
         (

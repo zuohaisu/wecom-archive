@@ -88,6 +88,9 @@ class AuditAction:
     REFUND_MANUAL_RECOVERY_REQUIRED = "refund.manual_recovery_required"
     PLATFORM_SUBSCRIPTION_UPDATED = "platform.subscription_updated"
     PLATFORM_MANUAL_FINANCIAL_TRANSACTION_RECORDED = "platform.manual_financial_transaction_recorded"
+    PLATFORM_OPERATOR_INVITED = "platform.operator.invited"
+    PLATFORM_OPERATOR_INVITE_ACCEPTED = "platform.operator.invite_accepted"
+    PLATFORM_OPERATOR_PASSWORD_CHANGED = "platform.operator.password_changed"
     DECRYPT_COMPLETED = "decrypt.completed"
     RETENTION_MESSAGES_LOCKED = "retention.messages_locked"
 
@@ -107,6 +110,8 @@ class AuditObjectType:
     SUBSCRIPTION = "subscription"
     FINANCIAL_TRANSACTION = "manual_financial_transaction"
     REFUND = "refund_order"
+    PLATFORM_OPERATOR = "platform_operator"
+    PLATFORM_OPERATOR_INVITATION = "platform_operator_invitation"
 
 
 # The catalogue is intentionally application-level: category is computed for
@@ -195,6 +200,18 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
         AuditCategory.ACCOUNT,
         AuditObjectType.FINANCIAL_TRANSACTION,
     ),
+    AuditAction.PLATFORM_OPERATOR_INVITED: (
+        AuditCategory.ACCOUNT,
+        AuditObjectType.PLATFORM_OPERATOR_INVITATION,
+    ),
+    AuditAction.PLATFORM_OPERATOR_INVITE_ACCEPTED: (
+        AuditCategory.ACCOUNT,
+        AuditObjectType.PLATFORM_OPERATOR,
+    ),
+    AuditAction.PLATFORM_OPERATOR_PASSWORD_CHANGED: (
+        AuditCategory.SECURITY,
+        AuditObjectType.PLATFORM_OPERATOR,
+    ),
     AuditAction.DECRYPT_COMPLETED: (AuditCategory.SYSTEM, AuditObjectType.KEY_VERSION),
     AuditAction.RETENTION_MESSAGES_LOCKED: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
 }
@@ -237,13 +254,14 @@ def write_audit(
     admin_user_id: Optional[str] = None,
     object_id: Optional[str] = None,
     detail: Optional[Mapping[str, Any]] = None,
+    audit_id: Optional[str] = None,
 ) -> bool:
     """Append an immutable audit row. FAIL-SAFE: never raises or commits."""
     try:
         with db.begin_nested():
             db.add(
                 AuditLog(
-                    id=str(uuid.uuid4()), tenant_id=tenant_id, admin_user_id=admin_user_id,
+                    id=audit_id or str(uuid.uuid4()), tenant_id=tenant_id, admin_user_id=admin_user_id,
                     action=action, object_type=object_type, object_id=object_id,
                     detail=dict(detail) if detail else None, created_at=datetime.now(timezone.utc),
                 )

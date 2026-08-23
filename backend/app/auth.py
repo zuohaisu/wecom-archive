@@ -193,7 +193,7 @@ def verify_platform_admin(db, email: str, password: str):
         .filter(PlatformAdmin.email == email.strip().lower())
         .first()
     )
-    if admin is None or admin.status != "active":
+    if admin is None or admin.status != "active" or admin.password_hash is None:
         return None
     if not verify_password(password, admin.password_hash):
         return None
