@@ -47,7 +47,7 @@ scope exclusively from `admin_sessions.tenant_id`.
 
 ---
 
-## 3. Annual-plan purchase and WeChat Pay
+## 3. Annual-plan purchase and payment providers
 
 The HTML and `/api/billing/*` routes require a valid owner session. They accept
 both an `admin`-scope owner for an active tenant and the restricted
@@ -61,9 +61,10 @@ Tenant identity always comes from that session.
 | `GET` | `/api/billing/subscription` | Current tenant plan, effective dates, entitlements and explicit customer-facing state |
 | `GET` | `/api/billing/capacity` | Live tenant-scoped quota, downloaded-byte usage, remaining bytes and capacity state |
 | `GET` | `/api/billing/orders/latest` | Latest tenant order or `null` |
-| `POST` | `/api/billing/orders` | Create/idempotently replay a Native QR order; requires `Idempotency-Key` |
-| `GET` | `/api/billing/orders/{order_id}` | Tenant-scoped order and activation state |
-| `GET` | `/api/billing/orders/{order_id}/qr` | Server-rendered PNG QR; never exposes the raw provider URL |
+| `POST` | `/api/billing/orders` | Create/idempotently replay a server-authoritative payment order; requires `Idempotency-Key` |
+| `GET` | `/api/billing/orders/{order_id}` | Tenant-scoped order and activation state; does not expose checkout material |
+| `GET` | `/api/billing/orders/{order_id}/qr` | Server-rendered PNG QR for a WeChat Native order; never exposes the raw provider URL |
+| `GET` | `/api/billing/orders/{order_id}/checkout` | Authenticated 303 redirect to an Alipay PC cashier; no signed URL appears in JSON or HTML |
 | `POST` | `/api/billing/orders/{order_id}/refresh` | Signed provider query and reconciliation |
 | `POST` | `/api/billing/orders/{order_id}/close` | Close an unpaid order |
 
@@ -79,13 +80,21 @@ authenticates WeChat Pay itself: the handler verifies the raw-body RSA
 signature, requires the configured `PUB_KEY_ID_*`, enforces timestamp
 freshness, decrypts the AES-GCM resource, verifies AppID/merchant/order/amount/
 currency, and then applies idempotent activation. Invalid notifications return
-a generic failure without provider details. The route must be public over
-HTTPS, but no other billing route should bypass normal session authentication.
+a generic failure without provider details.
 
-WeChat Pay Native is a one-time annual purchase, not an automatic debit
-agreement. The payer may choose only the funding methods offered by WeChat for
-that transaction; the product does not promise a specific bank-card option.
-Tencent's Conversation Archive service fee remains separate.
+`POST /api/payments/alipay/notify` is likewise public HTTPS-only. It verifies
+Alipay's RSA2 signature over the submitted form fields (excluding `sign` and
+`sign_type`), then checks AppID, seller ID, order number, transaction number,
+trade status and CNY total before it can apply idempotent activation. It returns
+Alipay's literal `success` acknowledgement only after that path; the browser
+`return_url` is presentation-only and never activates a subscription. The route
+must not have its form body rewritten by a proxy, and no other billing route
+bypasses normal session authentication.
+
+WeChat Native and Alipay PC cashier are one-time annual purchases, not an
+automatic debit agreement. The payer may use only the methods shown by the
+provider's cashier. Tencent's Conversation Archive service fee remains
+separate.
 
 ### Platform-controlled full refunds
 

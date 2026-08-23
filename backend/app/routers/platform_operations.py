@@ -35,8 +35,16 @@ from app.services.payment_orders import (
     get_order,
     query_and_reconcile_order,
 )
+from app.services.alipay import (
+    ALIPAY_PROVIDER,
+    AlipayConfigurationError,
+    AlipayProtocolError,
+    alipay_is_enabled,
+    get_alipay_provider,
+)
 from app.services.payment_provider import PaymentProvider
 from app.services.wechat_pay import (
+    WECHAT_PAY_PROVIDER,
     WechatPayConfigurationError,
     WechatPayProtocolError,
     get_wechat_pay_provider,
@@ -93,9 +101,27 @@ for _path, (_template, _active_id, _breadcrumb) in _PLATFORM_PAGES.items():
 
 def get_operations_payment_provider() -> PaymentProvider:
     try:
+        if alipay_is_enabled():
+            return get_alipay_provider()
         return get_wechat_pay_provider()
-    except WechatPayConfigurationError as error:
+    except (AlipayConfigurationError, WechatPayConfigurationError) as error:
         raise HTTPException(status_code=503, detail="payment_provider_unavailable") from error
+
+
+def _provider_for_operations_order(
+    db: Session,
+    tenant_id: str,
+    order_id: str,
+    default_provider: PaymentProvider,
+) -> PaymentProvider:
+    provider_code = get_order(db, tenant_id, order_id).provider
+    if provider_code == default_provider.code:
+        return default_provider
+    if provider_code == ALIPAY_PROVIDER:
+        return get_alipay_provider()
+    if provider_code == WECHAT_PAY_PROVIDER:
+        return get_wechat_pay_provider()
+    raise PaymentOrderConflictError("unsupported payment provider")
 
 
 def _factory(db: Session):
@@ -311,7 +337,7 @@ def query_operations_payment(
             if replay
             else query_and_reconcile_order(
                 _factory(db),
-                provider,
+                _provider_for_operations_order(db, tenant_id, order_id, provider),
                 tenant_id,
                 order_id,
                 now=datetime.now(timezone.utc),
@@ -330,7 +356,7 @@ def query_operations_payment(
         raise HTTPException(status_code=409, detail="payment_order_conflict") from error
     except PaymentActivationPendingError as error:
         raise HTTPException(status_code=503, detail="payment_activation_pending") from error
-    except WechatPayProtocolError as error:
+    except (AlipayProtocolError, WechatPayProtocolError) as error:
         raise HTTPException(status_code=502, detail="payment_provider_failed") from error
 
 

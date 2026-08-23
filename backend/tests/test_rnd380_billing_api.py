@@ -227,6 +227,8 @@ def _setup(monkeypatch):
     provider = FakeProvider()
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[billing.get_payment_provider] = lambda: provider
+    app.dependency_overrides[billing.get_wechat_payment_provider] = lambda: provider
+    monkeypatch.setattr(billing, "get_wechat_payment_provider", lambda: provider)
     monkeypatch.setattr(billing, "wechat_pay_is_enabled", lambda: True)
     return TestClient(app), factory, provider
 

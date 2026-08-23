@@ -391,12 +391,14 @@ def test_router_count() -> None:
     # and read-only latest-refund status.
     # RND-413 adds three platform-auth routes: login page GET/POST and
     # logout POST.
+    # RND-416 adds one authenticated Alipay cashier redirect and one signed
+    # Alipay payment notification route.
     # RND-414 adds the 9-item platform-console side nav: /platform (new
     # canonical dashboard URL — /platform/operations already counted
     # towards the RND-413 baseline and is now just a second route on the
     # same handler, not a new one) plus 8 new HTML shells — tenants
     # list/detail/new, usage, ledger, infra, analytics, audit.
-    assert route_count == 189
+    assert route_count == 191
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -490,6 +492,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/billing/orders/latest",
             "/api/billing/orders/{order_id}",
             "/api/billing/orders/{order_id}/close",
+            "/api/billing/orders/{order_id}/checkout",
             "/api/billing/orders/{order_id}/qr",
             "/api/billing/orders/{order_id}/refresh",
             "/api/billing/plan",
@@ -553,6 +556,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/ai/public/support/sessions/{chat_session_id}/messages",
             "/api/ai/public/support/sessions/{chat_session_id}/handoff/preview",
             "/api/ai/public/support/sessions/{chat_session_id}/handoff",
+            "/api/payments/alipay/notify",
             "/api/payments/wechat/notify",
             "/api/product-analytics/events",
             "/api/provisioning/activate",
@@ -826,6 +830,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ),
         ("/api/billing/orders", frozenset({"POST"}), "PaymentOrderOut", "None"),
         ("/api/billing/orders/{order_id}/qr", frozenset({"GET"}), "None", "None"),
+        ("/api/billing/orders/{order_id}/checkout", frozenset({"GET"}), "None", "None"),
         (
             "/api/billing/orders/{order_id}/refresh",
             frozenset({"POST"}),
@@ -1032,6 +1037,7 @@ def test_route_snapshot_with_real_model_names() -> None:
             "None",
             "None",
         ),
+        ("/api/payments/alipay/notify", frozenset({"POST"}), "None", "None"),
         ("/api/payments/wechat/notify", frozenset({"POST"}), "None", "None"),
         ("/api/provisioning/activate", frozenset({"POST"}), "dict", "None"),
         ("/api/provisioning/config", frozenset({"GET"}), "dict", "None"),

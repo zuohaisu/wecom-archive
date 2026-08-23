@@ -136,6 +136,10 @@ Linear 或 git diff 中。
 
 ### 2.6 支付渠道抽象与支付宝边界
 
+> **更新（RND-416，2026-08-23）**：本节原先「仅注册 `wechat_pay`」的阶段性限制已由
+> [ADR-0006](0006-alipay-pc-page-pay.md) 取代。支付宝电脑网站支付现通过同一 provider-neutral
+> 边界接入；本节其余的领域隔离原则仍然有效。
+
 领域层只依赖 provider-neutral contract：
 
 - `create_payment(order) -> checkout_artifact`
@@ -146,8 +150,9 @@ Linear 或 git diff 中。
 Order 保存稳定 provider code、provider transaction reference 和原始状态的最小必要摘要；
 Subscription 激活服务不 import 微信 client。`checkout_artifact` 当前类型为 QR code，未来可增加跳转链接。
 
-本阶段只注册 `wechat_pay` provider。可以保留 `alipay` 的枚举/接口扩展位，但不得加入支付宝 SDK、
-环境变量、路由、模拟“已支持”文案或未使用实现。
+RND-416 之前的阶段只注册 `wechat_pay` provider。支付宝当前实现范围、RSA2 验签、PC 收银台
+跳转与环境变量契约以 [ADR-0006](0006-alipay-pc-page-pay.md) 为准；未定义的支付宝产品模式和退款
+仍不应被宣称为已支持。
 
 ### 2.7 “全自助”与首个真实客户 E2E
 
@@ -182,7 +187,7 @@ Subscription 激活服务不 import 微信 client。`checkout_artifact` 当前�
 - **付款码支付**：需要商户扫描用户付款码，方向与“客户扫网页二维码”相反。
 - **先信任前端支付结果**：无法证明资金事实，拒绝。
 - **微信回调直接改 Subscription**：会把渠道逻辑和套餐规则耦合，未来支付宝会复制业务规则，拒绝。
-- **同时实现支付宝**：扩大当前上线面且无真实需求证据，拒绝；只保留 provider contract。
+- **在 RND-380 阶段同时实现支付宝**：当时会扩大上线面且无真实需求证据，故拒绝；RND-416 已在独立范围、测试与配置门禁下重新决策，见 ADR-0006。
 - **自动续费/代扣**：Native 单次扫码没有该授权语义，拒绝冒充。
 
 ## 5. References

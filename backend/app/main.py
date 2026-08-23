@@ -48,6 +48,7 @@ from app.routers.web import router as web_router
 from app.routers.wecom_events import router as wecom_events_router
 from app.routers.wecom_org_authorization import router as wecom_org_authorization_router
 from app.routers.wecom_provider_instructions import router as wecom_provider_instructions_router
+from app.services.alipay import validate_alipay_configuration_if_enabled
 from app.services.branding import BrandingHostMiddleware
 from app.services.wechat_pay import validate_wechat_pay_configuration_if_enabled
 
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
     effect so tests/tooling can construct an independent app instance; the
     module-level `app` below is what `uvicorn app.main:app` actually serves."""
     validate_wechat_pay_configuration_if_enabled()
+    validate_alipay_configuration_if_enabled()
     app = FastAPI(title="Crowntime WeCom Archive")
     # RND-187: guarantees Cache-Control: no-store on every response (success or
     # error, any status code) for the media access descriptor endpoint — see
