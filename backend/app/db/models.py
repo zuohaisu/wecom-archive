@@ -1482,15 +1482,18 @@ class PlatformAdmin(Base):
     )
 
     id = Column(String(36), primary_key=True)
+    name = Column(Text, nullable=True)
     email = Column(Text, nullable=False)
-    password_hash = Column(Text, nullable=False)
+    # Invited operators set their first password only through the one-time
+    # acceptance link, so this remains null while their account is pending.
+    password_hash = Column(Text, nullable=True)
     role = Column(
         Enum("superadmin", name="platform_admin_role"),
         nullable=False,
         server_default=text("'superadmin'"),
     )
     status = Column(
-        Enum("active", "disabled", name="platform_admin_status"),
+        Enum("active", "disabled", "pending", name="platform_admin_status"),
         nullable=False,
         server_default=text("'active'"),
     )
@@ -1498,6 +1501,7 @@ class PlatformAdmin(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     last_active_at = Column(DateTime(timezone=True), nullable=True)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
 
 
 # —— RND-413 (B1-2) 平台超管登录会话 ——
@@ -1524,6 +1528,60 @@ class PlatformAdminSession(Base):
     )
     expires_at = Column(DateTime(timezone=True), nullable=False)
     is_revoked = Column(Boolean, nullable=False, default=False)
+
+
+# —— RND-415 平台操作员密码历史与邀请 ——
+class PlatformAdminPasswordHistory(Base):
+    """Prior platform-admin password hashes used for the five-password rule.
+
+    Only previous PBKDF2 hashes are retained; the active hash remains on
+    :class:`PlatformAdmin`, so no plaintext password is ever persisted.
+    """
+
+    __tablename__ = "platform_admin_password_history"
+    __table_args__ = (
+        Index(
+            "ix_platform_admin_password_history_admin_created",
+            "platform_admin_id",
+            "created_at",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    platform_admin_id = Column(
+        String(36), ForeignKey("platform_admins.id"), nullable=False, index=True
+    )
+    password_hash = Column(Text, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PlatformAdminInvitation(Base):
+    """One-time, time-limited activation token for a pending operator."""
+
+    __tablename__ = "platform_admin_invitations"
+    __table_args__ = (
+        Index("ix_platform_admin_invitations_token_hash", "token_hash", unique=True),
+        Index("ix_platform_admin_invitations_expires_at", "expires_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    platform_admin_id = Column(
+        String(36), ForeignKey("platform_admins.id"), nullable=False, index=True
+    )
+    invited_by_platform_admin_id = Column(
+        String(36), ForeignKey("platform_admins.id"), nullable=False, index=True
+    )
+    # SHA-256 digest only. The raw bearer token appears solely in the mail
+    # link and the accepting browser request.
+    token_hash = Column(String(64), nullable=False)
+    note = Column(Text, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 # —— RND-278 (F0-3) 密码重置令牌 ——

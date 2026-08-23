@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>新增操作员 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-accounts.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>新增操作员</h1><p>受控邀请流程。被邀请人通过 24 小时有效的一次性邮件链接自行设置密码；管理员不会接触或设置其密码。</p></div>
+    <a class="btn" href="/platform/settings">返回账户与安全</a>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <section class="card account-card" id="invite-form-card">
+    <div class="card-hd"><h2>操作员信息</h2><span class="badge badge-pending">待复核</span></div>
+    <form id="operator-invite-form">
+      <div class="card-bd form-stack">
+        <div class="field"><label class="field-label" for="operator-name">姓名<span class="req">*</span></label><input class="input" id="operator-name" type="text" maxlength="160" autocomplete="name" required></div>
+        <div class="field"><label class="field-label" for="operator-email">企业邮箱<span class="req">*</span></label><input class="input" id="operator-email" type="email" maxlength="320" autocomplete="email" required><p class="field-help">请填写受控的内部企业邮箱。</p></div>
+        <div class="alert alert-warning"><span class="alert-ico">!</span><div>该账号获得完整 <span class="mono">super_admin</span> 权限。下一步会复核影响并把原因和备注写入审计；不会设置、显示或发送初始密码。</div></div>
+      </div>
+      <div class="card-ft account-actions"><button class="btn btn-primary" type="submit">复核并发送邀请</button></div>
+    </form>
+  </section>
+
+  <section class="card account-card" id="invite-result-card" hidden>
+    <div class="card-hd"><h2>邀请结果</h2><span class="badge badge-success badge-dot">已发送</span></div>
+    <div class="card-bd">
+      <div class="alert alert-success" role="status">邀请邮件已发送。链接 24 小时有效，且只能使用一次。</div>
+      <dl class="kv" id="invite-result"></dl>
+    </div>
+    <div class="card-ft account-actions"><a class="btn btn-primary" href="/platform/settings">返回操作员列表</a></div>
+  </section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-operator-new.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

@@ -17,6 +17,8 @@ app.auth), so the browser native dialog still works for them.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
@@ -92,6 +94,7 @@ def platform_login_submit(
         return JSONResponse({"detail": "invalid_credentials"}, status_code=401)
 
     session_id, ttl_hours = create_platform_admin_session(db, admin)
+    admin.last_login_at = datetime.now(timezone.utc)
     tenant_id = _audit_tenant_id(db)
     if tenant_id is not None:
         write_audit(

@@ -1,0 +1,16 @@
+/* RND-415 account pages. Uses existing design-system primitives and platform
+   theme tokens only; it introduces no colour or spacing variables. */
+[data-plane="platform"] .account-card{max-width:860px}
+[data-plane="platform"] .account-card .card-hd{align-items:flex-start;gap:var(--space-3)}
+[data-plane="platform"] .account-actions{justify-content:flex-end;gap:var(--space-2)}
+[data-plane="platform"] .form-stack{display:grid;gap:var(--space-4);max-width:560px}
+[data-plane="platform"] .platform-tabs{max-width:860px}
+[data-plane="platform"] .settings-panel{max-width:860px}
+.platform-activation-page{min-height:100vh;display:grid;place-items:center;padding:var(--space-5);background:var(--color-canvas)}
+.platform-activation-card{width:min(100%,560px);padding:var(--space-6);border:1px solid var(--color-border-strong);border-radius:var(--radius-lg);box-shadow:var(--shadow-2);background:var(--color-surface)}
+.platform-activation-card .page-hd{margin-bottom:var(--space-5)}
+.platform-activation-card .btn{width:100%;justify-content:center}
+.platform-activation-card .muted{margin-top:var(--space-5);text-align:center}
+@media(max-width:720px){
+  .platform-activation-card{padding:var(--space-4)}
+}

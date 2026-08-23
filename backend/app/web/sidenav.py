@@ -152,6 +152,7 @@ PLATFORM_NAV = (
         "group": "治理",
         "items": (
             {"id": "audit", "label": "全局审计", "path": "/platform/audit"},
+            {"id": "settings", "label": "账户与安全", "path": "/platform/settings"},
         ),
     },
 )

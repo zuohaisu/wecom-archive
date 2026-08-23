@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>激活平台操作员账户</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-accounts.css?v=__STATIC_VERSION__">
+</head>
+<body class="platform-activation-page">
+<main class="platform-activation-card">
+  <div class="page-hd"><div><h1>激活平台操作员账户</h1><p>设置密码后即可使用平台运营控制台。此链接仅能使用一次，并在 24 小时后失效。</p></div></div>
+  <div id="activation-error" class="alert alert-danger" role="alert" hidden></div>
+  <form id="activation-form">
+    <div class="form-stack">
+      <div class="field"><label class="field-label" for="activation-password">设置密码<span class="req">*</span></label><input class="input" id="activation-password" type="password" autocomplete="new-password" required><p class="field-help">至少 12 位，包含大写字母、小写字母和数字。</p></div>
+      <div class="field"><label class="field-label" for="activation-password-confirmation">确认密码<span class="req">*</span></label><input class="input" id="activation-password-confirmation" type="password" autocomplete="new-password" required></div>
+      <button class="btn btn-primary" id="activation-submit" type="submit">激活账户</button>
+    </div>
+  </form>
+  <div id="activation-success" class="alert alert-success" role="status" hidden>账户已激活。请前往平台登录页使用企业邮箱和新密码登录。</div>
+  <p class="muted"><a href="/platform/login">前往平台登录</a></p>
+</main>
+<script src="/web/static/platform-operator-accept.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

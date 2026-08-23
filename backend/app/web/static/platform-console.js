@@ -130,6 +130,7 @@
   //   renderImpact(el) — build step-1 body into the given container
   //   continueLabel    string — step-1 primary button text
   //   reasonCodes      [{value,label}]
+  //   noteLabel        string (default "原因说明")
   //   notePlaceholder  string
   //   noteRequired     bool (default true)
   //   unlock           null | {label, match} — destructive typed-match arm
@@ -210,7 +211,7 @@
     var noteInput = document.createElement('textarea'); noteInput.className = 'textarea'; noteInput.id = 'platform-modal-note';
     noteInput.maxLength = 1000;
     noteInput.placeholder = config.notePlaceholder || '写入审计，不可修改。';
-    body.appendChild(fieldWrap('原因说明', config.noteRequired !== false, noteInput, '≤1000 字符，写入审计，不可修改。'));
+    body.appendChild(fieldWrap(config.noteLabel || '原因说明', config.noteRequired !== false, noteInput, '≤1000 字符，写入审计，不可修改。'));
 
     var unlockInput = null;
     if (config.unlock) {
