@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.html_helpers import _badge, _e, _fmt_msgtime
 from app.i18n_assets import I18N_SCRIPT_TAG
 from app.schemas.messages import MessageDetailOut, MessageOut, RecipientOut
+from app.services.message_deletion import active_message_filter
 from app.web import render_template
 from app.web.sidenav import render_sidenav
 
@@ -30,7 +31,9 @@ def admin_messages(
     if tenant_id is None:
         return RedirectResponse("/admin/login", status_code=302)
 
-    query = db.query(ArchiveMessage).filter(ArchiveMessage.tenant_id == tenant_id)
+    query = db.query(ArchiveMessage).filter(
+        ArchiveMessage.tenant_id == tenant_id, active_message_filter()
+    )
     if sender:
         query = query.filter(ArchiveMessage.sender == sender)
     if q:
@@ -86,6 +89,7 @@ def admin_message_detail(
     msg = db.query(ArchiveMessage).filter(
         ArchiveMessage.msgid == msgid,
         ArchiveMessage.tenant_id == tenant_id,
+        active_message_filter(),
     ).first()
     if msg is None:
         body = render_template("message_detail_404", msgid=_e(msgid))
@@ -130,7 +134,9 @@ def get_messages(
     auth: Tuple = Depends(get_current_user),
 ):
     _, tenant_id = auth
-    query = db.query(ArchiveMessage).filter(ArchiveMessage.tenant_id == tenant_id)
+    query = db.query(ArchiveMessage).filter(
+        ArchiveMessage.tenant_id == tenant_id, active_message_filter()
+    )
     if sender:
         query = query.filter(ArchiveMessage.sender == sender)
     if q:
@@ -152,6 +158,7 @@ def get_message(
     msg = db.query(ArchiveMessage).filter(
         ArchiveMessage.msgid == msgid,
         ArchiveMessage.tenant_id == tenant_id,
+        active_message_filter(),
     ).first()
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")

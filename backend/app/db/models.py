@@ -74,6 +74,11 @@ class Tenant(Base):
     suspended_by_platform_admin_id = Column(String(36), nullable=True)
     suspension_previous_status = Column(String(16), nullable=True)
     onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
+    # Compliance/legal hold for archived-message lifecycle writes. It does
+    # not affect review or export reads; it fails deletion and purge closed.
+    deletion_locked = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -1982,6 +1987,7 @@ class ArchiveMessage(Base):
         # docstring for why a composite beats intersecting single-column
         # indexes here.
         Index("ix_archive_messages_tenant_msgtime_id", "tenant_id", "msgtime", "id"),
+        Index("ix_archive_messages_tenant_deleted_at", "tenant_id", "deleted_at"),
         Index("ix_archive_messages_tenant_roomid", "tenant_id", "roomid"),
         Index(
             "ix_archive_messages_tenant_decrypt_revoked",
@@ -2030,6 +2036,16 @@ class ArchiveMessage(Base):
     # app.revoke_reconciliation module docstring.
     is_revoked = Column(Boolean, nullable=False, server_default=text("false"))
     revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    # RND-362 soft-delete tombstone. Re-sync deliberately preserves these
+    # fields because the row's tenant-scoped stable msgid remains unique.
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by_admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=True)
+    delete_reason = Column(String(200), nullable=True)
+    purge_after = Column(DateTime(timezone=True), nullable=True)
+    restored_at = Column(DateTime(timezone=True), nullable=True)
+    restored_by_admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=True)
+    deletion_batch_id = Column(String(36), nullable=True, index=True)
 
     tenant_id = Column(
         String(36), ForeignKey("tenants.id"), nullable=True, index=True

@@ -18,6 +18,9 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient, AdminUser, Contact
+from app.services.message_deletion import active_message_filter
+
+
 def _is_staff(uid: str) -> bool:
     return uid.startswith("staff_")
 
@@ -316,6 +319,7 @@ def _fetch_direct_pair_messages(
             ArchiveMessageRecipient.receiver_userid == uid_b,
             or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
             ArchiveMessage.tenant_id == tenant_id,
+            active_message_filter(),
             ArchiveMessageRecipient.tenant_id == tenant_id,
         )
         .all()
@@ -331,6 +335,7 @@ def _fetch_direct_pair_messages(
             ArchiveMessageRecipient.receiver_userid == uid_a,
             or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
             ArchiveMessage.tenant_id == tenant_id,
+            active_message_filter(),
             ArchiveMessageRecipient.tenant_id == tenant_id,
         )
         .all()
@@ -360,6 +365,7 @@ def _fetch_group_room_messages(
         .filter(
             ArchiveMessage.roomid == roomid,
             ArchiveMessage.tenant_id == tenant_id,
+            active_message_filter(),
         )
         .all()
     )
