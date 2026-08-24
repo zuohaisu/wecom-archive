@@ -95,6 +95,8 @@ class AuditAction:
     RETENTION_MESSAGES_LOCKED = "retention.messages_locked"
     MESSAGES_SOFT_DELETED = "messages.soft_deleted"
     MESSAGES_RESTORED = "messages.restored"
+    MESSAGES_PURGED = "messages.purged"
+    MESSAGES_PURGE_MEDIA_FAILED = "messages.purge_media_failed"
 
 
 class AuditObjectType:
@@ -219,6 +221,8 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.RETENTION_MESSAGES_LOCKED: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
     AuditAction.MESSAGES_SOFT_DELETED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
     AuditAction.MESSAGES_RESTORED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_PURGED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_PURGE_MEDIA_FAILED: (AuditCategory.SYSTEM, AuditObjectType.MEDIA_FILE),
 }
 AUDIT_CATEGORIES = frozenset(
     {

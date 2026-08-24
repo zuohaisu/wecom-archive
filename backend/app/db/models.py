@@ -2280,6 +2280,40 @@ class MediaQuotaBlock(Base):
     )
 
 
+class MediaPurgeRetry(Base):
+    """Durable retry state for a media object whose permanent purge failed.
+
+    RND-364: when object-storage deletion fails, the MediaFile row is kept
+    (never deleted out from under a still-referenced object) and a retry row
+    is recorded. The 30-day purge worker retries these until the object is
+    gone, then removes both the MediaFile row and this retry row.
+    """
+
+    __tablename__ = "media_purge_retries"
+    __table_args__ = (
+        Index("ix_media_purge_retries_next_retry_at", "next_retry_at"),
+        Index("ix_media_purge_retries_tenant", "tenant_id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    media_file_id = Column(Integer, nullable=False)
+    tenant_id = Column(String(36), nullable=False)
+    storage_backend = Column(String(32), nullable=True)
+    storage_ref = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    next_retry_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class TenantStorageDaily(Base):
     """Daily materialized media-byte total for one tenant (RND-331).
 

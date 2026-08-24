@@ -405,7 +405,7 @@ def test_router_count() -> None:
     # RND-415 adds three platform account HTML shells and four guarded/public
     # account APIs: list, invite, invitation acceptance, and self password
     # rotation.
-    assert route_count == 202
+    assert route_count == 205
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -432,10 +432,13 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/provisioning/settings",
             "/admin/media",
             "/admin/messages",
+            "/admin/recycle-bin",
             "/admin/messages/{msgid}",
             "/api/admin/messages/delete",
             "/api/admin/messages/deletion-status",
             "/api/admin/messages/recycle-bin",
+            "/api/admin/messages/recycle-bin/metrics",
+            "/api/admin/messages/purge",
             "/api/admin/messages/restore",
             "/admin/reset-password",
             "/admin/search",
@@ -647,6 +650,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/provisioning", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/provisioning/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/media", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/recycle-bin", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages/{msgid}", frozenset({"GET"}), "None", "HTMLResponse"),
         (
@@ -665,6 +669,18 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/admin/messages/recycle-bin",
             frozenset({"GET"}),
             "RecycleBinOut",
+            "None",
+        ),
+        (
+            "/api/admin/messages/recycle-bin/metrics",
+            frozenset({"GET"}),
+            "PurgeMetricsOut",
+            "None",
+        ),
+        (
+            "/api/admin/messages/purge",
+            frozenset({"POST"}),
+            "PurgeOut",
             "None",
         ),
         (
