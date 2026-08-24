@@ -293,6 +293,15 @@
     node('capacity-measured').textContent = t('billing.capacityMeasured', {
       time: date(capacity.measured_at)
     });
+    // RND-370: surface the bulk-cleanup entry when capacity is at or near
+    // the limit so the Owner can act instead of waiting for the server gate.
+    var cleanupEntry = node('capacity-cleanup-entry');
+    cleanupEntry.hidden = !(
+      capacity.state === 'warning_80'
+      || capacity.state === 'warning_90'
+      || capacity.state === 'full'
+      || capacity.state === 'over_limit'
+    );
   }
 
   function stopPolling() {

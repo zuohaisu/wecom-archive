@@ -9,9 +9,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_role
-from app.db.models import AdminUser, ArchiveMessage, MediaFile, Tenant
+from app.db.models import AdminUser, ArchiveMessage, MediaFile, MessageCleanupTask, Tenant
 from app.db.session import get_db
 from app.schemas.message_deletion import (
+    CleanupPreviewIn,
+    CleanupPreviewOut,
+    CleanupTaskCreateIn,
+    CleanupTaskListOut,
+    CleanupTaskOut,
     DeletionStatusOut,
     MessageDeleteIn,
     MessageDeleteOut,
@@ -20,6 +25,19 @@ from app.schemas.message_deletion import (
     PurgeMetricsOut,
     RecycleBinItemOut,
     RecycleBinOut,
+)
+from app.services.message_cleanup import (
+    CleanupConfirmationRequired,
+    CleanupError,
+    CleanupLocked,
+    CleanupPreviewStale,
+    CleanupTaskNotFound,
+    cancel_cleanup_task,
+    create_cleanup_task,
+    get_cleanup_task,
+    preview_cleanup,
+    store_cleanup_preview,
+    validate_filter,
 )
 from app.services.message_deletion import (
     DeletionLockedError,
@@ -33,6 +51,19 @@ from app.services.message_deletion import (
 router = APIRouter(prefix="/api/admin/messages", tags=["message-deletion"])
 
 _PREVIEW_LENGTH = 80
+
+
+def _raise_cleanup_error(error: CleanupError) -> None:
+    if isinstance(error, CleanupLocked):
+        raise HTTPException(status_code=423, detail="deletion_locked") from error
+    if isinstance(error, CleanupConfirmationRequired):
+        raise HTTPException(status_code=422, detail="confirmation_required") from error
+    if isinstance(error, CleanupPreviewStale):
+        raise HTTPException(status_code=409, detail="preview_stale") from error
+    if isinstance(error, CleanupTaskNotFound):
+        raise HTTPException(status_code=404, detail="task_not_found") from error
+    code = str(error)
+    raise HTTPException(status_code=422, detail=code) from error
 
 
 @router.get("/deletion-status", response_model=DeletionStatusOut)
@@ -102,6 +133,7 @@ def recycle_bin(
     msgtype: Optional[str] = Query(None, description="Filter by message type"),
     roomid: Optional[str] = Query(None, description="Filter by conversation room id"),
     deleted_by: Optional[str] = Query(None, description="Filter by deleting admin user id"),
+    batch_id: Optional[str] = Query(None, description="Filter by cleanup task / delete batch id"),
     since: Optional[str] = Query(None, description="ISO8601 lower bound on deleted_at"),
     until: Optional[str] = Query(None, description="ISO8601 upper bound on deleted_at"),
     db: Session = Depends(get_db),
@@ -118,6 +150,8 @@ def recycle_bin(
         statement = statement.where(ArchiveMessage.roomid == roomid)
     if deleted_by:
         statement = statement.where(ArchiveMessage.deleted_by_admin_user_id == deleted_by)
+    if batch_id:
+        statement = statement.where(ArchiveMessage.deletion_batch_id == batch_id)
     if since:
         statement = statement.where(ArchiveMessage.deleted_at >= since)
     if until:
@@ -233,4 +267,147 @@ def purge_deleted_messages(
         not_found=result.not_found,
         media_retry_pending=result.media_retry_pending,
         purged_message_ids=list(result.purged_message_ids),
+    )
+
+
+# ---------------------------------------------------------------------------
+# RND-370: bulk cleanup preview + async tasks
+# ---------------------------------------------------------------------------
+
+
+@router.post("/cleanup/preview", response_model=CleanupPreviewOut)
+def cleanup_preview(
+    payload: CleanupPreviewIn,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(require_role("owner", "admin")),
+) -> CleanupPreviewOut:
+    _, tenant_id = auth
+    try:
+        f = validate_filter(payload.filter.model_dump(exclude_none=True))
+        preview = preview_cleanup(db, tenant_id, f)
+        store_cleanup_preview(db, tenant_id=tenant_id, preview=preview, f=f)
+        db.commit()
+    except CleanupError as error:
+        db.rollback()
+        _raise_cleanup_error(error)
+    return CleanupPreviewOut(
+        preview_version=preview.preview_version,
+        matched=preview.matched,
+        conversation_count=preview.conversation_count,
+        contact_count=preview.contact_count,
+        staff_count=preview.staff_count,
+        msgtype_counts=preview.msgtype_counts,
+        text_bytes_estimate=preview.text_bytes_estimate,
+        media_bytes=preview.media_bytes,
+        shared_media_bytes=preview.shared_media_bytes,
+        releasable_bytes=preview.releasable_bytes,
+        favorited_count=preview.favorited_count,
+        locked_count=preview.locked_count,
+        earliest_msgtime=preview.earliest_msgtime,
+        latest_msgtime=preview.latest_msgtime,
+        summary=preview.summary,
+    )
+
+
+@router.post("/cleanup/tasks", response_model=CleanupTaskOut, status_code=201)
+def create_cleanup(
+    payload: CleanupTaskCreateIn,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(require_role("owner", "admin")),
+) -> CleanupTaskOut:
+    user, tenant_id = auth
+    try:
+        task = create_cleanup_task(
+            db,
+            tenant_id=tenant_id,
+            actor_id=user.id,
+            raw_filter=payload.filter.model_dump(exclude_none=True),
+            preview_version=payload.preview_version,
+            confirmation=payload.confirmation,
+        )
+        db.commit()
+    except CleanupError as error:
+        db.rollback()
+        _raise_cleanup_error(error)
+    return _task_out(task)
+
+
+@router.get("/cleanup/tasks", response_model=CleanupTaskListOut)
+def list_cleanup_tasks(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(require_role("owner", "admin")),
+) -> CleanupTaskListOut:
+    _, tenant_id = auth
+    total = int(
+        db.scalar(
+            select(func.count()).select_from(
+                select(MessageCleanupTask.id)
+                .where(MessageCleanupTask.tenant_id == tenant_id)
+                .subquery()
+            )
+        )
+        or 0
+    )
+    rows = db.scalars(
+        select(MessageCleanupTask)
+        .where(MessageCleanupTask.tenant_id == tenant_id)
+        .order_by(MessageCleanupTask.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    return CleanupTaskListOut(items=[_task_out(row) for row in rows], total=total)
+
+
+@router.get("/cleanup/tasks/{task_id}", response_model=CleanupTaskOut)
+def get_cleanup(
+    task_id: str,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(require_role("owner", "admin")),
+) -> CleanupTaskOut:
+    _, tenant_id = auth
+    try:
+        task = get_cleanup_task(db, tenant_id, task_id)
+    except CleanupTaskNotFound as error:
+        _raise_cleanup_error(error)
+    return _task_out(task)
+
+
+@router.post("/cleanup/tasks/{task_id}/cancel", response_model=CleanupTaskOut)
+def cancel_cleanup(
+    task_id: str,
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(require_role("owner", "admin")),
+) -> CleanupTaskOut:
+    user, tenant_id = auth
+    try:
+        task = cancel_cleanup_task(db, tenant_id, task_id, actor_id=user.id)
+        db.commit()
+    except CleanupTaskNotFound as error:
+        db.rollback()
+        _raise_cleanup_error(error)
+    return _task_out(task)
+
+
+def _task_out(task: MessageCleanupTask) -> CleanupTaskOut:
+    return CleanupTaskOut(
+        id=task.id,
+        status=task.status,
+        filter_summary=task.filter_summary,
+        preview_version=task.preview_version,
+        preview_matched=task.preview_matched,
+        total_matched=task.total_matched,
+        succeeded=task.succeeded,
+        skipped=task.skipped,
+        failed=task.failed,
+        locked=task.locked,
+        moved_bytes=task.moved_bytes,
+        releasable_bytes=task.releasable_bytes,
+        failure_summary=task.failure_summary,
+        error_message=task.error_message,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        finished_at=task.finished_at,
+        canceled_at=task.canceled_at,
     )

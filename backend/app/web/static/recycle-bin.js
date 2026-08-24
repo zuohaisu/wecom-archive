@@ -5,6 +5,10 @@
   var state = { offset: 0, limit: 50, total: 0, items: [] };
   var selection = {};
   var busy = false;
+  // RND-370: when the page is opened from a cleanup task (…?batch=<task_id>),
+  // the recycle-bin list is scoped to that batch so the operator can review
+  // exactly what the task moved to the bin.
+  var batchId = new URLSearchParams(location.search).get('batch') || null;
 
   function t(key, values) {
     var value = I18N.t(key);
@@ -91,6 +95,7 @@
     if (type) { p.set('msgtype', type); }
     if (room) { p.set('roomid', room); }
     if (deletedBy) { p.set('deleted_by', deletedBy); }
+    if (batchId) { p.set('batch_id', batchId); }
     return p;
   }
 

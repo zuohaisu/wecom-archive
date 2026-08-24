@@ -2280,6 +2280,88 @@ class MediaQuotaBlock(Base):
     )
 
 
+class MessageCleanupPreview(Base):
+    """Server-side impact-preview snapshot for one cleanup filter (RND-370).
+
+    The preview API stores the matched count and filter snapshot under a
+    short-lived, unguessable version id. Task creation requires this
+    version and rejects a filter/count mismatch or an expired preview, so
+    the operator confirms exactly what was previewed.
+    """
+
+    __tablename__ = "message_cleanup_previews"
+    __table_args__ = (Index("ix_message_cleanup_previews_expires_at", "expires_at"),)
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    matched = Column(Integer, nullable=False)
+    filter_snapshot = Column(JSONB, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class MessageCleanupTask(Base):
+    """One tenant-scoped asynchronous bulk cleanup task (RND-370).
+
+    The task stores the server-validated filter snapshot (never free SQL),
+    a preview-version nonce used to bind the impact preview to the audit,
+    and progressive counts updated by the background worker
+     (scripts/
+    process_message_cleanup_once.py). Status transitions:
+
+      queued -> running -> partial/completed/failed | canceled
+
+    ``revision`` is an optimistic-lock guard so concurrent worker runs and
+    cancel requests never overwrite each other's progress.
+    """
+
+    __tablename__ = "message_cleanup_tasks"
+    __table_args__ = (
+        Index("ix_message_cleanup_tasks_tenant_status", "tenant_id", "status"),
+        Index("ix_message_cleanup_tasks_created_at", "tenant_id", "created_at"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'partial', 'completed', 'failed', 'canceled')",
+            name="ck_message_cleanup_tasks_status",
+        ),
+        CheckConstraint("revision >= 1", name="ck_message_cleanup_tasks_revision"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    created_by_admin_user_id = Column(
+        String(36), ForeignKey("admin_users.id"), nullable=False
+    )
+    filter_snapshot = Column(JSONB, nullable=False)
+    filter_summary = Column(Text, nullable=False)
+    preview_version = Column(String(36), nullable=False)
+    preview_matched = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, default="queued")
+    total_matched = Column(Integer, nullable=False, default=0)
+    succeeded = Column(Integer, nullable=False, default=0)
+    skipped = Column(Integer, nullable=False, default=0)
+    failed = Column(Integer, nullable=False, default=0)
+    locked = Column(Integer, nullable=False, default=0)
+    moved_bytes = Column(BigInteger, nullable=False, default=0)
+    releasable_bytes = Column(BigInteger, nullable=False, default=0)
+    failure_summary = Column(JSONB, nullable=True)
+    error_message = Column(Text, nullable=True)
+    revision = Column(Integer, nullable=False, default=1)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    canceled_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class MediaPurgeRetry(Base):
     """Durable retry state for a media object whose permanent purge failed.
 

@@ -97,6 +97,9 @@ class AuditAction:
     MESSAGES_RESTORED = "messages.restored"
     MESSAGES_PURGED = "messages.purged"
     MESSAGES_PURGE_MEDIA_FAILED = "messages.purge_media_failed"
+    MESSAGES_CLEANUP_TASK_CREATED = "messages.cleanup_task_created"
+    MESSAGES_CLEANUP_TASK_CANCELED = "messages.cleanup_task_canceled"
+    MESSAGES_CLEANUP_COMPLETED = "messages.cleanup_completed"
 
 
 class AuditObjectType:
@@ -223,6 +226,9 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.MESSAGES_RESTORED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
     AuditAction.MESSAGES_PURGED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
     AuditAction.MESSAGES_PURGE_MEDIA_FAILED: (AuditCategory.SYSTEM, AuditObjectType.MEDIA_FILE),
+    AuditAction.MESSAGES_CLEANUP_TASK_CREATED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_CLEANUP_TASK_CANCELED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_CLEANUP_COMPLETED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
 }
 AUDIT_CATEGORIES = frozenset(
     {

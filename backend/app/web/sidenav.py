@@ -25,6 +25,7 @@ NAV = (
         "group_key": "nav.group.data",
         "items": (
             {"id": "messages", "key": "nav.messages", "path": "/admin/messages"},
+            {"id": "cleanup", "key": "nav.cleanup", "path": "/admin/cleanup"},
             {"id": "recycle-bin", "key": "nav.recycleBin", "path": "/admin/recycle-bin"},
             {"id": "media", "key": "nav.mediaAttachments", "path": "/admin/media"},
             {"id": "exports", "key": "nav.exports", "path": "/admin/exports"},
