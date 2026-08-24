@@ -6,6 +6,7 @@
   var capacity = null;
   var subscription = null;
   var refund = null;
+  var trend = null;
   var pollTimer = null;
   var busy = false;
   var cancelIntentBusy = false;
@@ -274,6 +275,56 @@
     note.hidden = !noteKey;
   }
 
+  function renderTrendChart() {
+    var chart = node('trend-chart');
+    if (!chart || !trend || !trend.series || trend.series.length < 2) { return; }
+    var points = trend.series;
+    var max = Math.max.apply(null, points.map(function (p) { return p.bytes; })) || 1;
+    var min = Math.min.apply(null, points.map(function (p) { return p.bytes; }));
+    var width = 100, height = 44;
+    var step = points.length > 1 ? width / (points.length - 1) : width;
+    var coords = points.map(function (p, i) {
+      var x = (i * step).toFixed(1);
+      var y = (height - ((p.bytes - min) / (max - min || 1)) * (height - 6) - 2).toFixed(1);
+      return x + ',' + y;
+    });
+    var polyline = '<polyline points="' + coords.join(' ') + '" fill="none" stroke="#1677ff" stroke-width="2"/>';
+    chart.innerHTML = '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" role="img">'
+      + polyline
+      + '<line x1="0" y1="' + (height - 2) + '" x2="' + width + '" y2="' + (height - 2) + '" stroke="#d9dde3"/>'
+      + '</svg>';
+  }
+
+  function renderTrend() {
+    var container = node('capacity-trend');
+    if (!container) { return; }
+    if (!trend || !trend.series || trend.series.length < 2) {
+      container.hidden = true;
+      return;
+    }
+    container.hidden = false;
+    renderTrendChart();
+    var summary = node('trend-summary');
+    if (trend.avg_daily_growth_bytes != null) {
+      summary.textContent = t('billing.trendGrowth', { value: bytes(trend.avg_daily_growth_bytes) });
+    } else {
+      summary.textContent = t('billing.trendNoGrowth');
+    }
+    var note = node('trend-note');
+    if (trend.estimate_available && trend.days_until_full != null) {
+      note.textContent = t('billing.trendEstimate', { days: String(trend.days_until_full), points: String(trend.measured_points) });
+    } else {
+      note.textContent = t('billing.trendNoEstimate', { points: String(trend.measured_points) });
+    }
+  }
+
+  function loadTrend() {
+    return request('/api/billing/capacity/trend?range=30').then(function (value) {
+      trend = value;
+      renderTrend();
+    }).catch(function () { trend = null; });
+  }
+
   function renderCapacity() {
     if (!capacity) { return; }
     node('capacity-quota').textContent = bytes(capacity.quota_bytes);
@@ -399,6 +450,7 @@
       renderSubscription();
       renderCapacity();
       renderRefund();
+      return loadTrend();
     });
   }
 
@@ -434,6 +486,7 @@
       renderOrder();
       renderCapacity();
       renderRefund();
+      return loadTrend();
     }).catch(function (error) {
       showError(error.status === 401 ? t('billing.error.auth') : t('billing.error.load'));
     });

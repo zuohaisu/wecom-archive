@@ -9,7 +9,7 @@ from io import BytesIO
 from typing import Optional
 
 import qrcode
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from qrcode.constants import ERROR_CORRECT_M
 from sqlalchemy import select
@@ -31,6 +31,8 @@ from app.schemas.billing import (
     CreatePaymentOrderIn,
     PaymentOrderOut,
     StorageCapacityOut,
+    StorageTrendOut,
+    StorageTrendPointOut,
     SubscriptionOverviewOut,
 )
 from app.schemas.refunds import RefundOut
@@ -67,6 +69,7 @@ from app.services.payment_orders import (
 from app.services.payment_provider import PaymentProvider
 from app.services.refunds import get_latest_refund_for_tenant
 from app.services.storage_capacity import measure_storage_capacity
+from app.services.storage_trend import storage_trend
 from app.services.subscription_overview import get_subscription_overview
 from app.services.tenant_activation import spawn_activation_worker
 from app.services.wechat_pay import (
@@ -261,6 +264,44 @@ def billing_capacity(
         usage_status=snapshot.usage_status,
         can_accept_new_media=snapshot.can_accept_new_media,
         measured_at=snapshot.measured_at,
+    )
+
+
+@router.get("/api/billing/capacity/trend", response_model=StorageTrendOut)
+def billing_capacity_trend(
+    range_days: int = Query(30, ge=7, le=90),
+    context: BillingAccessContext = Depends(get_billing_viewer),
+    db: Session = Depends(get_db),
+) -> StorageTrendOut:
+    """Tenant storage trend + depletion estimate (RND-163).
+
+    Re-measures today's authoritative capacity (upserting today's rollup)
+    then reads the same rollup history, so the trend shares one measurement
+   口径 with the live capacity card. The forecast is an estimate only.
+    """
+    snapshot = measure_storage_capacity(db, context.tenant_id, lock_tenant=True)
+    db.commit()
+    trend = storage_trend(
+        db,
+        context.tenant_id,
+        range_days=range_days,
+        quota_bytes=snapshot.quota_bytes,
+        used_bytes=snapshot.used_bytes,
+        measured_at=snapshot.measured_at,
+    )
+    return StorageTrendOut(
+        range_days=trend.range_days,
+        series=[
+            StorageTrendPointOut(date=point.date, bytes=point.bytes)
+            for point in trend.series
+        ],
+        measured_points=trend.measured_points,
+        avg_daily_growth_bytes=trend.avg_daily_growth_bytes,
+        days_until_full=trend.days_until_full,
+        estimate_available=trend.estimate_available,
+        quota_bytes=trend.quota_bytes,
+        used_bytes=trend.used_bytes,
+        measured_at=trend.measured_at,
     )
 
 

@@ -108,6 +108,15 @@ __SIDENAV__
         <div id="capacity-measured" class="capacity-measured"></div>
         <!-- RND-370: capacity-management entry shown at warning/full thresholds. -->
         <div id="capacity-cleanup-entry" class="capacity-measured" hidden><a href="/admin/cleanup" data-i18n="billing.capacityCleanup">清理历史消息</a></div>
+        <!-- RND-163: usage trend + depletion estimate (estimates only). -->
+        <div class="capacity-trend" id="capacity-trend" hidden>
+          <div class="capacity-trend-head">
+            <span data-i18n="billing.trendTitle">容量趋势</span>
+            <span class="capacity-trend-summary" id="trend-summary"></span>
+          </div>
+          <div class="capacity-trend-chart" id="trend-chart" aria-hidden="true"></div>
+          <p class="capacity-measured" id="trend-note"></p>
+        </div>
       </div>
     </section>
   </main>

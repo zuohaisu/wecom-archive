@@ -405,7 +405,7 @@ def test_router_count() -> None:
     # RND-415 adds three platform account HTML shells and four guarded/public
     # account APIs: list, invite, invitation acceptance, and self password
     # rotation.
-    assert route_count == 211
+    assert route_count == 212
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -506,6 +506,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/auth/wecom/organization-claim/confirm",
             "/api/billing/orders",
             "/api/billing/capacity",
+            "/api/billing/capacity/trend",
             "/api/billing/subscription",
             "/api/billing/subscription/cancel-intent",
             "/api/billing/orders/latest",
@@ -898,6 +899,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/billing/capacity",
             frozenset({"GET"}),
             "StorageCapacityOut",
+            "None",
+        ),
+        (
+            "/api/billing/capacity/trend",
+            frozenset({"GET"}),
+            "StorageTrendOut",
             "None",
         ),
         (
