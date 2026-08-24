@@ -36,6 +36,7 @@ def content_access_client() -> Generator[tuple[TestClient, Session], None, None]
             text(
                 "CREATE TABLE tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
                 "slug TEXT NOT NULL, is_active BOOLEAN NOT NULL DEFAULT 1, "
+"deletion_locked INTEGER NOT NULL DEFAULT 0, "
                 "lifecycle_status TEXT NOT NULL DEFAULT 'active', "
                 "lifecycle_revision INTEGER NOT NULL DEFAULT 1, frozen_at DATETIME, "
                 "suspended_at DATETIME, suspension_reason TEXT, "

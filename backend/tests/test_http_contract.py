@@ -37,6 +37,7 @@ CREATE TABLE tenants (
     suspended_by_platform_admin_id TEXT,
     suspension_previous_status TEXT,
     onboarding_completed_at TEXT,
+    deletion_locked INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -48,6 +49,9 @@ CREATE TABLE archive_messages (
     structured_content TEXT, content_text TEXT, msgtype TEXT, sender TEXT,
     roomid TEXT, msgtime INTEGER, tolist TEXT, sdkfileid TEXT,
     is_revoked INTEGER NOT NULL DEFAULT 0, revoked_at TEXT,
+    deleted_at DATETIME, deleted_by_admin_user_id TEXT, delete_reason TEXT,
+    purge_after DATETIME, restored_at DATETIME, restored_by_admin_user_id TEXT,
+    deletion_batch_id TEXT,
     tenant_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE archive_message_recipients (
@@ -401,7 +405,7 @@ def test_router_count() -> None:
     # RND-415 adds three platform account HTML shells and four guarded/public
     # account APIs: list, invite, invitation acceptance, and self password
     # rotation.
-    assert route_count == 198
+    assert route_count == 202
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -429,6 +433,10 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/media",
             "/admin/messages",
             "/admin/messages/{msgid}",
+            "/api/admin/messages/delete",
+            "/api/admin/messages/deletion-status",
+            "/api/admin/messages/recycle-bin",
+            "/api/admin/messages/restore",
             "/admin/reset-password",
             "/admin/search",
             "/admin/settings",
@@ -641,6 +649,30 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/media", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages/{msgid}", frozenset({"GET"}), "None", "HTMLResponse"),
+        (
+            "/api/admin/messages/delete",
+            frozenset({"POST"}),
+            "MessageDeleteOut",
+            "None",
+        ),
+        (
+            "/api/admin/messages/deletion-status",
+            frozenset({"GET"}),
+            "DeletionStatusOut",
+            "None",
+        ),
+        (
+            "/api/admin/messages/recycle-bin",
+            frozenset({"GET"}),
+            "RecycleBinOut",
+            "None",
+        ),
+        (
+            "/api/admin/messages/restore",
+            frozenset({"POST"}),
+            "MessageDeleteOut",
+            "None",
+        ),
         ("/admin/reset-password", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/search", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/settings", frozenset({"GET"}), "None", "HTMLResponse"),

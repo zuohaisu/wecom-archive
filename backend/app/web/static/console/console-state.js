@@ -109,3 +109,13 @@ var convDetailCache={};
 // msgtype (via RND216_MSGTYPE_OPTIONS' rawValues, reused from the
 // standalone search page's own catalog).
 var searchDateRange=null,searchAllTypes=false;
+// RND-363: message-deletion selection state, scoped to the current tenant
+// and current conversation. deleteSelection is a {msgid:true} map over the
+// currently LOADED timeline rows only; it is cleared on every conversation/
+// scope/mode switch so an old selection can never be applied to a new view.
+// deleteStatus is the cached GET /api/admin/messages/deletion-status
+// response ({can_delete, deletion_locked}); the delete surface is hidden
+// unless the authenticated role may delete AND the tenant hold is off.
+var deleteMode=false;
+var deleteSelection={};
+var deleteStatus=null;

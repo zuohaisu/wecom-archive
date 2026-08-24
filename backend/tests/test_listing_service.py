@@ -35,6 +35,7 @@ import app.services.listing_service as svc
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT, slug TEXT, is_active INTEGER,
+    deletion_locked INTEGER NOT NULL DEFAULT 0,
     created_at TEXT, updated_at TEXT
 );
 CREATE TABLE archive_messages (
@@ -57,6 +58,7 @@ CREATE TABLE archive_messages (
     sdkfileid TEXT,
     is_revoked INTEGER NOT NULL DEFAULT 0,
     revoked_at TEXT,
+    deleted_at DATETIME, deleted_by_admin_user_id TEXT, delete_reason TEXT, purge_after DATETIME, restored_at DATETIME, restored_by_admin_user_id TEXT, deletion_batch_id TEXT,
     tenant_id TEXT,
     created_at TEXT
 );

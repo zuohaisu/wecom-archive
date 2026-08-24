@@ -9,9 +9,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_role
-from app.db.models import AdminUser, ArchiveMessage, MediaFile
+from app.db.models import AdminUser, ArchiveMessage, MediaFile, Tenant
 from app.db.session import get_db
 from app.schemas.message_deletion import (
+    DeletionStatusOut,
     MessageDeleteIn,
     MessageDeleteOut,
     RecycleBinItemOut,
@@ -25,6 +26,28 @@ from app.services.message_deletion import (
 )
 
 router = APIRouter(prefix="/api/admin/messages", tags=["message-deletion"])
+
+
+@router.get("/deletion-status", response_model=DeletionStatusOut)
+def deletion_status(
+    db: Session = Depends(get_db),
+    auth: Tuple[AdminUser, str] = Depends(require_role()),
+) -> DeletionStatusOut:
+    """Return whether the current tenant/role may delete archived messages.
+
+    Any authenticated admin may read this so the console can hide/disable
+    the delete surface without a failing mutation call. ``can_delete`` is
+    role-gated (Owner/Admin); ``deletion_locked`` reflects the tenant's
+    compliance/legal hold, which fails every deletion closed (RND-362).
+    """
+    user, tenant_id = auth
+    locked = db.scalar(select(Tenant.deletion_locked).where(Tenant.id == tenant_id))
+    if locked is None:
+        raise HTTPException(status_code=404, detail="tenant_not_found")
+    return DeletionStatusOut(
+        can_delete=user.role in ("owner", "admin"),
+        deletion_locked=bool(locked),
+    )
 
 
 def _raise_deletion_error(error: MessageDeletionError) -> None:
@@ -60,6 +83,7 @@ def delete_messages(
         deleted=result.deleted,
         already_deleted=result.already_deleted,
         not_found=result.not_found,
+        deleted_message_ids=list(result.deleted_message_ids),
     )
 
 
@@ -133,4 +157,5 @@ def restore_deleted_messages(
         deleted=result.deleted,
         already_deleted=result.already_deleted,
         not_found=result.not_found,
+        deleted_message_ids=list(result.deleted_message_ids),
     )

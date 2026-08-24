@@ -17,6 +17,7 @@ class MessageDeleteOut(BaseModel):
     deleted: int
     already_deleted: int
     not_found: int
+    deleted_message_ids: list[str] = []
 
 
 class RecycleBinItemOut(BaseModel):
@@ -34,3 +35,8 @@ class RecycleBinItemOut(BaseModel):
 class RecycleBinOut(BaseModel):
     items: list[RecycleBinItemOut]
     total: int
+
+
+class DeletionStatusOut(BaseModel):
+    can_delete: bool
+    deletion_locked: bool

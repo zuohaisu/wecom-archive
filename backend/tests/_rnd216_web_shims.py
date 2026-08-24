@@ -49,6 +49,7 @@ _CONSOLE_JS_MODULES = [
     "api-client.js",
     "conversation-list.js",
     "timeline.js",
+    "delete-timeline.js",
     "message-renderers.js",
     "media-viewer.js",
     "refresh.js",

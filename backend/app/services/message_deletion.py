@@ -29,6 +29,7 @@ class DeletionResult:
     deleted: int
     already_deleted: int
     not_found: int
+    deleted_message_ids: tuple[str, ...] = ()
 
 
 def active_message_filter():
@@ -86,7 +87,12 @@ def soft_delete_messages(
         row.restored_by_admin_user_id = None
         row.deletion_batch_id = batch_id
         deleted += 1
-    result = DeletionResult(deleted, already_deleted, len(stable_ids) - len(found))
+    result = DeletionResult(
+        deleted,
+        already_deleted,
+        len(stable_ids) - len(found),
+        tuple(row.msgid for row in rows if row.deleted_at is not None and row.deleted_at == now),
+    )
     write_audit(
         db,
         tenant_id=tenant_id,
@@ -137,7 +143,12 @@ def restore_messages(
         row.purge_after = None
         row.deletion_batch_id = None
         restored += 1
-    result = DeletionResult(restored, already_active, len(stable_ids) - len(found))
+    result = DeletionResult(
+        restored,
+        already_active,
+        len(stable_ids) - len(found),
+        tuple(row.msgid for row in rows if row.deleted_at is None and row.restored_at == now),
+    )
     write_audit(
         db,
         tenant_id=tenant_id,

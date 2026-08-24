@@ -98,6 +98,10 @@ function loadConversationDetail(convId){
 function loadTimeline(convId, convType){
   timelineConvId=convId; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   timelineLoadingOlder=false; timelineHistoryError=null;
+  // RND-363: a conversation switch must never carry the previous
+  // conversation's delete selection into the new view.
+  if(typeof clearDeleteSelection==='function')clearDeleteSelection();
+  if(typeof updateDeleteModeButton==='function')updateDeleteModeButton();
   // RND-158 Phase 2: capture the entity context for THIS timeline
   // selection now, not read live later -- see the declaration comment on
   // timelineConvType/timelineMode/timelineEntityId above.
