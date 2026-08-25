@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>回收站</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="manifest" href="/api/branding/manifest.webmanifest">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<style>
+.recycle-filters{display:flex;gap:var(--space-3);flex-wrap:wrap;align-items:center}
+.recycle-metrics{display:flex;gap:var(--space-4);flex-wrap:wrap;color:var(--color-text-4);font-size:var(--text-xs)}
+.recycle-table{width:100%;border-collapse:collapse}
+.recycle-table th,.recycle-table td{padding:10px 12px;border-bottom:1px solid var(--color-border);text-align:left;font-size:var(--text-sm);vertical-align:top}
+.recycle-table th{color:var(--color-text-4);font-weight:var(--weight-semibold);white-space:nowrap}
+.recycle-preview{color:var(--color-text-2);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recycle-actions{display:flex;gap:var(--space-2);align-items:center}
+.recycle-bar{display:flex;gap:var(--space-3);align-items:center;margin-bottom:var(--space-4)}
+.recycle-bar .count{font-weight:var(--weight-semibold)}
+.toolbar-compact{margin-bottom:var(--space-3)}
+.purge-modal{position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center}
+.purge-modal[hidden]{display:none}
+.purge-modal .backdrop{position:absolute;inset:0;background:rgba(15,23,42,.45)}
+.purge-modal .card{position:relative;width:min(440px,92vw);background:var(--color-surface);border-radius:var(--radius-lg);padding:var(--space-5);box-shadow:var(--shadow-3)}
+.purge-modal h3{margin:0 0 var(--space-3)}
+.purge-modal .danger-note{background:var(--color-danger-bg);color:var(--color-danger-fg);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-sm);line-height:var(--leading-loose)}
+.purge-modal .actions{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-4)}
+@media(max-width:900px){.side-nav{display:none}.page{padding:var(--space-4)}.recycle-preview{max-width:180px}}
+</style>
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="recycle.breadcrumbData">数据</span><span class="sep">/</span><span class="cur" data-i18n="recycle.pageTitle">回收站</span></div></header>
+  <main class="page">
+    <div class="page-hd"><div><h1 data-i18n="recycle.pageTitle">回收站</h1><p data-i18n="recycle.description">软删除消息保留 30 天，可恢复或主动永久清理；到期自动清理。</p></div></div>
+    <div class="recycle-metrics" id="recycle-metrics" role="status" aria-live="polite"></div>
+    <div class="toolbar toolbar-compact recycle-filters" style="margin-top:var(--space-3)">
+      <select class="select" id="recycle-type"><option value="" data-i18n="recycle.allTypes">全部类型</option><option value="text" data-i18n="dashboard.type.text">文本</option><option value="image" data-i18n="dashboard.type.image">图片</option><option value="voice" data-i18n="dashboard.type.voice">语音</option><option value="video" data-i18n="dashboard.type.video">视频</option><option value="file" data-i18n="dashboard.type.file">文件</option></select>
+      <input class="input" id="recycle-room" data-i18n-placeholder="recycle.filterRoom" placeholder="会话 ID" style="width:160px">
+      <input class="input" id="recycle-deleted-by" data-i18n-placeholder="recycle.filterDeletedBy" placeholder="删除人 ID" style="width:160px">
+      <button type="button" class="btn" id="recycle-filter-apply" data-i18n="recycle.filterApply">筛选</button>
+      <button type="button" class="btn" id="recycle-filter-reset" data-i18n="recycle.filterReset">重置</button>
+    </div>
+    <div class="recycle-bar">
+      <span class="count" id="recycle-count"></span>
+      <label class="field-check"><input type="checkbox" id="recycle-select-all" data-i18n="recycle.selectAll"> 全选本页</label>
+      <button type="button" class="btn" id="recycle-restore" data-i18n="recycle.restore" disabled>恢复所选</button>
+      <button type="button" class="btn btn-danger" id="recycle-purge" data-i18n="recycle.purge" disabled>永久删除所选</button>
+      <span class="muted" id="recycle-selected"></span>
+    </div>
+    <p id="recycle-status" class="field-help" role="status" aria-live="polite"></p>
+    <div class="card" style="overflow:auto">
+      <table class="recycle-table">
+        <thead><tr>
+          <th></th><th data-i18n="recycle.colMsgid">消息 ID</th><th data-i18n="recycle.colType">类型</th>
+          <th data-i18n="recycle.colPreview">预览</th><th data-i18n="recycle.colMedia">媒体</th>
+          <th data-i18n="recycle.colDeletedAt">删除时间</th><th data-i18n="recycle.colDeletedBy">删除人</th>
+          <th data-i18n="recycle.colPurgeAt">计划清理</th><th data-i18n="recycle.colRemaining">剩余</th>
+        </tr></thead>
+        <tbody id="recycle-body"></tbody>
+      </table>
+    </div>
+    <div class="row gap-3 mt-6" style="justify-content:center">
+      <button class="btn hidden" id="recycle-more" type="button" data-i18n="recycle.loadMore">加载更多</button>
+    </div>
+  </main>
+</div></div>
+
+<div class="purge-modal" id="purge-modal" role="dialog" aria-modal="true" aria-labelledby="purge-title" hidden>
+  <div class="backdrop" onclick="document.getElementById('purge-modal').hidden=true"></div>
+  <div class="card" role="document">
+    <h3 id="purge-title" data-i18n="recycle.purgeTitle">永久删除消息</h3>
+    <div class="danger-note">
+      <p id="purge-count"></p>
+      <p data-i18n="recycle.purgeIrreversible">永久删除不可恢复，包含所有媒体附件；仅影响本系统存档副本，不影响企业微信原始记录。</p>
+    </div>
+    <div class="mt-4">
+      <label class="field-check"><input type="checkbox" id="purge-confirm-check" data-i18n="recycle.purgeConfirmCheck"> 我已确认要永久删除这些消息</label>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="purge-cancel" data-i18n="delete.cancel">取消</button>
+      <button type="button" class="btn btn-danger" id="purge-ok" data-i18n="recycle.purgeAction" disabled>永久删除</button>
+    </div>
+  </div>
+</div>
+
+<script src="/web/static/product-analytics.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/recycle-bin.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

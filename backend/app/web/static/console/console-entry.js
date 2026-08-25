@@ -105,6 +105,10 @@ function selectModeWithTracking(m){
 function setMode(m){
   mode=m; selEntityId=null; selConvId=null; selEntityName=null; selConvName=null;
   if(typeof updateConversationExportButton==='function')updateConversationExportButton();
+  // RND-363: a scope/mode switch clears the delete selection and re-evaluates
+  // whether the delete surface may be shown for the new scope.
+  if(typeof clearDeleteSelection==='function')clearDeleteSelection();
+  if(typeof updateDeleteModeButton==='function')updateDeleteModeButton();
   lastConvItems=null;
   timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.getElementById('tab-staff').classList.toggle('active',m==='staff');

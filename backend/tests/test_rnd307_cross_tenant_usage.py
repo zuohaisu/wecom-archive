@@ -18,7 +18,7 @@ from app.db.session import get_db
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT 1, lifecycle_status TEXT NOT NULL DEFAULT 'active',
+    is_active BOOLEAN NOT NULL DEFAULT 1, deletion_locked INTEGER NOT NULL DEFAULT 0, lifecycle_status TEXT NOT NULL DEFAULT 'active',
     lifecycle_revision INTEGER NOT NULL DEFAULT 1, frozen_at DATETIME,
     suspended_at DATETIME, suspension_reason TEXT,
     suspended_by_platform_admin_id TEXT, suspension_previous_status TEXT,
@@ -37,7 +37,7 @@ CREATE TABLE archive_messages (
     decrypt_status TEXT NOT NULL DEFAULT 'pending', decrypted_payload TEXT,
     structured_content TEXT, content_text TEXT, msgtype TEXT, sender TEXT,
     roomid TEXT, msgtime INTEGER, tolist TEXT, sdkfileid TEXT,
-    is_revoked BOOLEAN NOT NULL DEFAULT 0, revoked_at DATETIME, tenant_id TEXT,
+    is_revoked BOOLEAN NOT NULL DEFAULT 0, revoked_at DATETIME, deleted_at DATETIME, deleted_by_admin_user_id TEXT, delete_reason TEXT, purge_after DATETIME, restored_at DATETIME, restored_by_admin_user_id TEXT, deletion_batch_id TEXT, tenant_id TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE media_files (

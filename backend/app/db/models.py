@@ -74,6 +74,11 @@ class Tenant(Base):
     suspended_by_platform_admin_id = Column(String(36), nullable=True)
     suspension_previous_status = Column(String(16), nullable=True)
     onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
+    # Compliance/legal hold for archived-message lifecycle writes. It does
+    # not affect review or export reads; it fails deletion and purge closed.
+    deletion_locked = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -1982,6 +1987,7 @@ class ArchiveMessage(Base):
         # docstring for why a composite beats intersecting single-column
         # indexes here.
         Index("ix_archive_messages_tenant_msgtime_id", "tenant_id", "msgtime", "id"),
+        Index("ix_archive_messages_tenant_deleted_at", "tenant_id", "deleted_at"),
         Index("ix_archive_messages_tenant_roomid", "tenant_id", "roomid"),
         Index(
             "ix_archive_messages_tenant_decrypt_revoked",
@@ -2030,6 +2036,16 @@ class ArchiveMessage(Base):
     # app.revoke_reconciliation module docstring.
     is_revoked = Column(Boolean, nullable=False, server_default=text("false"))
     revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    # RND-362 soft-delete tombstone. Re-sync deliberately preserves these
+    # fields because the row's tenant-scoped stable msgid remains unique.
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by_admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=True)
+    delete_reason = Column(String(200), nullable=True)
+    purge_after = Column(DateTime(timezone=True), nullable=True)
+    restored_at = Column(DateTime(timezone=True), nullable=True)
+    restored_by_admin_user_id = Column(String(36), ForeignKey("admin_users.id"), nullable=True)
+    deletion_batch_id = Column(String(36), nullable=True, index=True)
 
     tenant_id = Column(
         String(36), ForeignKey("tenants.id"), nullable=True, index=True
@@ -2256,6 +2272,122 @@ class MediaQuotaBlock(Base):
     observed_bytes = Column(BigInteger, nullable=False)
     reason = Column(String(32), nullable=False)
     blocked_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class MessageCleanupPreview(Base):
+    """Server-side impact-preview snapshot for one cleanup filter (RND-370).
+
+    The preview API stores the matched count and filter snapshot under a
+    short-lived, unguessable version id. Task creation requires this
+    version and rejects a filter/count mismatch or an expired preview, so
+    the operator confirms exactly what was previewed.
+    """
+
+    __tablename__ = "message_cleanup_previews"
+    __table_args__ = (Index("ix_message_cleanup_previews_expires_at", "expires_at"),)
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    matched = Column(Integer, nullable=False)
+    filter_snapshot = Column(JSONB, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class MessageCleanupTask(Base):
+    """One tenant-scoped asynchronous bulk cleanup task (RND-370).
+
+    The task stores the server-validated filter snapshot (never free SQL),
+    a preview-version nonce used to bind the impact preview to the audit,
+    and progressive counts updated by the background worker
+     (scripts/
+    process_message_cleanup_once.py). Status transitions:
+
+      queued -> running -> partial/completed/failed | canceled
+
+    ``revision`` is an optimistic-lock guard so concurrent worker runs and
+    cancel requests never overwrite each other's progress.
+    """
+
+    __tablename__ = "message_cleanup_tasks"
+    __table_args__ = (
+        Index("ix_message_cleanup_tasks_tenant_status", "tenant_id", "status"),
+        Index("ix_message_cleanup_tasks_created_at", "tenant_id", "created_at"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'partial', 'completed', 'failed', 'canceled')",
+            name="ck_message_cleanup_tasks_status",
+        ),
+        CheckConstraint("revision >= 1", name="ck_message_cleanup_tasks_revision"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    created_by_admin_user_id = Column(
+        String(36), ForeignKey("admin_users.id"), nullable=False
+    )
+    filter_snapshot = Column(JSONB, nullable=False)
+    filter_summary = Column(Text, nullable=False)
+    preview_version = Column(String(36), nullable=False)
+    preview_matched = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, default="queued")
+    total_matched = Column(Integer, nullable=False, default=0)
+    succeeded = Column(Integer, nullable=False, default=0)
+    skipped = Column(Integer, nullable=False, default=0)
+    failed = Column(Integer, nullable=False, default=0)
+    locked = Column(Integer, nullable=False, default=0)
+    moved_bytes = Column(BigInteger, nullable=False, default=0)
+    releasable_bytes = Column(BigInteger, nullable=False, default=0)
+    failure_summary = Column(JSONB, nullable=True)
+    error_message = Column(Text, nullable=True)
+    revision = Column(Integer, nullable=False, default=1)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    canceled_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class MediaPurgeRetry(Base):
+    """Durable retry state for a media object whose permanent purge failed.
+
+    RND-364: when object-storage deletion fails, the MediaFile row is kept
+    (never deleted out from under a still-referenced object) and a retry row
+    is recorded. The 30-day purge worker retries these until the object is
+    gone, then removes both the MediaFile row and this retry row.
+    """
+
+    __tablename__ = "media_purge_retries"
+    __table_args__ = (
+        Index("ix_media_purge_retries_next_retry_at", "next_retry_at"),
+        Index("ix_media_purge_retries_tenant", "tenant_id"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    media_file_id = Column(Integer, nullable=False)
+    tenant_id = Column(String(36), nullable=False)
+    storage_backend = Column(String(32), nullable=True)
+    storage_ref = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    next_retry_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,

@@ -93,6 +93,13 @@ class AuditAction:
     PLATFORM_OPERATOR_PASSWORD_CHANGED = "platform.operator.password_changed"
     DECRYPT_COMPLETED = "decrypt.completed"
     RETENTION_MESSAGES_LOCKED = "retention.messages_locked"
+    MESSAGES_SOFT_DELETED = "messages.soft_deleted"
+    MESSAGES_RESTORED = "messages.restored"
+    MESSAGES_PURGED = "messages.purged"
+    MESSAGES_PURGE_MEDIA_FAILED = "messages.purge_media_failed"
+    MESSAGES_CLEANUP_TASK_CREATED = "messages.cleanup_task_created"
+    MESSAGES_CLEANUP_TASK_CANCELED = "messages.cleanup_task_canceled"
+    MESSAGES_CLEANUP_COMPLETED = "messages.cleanup_completed"
 
 
 class AuditObjectType:
@@ -112,6 +119,7 @@ class AuditObjectType:
     REFUND = "refund_order"
     PLATFORM_OPERATOR = "platform_operator"
     PLATFORM_OPERATOR_INVITATION = "platform_operator_invitation"
+    ARCHIVE_MESSAGE = "archive_message"
 
 
 # The catalogue is intentionally application-level: category is computed for
@@ -214,6 +222,13 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     ),
     AuditAction.DECRYPT_COMPLETED: (AuditCategory.SYSTEM, AuditObjectType.KEY_VERSION),
     AuditAction.RETENTION_MESSAGES_LOCKED: (AuditCategory.SYSTEM, AuditObjectType.TENANT),
+    AuditAction.MESSAGES_SOFT_DELETED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_RESTORED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_PURGED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_PURGE_MEDIA_FAILED: (AuditCategory.SYSTEM, AuditObjectType.MEDIA_FILE),
+    AuditAction.MESSAGES_CLEANUP_TASK_CREATED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_CLEANUP_TASK_CANCELED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.MESSAGES_CLEANUP_COMPLETED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
 }
 AUDIT_CATEGORIES = frozenset(
     {

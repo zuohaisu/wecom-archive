@@ -54,6 +54,7 @@ from app.services.avatar_sync import (
     internal_avatar_presentations,
 )
 from app.services.external_contact_identity import external_contact_display_names
+from app.services.message_deletion import active_message_filter
 
 
 def attach_group_chat_display_name(
@@ -606,6 +607,7 @@ def _hydrate_timeline_page_messages(
         .filter(
             ArchiveMessage.id.in_(page_ids),
             ArchiveMessage.tenant_id == tenant_id,
+            active_message_filter(),
         )
         .order_by(func.coalesce(ArchiveMessage.msgtime, 0).asc(), ArchiveMessage.id.asc())
         .all()
@@ -688,6 +690,7 @@ def _fast_timeline_page(
         return _page_from_compact_query(
             db.query(ArchiveMessage.id, func.coalesce(ArchiveMessage.msgtime, 0)).filter(
                 ArchiveMessage.tenant_id == tenant_id,
+                active_message_filter(),
                 ArchiveMessage.roomid == conversation_id,
             ),
             limit,
@@ -709,6 +712,7 @@ def _fast_timeline_page(
         db.query(ArchiveMessage.id)
         .filter(
             ArchiveMessage.tenant_id == tenant_id,
+            active_message_filter(),
             ArchiveMessage.roomid == conversation_id,
         )
         .first()
@@ -722,6 +726,7 @@ def _fast_timeline_page(
     # it from a pair-only SQL predicate.
     has_null_sender_candidate = db.query(ArchiveMessage.id).filter(
         ArchiveMessage.tenant_id == tenant_id,
+        active_message_filter(),
         or_(ArchiveMessage.sender.is_(None), ArchiveMessage.sender == ""),
         or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
         exists().where(
@@ -745,6 +750,7 @@ def _fast_timeline_page(
     )
     filters = [
         ArchiveMessage.tenant_id == tenant_id,
+        active_message_filter(),
         or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
         direct_pair,
     ]

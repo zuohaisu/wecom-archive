@@ -1,0 +1,12 @@
+[Unit]
+Description=WeCom Archive Bulk Message Cleanup Worker Timer
+
+[Timer]
+# Every 10 minutes: bulk cleanup tasks advance a few bounded pages per run
+# so large batches make steady progress without one long blocking job.
+OnCalendar=*:0/10
+Persistent=true
+Unit=wecom-message-cleanup.service
+
+[Install]
+WantedBy=timers.target

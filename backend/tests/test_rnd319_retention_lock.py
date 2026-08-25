@@ -65,6 +65,7 @@ def db() -> Generator[Session, None, None]:
                 sdkfileid TEXT,
                 is_revoked BOOLEAN NOT NULL DEFAULT 0,
                 revoked_at DATETIME,
+                deleted_at DATETIME, deleted_by_admin_user_id TEXT, delete_reason TEXT, purge_after DATETIME, restored_at DATETIME, restored_by_admin_user_id TEXT, deletion_batch_id TEXT,
                 tenant_id TEXT,
                 created_at DATETIME
             );

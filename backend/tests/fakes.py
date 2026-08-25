@@ -250,6 +250,7 @@ CREATE TABLE tenants (
     suspended_by_platform_admin_id TEXT,
     suspension_previous_status TEXT,
     onboarding_completed_at TEXT,
+    deletion_locked INTEGER NOT NULL DEFAULT 0,
     created_at TEXT, updated_at TEXT
 );
 CREATE TABLE billing_plans (
@@ -345,6 +346,13 @@ CREATE TABLE archive_messages (
     sdkfileid TEXT,
     is_revoked INTEGER NOT NULL DEFAULT 0,
     revoked_at TEXT,
+    deleted_at DATETIME,
+    deleted_by_admin_user_id TEXT,
+    delete_reason TEXT,
+    purge_after DATETIME,
+    restored_at DATETIME,
+    restored_by_admin_user_id TEXT,
+    deletion_batch_id TEXT,
     tenant_id TEXT,
     created_at TEXT
 );

@@ -35,6 +35,23 @@ class StorageCapacityOut(BaseModel):
     measured_at: datetime
 
 
+class StorageTrendPointOut(BaseModel):
+    date: str
+    bytes: int
+
+
+class StorageTrendOut(BaseModel):
+    range_days: int
+    series: list[StorageTrendPointOut]
+    measured_points: int
+    avg_daily_growth_bytes: Optional[int]
+    days_until_full: Optional[int]
+    estimate_available: bool
+    quota_bytes: int
+    used_bytes: Optional[int]
+    measured_at: Optional[datetime]
+
+
 class SubscriptionOverviewOut(BaseModel):
     plan_code: Optional[str]
     plan_name: Optional[str]

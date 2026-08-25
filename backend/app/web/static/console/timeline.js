@@ -259,8 +259,16 @@ function timelineRowHtml(m){
   }else if(rcptNames.length){
     rcpt='<div class="tl-rcpt">→ '+esc(rcptNames.join(', '))+'</div>';
   }
+  // RND-363: a leading select checkbox appears only while delete mode is
+  // active. It is a real <input type=checkbox> with an aria-label (never
+  // message content) so screen readers and keyboard users can operate it.
+  var deleteCheck='';
+  if(typeof deleteMode!=='undefined'&&deleteMode){
+    var checked=deleteSelection[m.msgid]?' checked':' ';
+    deleteCheck='<label class="tl-delete-checkbox" aria-hidden="false"><input class="tl-delete-check" type="checkbox" aria-label="'+esc(I18N.t('delete.selectMessage'))+'"'+checked+'onclick="event.stopPropagation();toggleMessageForDelete(&quot;'+esc(m.msgid)+'&quot;)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();event.stopPropagation();toggleMessageForDelete(&quot;'+esc(m.msgid)+'&quot;)}"></label>';
+  }
   return '<div class="'+rowCls+'" data-msgid="'+esc(m.msgid)+'" data-msgsig="'+esc(timelineSignature([m]))+'" onclick="selectMessageForAudit(&quot;'+esc(m.msgid)+'&quot;)">'
-    +'<div class="tl-meta">'+senderAvatar+'<span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
+    +'<div class="tl-meta">'+deleteCheck+senderAvatar+'<span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
     +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+revokedBadge+'</div>'
     +bodyHtml
     +rcpt+auditLine+'</div>';
