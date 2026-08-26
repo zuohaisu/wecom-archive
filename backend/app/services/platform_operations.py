@@ -30,6 +30,7 @@ from app.db.models import (
     MediaFile,
     PaymentEvent,
     PaymentOrder,
+    PaymentRecoveryFinding,
     RefundEvent,
     RefundOrder,
     Subscription,
@@ -586,15 +587,37 @@ def _exception_counts(db: Session, tenant_id: str | None = None) -> dict:
     if tenant_id is not None:
         payment = payment.where(PaymentOrder.tenant_id == tenant_id)
         refund = refund.where(RefundOrder.tenant_id == tenant_id)
+    findings = select(
+        PaymentRecoveryFinding.kind,
+        func.count(PaymentRecoveryFinding.id),
+    ).where(PaymentRecoveryFinding.status == "open")
+    if tenant_id is not None:
+        findings = findings.where(PaymentRecoveryFinding.tenant_id == tenant_id)
     payment = payment.group_by(PaymentOrder.status)
     refund = refund.group_by(RefundOrder.status)
+    findings = findings.group_by(PaymentRecoveryFinding.kind)
     payment_counts = {state: int(count) for state, count in db.execute(payment).all()}
     refund_counts = {state: int(count) for state, count in db.execute(refund).all()}
+    finding_counts = {kind: int(count) for kind, count in db.execute(findings).all()}
     return {
         "payment_activation_pending": payment_counts.get(
             "paid_activation_pending", 0
         ),
         "payment_failed": payment_counts.get("failed", 0),
+        "payment_pending_timeout": finding_counts.get("payment_pending_timeout", 0),
+        "payment_channel_paid_local_pending": finding_counts.get(
+            "payment_channel_paid_local_pending", 0
+        ),
+        "payment_query_failed": finding_counts.get("payment_query_failed", 0),
+        "payment_reconciliation_mismatch": finding_counts.get(
+            "payment_reconciliation_mismatch", 0
+        ),
+        "payment_callback_signature_failure": finding_counts.get(
+            "payment_callback_signature_failure", 0
+        ),
+        "payment_callback_decrypt_failure": finding_counts.get(
+            "payment_callback_decrypt_failure", 0
+        ),
         "refund_pending": sum(
             refund_counts.get(state, 0) for state in _REFUND_PENDING_STATUSES
         ),
@@ -666,6 +689,12 @@ def get_dashboard(db: Session, *, months: int = 12, at: datetime | None = None) 
         reverse=True,
     )[:5]
 
+    recent_payment_findings = db.scalars(
+        select(PaymentRecoveryFinding)
+        .order_by(PaymentRecoveryFinding.last_detected_at.desc())
+        .limit(10)
+    ).all()
+
     return {
         "tenant_counts": {
             "total": len(snapshots),
@@ -697,6 +726,20 @@ def get_dashboard(db: Session, *, months: int = 12, at: datetime | None = None) 
         "revenue": _financial_summary(db, now=now, months=months),
         "manual_financial": _manual_financial_summary(db),
         "exceptions": _exception_counts(db),
+        "recent_payment_findings": [
+            {
+                "finding_id": row.id,
+                "tenant_id": row.tenant_id,
+                "payment_order_id": row.payment_order_id,
+                "kind": row.kind,
+                "severity": row.severity,
+                "status": row.status,
+                "occurrence_count": row.occurrence_count,
+                "first_detected_at": _as_utc(row.first_detected_at),
+                "last_detected_at": _as_utc(row.last_detected_at),
+            }
+            for row in recent_payment_findings
+        ],
         "recent_tenants": [
             {
                 "tenant_id": snapshot.tenant.id,
@@ -947,6 +990,10 @@ def _tenant_commercial_evidence(db: Session, tenant_id: str) -> dict:
                 latest_event.provider_event_id if latest_event else None
             ),
             "failure_code": order.failure_code,
+            "recovery_state": order.recovery_state,
+            "recovery_reason_code": order.recovery_reason_code,
+            "last_query_at": _as_utc(order.last_query_at) if order.last_query_at else None,
+            "next_query_at": _as_utc(order.next_query_at) if order.next_query_at else None,
             "created_at": _as_utc(order.created_at),
             "paid_at": _as_utc(order.paid_at) if order.paid_at else None,
         }
@@ -959,6 +1006,23 @@ def _tenant_commercial_evidence(db: Session, tenant_id: str) -> dict:
                     "status": order.status,
                     "failure_code": order.failure_code,
                     "occurred_at": _as_utc(order.updated_at or order.created_at),
+                }
+            )
+
+    for finding in db.scalars(
+        select(PaymentRecoveryFinding)
+        .where(PaymentRecoveryFinding.tenant_id == tenant_id)
+        .order_by(PaymentRecoveryFinding.last_detected_at.desc())
+        .limit(25)
+    ).all():
+        if finding.status == "open":
+            exceptions.append(
+                {
+                    "kind": "payment_recovery",
+                    "subject_id": finding.id,
+                    "status": finding.status,
+                    "failure_code": finding.kind,
+                    "occurred_at": _as_utc(finding.last_detected_at),
                 }
             )
 

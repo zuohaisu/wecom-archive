@@ -7,7 +7,7 @@
   var PC = window.PC;
 
   function tenantExceptionCount(item) {
-    return item.payment_activation_pending + item.payment_failed + item.refund_abnormal + item.refund_closed + item.refund_manual_recovery;
+    return item.payment_activation_pending + item.payment_failed + item.payment_pending_timeout + item.payment_channel_paid_local_pending + item.payment_query_failed + item.payment_reconciliation_mismatch + item.payment_callback_signature_failure + item.payment_callback_decrypt_failure + item.refund_abnormal + item.refund_closed + item.refund_manual_recovery;
   }
 
   function renderDashboard(data) {
@@ -26,7 +26,10 @@
     PC.el('net-revenue').textContent = '渠道净收入 ' + PC.money(revenue.net_revenue_cents);
     PC.el('manual-financial').textContent = '手工收 / 退 ' + PC.money(manual.receipt_cents) + ' / ' + PC.money(manual.refund_cents) + '（合同定制，不计入渠道）';
     PC.el('exception-total').textContent = PC.number(exceptionTotal);
-    PC.el('exception-states').textContent = '支付/激活 ' + PC.number(exceptions.payment_activation_pending + exceptions.payment_failed) + ' · 退款 ' + PC.number(exceptions.refund_abnormal + exceptions.refund_closed + exceptions.refund_manual_recovery) + ' · 退款处理中 ' + PC.number(exceptions.refund_pending);
+    PC.el('exception-states').textContent = '支付/激活 ' + PC.number(exceptions.payment_activation_pending + exceptions.payment_failed) + ' · 恢复/对账 ' + PC.number(exceptions.payment_pending_timeout + exceptions.payment_channel_paid_local_pending + exceptions.payment_query_failed + exceptions.payment_reconciliation_mismatch + exceptions.payment_callback_signature_failure + exceptions.payment_callback_decrypt_failure) + ' · 退款 ' + PC.number(exceptions.refund_abnormal + exceptions.refund_closed + exceptions.refund_manual_recovery) + ' · 退款处理中 ' + PC.number(exceptions.refund_pending);
+    PC.list(PC.el('payment-recovery-findings'), data.recent_payment_findings, function (item) {
+      return PC.textPair(item.kind + ' · ' + item.severity + ' · ' + item.status, '次数 ' + PC.number(item.occurrence_count) + ' · ' + PC.date(item.last_detected_at));
+    }, '暂无支付恢复或对账异常');
     PC.list(PC.el('subscriptions'), data.subscription_distribution, function (item) {
       return PC.textPair((item.plan_name || '未订阅') + ' · ' + item.status, PC.number(item.tenant_count) + ' 个租户');
     }, '暂无订阅数据');

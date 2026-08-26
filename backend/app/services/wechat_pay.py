@@ -63,6 +63,14 @@ class WechatPayVerificationError(WechatPayProtocolError):
     pass
 
 
+class WechatPaySignatureVerificationError(WechatPayVerificationError):
+    """A callback/API signature could not be verified."""
+
+
+class WechatPayDecryptError(WechatPayVerificationError):
+    """A signed callback resource could not be decrypted."""
+
+
 @dataclass(frozen=True)
 class WechatPayConfig:
     app_id: str
@@ -86,7 +94,34 @@ def _enabled(raw: str) -> bool:
 
 
 def wechat_pay_is_enabled(settings: WechatPaySettings | None = None) -> bool:
+    """Whether the server accepts *new* WeChat payment creation.
+
+    This is deliberately not a provider-credential gate. Existing callbacks,
+    queries, recovery, reconciliation and refund recovery still need a valid
+    provider while new payment acceptance is switched off.
+    """
     return _enabled((settings or get_wechat_pay_settings()).wechat_pay_enabled)
+
+
+def _configured_values(source: WechatPaySettings) -> dict[str, str]:
+    return {
+        "WECHAT_PAY_APP_ID": source.wechat_pay_app_id.strip(),
+        "WECHAT_PAY_MCH_ID": source.wechat_pay_mch_id.strip(),
+        "WECHAT_PAY_MERCHANT_SERIAL_NO": source.wechat_pay_merchant_serial_no.strip(),
+        "WECHAT_PAY_MERCHANT_PRIVATE_KEY": source.wechat_pay_merchant_private_key.strip(),
+        "WECHAT_PAY_API_V3_KEY": source.wechat_pay_api_v3_key.strip(),
+        "WECHAT_PAY_PUBLIC_KEY_ID": source.wechat_pay_public_key_id.strip(),
+        "WECHAT_PAY_PUBLIC_KEY": source.wechat_pay_public_key.strip(),
+        "WECHAT_PAY_NOTIFY_URL": source.wechat_pay_notify_url.strip(),
+        "WECHAT_PAY_REFUND_NOTIFY_URL": source.wechat_pay_refund_notify_url.strip(),
+    }
+
+
+def wechat_pay_configuration_present(
+    settings: WechatPaySettings | None = None,
+) -> bool:
+    """Whether any payment credential/configuration value is configured."""
+    return any(_configured_values(settings or get_wechat_pay_settings()).values())
 
 
 def _pem(value: str) -> bytes:
@@ -100,19 +135,9 @@ def load_wechat_pay_config(
     settings: WechatPaySettings | None = None,
 ) -> WechatPayConfig:
     source = settings or get_wechat_pay_settings()
-    if not wechat_pay_is_enabled(source):
-        raise WechatPayNotConfiguredError("WeChat Pay is not enabled")
-    values = {
-        "WECHAT_PAY_APP_ID": source.wechat_pay_app_id.strip(),
-        "WECHAT_PAY_MCH_ID": source.wechat_pay_mch_id.strip(),
-        "WECHAT_PAY_MERCHANT_SERIAL_NO": source.wechat_pay_merchant_serial_no.strip(),
-        "WECHAT_PAY_MERCHANT_PRIVATE_KEY": source.wechat_pay_merchant_private_key.strip(),
-        "WECHAT_PAY_API_V3_KEY": source.wechat_pay_api_v3_key.strip(),
-        "WECHAT_PAY_PUBLIC_KEY_ID": source.wechat_pay_public_key_id.strip(),
-        "WECHAT_PAY_PUBLIC_KEY": source.wechat_pay_public_key.strip(),
-        "WECHAT_PAY_NOTIFY_URL": source.wechat_pay_notify_url.strip(),
-        "WECHAT_PAY_REFUND_NOTIFY_URL": source.wechat_pay_refund_notify_url.strip(),
-    }
+    values = _configured_values(source)
+    if not any(values.values()):
+        raise WechatPayNotConfiguredError("WeChat Pay credentials are not configured")
     missing = sorted(name for name, value in values.items() if not value)
     if missing:
         raise WechatPayConfigurationError(
@@ -168,10 +193,23 @@ def load_wechat_pay_config(
     )
 
 
-def validate_wechat_pay_configuration_if_enabled() -> None:
+def validate_wechat_pay_configuration_if_configured() -> None:
+    """Fail closed for enabled or partially configured WeChat Pay.
+
+    A fully blank disabled configuration is valid for a deployment that has
+    never accepted WeChat payments. Once any credential/config value exists,
+    it must be complete even if new payment acceptance is disabled: existing
+    transactions rely on callback/query/recovery availability.
+    """
     settings = get_wechat_pay_settings()
-    if wechat_pay_is_enabled(settings):
+    if wechat_pay_is_enabled(settings) or wechat_pay_configuration_present(settings):
         load_wechat_pay_config(settings)
+
+
+# Compatibility import for older call sites. The semantics intentionally now
+# include disabled-but-configured recovery deployments.
+def validate_wechat_pay_configuration_if_enabled() -> None:
+    validate_wechat_pay_configuration_if_configured()
 
 
 def _utc(value: datetime) -> datetime:
@@ -254,20 +292,20 @@ class WechatPayProvider:
             "wechatpay-signature"
         )
         if serial != self._config.public_key_id:
-            raise WechatPayVerificationError("unknown WeChat Pay public key ID")
+            raise WechatPaySignatureVerificationError("unknown WeChat Pay public key ID")
         if not timestamp_raw or not nonce or not signature_raw:
-            raise WechatPayVerificationError("missing WeChat Pay signature headers")
+            raise WechatPaySignatureVerificationError("missing WeChat Pay signature headers")
         try:
             timestamp = int(timestamp_raw)
         except ValueError as error:
-            raise WechatPayVerificationError("invalid WeChat Pay timestamp") from error
+            raise WechatPaySignatureVerificationError("invalid WeChat Pay timestamp") from error
         now_timestamp = int(_utc(self._now()).timestamp())
         if abs(now_timestamp - timestamp) > CALLBACK_TOLERANCE_SECONDS:
-            raise WechatPayVerificationError("stale WeChat Pay signature")
+            raise WechatPaySignatureVerificationError("stale WeChat Pay signature")
         try:
             signature = base64.b64decode(signature_raw, validate=True)
         except (binascii.Error, ValueError) as error:
-            raise WechatPayVerificationError("invalid WeChat Pay signature") from error
+            raise WechatPaySignatureVerificationError("invalid WeChat Pay signature") from error
         message = timestamp_raw.encode() + b"\n" + nonce.encode() + b"\n" + raw_body + b"\n"
         try:
             self._config.public_key.verify(
@@ -277,7 +315,7 @@ class WechatPayProvider:
                 hashes.SHA256(),
             )
         except InvalidSignature as error:
-            raise WechatPayVerificationError("invalid WeChat Pay signature") from error
+            raise WechatPaySignatureVerificationError("invalid WeChat Pay signature") from error
 
     def _request(self, method: str, canonical_url: str, body: str = "") -> bytes:
         headers = {
@@ -421,7 +459,7 @@ class WechatPayProvider:
                 associated_data.encode("utf-8"),
             )
         except Exception as error:
-            raise WechatPayVerificationError("notification decryption failed") from error
+            raise WechatPayDecryptError("notification decryption failed") from error
         data = _json_object(plaintext)
         if data.get("appid") != self.app_id or data.get("mchid") != self.merchant_id:
             raise WechatPayVerificationError("notification merchant identity mismatch")
@@ -662,7 +700,7 @@ class WechatPayProvider:
                 associated_data.encode("utf-8"),
             )
         except Exception as error:
-            raise WechatPayVerificationError(
+            raise WechatPayDecryptError(
                 "refund notification decryption failed"
             ) from error
         data = _json_object(plaintext)

@@ -17,6 +17,7 @@ from app.db.models import (
     BillingNotificationIntent,
     BillingPlan,
     PaymentOrder,
+    PaymentRecoveryFinding,
     PlatformAdmin,
     RefundOrder,
     Subscription,
@@ -53,6 +54,7 @@ def factory():
             Subscription.__table__,
             AdminUser.__table__,
             PaymentOrder.__table__,
+            PaymentRecoveryFinding.__table__,
             RefundOrder.__table__,
             BillingNotificationIntent.__table__,
             BillingNotificationAttempt.__table__,
@@ -398,6 +400,44 @@ def test_payment_and_refund_anomaly_intents_cancel_when_state_changes(factory) -
             kind="refund_abnormal", status="pending"
         ).count() == 1
         assert db.query(BillingNotificationIntent).filter_by(status="canceled").count() == 2
+
+
+def test_open_payment_recovery_finding_creates_and_cancels_global_operations_intent(factory) -> None:
+    with factory() as db:
+        db.add(
+            PaymentRecoveryFinding(
+                id="finding-rnd390",
+                provider="wechat_pay",
+                tenant_id=None,
+                payment_order_id=None,
+                kind="payment_callback_signature_failure",
+                severity="critical",
+                status="open",
+                dedupe_key="f" * 64,
+                occurrence_count=1,
+                first_detected_at=NOW,
+                last_detected_at=NOW,
+            )
+        )
+        db.commit()
+
+        assert plan_billing_notification_intents(db, at=NOW) == (1, 0)
+        db.commit()
+        intent = db.scalar(
+            select(BillingNotificationIntent).where(
+                BillingNotificationIntent.subject_type == "payment_recovery_finding"
+            )
+        )
+        assert intent is not None
+        assert intent.tenant_id is None
+        assert intent.audience == "operations"
+
+        db.get(PaymentRecoveryFinding, "finding-rnd390").status = "resolved"
+        db.commit()
+        assert plan_billing_notification_intents(db, at=NOW + timedelta(minutes=5)) == (0, 1)
+        db.commit()
+        db.refresh(intent)
+        assert intent.status == "canceled"
 
 
 def test_frozen_notice_waits_for_authoritative_tenant_projection(factory, monkeypatch) -> None:

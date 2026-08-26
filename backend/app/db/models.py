@@ -456,7 +456,21 @@ class PaymentOrder(Base):
             "status != 'failed' OR failure_code IS NOT NULL",
             name="ck_payment_orders_failed_code",
         ),
+        CheckConstraint(
+            "recovery_state IN ('automatic', 'manual_recovery', 'not_required')",
+            name="ck_payment_orders_recovery_state",
+        ),
+        CheckConstraint(
+            "query_attempt_count >= 0",
+            name="ck_payment_orders_query_attempt_count",
+        ),
         Index("ix_payment_orders_tenant_created", "tenant_id", "created_at"),
+        Index(
+            "ix_payment_orders_recovery_due",
+            "provider",
+            "recovery_state",
+            "next_query_at",
+        ),
     )
 
     id = Column(String(36), primary_key=True)
@@ -477,6 +491,19 @@ class PaymentOrder(Base):
         String(36), ForeignKey("subscription_activations.id"), nullable=True
     )
     failure_code = Column(String(32), nullable=True)
+    # RND-390 recovery control-plane state. These fields never replace the
+    # provider-confirmed payment status or subscription activation evidence.
+    recovery_state = Column(
+        String(32), nullable=False, server_default=text("'automatic'")
+    )
+    recovery_reason_code = Column(String(64), nullable=True)
+    query_attempt_count = Column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    last_query_at = Column(DateTime(timezone=True), nullable=True)
+    next_query_at = Column(DateTime(timezone=True), nullable=True)
+    recovery_lease_until = Column(DateTime(timezone=True), nullable=True)
+    last_reconciled_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -565,6 +592,70 @@ class PaymentEvent(Base):
     occurred_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PaymentRecoveryFinding(Base):
+    """Sanitized operational finding, never a second payment ledger."""
+
+    __tablename__ = "payment_recovery_findings"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_payment_recovery_findings_dedupe"),
+        CheckConstraint(
+            "kind IN ('payment_pending_timeout', "
+            "'payment_channel_paid_local_pending', "
+            "'payment_activation_pending', 'payment_query_failed', "
+            "'payment_reconciliation_mismatch', "
+            "'payment_callback_signature_failure', "
+            "'payment_callback_decrypt_failure')",
+            name="ck_payment_recovery_findings_kind",
+        ),
+        CheckConstraint(
+            "severity IN ('info', 'warning', 'critical')",
+            name="ck_payment_recovery_findings_severity",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'resolved')",
+            name="ck_payment_recovery_findings_status",
+        ),
+        CheckConstraint(
+            "occurrence_count >= 1",
+            name="ck_payment_recovery_findings_occurrence_count",
+        ),
+        Index(
+            "ix_payment_recovery_findings_status_last_detected",
+            "status",
+            "last_detected_at",
+        ),
+        Index(
+            "ix_payment_recovery_findings_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    provider = Column(String(32), nullable=False)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=True)
+    payment_order_id = Column(
+        String(36), ForeignKey("payment_orders.id"), nullable=True
+    )
+    kind = Column(String(64), nullable=False)
+    severity = Column(String(16), nullable=False)
+    status = Column(String(16), nullable=False, server_default=text("'open'"))
+    dedupe_key = Column(String(64), nullable=False)
+    occurrence_count = Column(Integer, nullable=False, server_default=text("1"))
+    first_detected_at = Column(DateTime(timezone=True), nullable=False)
+    last_detected_at = Column(DateTime(timezone=True), nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -764,12 +855,12 @@ class BillingNotificationIntent(Base):
     __tablename__ = "billing_notification_intents"
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id",
             "dedupe_key",
-            name="uq_billing_notification_intents_tenant_dedupe",
+            name="uq_billing_notification_intents_dedupe",
         ),
         CheckConstraint(
-            "subject_type IN ('subscription', 'payment_order', 'refund_order')",
+            "subject_type IN ('subscription', 'payment_order', 'refund_order', "
+            "'payment_recovery_finding')",
             name="ck_billing_notification_intents_subject_type",
         ),
         CheckConstraint(
@@ -803,7 +894,9 @@ class BillingNotificationIntent(Base):
     )
 
     id = Column(String(36), primary_key=True)
-    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    # Global payment callback findings have no trusted tenant identity. They
+    # remain operations-only and use this nullable foreign key deliberately.
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=True)
     subject_type = Column(String(32), nullable=False)
     subject_id = Column(String(36), nullable=False)
     kind = Column(String(64), nullable=False)
@@ -865,7 +958,7 @@ class BillingNotificationAttempt(Base):
     intent_id = Column(
         String(36), ForeignKey("billing_notification_intents.id"), nullable=False
     )
-    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=True)
     attempt_no = Column(Integer, nullable=False)
     outcome = Column(String(16), nullable=False)
     failure_code = Column(String(64), nullable=True)

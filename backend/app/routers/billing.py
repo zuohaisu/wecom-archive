@@ -67,6 +67,11 @@ from app.services.payment_orders import (
     query_and_reconcile_order,
 )
 from app.services.payment_provider import PaymentProvider
+from app.services.payment_recovery import (
+    FINDING_CALLBACK_DECRYPT_FAILURE,
+    FINDING_CALLBACK_SIGNATURE_FAILURE,
+    record_callback_failure,
+)
 from app.services.refunds import get_latest_refund_for_tenant
 from app.services.storage_capacity import measure_storage_capacity
 from app.services.storage_trend import storage_trend
@@ -75,7 +80,9 @@ from app.services.tenant_activation import spawn_activation_worker
 from app.services.wechat_pay import (
     WECHAT_PAY_PROVIDER,
     WechatPayConfigurationError,
+    WechatPayDecryptError,
     WechatPayProtocolError,
+    WechatPaySignatureVerificationError,
     get_wechat_pay_provider,
     wechat_pay_is_enabled,
 )
@@ -88,13 +95,15 @@ logger = logging.getLogger(__name__)
 
 
 def get_payment_provider() -> PaymentProvider:
-    """Prefer Alipay for new orders while retaining configured WeChat Pay."""
+    """Select only a provider currently accepting new payment creation."""
     try:
         if alipay_is_enabled():
             return get_alipay_provider()
-        return get_wechat_pay_provider()
+        if wechat_pay_is_enabled():
+            return get_wechat_pay_provider()
     except (AlipayConfigurationError, WechatPayConfigurationError) as error:
         raise HTTPException(status_code=503, detail="payment_unavailable") from error
+    raise HTTPException(status_code=503, detail="payment_unavailable")
 
 
 def get_wechat_payment_provider() -> PaymentProvider:
@@ -525,6 +534,26 @@ async def wechat_payment_notification(
         return JSONResponse(
             status_code=500,
             content={"code": "FAIL", "message": "temporary processing failure"},
+        )
+    except WechatPaySignatureVerificationError:
+        try:
+            record_callback_failure(
+                _factory(db), kind=FINDING_CALLBACK_SIGNATURE_FAILURE
+            )
+        except Exception:  # noqa: BLE001 - callback must still fail closed
+            logger.exception("payment callback signature finding write failed")
+        return JSONResponse(
+            status_code=400,
+            content={"code": "FAIL", "message": "invalid notification"},
+        )
+    except WechatPayDecryptError:
+        try:
+            record_callback_failure(_factory(db), kind=FINDING_CALLBACK_DECRYPT_FAILURE)
+        except Exception:  # noqa: BLE001 - callback must still fail closed
+            logger.exception("payment callback decrypt finding write failed")
+        return JSONResponse(
+            status_code=400,
+            content={"code": "FAIL", "message": "invalid notification"},
         )
     except (PaymentOrderNotFoundError, PaymentOrderConflictError, WechatPayProtocolError):
         return JSONResponse(

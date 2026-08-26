@@ -122,11 +122,12 @@
         var doneText = document.createElement('span'); doneText.className = 'muted'; doneText.textContent = '已全额退款'; actions.appendChild(doneText);
       } else if (order.status === 'succeeded') {
         actions.appendChild(PC.actionButton('全额退款', function () { PC.ops.submitRefund(tenantRef(), order, { onDone: load }); }, 'btn-danger'));
-      } else if (order.status === 'paid_activation_pending') {
+      } else if (order.status === 'paid_activation_pending' || order.recovery_state === 'manual_recovery') {
         actions.appendChild(PC.actionButton('查询 / 恢复', function () { PC.ops.queryPayment(tenantRef(), order, { onDone: load }); }));
       }
       var refText = (order.provider_transaction_ref_masked || '—') + ' / ' + (order.provider_order_ref_masked || '—');
-      payBody.appendChild(PC.rowFrom([PC.date(order.created_at), order.plan_name + ' · ' + PC.money(order.amount_cents), order.status + (order.failure_code ? ' · ' + order.failure_code : ''), refText, actions]));
+      var recovery = order.recovery_state && order.recovery_state !== 'not_required' ? ' · 恢复 ' + order.recovery_state + (order.recovery_reason_code ? ' · ' + order.recovery_reason_code : '') : '';
+      payBody.appendChild(PC.rowFrom([PC.date(order.created_at), order.plan_name + ' · ' + PC.money(order.amount_cents), order.status + (order.failure_code ? ' · ' + order.failure_code : '') + recovery, refText, actions]));
     });
 
     var refundBody = PC.el('refund-rows'); PC.clear(refundBody);

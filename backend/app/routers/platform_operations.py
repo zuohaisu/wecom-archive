@@ -43,6 +43,7 @@ from app.services.alipay import (
     get_alipay_provider,
 )
 from app.services.payment_provider import PaymentProvider
+from app.services.payment_recovery import finalize_manual_payment_query
 from app.services.wechat_pay import (
     WECHAT_PAY_PROVIDER,
     WechatPayConfigurationError,
@@ -341,8 +342,12 @@ def query_operations_payment(
                 tenant_id,
                 order_id,
                 now=datetime.now(timezone.utc),
+                force_channel_query=True,
             )
         )
+        if not replay:
+            db.expire_all()
+            finalize_manual_payment_query(db, order_id)
         return PaymentOrderOut(**asdict(summary))
     except platform_operations.PlatformOperationsNotFoundError as error:
         raise _not_found(error) from error
