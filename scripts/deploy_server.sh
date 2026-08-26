@@ -73,9 +73,9 @@
 #              source .venv/bin/activate
 #              pip install -r requirements.txt
 #          '
-#   5. Create backend/.env (DATABASE_URL, etc. — see docs/DEPLOYMENT.md) —
-#      this script sources it to give `alembic` the same DATABASE_URL the
-#      running service uses.
+#   5. Create backend/.env (DATABASE_URL, etc. — see docs/DEPLOYMENT.md).
+#      This script reads only its deployment keys as data; it never executes
+#      the file as shell code.
 #   6. Install the systemd service unit (not included in this repo — out of scope).
 #   7. Ensure the runtime user has passwordless sudo for `systemctl restart wecom-archive-365.service`
 #      as described in the sudoers section above.
@@ -203,7 +203,7 @@ SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 # code rollback.
 INTERNAL_HEALTH="${INTERNAL_HEALTH:-http://127.0.0.1:8035/health/ready}"
 # ARCHIVE_DOMAIN — the public hostname this deployment serves the archive
-# app on. Set the real value via backend/.env (already sourced below) or
+# app on. Set the real value via backend/.env (loaded as data below) or
 # the calling shell's environment; PUBLIC_HEALTH can also be set directly
 # to override independently of ARCHIVE_DOMAIN.
 ARCHIVE_DOMAIN="${ARCHIVE_DOMAIN:-archive.example.com}"
@@ -277,6 +277,73 @@ echo "  Time:   $DEPLOY_TIME"
 # text is outside our control.
 _redact() {
     sed -E 's#://[^:/@[:space:]]+:[^@[:space:]]*@#://REDACTED@#g'
+}
+
+# Load only the deployment keys required by this script, as literal data.
+#
+# backend/.env is application configuration, not a trusted shell script. In
+# particular, a pasted multi-line PEM must never become a command during CD.
+# The application still owns all other settings through its service manager;
+# this deploy path needs only the database URL and public/static destinations.
+# Malformed non-assignment lines are ignored with their line numbers only so
+# neither secrets nor raw configuration values enter the deploy log.
+_load_deploy_environment() {
+    local env_file="$1"
+    local line raw key value
+    local line_no=0
+    local ignored_lines=""
+
+    while IFS= read -r raw || [ -n "$raw" ]; do
+        line_no=$((line_no + 1))
+        line="${raw%$'\r'}"
+        case "$line" in
+            ""|\#*|[[:space:]]\#*)
+                continue
+                ;;
+            [A-Za-z_][A-Za-z0-9_]*=*)
+                key="${line%%=*}"
+                value="${line#*=}"
+                # Support the common single-line quoted dotenv form without
+                # evaluating expansions, command substitutions, or escapes.
+                case "$value" in
+                    \"*\")
+                        value="${value#\"}"
+                        value="${value%\"}"
+                        ;;
+                    \'*\')
+                        value="${value#\'}"
+                        value="${value%\'}"
+                        ;;
+                esac
+                case "$key" in
+                    DATABASE_URL)
+                        DATABASE_URL="$value"
+                        export DATABASE_URL
+                        ;;
+                    ARCHIVE_DOMAIN)
+                        ARCHIVE_DOMAIN="$value"
+                        export ARCHIVE_DOMAIN
+                        ;;
+                    PUBLIC_HEALTH)
+                        PUBLIC_HEALTH="$value"
+                        export PUBLIC_HEALTH
+                        ;;
+                    STATIC_SITE_DIR_NAME)
+                        STATIC_SITE_DIR_NAME="$value"
+                        export STATIC_SITE_DIR_NAME
+                        ;;
+                esac
+                ;;
+            *)
+                ignored_lines="${ignored_lines}${ignored_lines:+, }${line_no}"
+                ;;
+        esac
+    done < "$env_file"
+
+    if [ -n "$ignored_lines" ]; then
+        echo "WARN: ignored non-KEY=value configuration line(s) in $env_file at line(s): $ignored_lines." >&2
+        printf '%s\n' '  Encode PEM line breaks as literal \n characters in one KEY=value line; no configuration content was executed.' >&2
+    fi
 }
 
 _git() { "$GIT_BIN" "$@"; }
@@ -694,20 +761,17 @@ fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
-# Load DATABASE_URL (and any other deployment configuration) into this shell
-# so `alembic upgrade head` below runs against the SAME database the systemd
-# service uses — never echoed, never included in any log line.  Production
-# retains the checkout-local .env default; RND-392 passes an operator-managed
-# external file through DEPLOY_ENV_FILE.
+# Load only deployment-specific values as literal data so `alembic upgrade
+# head` below runs against the SAME database the systemd service uses. Never
+# source backend/.env: it may contain private keys and must not execute code.
+# Production retains the checkout-local .env default; RND-392 passes an
+# operator-managed external file through DEPLOY_ENV_FILE.
 DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$PWD/.env}"
 if [ -f "$DEPLOY_ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$DEPLOY_ENV_FILE"
-    set +a
+    _load_deploy_environment "$DEPLOY_ENV_FILE"
     # PUBLIC_HEALTH was not defaulted at the top of this script (see config
     # section) because it depends on ARCHIVE_DOMAIN which may be set in .env.
-    # Default it now that .env has been sourced.
+    # Default it now that deployment values have been loaded.
     PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://${ARCHIVE_DOMAIN}/health}"
 else
     echo "ERROR: deployment configuration file not found — required to supply DATABASE_URL for Alembic." >&2

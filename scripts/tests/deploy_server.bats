@@ -264,6 +264,20 @@ EOF
 	assert_output_not_contains "external-config-sentinel"
 }
 
+@test "configuration is parsed as data and never executes a malformed PEM continuation" {
+	local marker="$TEST_TMPDIR/env-command-must-not-run"
+	cat >>"$DEPLOY_DIR/backend/.env" <<EOF
+WECHAT_PAY_MERCHANT_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----
+touch "$marker"
+EOF
+
+	run run_deploy
+	[ "$status" -eq 0 ]
+	[ ! -e "$marker" ]
+	assert_output_contains "ignored non-KEY=value configuration line(s)"
+	assert_output_not_contains "env-command-must-not-run"
+}
+
 @test "QA-04: a fully successful deploy records the new commit as last-known-good" {
 	run run_deploy
 	[ "$status" -eq 0 ]

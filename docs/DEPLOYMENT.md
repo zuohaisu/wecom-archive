@@ -94,6 +94,12 @@ for the per-row storage model and rollback behavior.
 
 The current source of truth is [../.env.example](../.env.example).
 
+Deployment configuration is parsed as data, never sourced as shell code. Keep one
+`KEY=value` assignment per line; encode PEM line breaks as literal `\n` characters.
+Do not paste raw multi-line PEM blocks into `.env`: CD ignores their continuation
+lines to prevent secret-bearing configuration from being executed as shell commands,
+and the application will fail closed if an enabled credential is incomplete.
+
 Minimum local app bring-up:
 
 - `DATABASE_URL`
