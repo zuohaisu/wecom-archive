@@ -32,6 +32,7 @@ from app.db.models import (
     MediaFile,
     PaymentEvent,
     PaymentOrder,
+    PaymentRecoveryFinding,
     PlatformAdmin,
     RefundEvent,
     RefundOrder,
@@ -106,6 +107,7 @@ def _tables():
         ArchiveMessage.__table__,
         MediaFile.__table__,
         PaymentOrder.__table__,
+        PaymentRecoveryFinding.__table__,
         PaymentEvent.__table__,
         SubscriptionTermGrant.__table__,
         RefundOrder.__table__,
@@ -311,7 +313,24 @@ def operations_client() -> Generator[tuple[TestClient, sessionmaker], None, None
 def test_operations_dashboard_is_platform_only_and_contains_only_summary_metrics(
     operations_client: tuple[TestClient, sessionmaker],
 ) -> None:
-    client, _factory = operations_client
+    client, factory = operations_client
+    with factory() as db:
+        db.add(
+            PaymentRecoveryFinding(
+                id="platform-finding-rnd390",
+                provider="wechat_pay",
+                tenant_id=None,
+                payment_order_id=None,
+                kind="payment_callback_signature_failure",
+                severity="critical",
+                status="open",
+                dedupe_key="d" * 64,
+                occurrence_count=2,
+                first_detected_at=NOW,
+                last_detected_at=NOW,
+            )
+        )
+        db.commit()
 
     client.cookies.set("session_id", "tenant-owner-session-must-not-grant-platform-access")
     assert client.get("/api/platform/operations/dashboard").status_code == 401
@@ -349,6 +368,20 @@ def test_operations_dashboard_is_platform_only_and_contains_only_summary_metrics
         "net_cents": -500,
     }
     assert body["exceptions"]["payment_activation_pending"] == 1
+    assert body["exceptions"]["payment_callback_signature_failure"] == 1
+    assert body["recent_payment_findings"] == [
+        {
+            "finding_id": "platform-finding-rnd390",
+            "tenant_id": None,
+            "payment_order_id": None,
+            "kind": "payment_callback_signature_failure",
+            "severity": "critical",
+            "status": "open",
+            "occurrence_count": 2,
+            "first_detected_at": NOW.isoformat().replace("+00:00", "Z"),
+            "last_detected_at": NOW.isoformat().replace("+00:00", "Z"),
+        }
+    ]
     assert body["storage_quota_risks"][0]["tenant_id"] == "tenant-active"
     assert "must never appear in platform operations output" not in response.text
     assert "provider_transaction_id" not in response.text

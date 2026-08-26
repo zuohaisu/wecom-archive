@@ -1,0 +1,11 @@
+[Unit]
+Description=WeCom Archive WeChat Payment T+1 Reconciliation Timer
+
+[Timer]
+# Payment facts and daily boundaries are UTC-authoritative.
+OnCalendar=*-*-* 02:30:00 UTC
+Persistent=true
+Unit=wecom-payment-reconciliation.service
+
+[Install]
+WantedBy=timers.target

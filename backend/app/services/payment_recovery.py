@@ -82,6 +82,13 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _stored_utc(value: datetime) -> datetime:
+    """Normalize a persisted UTC value across PostgreSQL and SQLite tests."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _hash(*parts: object) -> str:
     return hashlib.sha256(
         "\x1f".join(str(part) for part in parts).encode("utf-8")
@@ -369,7 +376,7 @@ def _finish_failure(
             pass
         if (
             order.status == "pending"
-            and at >= _utc(order.expires_at) + PENDING_TIMEOUT_GRACE
+            and at >= _stored_utc(order.expires_at) + PENDING_TIMEOUT_GRACE
         ):
             _open_finding(
                 db,
