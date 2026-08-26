@@ -23,6 +23,7 @@ from app.db.models import (
     BillingNotificationAttempt,
     BillingNotificationIntent,
     PaymentOrder,
+    PaymentRecoveryFinding,
     PlatformAdmin,
     RefundOrder,
     Subscription,
@@ -45,7 +46,17 @@ _SUBSCRIPTION_KINDS = frozenset(
         "tenant_frozen",
     }
 )
-_PAYMENT_KINDS = frozenset({"payment_activation_pending"})
+_PAYMENT_KINDS = frozenset(
+    {
+        "payment_activation_pending",
+        "payment_pending_timeout",
+        "payment_channel_paid_local_pending",
+        "payment_query_failed",
+        "payment_reconciliation_mismatch",
+        "payment_callback_signature_failure",
+        "payment_callback_decrypt_failure",
+    }
+)
 _REFUND_KINDS = frozenset(
     {
         "refund_processing_timeout",
@@ -69,7 +80,7 @@ class BillingNotificationRunSummary:
 
 @dataclass(frozen=True)
 class _PlannedEvent:
-    tenant_id: str
+    tenant_id: str | None
     subject_type: str
     subject_id: str
     kind: str
@@ -184,6 +195,31 @@ def _payment_events(db: Session) -> list[_PlannedEvent]:
     ]
 
 
+def _payment_recovery_finding_events(db: Session) -> list[_PlannedEvent]:
+    """Open findings are the source of operations-only payment alerts.
+
+    Global callback cryptographic failures intentionally have no tenant id;
+    the outbox schema supports this only for the operations audience.
+    """
+    rows = db.scalars(
+        select(PaymentRecoveryFinding).where(PaymentRecoveryFinding.status == "open")
+    ).all()
+    return [
+        _PlannedEvent(
+            tenant_id=row.tenant_id,
+            subject_type="payment_recovery_finding",
+            subject_id=row.id,
+            kind=row.kind,
+            audience="operations",
+            context_key=_hash("payment_recovery_finding", row.id),
+            source_revision=None,
+            effective_at=_utc(row.first_detected_at),
+            scheduled_at=_utc(row.first_detected_at),
+        )
+        for row in rows
+    ]
+
+
 def _refund_events(db: Session) -> list[_PlannedEvent]:
     rows = db.scalars(
         select(RefundOrder).where(
@@ -226,7 +262,6 @@ def _ensure_intent(db: Session, event: _PlannedEvent) -> bool:
     dedupe_key = _event_dedupe(event)
     existing = db.scalar(
         select(BillingNotificationIntent.id).where(
-            BillingNotificationIntent.tenant_id == event.tenant_id,
             BillingNotificationIntent.dedupe_key == dedupe_key,
         )
     )
@@ -288,7 +323,7 @@ def _cancel_obsolete_subscription_intents(
 
 def _cancel_resolved_anomaly_intents(
     db: Session,
-    desired_dedupe_keys: set[tuple[str, str]],
+    desired_dedupe_keys: set[str],
     *,
     now: datetime,
 ) -> int:
@@ -300,7 +335,7 @@ def _cancel_resolved_anomaly_intents(
     ).all()
     canceled = 0
     for intent in rows:
-        if (intent.tenant_id, intent.dedupe_key) not in desired_dedupe_keys:
+        if intent.dedupe_key not in desired_dedupe_keys:
             intent.status = "canceled"
             intent.cancellation_code = "anomaly_resolved"
             intent.canceled_at = now
@@ -321,15 +356,17 @@ def plan_billing_notification_intents(
         for subscription in subscriptions
         for event in _subscription_events(subscription, now=checked_at)
     ]
-    anomaly_events = _payment_events(db) + _refund_events(db)
+    anomaly_events = (
+        _payment_events(db)
+        + _payment_recovery_finding_events(db)
+        + _refund_events(db)
+    )
     events.extend(anomaly_events)
     scheduled = sum(1 for event in events if _ensure_intent(db, event))
     canceled = _cancel_obsolete_subscription_intents(
         db, subscriptions, now=checked_at
     )
-    desired_anomalies = {
-        (event.tenant_id, _event_dedupe(event)) for event in anomaly_events
-    }
+    desired_anomalies = {_event_dedupe(event) for event in anomaly_events}
     canceled += _cancel_resolved_anomaly_intents(
         db, desired_anomalies, now=checked_at
     )
@@ -405,6 +442,9 @@ def _applicability(
             and payment.status == "paid_activation_pending"
             else "cancel"
         )
+    if intent.subject_type == "payment_recovery_finding":
+        finding = db.get(PaymentRecoveryFinding, intent.subject_id)
+        return "applicable" if finding is not None and finding.status == "open" else "cancel"
     refund = db.get(RefundOrder, intent.subject_id)
     expected = {
         "refund_processing_timeout": "processing",

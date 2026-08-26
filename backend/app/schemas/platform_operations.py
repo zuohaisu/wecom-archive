@@ -56,6 +56,12 @@ class ManualFinancialSummaryOut(BaseModel):
 class CommercialExceptionCountsOut(BaseModel):
     payment_activation_pending: int
     payment_failed: int
+    payment_pending_timeout: int
+    payment_channel_paid_local_pending: int
+    payment_query_failed: int
+    payment_reconciliation_mismatch: int
+    payment_callback_signature_failure: int
+    payment_callback_decrypt_failure: int
     refund_pending: int
     refund_abnormal: int
     refund_closed: int
@@ -86,6 +92,18 @@ class StorageQuotaRiskOut(BaseModel):
     state: Literal["near_quota", "at_quota", "over_quota"]
 
 
+class PaymentRecoveryFindingOut(BaseModel):
+    finding_id: str
+    tenant_id: Optional[str]
+    payment_order_id: Optional[str]
+    kind: str
+    severity: Literal["info", "warning", "critical"]
+    status: Literal["open", "resolved"]
+    occurrence_count: int
+    first_detected_at: datetime
+    last_detected_at: datetime
+
+
 class PlatformOperationsDashboardOut(BaseModel):
     tenant_counts: TenantLifecycleCountsOut
     account_counts: AccountCountsOut
@@ -94,6 +112,7 @@ class PlatformOperationsDashboardOut(BaseModel):
     revenue: RevenueOut
     manual_financial: ManualFinancialSummaryOut
     exceptions: CommercialExceptionCountsOut
+    recent_payment_findings: list[PaymentRecoveryFindingOut]
     recent_tenants: list[RecentTenantOut]
     recently_active_tenants: list[RecentTenantOut]
     storage_quota_risks: list[StorageQuotaRiskOut]
@@ -173,6 +192,10 @@ class PlatformPaymentOrderOut(BaseModel):
     provider_transaction_ref_masked: Optional[str]
     latest_event_id_masked: Optional[str]
     failure_code: Optional[str]
+    recovery_state: str
+    recovery_reason_code: Optional[str]
+    last_query_at: Optional[datetime]
+    next_query_at: Optional[datetime]
     created_at: datetime
     paid_at: Optional[datetime]
 
@@ -204,7 +227,7 @@ class PlatformManualFinancialOut(BaseModel):
 
 
 class CommercialExceptionOut(BaseModel):
-    kind: Literal["payment", "refund", "activation"]
+    kind: Literal["payment", "payment_recovery", "refund", "activation"]
     subject_id: str
     status: str
     failure_code: Optional[str]
