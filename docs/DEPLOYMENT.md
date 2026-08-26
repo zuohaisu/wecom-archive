@@ -33,6 +33,7 @@ Versioned in this repository:
 | Export worker unit/timer | `deploy/systemd/wecom-export-jobs.{service,timer}` | Generate queued ZIPs, retry email delivery, and delete seven-day artifacts every five minutes |
 | Billing notification unit/timer | `deploy/systemd/wecom-billing-notifications.{service,timer}` | Schedule and retry lifecycle, payment-activation and refund-anomaly notices every five minutes |
 | Billing lifecycle unit/timer | `deploy/systemd/wecom-billing-lifecycle.{service,timer}` | Advance grace/expired/frozen projections for commercial tenants (row-locked, idempotent, failure-isolated) every five minutes (RND-402) |
+| Payment recovery/reconciliation unit/timers | `deploy/systemd/wecom-payment-{recovery,reconciliation}.{service,timer}` | Bounded recovery every five minutes and T+1 reconciliation at 02:30 UTC; neither unit enables new payment creation (RND-390) |
 | AI KB reindex unit/timer | `deploy/systemd/wecom-ai-kb-reindex.{service,timer}` | Rebuild the AI support knowledge-base index from `backend/app/ai_kb/manifest.json` hourly (`:15`); no-op if `AI_SUPPORT_ENABLED` is unset (RND-356) |
 | AI KB eval unit/timer | `deploy/systemd/wecom-ai-kb-eval.{service,timer}` | Daily (05:00) retrieval-quality launch gate against the fixed eval set; records `ai_eval_runs`, exits non-zero on a blocked run (RND-359) |
 | AI KB gap report unit/timer | `deploy/systemd/wecom-ai-kb-gap-report.{service,timer}` | Weekly (Mon 06:00) Markdown candidate-improvement report under `docs/ai/reports/` — never writes Linear (RND-359) |
@@ -288,6 +289,18 @@ sudo cp deploy/systemd/wecom-billing-notifications.{service,timer} /etc/systemd/
 sudo systemctl daemon-reload
 sudo systemctl enable --now wecom-billing-notifications.timer
 sudo systemctl status wecom-billing-notifications.timer --no-pager
+```
+
+Payment recovery and T+1 reconciliation (RND-390; operator action only). These units
+query existing WeChat payment orders; installing them does **not** enable new WeChat
+payment creation. Keep `WECHAT_PAY_ENABLED=false` unless Haisu has separately approved
+the production Go gate, and inject no credentials through this repository, chat, or logs:
+
+```bash
+sudo cp deploy/systemd/wecom-payment-{recovery,reconciliation}.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wecom-payment-recovery.timer wecom-payment-reconciliation.timer
+sudo systemctl status wecom-payment-recovery.timer wecom-payment-reconciliation.timer --no-pager
 ```
 
 Apply Alembic migration `0053` before enabling the timer. Configure a public

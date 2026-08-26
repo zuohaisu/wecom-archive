@@ -61,7 +61,14 @@ def db() -> Session:
                     id INTEGER PRIMARY KEY,
                     sender TEXT,
                     tenant_id TEXT,
-                    msgtime INTEGER
+                    msgtime INTEGER,
+                    deleted_at DATETIME,
+                    deleted_by_admin_user_id TEXT,
+                    delete_reason TEXT,
+                    purge_after DATETIME,
+                    restored_at DATETIME,
+                    restored_by_admin_user_id TEXT,
+                    deletion_batch_id TEXT
                 )
                 """
             )

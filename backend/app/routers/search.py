@@ -36,6 +36,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.display_names import resolve_person_display_name, resolve_room_display_name
+from app.services.message_deletion import active_message_filter
 from app.services.external_contact_identity import (
     load_external_contact_search_matches,
     normalized_search_term,
@@ -388,6 +389,7 @@ def search_messages(
 
     filters = [
         ArchiveMessage.tenant_id == tenant_id,
+        active_message_filter(),
         ArchiveMessage.decrypt_status == "success",
         ArchiveMessage.is_revoked.is_(False),
     ]

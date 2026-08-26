@@ -1,0 +1,11 @@
+[Unit]
+Description=WeCom Archive WeChat Payment Recovery Timer
+
+[Timer]
+# Keep this offset from lifecycle (:07/5) and notification (:02/5) batches.
+OnCalendar=*:04/5
+Persistent=true
+Unit=wecom-payment-recovery.service
+
+[Install]
+WantedBy=timers.target

@@ -93,5 +93,12 @@ def test_require_role_is_attached_only_to_authorized_admin_routes() -> None:
         elif router_file.name == "branding.py":
             assert "Depends(require_role())" in source
             assert 'Depends(require_role("owner", "admin"))' in source
+        elif router_file.name == "message_deletion.py":
+            # RND-363/364/370: status is readable by any authenticated admin so
+            # the console can hide/disable the delete surface; delete/restore,
+            # recycle-bin list/metrics, permanent purge and bulk-cleanup
+            # preview/tasks are Owner/Admin-only.
+            assert "Depends(require_role())" in source
+            assert source.count('Depends(require_role("owner", "admin"))') == 10
         else:
             assert "Depends(require_role" not in source

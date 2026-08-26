@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>消息清理</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="manifest" href="/api/branding/manifest.webmanifest">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<style>
+.cleanup-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-5)}
+.cleanup-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--space-3)}
+.cleanup-preview{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--space-3)}
+.preview-stat{background:var(--color-surface-sunken);border-radius:var(--radius-md);padding:10px 12px}
+.preview-stat b{display:block;font-size:var(--text-xl);margin-top:2px}
+.preview-stat span{font-size:var(--text-xs);color:var(--color-text-4)}
+.preview-warn{background:var(--color-warning-bg);color:var(--color-warning-fg);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-sm);line-height:var(--leading-loose)}
+.task-row{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;padding:12px 0;border-bottom:1px solid var(--color-border)}
+.task-row:last-child{border-bottom:none}
+.task-meta{flex:1;min-width:240px}
+.task-status{white-space:nowrap}
+.task-actions{display:flex;gap:var(--space-2)}
+.confirm-modal{position:fixed;inset:0;z-index:400;display:flex;align-items:center;justify-content:center}
+.confirm-modal[hidden]{display:none}
+.confirm-modal .backdrop{position:absolute;inset:0;background:rgba(15,23,42,.45)}
+.confirm-modal .card{position:relative;width:min(480px,92vw);background:var(--color-surface);border-radius:var(--radius-lg);padding:var(--space-5);box-shadow:var(--shadow-3)}
+.confirm-modal h3{margin:0 0 var(--space-3)}
+.confirm-modal .summary{background:var(--color-surface-sunken);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-sm);margin-bottom:var(--space-3)}
+.confirm-modal .note{font-size:var(--text-xs);color:var(--color-text-4);line-height:var(--leading-loose)}
+.confirm-modal .actions{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-4)}
+@media(max-width:900px){.side-nav{display:none}.page{padding:var(--space-4)}}
+</style>
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="recycle.breadcrumbData">数据</span><span class="sep">/</span><span class="cur" data-i18n="cleanup.pageTitle">消息清理</span></div></header>
+  <main class="page">
+    <div class="page-hd"><div><h1 data-i18n="cleanup.pageTitle">消息清理</h1><p data-i18n="cleanup.description">按条件批量将历史消息移入回收站；先预览影响与容量预估，再异步执行。不会直接永久删除。</p></div></div>
+    <p id="cleanup-status" class="field-help" role="status" aria-live="polite"></p>
+    <div class="cleanup-grid">
+      <section class="card">
+        <div class="card-hd"><div><h2 data-i18n="cleanup.filterTitle">筛选条件</h2></div></div>
+        <div class="card-bd">
+          <div class="cleanup-filters">
+            <label class="field-label" data-i18n="cleanup.preset">快捷区间</label>
+            <select class="select" id="cleanup-preset">
+              <option value="" data-i18n="cleanup.presetNone">自定义日期</option>
+              <option value="30" data-i18n="cleanup.older30">早于 30 天</option>
+              <option value="90" data-i18n="cleanup.older90">早于 90 天</option>
+              <option value="180" data-i18n="cleanup.older180">早于 180 天</option>
+              <option value="365" data-i18n="cleanup.older365">早于 365 天</option>
+            </select>
+            <input class="input" id="cleanup-date-from" type="date" data-i18n-label="cleanup.dateFrom" aria-label="开始日期">
+            <input class="input" id="cleanup-date-to" type="date" data-i18n-label="cleanup.dateTo" aria-label="结束日期">
+            <input class="input" id="cleanup-room" data-i18n-placeholder="cleanup.room" placeholder="会话 ID">
+            <input class="input" id="cleanup-staff" data-i18n-placeholder="cleanup.staff" placeholder="员工 ID">
+            <input class="input" id="cleanup-contact" data-i18n-placeholder="cleanup.contact" placeholder="外部联系人 ID">
+            <select class="select" id="cleanup-kind">
+              <option value="all" data-i18n="cleanup.kindAll">单聊+群聊</option>
+              <option value="single" data-i18n="cleanup.kindSingle">仅单聊</option>
+              <option value="group" data-i18n="cleanup.kindGroup">仅群聊</option>
+            </select>
+            <select class="select" id="cleanup-msgtype">
+              <option value="" data-i18n="cleanup.allTypes">全部类型</option>
+              <option value="text" data-i18n="dashboard.type.text">文本</option>
+              <option value="image" data-i18n="dashboard.type.image">图片</option>
+              <option value="voice" data-i18n="dashboard.type.voice">语音</option>
+              <option value="video" data-i18n="dashboard.type.video">视频</option>
+              <option value="file" data-i18n="dashboard.type.file">文件</option>
+            </select>
+            <select class="select" id="cleanup-media">
+              <option value="" data-i18n="cleanup.mediaAny">媒体不限</option>
+              <option value="yes" data-i18n="cleanup.mediaYes">仅含媒体</option>
+              <option value="no" data-i18n="cleanup.mediaNo">仅不含媒体</option>
+            </select>
+            <input class="input" id="cleanup-media-min" type="number" min="0" data-i18n-placeholder="cleanup.mediaMin" placeholder="媒体最小字节">
+            <input class="input" id="cleanup-media-max" type="number" min="0" data-i18n-placeholder="cleanup.mediaMax" placeholder="媒体最大字节">
+          </div>
+          <div class="mt-4">
+            <label class="field-check"><input type="checkbox" id="cleanup-include-favorited" data-i18n="cleanup.includeFavorited"> 包含已收藏内容（默认排除）</label>
+          </div>
+          <div class="mt-4"><button type="button" class="btn btn-primary" id="cleanup-preview" data-i18n="cleanup.preview">预览影响</button></div>
+        </div>
+      </section>
+
+      <section class="card" id="cleanup-preview-card" hidden>
+        <div class="card-hd"><div><h2 data-i18n="cleanup.previewTitle">影响预览</h2></div></div>
+        <div class="card-bd">
+          <p class="muted" id="cleanup-preview-summary"></p>
+          <div class="cleanup-preview" id="cleanup-preview-stats"></div>
+          <p class="cleanup-preview-note field-help" id="cleanup-preview-note"></p>
+          <div class="mt-4"><button type="button" class="btn btn-danger" id="cleanup-confirm" data-i18n="cleanup.startTask" disabled>创建清理任务</button></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-hd"><div><h2 data-i18n="cleanup.tasksTitle">清理任务</h2></div></div>
+        <div class="card-bd" id="cleanup-tasks"><div class="muted" data-i18n="cleanup.tasksEmpty">暂无任务</div></div>
+      </section>
+    </div>
+  </main>
+</div></div>
+
+<div class="confirm-modal" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
+  <div class="backdrop" onclick="document.getElementById('confirm-modal').hidden=true"></div>
+  <div class="card" role="document">
+    <h3 id="confirm-title" data-i18n="cleanup.confirmTitle">创建清理任务</h3>
+    <div class="summary" id="confirm-summary"></div>
+    <p class="note" data-i18n="cleanup.confirmNote">匹配消息将移入回收站并保留 30 天，期间仍可能占用计费容量；30 天后自动永久清理。仅影响本系统存档副本，不影响企业微信原始记录。</p>
+    <div class="mt-4">
+      <label class="field-label" data-i18n="cleanup.confirmType">请输入“确认清理”以继续</label>
+      <input class="input" id="confirm-phrase" type="text" autocomplete="off">
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="confirm-cancel" data-i18n="delete.cancel">取消</button>
+      <button type="button" class="btn btn-danger" id="confirm-ok" data-i18n="cleanup.confirmOk" disabled>确认创建</button>
+    </div>
+  </div>
+</div>
+
+<script src="/web/static/product-analytics.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/cleanup.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

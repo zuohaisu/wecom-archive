@@ -19,6 +19,7 @@ from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.db.session import get_db
+from app.services.message_deletion import active_message_filter
 from app.schemas.media_library import MediaLibraryPage
 
 router = APIRouter()
@@ -83,6 +84,7 @@ def list_media(
         )
         .where(MediaFile.tenant_id == tenant_id)
         .where(ArchiveMessage.tenant_id == tenant_id)
+        .where(active_message_filter())
     )
     if types:
         statement = statement.where(MediaFile.file_type.in_(types))

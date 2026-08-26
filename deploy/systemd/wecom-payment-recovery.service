@@ -1,0 +1,22 @@
+[Unit]
+Description=WeCom Archive WeChat Payment Recovery Batch
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wecomarchive
+WorkingDirectory=/srv/apps/wecom-archive-365/current/backend
+EnvironmentFile=/srv/apps/wecom-archive-365/current/backend/.env
+ExecStart=/srv/apps/wecom-archive-365/current/backend/.venv/bin/python scripts/process_payment_recovery_once.py recovery
+TimeoutStartSec=4min
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/apps/wecom-archive-365
+ReadOnlyPaths=/usr /etc
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

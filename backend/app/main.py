@@ -7,9 +7,11 @@ from fastapi.staticfiles import StaticFiles
 from app.db.schema_check import full_readiness_check
 from app.db.session import get_engine
 from app.routers.admin_audit_page import router as admin_audit_page_router
+from app.routers.admin_cleanup_page import router as admin_cleanup_page_router
 from app.routers.analytics import router as analytics_router
 from app.routers.admin_contacts_page import router as admin_contacts_page_router
 from app.routers.admin_media_page import router as admin_media_page_router
+from app.routers.admin_recycle_bin_page import router as admin_recycle_bin_page_router
 from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.ai_support import router as ai_support_router
 from app.routers.public_ai_support import router as public_ai_support_router
@@ -27,6 +29,7 @@ from app.routers.external_contacts import router as external_contacts_router
 from app.routers.media import MediaAccessNoStoreMiddleware
 from app.routers.media import router as media_router
 from app.routers.media_library import router as media_library_router
+from app.routers.message_deletion import router as message_deletion_router
 from app.routers.messages import router as messages_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.platform import router as platform_router
@@ -51,7 +54,7 @@ from app.routers.wecom_org_authorization import router as wecom_org_authorizatio
 from app.routers.wecom_provider_instructions import router as wecom_provider_instructions_router
 from app.services.alipay import validate_alipay_configuration_if_enabled
 from app.services.branding import BrandingHostMiddleware
-from app.services.wechat_pay import validate_wechat_pay_configuration_if_enabled
+from app.services.wechat_pay import validate_wechat_pay_configuration_if_configured
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +132,7 @@ def create_app() -> FastAPI:
     instance. Kept as a factory (RND-223) rather than a module-level side
     effect so tests/tooling can construct an independent app instance; the
     module-level `app` below is what `uvicorn app.main:app` actually serves."""
-    validate_wechat_pay_configuration_if_enabled()
+    validate_wechat_pay_configuration_if_configured()
     validate_alipay_configuration_if_enabled()
     app = FastAPI(title="Crowntime WeCom Archive")
     # RND-187: guarantees Cache-Control: no-store on every response (success or
@@ -161,10 +164,13 @@ def create_app() -> FastAPI:
     app.include_router(admin_users_page_router)
     app.include_router(admin_audit_page_router)
     app.include_router(admin_media_page_router)
+    app.include_router(admin_recycle_bin_page_router)
+    app.include_router(admin_cleanup_page_router)
     app.include_router(admin_contacts_page_router)
     app.include_router(web_router)
     app.include_router(analytics_router)
     app.include_router(messages_router)
+    app.include_router(message_deletion_router)
     app.include_router(export_approval_router)
     app.include_router(export_audit_router)
     app.include_router(exports_router)

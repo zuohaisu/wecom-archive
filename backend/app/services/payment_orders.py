@@ -17,6 +17,8 @@ from app.db.models import (
     BillingPlan,
     PaymentEvent,
     PaymentOrder,
+    RefundOrder,
+    Subscription,
     SubscriptionActivation,
     Tenant,
 )
@@ -57,6 +59,10 @@ class PaymentReplayConflictError(PaymentOrderConflictError):
 
 class PaymentActivationPendingError(PaymentOrderError):
     pass
+
+
+class PaymentReconciliationMismatchError(PaymentOrderConflictError):
+    """A verified channel fact is incompatible with local durable state."""
 
 
 @dataclass(frozen=True)
@@ -293,6 +299,8 @@ def create_payment_order(
             provider=provider.code,
             provider_order_ref=_provider_ref(provider.code),
             status="creating",
+            recovery_state="automatic",
+            next_query_at=now + timedelta(minutes=2),
             idempotency_key_hash=idempotency_hash,
             created_at=now,
             expires_at=now + timedelta(minutes=ORDER_TTL_MINUTES),
@@ -520,6 +528,42 @@ def apply_trusted_payment(
         return _summary(db, order)
 
 
+def _succeeded_projection_is_valid(db: Session, order: PaymentOrder) -> bool:
+    """Validate the local projection without re-applying a paid term.
+
+    A payment that has already reached ``succeeded`` must not be activated a
+    second time merely because a later reconciliation sees an inconsistency.
+    A confirmed refund is the one legitimate reason its entitlement projection
+    may no longer be active.
+    """
+    if order.activation_id is None:
+        return False
+    refunded = db.scalar(
+        select(RefundOrder.id).where(
+            RefundOrder.payment_order_id == order.id,
+            RefundOrder.status == "succeeded",
+        )
+    )
+    if refunded is not None:
+        return True
+    activation = db.get(SubscriptionActivation, order.activation_id)
+    if (
+        activation is None
+        or activation.status != "applied"
+        or activation.tenant_id != order.tenant_id
+        or activation.plan_code != order.plan_code
+        or activation.subscription_id is None
+        or activation.applied_ends_at is None
+    ):
+        return False
+    subscription = db.get(Subscription, activation.subscription_id)
+    return bool(
+        subscription is not None
+        and subscription.tenant_id == order.tenant_id
+        and _utc(subscription.ends_at) >= _utc(activation.applied_ends_at)
+    )
+
+
 def query_and_reconcile_order(
     session_factory: SessionFactory,
     provider: PaymentProvider,
@@ -527,7 +571,14 @@ def query_and_reconcile_order(
     order_id: str,
     *,
     now: datetime,
+    force_channel_query: bool = False,
 ) -> PaymentOrderSummary:
+    """Query a persisted order and apply only trusted provider facts.
+
+    ``force_channel_query`` is reserved for T+1/manual reconciliation. It
+    bypasses the normal succeeded short-circuit while deliberately avoiding a
+    second PaymentEvent/activation for an already succeeded order.
+    """
     checked_at = _explicit_utc(now)
     with session_factory() as db:
         order = db.scalar(
@@ -541,7 +592,8 @@ def query_and_reconcile_order(
         if order.provider != provider.code:
             raise PaymentOrderConflictError("payment provider mismatch")
         provider_order_ref = order.provider_order_ref
-        if order.status == "succeeded":
+        initially_succeeded = order.status == "succeeded"
+        if initially_succeeded and not force_channel_query:
             return _summary(db, order)
 
     result = provider.query_payment(provider_order_ref)
@@ -554,6 +606,27 @@ def query_and_reconcile_order(
     if result.success is not None:
         if result.status != "succeeded":
             raise PaymentOrderConflictError("payment query result mismatch")
+        if initially_succeeded:
+            with session_factory() as db:
+                order = db.scalar(
+                    select(PaymentOrder)
+                    .where(PaymentOrder.id == order_id, PaymentOrder.tenant_id == tenant_id)
+                    .with_for_update()
+                )
+                if order is None:
+                    raise PaymentOrderNotFoundError("payment order does not exist")
+                if order.status != "succeeded":
+                    # A concurrent callback/recovery changed the state. Let
+                    # the normal trusted path serialize the new fact instead.
+                    pass
+                else:
+                    _validate_event(provider, order, result.success)
+                    if not _succeeded_projection_is_valid(db, order):
+                        raise PaymentReconciliationMismatchError(
+                            "succeeded payment projection is inconsistent"
+                        )
+                    return _summary(db, order)
+            return apply_trusted_payment(session_factory, provider, result.success)
         return apply_trusted_payment(session_factory, provider, result.success)
     if result.status == "succeeded":
         raise PaymentOrderConflictError("successful payment query has no trusted event")
@@ -571,7 +644,9 @@ def query_and_reconcile_order(
         if order is None:
             raise PaymentOrderNotFoundError("payment order does not exist")
         if order.status in {"paid_activation_pending", "succeeded"}:
-            return _summary(db, order)
+            raise PaymentReconciliationMismatchError(
+                "channel state conflicts with a locally paid order"
+            )
         order.provider_state = result.state
         if result.status in {"closed", "failed"}:
             order.status = result.status

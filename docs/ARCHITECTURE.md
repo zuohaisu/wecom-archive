@@ -379,6 +379,10 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 | `wecom-billing-notifications.timer` | timer | — | Activates above; all lifecycle thresholds are evaluated in UTC |
 | `wecom-billing-lifecycle.service` | oneshot | `*:07/5` | Advances grace/expired/frozen projections for commercial tenants only (row-locked, idempotent, failure-isolated); legacy/self-host tenants are never scanned |
 | `wecom-billing-lifecycle.timer` | timer | — | Activates above; all lifecycle thresholds are evaluated in UTC |
+| `wecom-payment-recovery.service` | oneshot | `*:04/5` | Bounded WeChat payment query/recovery batch; never creates payments or logs provider payloads |
+| `wecom-payment-recovery.timer` | timer | — | Activates above on a persistent five-minute cadence |
+| `wecom-payment-reconciliation.service` | oneshot | daily at 02:30 UTC | T+1 WeChat payment reconciliation; records only sanitized operational findings |
+| `wecom-payment-reconciliation.timer` | timer | — | Activates above and catches a missed daily run |
 
 The repository does **not** currently version:
 

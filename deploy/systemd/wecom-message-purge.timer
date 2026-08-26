@@ -1,0 +1,12 @@
+[Unit]
+Description=WeCom Archive Recycle Bin 30-Day Message Purge Timer
+
+[Timer]
+# Daily. Purge windows are measured in days (30), so a daily sweep never
+# lets an expired recycle-bin message linger more than ~24h past its window.
+OnCalendar=*-*-* 02:45:00
+Persistent=true
+Unit=wecom-message-purge.service
+
+[Install]
+WantedBy=timers.target

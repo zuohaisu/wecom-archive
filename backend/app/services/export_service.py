@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.conversation_membership import resolve_conversation_message_ids
 from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
+from app.services.message_deletion import active_message_filter
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.message_type_registry import describe_message_type
 from app.schemas.export import ExportFormat, ExportResult, ExportSelection
@@ -126,7 +127,7 @@ def _load_export_rows(
         ArchiveMessage.msgtype,
         ArchiveMessage.content_text,
         ArchiveMessage.structured_content,
-    ).filter(ArchiveMessage.tenant_id == tenant_id)
+    ).filter(ArchiveMessage.tenant_id == tenant_id, active_message_filter())
     if selection.roomid:
         if selection.roomid.startswith("direct__"):
             conversation_ids = resolve_conversation_message_ids(

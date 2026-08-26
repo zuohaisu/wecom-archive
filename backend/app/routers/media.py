@@ -31,6 +31,7 @@ from app.auth import get_current_user
 from app.db.models import AdminUser, ArchiveMessage, MediaFile
 from app.db.session import get_db
 from app.schemas.media import MediaAccessOut, NestedMediaAccessOut
+from app.services.message_deletion import active_message_filter
 from app.services.media_access import (
     _resolve_servable_backend_and_ref,
     _resolve_variant_serve_ref,
@@ -71,6 +72,7 @@ def download_media_library_file(
         .filter(MediaFile.id == media_id)
         .filter(MediaFile.tenant_id == tenant_id)
         .filter(ArchiveMessage.tenant_id == tenant_id)
+        .filter(active_message_filter())
         .first()
     )
     if media_file is None or media_file.download_status != "downloaded":
