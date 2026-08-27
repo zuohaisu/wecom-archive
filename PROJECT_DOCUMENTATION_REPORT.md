@@ -32,8 +32,7 @@
 
 | Document | Reason |
 |----------|--------|
-| `DEV_AGENT_RULES.md` | Accurate, well-maintained, reflects current workflow |
-| `docs/AGENTS.md` | Agent roster and handoff protocol are current |
+| `AGENTS.md` | Single source of truth for working rules + agent roles (v6, merged 2026-08-28) |
 | `docs/CONVERSATION_REVIEW_CONSOLE_PRD.md` | Spec document — historical reference; still accurate as product vision |
 | `docs/wecom_archive_worker_runbook.md` | Accurate, covers production deployment |
 | `docs/wecom_archive_media_download_runbook.md` | Accurate, covers production deployment |

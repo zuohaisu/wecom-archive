@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://crowntime.example/schemas/qa-verdict.schema.json",
   "title": "QA Verdict",
-  "description": "独立验收 agent 的结构化判定输出。适配本项目的 Linear RND-* 工单、make verify 验证闸和 PR-first 流程。",
+  "description": "独立验收 agent 的结构化判定输出。适配本项目的 GitHub Issue RND-* 工单、make verify 验证闸和 PR-first 流程。",
   "type": "object",
   "required": [
     "schema_version",
@@ -23,7 +23,7 @@
     "issue_key": {
       "type": "string",
       "pattern": "^RND-[0-9]+$",
-      "description": "Linear 工单标识，如 RND-326"
+      "description": "工单标识，如 RND-326（GitHub Issue 标题前缀）"
     },
     "linear_url": { "type": "string", "format": "uri" },
     "run_id": {

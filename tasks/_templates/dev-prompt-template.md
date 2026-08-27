@@ -1,12 +1,12 @@
 # RND-<N> 开发提示词（Developer Prompt）— 模板
 
 > 复制本模板，替换所有 `<...>` 占位符。**任一必填字段为空或仅写 TBD 的工单不得置 In Progress**，按 `BLOCKED_NEEDS_HUMAN` 上报。
-> 由 PM agent 生成，交给**开发 agent** 执行。开发 agent 开始前必须先读 `DEV_AGENT_RULES.md` 与 `docs/ticket-autopilot-workflow.md`，并在工作开头输出一行 `[Goal check]`。
+> 交给 **dev 角色 agent** 执行。开始前必须先读 `AGENTS.md`（唯一权威规则），并在工作开头输出一行 `[Goal check]` 复述本票目标。实现完成后由 dev 自己跑 `make verify` 并写 QA Summary，交 required CI 判定。
 
 ## 任务身份
-- 项目：Crowntime WeCom Archive / 365 企微会话存档（Linear team `Builder`，project `365企微会话存档`）
+- 项目：Crowntime WeCom Archive / 365 企微会话存档
 - 工单：RND-<N>「<标题>」
-- Linear URL：<url>
+- GitHub Issue：`[RND-<n>]` #<github-issue-number> — <url>
 - 优先级：<priority>｜风险等级：**<R0|R1|R2|R3>**
 - 所属波次：<R1 · 前端快赢四页 | ...>
 - 交付 worktree/branch：<名称；可为本票专用，或同 Epic 串行交付容器>
@@ -38,7 +38,7 @@
 - `<path>`
 
 > **写这份清单时（PM 职责，不是开发 agent 的）**：所有权清单的判据是「**跑通验证闸所必需的全部文件**」，不只是功能文件本身。凡是本工单的改动会导致其失败、且必须随之更新的守卫性文件（契约快照、计数基线、白名单式测试等），都属于本工单，必须写进清单并注明**允许的最小改动范围**。
-> 判定方法：把本工单的改动想象成已完成，然后问「`make verify` 会因此红在哪里」——那些地方就在清单里。本项目当前已知的此类守卫见 `docs/ticket-autopilot-workflow.md` §3.3（**以该文档为准，不在此复制清单，避免两处漂移**）。
+> 判定方法：把本工单的改动想象成已完成，然后问「`make verify` 会因此红在哪里」——那些地方就在清单里。本项目当前已知的此类守卫见 `AGENTS.md` § Test integrity 的「The one legitimate test change: route contract tests」（**以 `AGENTS.md` 为准，不在此复制清单，避免两处漂移**）。
 
 **本工单只读、绝不可写的文件（他人所有）：**
 - `<path>` — 所有者 RND-<M>
@@ -73,7 +73,7 @@
 - [ ] 3 个 locale 的 i18n 键齐全（若涉及界面文案）
 - [ ] 无新增 lint / 类型错误
 - [ ] 只改了本工单拥有的文件（`git status` 自证）
-- [ ] 产出 QA Summary（格式见 `DEV_AGENT_RULES.md` 的 QA Rules）
+- [ ] 产出 QA Summary（格式见 `AGENTS.md` 的 Validation and QA）
 - [ ] **未 commit、未 push**（等 Haisu 批准）
 - [ ] 当前位于已分配的交付 worktree/分支，且分支不是 `main`
 - [ ] working tree 只含本票未提交改动；更早的同 Epic 工单已各自形成获批 commit
@@ -89,12 +89,12 @@
 - **Escalation**：2 轮修复后仍 FAIL，或遇到需要产品决策的歧义 → `BLOCKED_NEEDS_HUMAN`，附上下文，**不要猜**。
 
 ## 开发 agent 执行指引（步骤）
-1. 读 `DEV_AGENT_RULES.md`、`docs/ticket-autopilot-workflow.md`、<关键现有文件>。
+1. 读 `AGENTS.md`、<关键现有文件>。
 2. <步骤>
 3. 跑 `make verify`，确认全绿。
 4. 输出 QA Summary + `git status`（证明只动了自己的文件），**不要 commit**。
 
-## 硬性约束（来自 DEV_AGENT_RULES.md）
+## 硬性约束（来自 AGENTS.md）
 - 在已分配的非 `main` 交付 worktree/分支工作；它可以服务本票，也可以串行服务同
   Epic 多票。开始本票前，上一票必须已完成 QA 并形成获批 commit；不得让多票未提交
   diff 共存。未经批准不 commit/push，不另建分支、不改 git 历史；任何情况下都不得

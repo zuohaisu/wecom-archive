@@ -1,15 +1,34 @@
 # Ticket Autopilot 工作流（本项目适配版）
 
-> 移植自 `AI-Operations` 项目的 Ticket Autopilot v0.1，按本项目的 `DEV_AGENT_RULES.md` v4 适配。
-> 目的：把每张 Linear 工单自动跑成「已通过确定性验证 + 独立 AI QA」的单一可追踪 commit，再把一个或多个相关工单 commit 组成 required CI 通过的可合并 PR。
-> 建立：2026-07-29 ｜ 权威操作定义，与 `DEV_AGENT_RULES.md` 冲突时以 `DEV_AGENT_RULES.md` 为准。
+> ## ⚠️ 已停用（2026-08-28）
+>
+> **本文档描述的 Ticket Autopilot 流程当前不再使用。** 现行流程是：dev 角色 agent
+> 实现完成后**自行 QA**（跑 `make verify`、写 QA Summary），推交付分支开 PR，**由
+> required CI 作为判定闸**；CI 红则打回同一个 dev 会话修复。不再生成
+> dev/qa 提示词对，不再有独立 QA agent 与 `qa-verdict.json`。
+>
+> 本文档保留为休眠参考（"暂时用不上"，非作废），因为 `tasks/` 下大量历史提示词引用
+> 它。**其中两条与 autopilot 无关、至今仍然成立的项目不变量已上收至 `AGENTS.md`：**
+>
+> - 原 §3.3「新增路由必须同步两个契约测试」→ `AGENTS.md` § Test integrity →
+>   *The one legitimate test change: route contract tests*
+> - 原 §3.4「`make verify` 必须在本票交付 worktree 中运行」→ `AGENTS.md` § Required checks
+> - 原 §8「`tasks/` 目录约定」→ `AGENTS.md` § Ticket artifacts（产物清单已按新流程改写）
+>
+> **与 `AGENTS.md` 冲突时一律以 `AGENTS.md` 为准。** 恢复本流程前请先与 Haisu 确认。
+
+---
+
+> 移植自 `AI-Operations` 项目的 Ticket Autopilot v0.1，按本项目的 `AGENTS.md` 适配。
+> 目的：把每张 GitHub Issue 工单自动跑成「已通过确定性验证 + 独立 AI QA」的单一可追踪 commit，再把一个或多个相关工单 commit 组成 required CI 通过的可合并 PR。
+> 建立：2026-07-29 ｜ 权威操作定义，与 `AGENTS.md` 冲突时以 `AGENTS.md` 为准。
 
 ---
 
 ## 1. 闭环
 
 ```
-Linear Ticket（九字段合同齐全）
+GitHub Issue [RND-<n>]（九字段合同齐全）
   → 人工置 In Progress（唯一启动信号）
   → 进入已分配的非 main 交付 worktree/分支（新建时基于最新 origin/main）
   → 开发 agent 执行 dev-prompt（当前工单未经批准禁 commit）
@@ -169,7 +188,7 @@ make test                                    # 仅 pytest 全量
 
 ## 7. 独立 QA 与有界修复
 
-- QA agent（默认 Codex，见 `DEV_AGENT_RULES.md` 的 Agent Responsibilities）**只读**：可读文件、可跑只读命令，**不得**改任何文件、不得 commit、不得放松 AC。
+- **qa 角色 agent**（见 `AGENTS.md` 的 Roles）**只读**：可读文件、可跑只读命令，**不得**改任何文件、不得 commit、不得放松 AC。
 - 产出 `tasks/RND-<n>-qa-verdict.json`，schema 见 `tasks/_templates/qa-verdict.schema.json`。
 - `verdict: FAIL` → 开发 agent **只修 findings**，不扩大范围，最多 2 轮。2 轮仍 FAIL → `BLOCKED_NEEDS_HUMAN`。
 - QA agent 不得替开发 agent 补做缺失的实现或测试。
