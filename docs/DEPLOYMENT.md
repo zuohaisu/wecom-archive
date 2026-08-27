@@ -192,14 +192,14 @@ just does not self-heal the missing unit. Only add a unit to
 every future deploy; templated (`@`) and manual/one-off units must stay
 out of that file and keep using the manual steps below.
 
-Archive worker:
-
-```bash
-sudo cp deploy/systemd/wecom-archive-worker.service /etc/systemd/system/
-sudo cp deploy/systemd/wecom-archive-worker.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-archive-worker.timer
-```
+Archive worker service/timer are both listed in `MANAGED_UNITS`. On an approved
+controlled deployment, step 10 updates the existing same-named unit files,
+performs one `daemon-reload` only when a file changed, and re-arms only
+`wecom-archive-worker.timer`; it never enables the oneshot service directly or
+creates a second timer. The versioned timer preserves the existing five-minute
+cadence (`OnCalendar=*:0/5`). Do not use a manual `cp`/`enable` workflow for
+this pair; production deployment, reload, enable/restart, and verification
+remain separately approved operations.
 
 External-contact refresh and daily reconciliation:
 
@@ -217,7 +217,7 @@ enables it automatically; no manual `cp`/`enable --now` step is needed for
 it once the step-10 sudoers grant exists. The commands above remain for
 `wecom-external-contact-refresh.*`, which is not in that manifest.
 
-The 30-minute archive timer continues to sync/decrypt messages; it no longer
+The five-minute archive timer continues to sync/decrypt messages; it no longer
 calls the full external-contact API. Callback events and direct inbound
 external messages only persist a coalesced task, so neither the HTTP request
 nor archive worker waits for contact metadata network I/O.

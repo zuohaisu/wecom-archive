@@ -27,13 +27,21 @@ the durable compensation path.
 
 | Worker | Versioned default | Purpose |
 |---|---:|---|
-| Archive reconciliation | `OnCalendar=*:0/30` (`:00`, `:30`) | Catch missed callbacks, failed dispatches, restarts, and cursor reconciliation |
+| Archive reconciliation | `OnCalendar=*:0/5` (every five minutes) | Catch missed callbacks, failed dispatches, restarts, and cursor reconciliation |
 | Generic media reconciliation | `OnCalendar=*:15/30` (`:15`, `:45`) | Pending/retryable generic media reconciliation |
 | External-contact incremental refresh | path signal + `OnUnitInactiveSec=15min` retry | Drain small, persisted metadata-refresh batches |
 | External-contact full reconciliation | daily at `04:15` | Correct missed/unreadable/stale customer metadata in resumable batches |
 
-The 15-minute stagger exceeds the required 10-minute offset. Callback-driven
-archive work remains the low-latency path; the timer is not removed.
+Callback-driven archive work remains the low-latency path; the existing
+same-named timer is the durable five-minute reconciliation path. It is managed
+as one service/timer pair and must never be duplicated by a second timer.
+
+### 时间戳单位契约
+
+`archive_messages.msgtime` 是 **epoch 毫秒**。诊断、运维查询和展示代码把它
+转换为 datetime 时必须使用 `msgtime / 1000`；不得按 epoch 秒处理，也不得迁移或
+改写历史值。chatrecord 子项的官方时间字段可能是秒，不能据此改变 archive message
+记录的单位。
 
 ### External-contact identity reconciliation (RND-170)
 
@@ -51,7 +59,7 @@ signal. `wecom-external-contact-refresh.service` drains a small batch and
 commits every customer independently; unavailable records are retried with a
 bounded backoff. `wecom-external-contact-reconcile.timer` performs one daily
 full reconciliation at 04:15, with periodic commits, as the fallback. The
-30-minute archive timer no longer performs a full contact API sweep.
+five-minute archive timer no longer performs a full contact API sweep.
 
 Never put customer IDs, remarks, nicknames, callback ciphertext, or secrets
 in journal queries, tickets, or manual command arguments.
@@ -76,7 +84,10 @@ The archive and media lock files are separate:
 ## Installation / upgrade (Ops-owned)
 
 > Production scheduling changes are performed by the operations agent only.
-> Preserve the currently installed units before replacing them.
+> `wecom-archive-worker.{service,timer}` is managed through the repository
+> manifest and must retain its same names and five-minute cadence; do not
+> manually add a second archive timer. Preserve currently installed units
+> before any separately approved production operation.
 
 ```bash
 sudo install -d -m 0750 /srv/apps/wecom-archive-365/shared/rollback/rnd-343
@@ -86,8 +97,6 @@ sudo cp -a /etc/systemd/system/wecom-archive-worker.{service,timer} \
 sudo cp -a /etc/systemd/system/wecom-archive-media-event.{service,path} \
   /srv/apps/wecom-archive-365/shared/rollback/rnd-343/ 2>/dev/null || true
 
-sudo cp deploy/systemd/wecom-archive-worker.service /etc/systemd/system/
-sudo cp deploy/systemd/wecom-archive-worker.timer /etc/systemd/system/
 sudo cp deploy/systemd/wecom-archive-media-download.service /etc/systemd/system/
 sudo cp deploy/systemd/wecom-archive-media-download.timer /etc/systemd/system/
 sudo cp deploy/systemd/wecom-archive-media-event.service /etc/systemd/system/
@@ -95,7 +104,6 @@ sudo cp deploy/systemd/wecom-archive-media-event.path /etc/systemd/system/
 sudo cp deploy/systemd/wecom-external-contact-refresh.{service,path,timer} /etc/systemd/system/
 sudo cp deploy/systemd/wecom-external-contact-reconcile.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-archive-worker.timer
 sudo systemctl enable --now wecom-archive-media-download.timer
 sudo systemctl enable --now wecom-archive-media-event.path
 sudo systemctl enable --now wecom-external-contact-refresh.path
@@ -108,32 +116,14 @@ directory. It contains no identifiers and cannot grow into a queue; database
 pending/retryable state remains the task source. The event service and timer
 both reuse the same generic media CLI and media lock.
 
-## Safe cadence configuration and emergency rollback
+## Cadence and emergency rollback
 
-The versioned defaults above are the production recommendation. To restore the
-previous 5-minute cadence, install the reviewed drop-ins (they preserve the
-old two-minute offset), then reload systemd:
-
-```bash
-sudo install -d /etc/systemd/system/wecom-archive-worker.timer.d
-sudo install -d /etc/systemd/system/wecom-archive-media-download.timer.d
-sudo install -m 0644 deploy/systemd/overrides/wecom-archive-worker-5min.conf \
-  /etc/systemd/system/wecom-archive-worker.timer.d/reconciliation.conf
-sudo install -m 0644 deploy/systemd/overrides/wecom-archive-media-download-5min.conf \
-  /etc/systemd/system/wecom-archive-media-download.timer.d/reconciliation.conf
-sudo systemctl daemon-reload
-sudo systemctl restart wecom-archive-worker.timer wecom-archive-media-download.timer
-```
-
-To return to the versioned 30-minute defaults, remove only those drop-ins and
-reload/restart the timers:
-
-```bash
-sudo rm -f /etc/systemd/system/wecom-archive-worker.timer.d/reconciliation.conf
-sudo rm -f /etc/systemd/system/wecom-archive-media-download.timer.d/reconciliation.conf
-sudo systemctl daemon-reload
-sudo systemctl restart wecom-archive-worker.timer wecom-archive-media-download.timer
-```
+The versioned archive timer is the existing five-minute schedule. The legacy
+five-minute drop-in remains only for hosts that already have it; it is not a
+second timer and does not need to be installed for the versioned cadence.
+Never add another timer unit or change cadence as part of a worker code change.
+Any production rollback, reload, enable, or restart remains an explicitly
+approved Ops action.
 
 For a full operational rollback, disable the new path watcher, restore the
 files saved under `shared/rollback/rnd-343/`, remove the newly introduced event

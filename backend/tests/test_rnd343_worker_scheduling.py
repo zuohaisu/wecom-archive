@@ -164,7 +164,7 @@ def test_timer_templates_are_low_frequency_staggered_and_retryable() -> None:
     media_event_service = _pairs(MEDIA_EVENT_SERVICE)
     media_event_path = _pairs(MEDIA_EVENT_PATH)
 
-    assert archive_timer["OnCalendar"] == "*:0/30"
+    assert archive_timer["OnCalendar"] == "*:0/5"
     assert media_timer["OnCalendar"] == "*:15/30"
     assert archive_timer["Persistent"] == "true"
     assert media_timer["Persistent"] == "true"

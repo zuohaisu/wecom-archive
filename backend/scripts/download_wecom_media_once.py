@@ -96,7 +96,6 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.audit import AuditAction, AuditObjectType
-from app.crypto import FieldDecryptionError
 from app.db.models import ArchiveMessage, AuditLog, MediaFile, Tenant, TenantWecomConfig
 from app.media_download import (
     GENERIC_DOWNLOAD_MSGTYPES,
@@ -120,7 +119,12 @@ from app.services.media_worker import (  # noqa: F401 -- re-exported for backwar
     download_media_candidates,
 )
 from app.services.service_access import WORKER_MEDIA, tenant_service_denial
-from app.services.tenant_credentials import config_for_tenant, tenant_log_tag
+from app.services.tenant_credentials import (
+    TenantCredentialError,
+    config_for_tenant,
+    resolve_tenant_archive_credentials,
+    tenant_log_tag,
+)
 from app.settings import get_event_media_download_settings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -575,7 +579,10 @@ def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
         if tenant_id_env:
             config = config_for_tenant(session, tenant_id_env)
             if config is None:
-                _fail("tenant_unavailable", "No active tenant config found for this tenant")
+                _fail(
+                    "tenant_config_unavailable",
+                    "Tenant archive configuration is unavailable",
+                )
             corp_id = config.corp_id
             tenant_id = config.tenant_id
         else:
@@ -662,11 +669,13 @@ def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
         lib_path = _require_env("WECOM_SDK_LIB_PATH")
         if tenant_id_env:
             try:
-                secret = config.decrypted_app_secret
-            except FieldDecryptionError:
+                secret = resolve_tenant_archive_credentials(
+                    session, tenant_id_env
+                ).archive_secret
+            except TenantCredentialError as exc:
                 _fail(
-                    "tenant_credentials_unreadable",
-                    "Stored archive secret cannot be decrypted",
+                    exc.error_class,
+                    "Tenant archive credentials are unavailable",
                 )
         else:
             secret = _require_env("WECOM_ARCHIVE_SECRET")
