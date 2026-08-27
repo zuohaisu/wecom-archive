@@ -59,14 +59,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.crypto import FieldDecryptionError
 from app.audit import AuditAction, AuditObjectType
-from app.db.models import AuditLog, Tenant, TenantWecomConfig
+from app.db.models import AuditLog, Tenant
 from app.media_event_dispatch import MediaWorkerDispatch, dispatch_media_worker
 from app.services.service_access import WORKER_SYNC, tenant_service_denial
 from app.services.tenant_credentials import (
+    TenantArchiveCredentials,
+    TenantCredentialError,
     active_tenant_configs,
-    config_for_tenant,
+    credentials_for_active_config,
+    resolve_tenant_archive_credentials,
     tenant_log_tag,
 )
 
@@ -261,8 +263,8 @@ def _tenant_engine():
     return create_engine(database_url)
 
 
-def _tenant_env(config: TenantWecomConfig) -> dict:
-    """Merged child environment for one tenant's worker chain.
+def _tenant_env(credentials: TenantArchiveCredentials) -> dict:
+    """Merged child environment for one validated tenant worker chain.
 
     WECOM_TENANT_ID routes every child to the tenant's own DB-stored
     credentials (including the decrypt private-key fallback); the decrypted
@@ -270,12 +272,11 @@ def _tenant_env(config: TenantWecomConfig) -> dict:
     process environment — never in logs, output, or files.
     """
     env = os.environ.copy()
-    env["WECOM_TENANT_ID"] = config.tenant_id
-    env["WECOM_CORP_ID"] = config.corp_id
-    env["WECOM_ARCHIVE_SECRET"] = config.decrypted_app_secret
-    publickey_version = config.publickey_version
-    if publickey_version is not None:
-        env["WECOM_PUBLIC_KEY_VERSION"] = str(publickey_version)
+    env["WECOM_TENANT_ID"] = credentials.tenant_id
+    env["WECOM_CORP_ID"] = credentials.corp_id
+    env["WECOM_ARCHIVE_SECRET"] = credentials.archive_secret
+    if credentials.publickey_version is not None:
+        env["WECOM_PUBLIC_KEY_VERSION"] = str(credentials.publickey_version)
     return env
 
 
@@ -332,15 +333,13 @@ def _run_single_tenant_chain(tenant_id: str) -> None:
     tag = tenant_log_tag(tenant_id)
     try:
         with Session(_tenant_engine()) as db:
-            config = config_for_tenant(db, tenant_id)
-            if config is None:
-                _fail("tenant_unavailable", f"Active config not found (tenant={tag})")
-            _gate_single_tenant(db, tenant_id, tag)
-            env = _tenant_env(config)
-    except FieldDecryptionError:
+            credentials = resolve_tenant_archive_credentials(db, tenant_id)
+            _gate_single_tenant(db, credentials.tenant_id, tag)
+            env = _tenant_env(credentials)
+    except TenantCredentialError as exc:
         _fail(
-            "tenant_credentials_unreadable",
-            f"Stored archive secret cannot be decrypted (tenant={tag})",
+            exc.error_class,
+            f"Tenant archive credentials are unavailable (tenant={tag})",
         )
     print(f"[INFO] archive_worker tenant={tag} trigger=tenant-selected", flush=True)
     if not _run_script_env(_SYNC_SCRIPT, "sync_wecom_archive_once.py", env, tag):
@@ -372,11 +371,11 @@ def _run_all_tenants_chain() -> list[str]:
     for config in configs:
         tag = tenant_log_tag(config.tenant_id)
         try:
-            env = _tenant_env(config)
-        except FieldDecryptionError:
+            env = _tenant_env(credentials_for_active_config(config))
+        except TenantCredentialError as exc:
             print(
                 f"[WARN] archive_worker tenant={tag} trigger=skipped-failed "
-                "error_class=tenant_credentials_unreadable",
+                f"error_class={exc.error_class}",
                 flush=True,
             )
             continue

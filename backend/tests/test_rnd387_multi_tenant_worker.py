@@ -232,14 +232,14 @@ def test_loop_zero_active_tenants_is_a_success_noop(
     assert media_tenants == []
 
 
-def test_loop_unreadable_credentials_skip_tenant_and_continue(
+def test_loop_legacy_credentials_skip_tenant_and_continue(
     monkeypatch, tmp_path, worker_engine, capsys, field_encryption_key
 ) -> None:
     with Session(worker_engine) as db:
         insert_tenant(db, _TENANT_A)
         insert_tenant(db, _TENANT_B)
         # Tenant A's row keeps the plaintext "secret" from the insert helper
-        # (not re-encrypted): _tenant_env cannot decrypt it.
+        # and must be classified as historical/non-Fernet format.
         insert_tenant_wecom_config(db, _TENANT_A, "corp-a")
         _encrypted_config(db, _TENANT_B, "corp-b", _SECRET_B)
 
@@ -257,7 +257,7 @@ def test_loop_unreadable_credentials_skip_tenant_and_continue(
     out = capsys.readouterr().out
     assert (
         f"[WARN] archive_worker tenant={tag_a} trigger=skipped-failed "
-        "error_class=tenant_credentials_unreadable" in out
+        "error_class=tenant_credentials_legacy_format" in out
     )
     # Only tenant B's chain ran; media wakes only B.
     assert [env["WECOM_TENANT_ID"] for label, env, _tag in script_calls if label.startswith("sync")] == [
@@ -285,11 +285,11 @@ def test_single_tenant_chain_hard_fails_when_config_missing(
 
     assert result.value.code == 1
     out = capsys.readouterr().out
-    assert "error_class=tenant_unavailable" in out
-    assert "Active config not found" in out
+    assert "error_class=tenant_config_unavailable" in out
+    assert "Tenant archive credentials are unavailable" in out
 
 
-def test_single_tenant_chain_hard_fails_on_unreadable_credentials(
+def test_single_tenant_chain_hard_fails_on_legacy_credentials(
     monkeypatch, tmp_path, worker_engine, capsys, field_encryption_key
 ) -> None:
     with Session(worker_engine) as db:
@@ -308,7 +308,7 @@ def test_single_tenant_chain_hard_fails_on_unreadable_credentials(
 
     assert result.value.code == 1
     out = capsys.readouterr().out
-    assert "error_class=tenant_credentials_unreadable" in out
+    assert "error_class=tenant_credentials_legacy_format" in out
 
 
 def test_legacy_env_chain_unchanged(

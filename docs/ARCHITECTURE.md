@@ -73,7 +73,7 @@ It is **not** a public-facing product. Access is restricted to employees authent
 | REST API | Python 3.11 + FastAPI | ✅ Fully implemented |
 | Database | PostgreSQL 14+ | ✅ Schema deployed, Alembic migrations active |
 | Media storage | Pluggable provider (`MediaStorageProvider` interface) | ✅ Local disk (RND-185) + Qiniu Kodo, optional (RND-174); OSS/S3 contract ready |
-| Sync worker | Callback-primary Python worker + 30-minute systemd reconciliation (`OnCalendar=*:0/30`) | ✅ Implemented; worker/media timer units are versioned in repo |
+| Sync worker | Callback-primary Python worker + five-minute systemd reconciliation (`OnCalendar=*:0/5`) | ✅ Implemented; the existing worker service/timer are versioned and managed as one named pair |
 | Admin UI — Conversation Review Console | Server-rendered HTML + JS (FastAPI) | ✅ Three-column, WeCom-style (RND-154/157) |
 | Admin UI — Diagnostics | Server-rendered HTML + JS | ✅ Message reachability audit (RND-180) |
 | Auth — WeCom OAuth | WeCom OAuth 2.0 (`snsapi_base`) | ✅ RND-110 |
@@ -88,7 +88,7 @@ It is **not** a public-facing product. Access is restricted to employees authent
 
 ```
 [validated WeCom callback] ──non-blocking──► [archive dispatch]
-[systemd reconciliation: OnCalendar=*:0/30] ─► [same archive entrypoint]
+[systemd reconciliation: OnCalendar=*:0/5] ─► [same archive entrypoint]
                                                   │
                                                   ▼
 run_archive_worker_once.py
@@ -360,7 +360,7 @@ Client-facing Signed URL / CDN delivery (RND-187) is implemented locally and pas
 
 | Unit | Type | Schedule | Purpose |
 |------|------|----------|---------|
-| `wecom-archive-worker.service` | oneshot | `OnCalendar=*:0/30` | Callback-primary sync/decrypt reconciliation; archive-complete media wake-up |
+| `wecom-archive-worker.service` | oneshot | `OnCalendar=*:0/5` | Callback-primary sync/decrypt reconciliation; archive-complete media wake-up |
 | `wecom-archive-worker.timer` | timer | — | Activates above |
 | `wecom-external-contact-refresh.service` | oneshot | path signal / retry timer | Drains small persisted external-contact metadata refresh batches |
 | `wecom-external-contact-refresh.path` | path | shared mtime signal | Starts incremental refresh work without putting identifiers on disk |
