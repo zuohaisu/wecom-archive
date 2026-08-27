@@ -160,7 +160,7 @@ verify: lint-diff typecheck build test
 ## Build the public open-source snapshot into build/public-snapshot.
 ##
 ## This repository ships under a two-repository model: everything internal
-## (Linear ticket files, agent automation, design sources, roadmaps) stays
+## (ticket files, agent automation, design sources, roadmaps) stays
 ## here, and only the paths named in scripts/public_allowlist.txt reach the
 ## public repo. The export script copies that allowlist, rewrites real
 ## hostnames and deploy paths to placeholders, then runs a leak gate that

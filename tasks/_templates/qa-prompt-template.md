@@ -1,6 +1,10 @@
 # RND-<N> 验收提示词（Acceptance / QA Prompt）— 模板
 
-> 复制本模板，替换所有 `<...>` 占位符。**保留下面的「立即执行」块，逐字复制到生成的提示词里** —— 它是防止接收 agent（尤其 Qoder 等在收到长文档时习惯先反问用户意图的工具）把这份提示词当成"待讨论文档"而不是"待执行任务"的关键。若本工单同时有 `[Goal check]` 首行（Ticket Autopilot 格式），「立即执行」块放在 `[Goal check]` 行**之后**——`[Goal check]` 必须留在文件字面第一行，`docs/ticket-autopilot-workflow.md` 的合规检查靠这个。
+> **⚠️ 休眠模板（2026-08-28 起）** — 独立 QA agent 流程已停用，现行流程是 dev 自
+> QA + required CI 判定（见 `AGENTS.md`）。仅当 Haisu 为高风险改动显式指派可选的
+> **qa 角色**时才使用本模板。
+
+> 复制本模板，替换所有 `<...>` 占位符。**保留下面的「立即执行」块，逐字复制到生成的提示词里** —— 它是防止接收 agent（尤其 Qoder 等在收到长文档时习惯先反问用户意图的工具）把这份提示词当成"待讨论文档"而不是"待执行任务"的关键。若本工单同时有 `[Goal check]` 首行，「立即执行」块放在 `[Goal check]` 行**之后**——`[Goal check]` 必须留在文件字面第一行。
 
 ---
 
@@ -17,7 +21,7 @@
 ---
 
 ## 任务身份
-- 项目：Crowntime WeCom Archive / 365 企微会话存档（Linear team `Builder`）
+- 项目：Crowntime WeCom Archive / 365 企微会话存档
 - 工单：RND-<N>「<标题>」
 - 风险等级：<R0|R1|R2|R3>｜类型：<代码改动 automated 验收 | ...>
 
