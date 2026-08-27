@@ -1,11 +1,11 @@
 [Unit]
-Description=WeCom Archive Worker Reconciliation Timer — default every 30 minutes
+Description=WeCom Archive Worker Reconciliation Timer — every 5 minutes
 
 [Timer]
 # Callback dispatch is the low-latency primary path. This is the durable
-# reconciliation fallback at :00 and :30; see docs for the reviewed 5-minute
-# rollback drop-in. Media reconciliation runs at :15 and :45.
-OnCalendar=*:0/30
+# reconciliation fallback every five minutes. It intentionally reuses this
+# existing timer name; controlled deployment must never create a second timer.
+OnCalendar=*:0/5
 AccuracySec=30s
 Persistent=true
 Unit=wecom-archive-worker.service

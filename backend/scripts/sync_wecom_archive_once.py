@@ -52,7 +52,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.crypto import FieldDecryptionError
 from app.db.models import TenantWecomConfig
 from app.sdk import wecom_sdk
 from app.services.sync_worker import (  # noqa: F401 -- re-exported for backward-compat imports
@@ -60,7 +59,10 @@ from app.services.sync_worker import (  # noqa: F401 -- re-exported for backward
     _upsert_seq,
     run_sync_once,
 )
-from app.services.tenant_credentials import config_for_tenant
+from app.services.tenant_credentials import (
+    TenantCredentialError,
+    resolve_tenant_archive_credentials,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -146,17 +148,18 @@ def main() -> None:
     tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
     if tenant_id_env:
         with Session(engine) as session:
-            config = config_for_tenant(session, tenant_id_env)
-            if config is None:
-                print("[FAIL] No active tenant config found for this tenant", flush=True)
-                sys.exit(1)
             try:
-                corp_id = config.corp_id
-                secret = config.decrypted_app_secret
-                tenant_id = config.tenant_id
-            except FieldDecryptionError:
-                print("[FAIL] Stored archive secret cannot be decrypted", flush=True)
+                credentials = resolve_tenant_archive_credentials(session, tenant_id_env)
+            except TenantCredentialError as exc:
+                print(
+                    f"[FAIL] sync_worker error_class={exc.error_class} "
+                    "Tenant archive credentials are unavailable",
+                    flush=True,
+                )
                 sys.exit(1)
+            corp_id = credentials.corp_id
+            secret = credentials.archive_secret
+            tenant_id = credentials.tenant_id
     else:
         corp_id = _require_env("WECOM_CORP_ID")
         secret = _require_env("WECOM_ARCHIVE_SECRET")

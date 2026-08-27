@@ -74,7 +74,10 @@ from app.services.decrypt_worker import (  # noqa: F401 -- re-exported for backw
     repair_missing_recipients,
     run_decrypt_once,
 )
-from app.services.tenant_credentials import config_for_tenant
+from app.services.tenant_credentials import (
+    TenantCredentialError,
+    resolve_tenant_archive_credentials,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -197,17 +200,19 @@ def main() -> None:
     config = None
     if tenant_id_env:
         with Session(engine) as session:
-            config = config_for_tenant(session, tenant_id_env)
-            if config is None:
-                print("[FAIL] No active tenant config found for this tenant", flush=True)
-                sys.exit(1)
             try:
-                corp_id = config.corp_id
-                secret = config.decrypted_app_secret
-                tenant_id = config.tenant_id
-            except FieldDecryptionError:
-                print("[FAIL] Stored archive secret cannot be decrypted", flush=True)
+                credentials = resolve_tenant_archive_credentials(session, tenant_id_env)
+            except TenantCredentialError as exc:
+                print(
+                    f"[FAIL] decrypt_worker error_class={exc.error_class} "
+                    "Tenant archive credentials are unavailable",
+                    flush=True,
+                )
                 sys.exit(1)
+            config = credentials.config
+            corp_id = credentials.corp_id
+            secret = credentials.archive_secret
+            tenant_id = credentials.tenant_id
         expected_pubkey_ver_str = os.environ.get("WECOM_PUBLIC_KEY_VERSION", "").strip()
         if not expected_pubkey_ver_str and config.publickey_version is not None:
             expected_pubkey_ver_str = str(config.publickey_version)

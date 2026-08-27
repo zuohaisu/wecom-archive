@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "issue_key": "RND-422",
+  "linear_url": "https://linear.app/xyzhs1897/issue/RND-422/归档-worker-运维硬化systemd-纳管触发来源与凭证错误分类",
+  "run_id": "rnd-422-qa-20260827-1",
+  "qa_attempt": 1,
+  "verdict": "PASS",
+  "review_target": {
+    "base": "70b3b4a (origin/main)",
+    "head": "70b3b4a + RND-422 working-tree diff",
+    "diff_scope": "16 intentional files: tenant credential resolver and four existing worker shells; archive service/timer manifest and existing timer template; focused tests; deployment/architecture/worker runbooks; RND-422 dev/QA artifacts. No migration, router, app/main.py, CI/CD workflow, .env, production operation, credential, commit, or push change."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd422_worker_hardening.py::test_archive_timer_is_managed_once_with_existing_five_minute_contract",
+        "deploy/systemd/MANAGED_UNITS lists the existing archive service and timer once; timer is Unit=wecom-archive-worker.service, OnCalendar=*:0/5, and its service preserves ARCHIVE_WORKER_TRIGGER_SOURCE=timer."
+      ]
+    },
+    {
+      "id": "AC-2",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd422_worker_hardening.py::test_managed_unit_deploy_contract_enables_only_the_existing_trigger_unit",
+        "bats scripts/tests/deploy_server.bats: EXIT=0, 41/41 pass; its step-10 cases prove exact unit copying, one reload after change, timer-only enable, and no redundant reload for unchanged units."
+      ]
+    },
+    {
+      "id": "AC-3",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_rnd422_worker_hardening.py::test_tenant_worker_credential_failures_are_classified_and_redacted covers missing/inactive config, missing field, legacy format, key mismatch and unknown error classes; every captured output excludes the fixture tenant, corp and secret.",
+        "backend/tests/test_rnd387_multi_tenant_worker.py passes with the legacy-format compatibility path."
+      ]
+    },
+    {
+      "id": "AC-4",
+      "status": "PASS",
+      "evidence": [
+        "backend/tests/test_sync_wecom_archive_once_cli.py, test_decrypt_wecom_messages_once_cli.py and test_download_wecom_media_once_cli.py: 39 focused tests total with RND-422/RND-343/RND-387 tests, EXIT=0.",
+        "The four tenant-scoped shells use the same resolver; no RND-419-specific value is present in business code."
+      ]
+    },
+    {
+      "id": "AC-5",
+      "status": "PASS",
+      "evidence": [
+        "docs/wecom_archive_worker_runbook.md declares archive_messages.msgtime as epoch milliseconds and requires msgtime / 1000.",
+        "backend/tests/test_rnd422_worker_hardening.py::test_msgtime_runbook_contract_and_formatter_use_epoch_milliseconds verifies a known epoch-ms value renders as the expected 2026 Beijing time."
+      ]
+    },
+    {
+      "id": "AC-6",
+      "status": "PASS",
+      "evidence": [
+        "make verify: EXIT=0; 3463 passed, 158 skipped.",
+        ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q: EXIT=0; 25 passed."
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_rnd422_worker_hardening.py backend/tests/test_rnd343_worker_scheduling.py backend/tests/test_rnd387_multi_tenant_worker.py backend/tests/test_sync_wecom_archive_once_cli.py backend/tests/test_decrypt_wecom_messages_once_cli.py backend/tests/test_download_wecom_media_once_cli.py -q",
+      "result": "EXIT=0; 39 passed"
+    },
+    {
+      "command": "bats scripts/tests/deploy_server.bats",
+      "result": "EXIT=0; 41 passed"
+    },
+    {
+      "command": ".venv/bin/python -m pytest backend/tests/test_architecture_boundary.py -q",
+      "result": "EXIT=0; 25 passed"
+    },
+    {
+      "command": "make verify",
+      "result": "EXIT=0; 3463 passed, 158 skipped"
+    },
+    {
+      "command": "git diff --check && git status --short",
+      "result": "EXIT=0; whitespace clean; only the 16 intentional RND-422 files are modified/untracked"
+    }
+  ],
+  "safety_checks": {
+    "no_secrets_introduced": true,
+    "no_commit_or_push": true,
+    "file_ownership_respected": true,
+    "architecture_boundary_pass": true,
+    "i18n_all_locales": true,
+    "no_template_engine_syntax": true
+  },
+  "scope_violation": false,
+  "recommended_next_state": "PASS",
+  "notes": "Repository-only R3 scope is satisfied. No production systemctl, deployment, credential, database or runtime verification was run. The next gated action is Haisu review and explicit approval for the single RND-422 commit and branch push; post-merge production operations require separate approval."
+}

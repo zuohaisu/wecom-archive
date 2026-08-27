@@ -10,5 +10,7 @@
 # directly — it still needs to land in /etc/systemd/system/ for its
 # .timer/.path to be able to trigger it. Units NOT listed here keep
 # following the manual install steps in docs/DEPLOYMENT.md.
+wecom-archive-worker.service
+wecom-archive-worker.timer
 wecom-external-contact-reconcile.service
 wecom-external-contact-reconcile.timer
