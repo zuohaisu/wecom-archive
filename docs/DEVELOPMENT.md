@@ -32,7 +32,7 @@ only need the real SDK to work on the live sync path itself.
 
 Every change runs in an assigned non-`main` delivery worktree and branch, based
 on an up-to-date `origin/main`. Never develop on, commit to, or push directly to
-`main`. Each Linear issue keeps its own implementation conversation and exactly
+`main`. Each GitHub Issue keeps its own implementation conversation and exactly
 one final commit. A worktree/branch/pull request may group several related issue
 commits, normally from the same Epic. Those issues must be implemented serially
 so uncommitted changes from different tickets never coexist. Agents must verify

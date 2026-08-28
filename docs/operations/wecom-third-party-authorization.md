@@ -33,23 +33,23 @@ RND-350 提供独立 HTTPS 指令回调：
 `/api/wecom/archive/events` 的 Token/AESKey。反向代理访问日志必须对完整 query string
 脱敏。
 
-**信封 receiver 与明文 SuiteId 的校验边界（RND-410）**：企业微信在第三方应用指令回调
-（至少 URL 验证阶段）将 AES 信封的 receiver id 填充为**服务商 CorpID**，而不是 SuiteID。
-两者不可混用：
+**信封 receiver 与明文 SuiteId 的校验边界**：GET URL 验证和 POST 指令
+使用不同的已验证 receiver 语义；两者不可混用：
 
-- AES 信封 receiver id ⟷ `WECOM_THIRD_PARTY_CORP_ID`（服务商 CorpID，ww 开头 18 位，见
-  企业微信服务商后台“服务商信息”）。GET URL 验证与 POST 指令均以此比较；不匹配拒绝
+- **GET URL 验证**：AES 信封 receiver id ⟷ `WECOM_THIRD_PARTY_CORP_ID`（服务商
+  CorpID，ww 开头 18 位，见企业微信服务商后台“服务商信息”）。不匹配拒绝
   403 `Corp ID mismatch`。
-- POST 指令体内的明文 `<SuiteId>` 字段 ⟷ `WECOM_THIRD_PARTY_SUITE_ID`（保持 RND-350 原有
-  语义不变）。不匹配拒绝 403 `Suite ID mismatch`。
-- `WECOM_THIRD_PARTY_CORP_ID` 缺失或与 `WECOM_THIRD_PARTY_SUITE_ID` 等配置一并校验；
-  缺失时 GET/POST 均 fail-closed 返回 503 `configuration_error`，不做任何解密或落库。
+- **POST `suite_ticket` 指令**：AES 信封 receiver id **和**明文 `<SuiteId>` 都必须
+  ⟷ `WECOM_THIRD_PARTY_SUITE_ID`。任一不匹配拒绝 403 `Suite ID mismatch`。
+- `WECOM_THIRD_PARTY_CORP_ID`、SuiteID、Token 和 EncodingAESKey 都是回调配置的
+  必需部分；缺失或无效时 GET/POST 均 fail-closed 返回 503 `configuration_error`，
+  不做解密或落库。
 
-服务只接受配置 `suite_id` 的 `suite_ticket` 指令，校验签名、请求时间、AES 信封中的
-receiver id（服务商 CorpID）、明文 `SuiteId`（SuiteID）和事件时间。ticket 按 `suite_id`
-在 `wecom_suite_ticket_states` 中以 Fernet 密文原子保存；相同或更旧事件不会覆盖较新的
+服务只接受配置 `suite_id` 的 `suite_ticket` 指令，校验签名、请求时间、相应 HTTP
+方法的 receiver 语义、明文 `SuiteId`（POST）和事件时间。ticket 按 `suite_id` 在
+`wecom_suite_ticket_states` 中以 Fernet 密文原子保存；相同或更旧事件不会覆盖较新的
 权威记录。`WECOM_THIRD_PARTY_SUITE_TICKET` 已废止，禁止把 ticket 放入环境、日志、
-Linear、聊天或截图。
+GitHub Issue、聊天或截图。
 
 授权服务只读取数据库中的最新 ticket：
 
@@ -66,13 +66,14 @@ Linear、聊天或截图。
 
 ### 部署与回滚
 
-1. 发布前运行 `alembic upgrade head`，确认 `alembic heads` 只有 `0045` 且
-   `alembic check` 无 drift。
+1. 发布前按 `docs/DEPLOYMENT.md` 运行当前迁移/修订验证流程：`alembic upgrade head`、
+   `scripts/verify_alembic_head.py`，以及适用的 CI schema-drift gate。不要把历史 revision
+   号当作当前 head。
 2. 保持第三方自助入口关闭，先配置非生产独立指令回调；确认 GET 验证通过并收到至少一次
-   `fresh` ticket 后，再执行 RND-351/352 的非生产授权验收。
-3. 回滚应用前先关闭 install 入口。若需要 schema 回滚，执行 downgrade 到 `0044` 会删除
-   `wecom_suite_ticket_states`；这不会删除组织、Payment、Subscription 或归档数据，但恢复
-   后必须等待企业微信推送新 ticket，不能从日志或环境恢复旧值。
+   `fresh` ticket 后，再执行 GitHub #78 / #79 的非生产授权验收。
+3. 回滚应用前先关闭 install 入口。不要把自动 `alembic downgrade` 当作应用回滚的一部分；
+   任何 destructive schema action 都需要独立、经批准的运行手册。恢复后必须等待企业微信
+   推送新 ticket，不能从日志或环境恢复旧值。
 4. 任一异常只记录固定结果类型与时间。禁止记录请求体、解密 XML、ticket、suite token、
    suite secret、CorpID、UserID 或完整回调 URL。
 
@@ -132,4 +133,6 @@ permanent code、CorpID、UserID 或完整回调 URL。
 自助创建完成后租户保持 `provisioning` 且 `is_active=false`。其会话只能访问
 `/admin/provisioning`、`/admin/provisioning/settings` 与 `/api/provisioning/status`；归档、
 同步、导出、邀请和普通后台均失败关闭。运维完成会话存档凭证、回调与连通性验证后，
-再由平台启用租户；本流程不会更改现有单 `WECOM_CORP_ID` worker。
+再由平台启用租户；激活后的 archive dispatch 使用该租户的显式 tenant-scoped
+worker path。现有单 `WECOM_CORP_ID` worker 属于 transitional runtime，且不由本
+runbook 改动。

@@ -49,7 +49,7 @@ v1 检索后端是 Postgres `pg_trgm` 的 `word_similarity`（见 `retriever.py`
 
 `doc_missing` | `doc_stale` | `product_bug` | `config_issue` | `external_platform` | `model_issue` | `user_misunderstanding`
 
-`backend/scripts/run_ai_kb_gap_report.py`（每周一 06:00）聚合高频未解决问题、`helpful=false` 的回答数、上述分类计数、`ai_feedback` 分类，生成 Markdown 候选改进清单到 `docs/ai/reports/`（已加入 `.gitignore`，因含真实运营内容）。**只产出草稿文本，绝不调用 Linear API**——见 `gap_report.py` 模块文档字符串。
+`backend/scripts/run_ai_kb_gap_report.py`（每周一 06:00）聚合高频未解决问题、`helpful=false` 的回答数、上述分类计数、`ai_feedback` 分类，生成 Markdown 候选改进清单到 `docs/ai/reports/`（已加入 `.gitignore`，因含真实运营内容）。**只产出草稿文本，绝不创建、修改或关闭 GitHub Issue**——见 `gap_report.py` 模块文档字符串。
 
 ## 4. 成本上限与限流
 

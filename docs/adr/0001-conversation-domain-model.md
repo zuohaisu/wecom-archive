@@ -1,7 +1,13 @@
 # ADR-0001: 会话领域模型架构评估
 
-**状态**：已评审通过（v7，2026-07-21）  
-**日期**：2026-07-21  
+**状态**：历史性、未采纳的实现提案（v7，2026-07-21）；不作为当前架构或实现合同。
+**日期**：2026-07-21
+
+> **Superseded as a current architecture reference (GitHub #92).** This ADR
+> records a proposed conversation-entity / dual-write migration that is not
+> present in the current repository. Use `docs/architecture/current-state.md`
+> and executable sources for current behavior; retain this document only as
+> historical design context.
 **作者**：架构分析  
 **评审人**：Samuel  
 **关联任务**：RND-209（本 ADR）
@@ -1164,7 +1170,7 @@ Batch N 验证清单:
 
 本 ADR 为后端重构提供了领域模型基础。相关任务按以下章节指导：
 
-| ADR 章节 | 指导方向 | 相关 Linear 任务 |
+| ADR 章节 | 历史指导方向 | 相关历史任务 |
 |----------|----------|-----------------|
 | §3-4 数据模型 | `conversations` + `conversation_members` + `conversation_messages` 表设计 | Alembic migration 任务 |
 | §6 API 契约 | 非破坏性响应结构、加法式字段追加、旧 ID 兼容规则 | Router 拆分 / Service 层实现 |
@@ -1172,4 +1178,4 @@ Batch N 验证清单:
 | §8 上线计划 | 三批推进、per-tenant feature flag、验证清单 | Feature flag 基础设施、监控告警 |
 | §9 风险 | 脏数据处理、复合 FK、性能基线 | 测试补充、性能验证 |
 
-**注意**：附录仅说明 ADR 与后续任务的方向性对应关系。各 Linear 任务的实际标题和范围以 Linear 平台记录为准，不在此 ADR 中硬编码。
+**注意**：附录仅说明 ADR 与后续任务的历史方向性对应关系，不定义当前工作范围。当前任务范围以 GitHub Issue 和 `AGENTS.md` 为准。

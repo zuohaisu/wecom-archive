@@ -1,7 +1,12 @@
 # Data Model — Crowntime WeCom Archive
 
-PostgreSQL schema for storing WeCom conversation archive messages and tenant
-management infrastructure for future SaaS use.
+PostgreSQL schema reference for WeCom archive messages and the current
+hosted multi-tenant SaaS tenant, identity, billing, and service-lifecycle model.
+
+> **Scope:** this is a schema reference, not the product or runtime authority.
+> Use [`architecture/current-state.md`](architecture/current-state.md) for the
+> current architecture map and `backend/app/db/models.py` plus migrations for
+> executable schema behavior.
 
 Related issues: RND-75 (initial schema), RND-111 (tenant foundation), RND-156
 (multi-tenant), RND-184 (corp ID uniqueness), RND-376 (billing authority),
@@ -12,8 +17,7 @@ RND-400 (subscription and Tenant service lifecycle).
 ## Overview
 
 Core archive, tenant, and identity tables cover the lifecycle from encrypted
-pull to searchable archive, plus the tenant-aware foundation for employee
-login (RND-110, shipped) and future multi-tenant SaaS operation:
+pull to searchable archive and the current multi-tenant SaaS operation:
 
 | Table | Purpose |
 |---|---|
@@ -51,8 +55,8 @@ login (RND-110, shipped) and future multi-tenant SaaS operation:
 
 ### `tenants`
 
-Top-level tenant entity. MVP: one default row with
-`id = 00000000-0000-0000-0000-000000000001` and `slug = 'default'`.
+Top-level tenant entity. The historical bootstrap script can create a default
+row; that bootstrap convention does not limit the current model to one tenant.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -101,17 +105,22 @@ OAuth login. A given `corp_id` can be active on at most one tenant
 | Column | Type | Notes |
 |---|---|---|
 | `id` | varchar(36) PK | UUID string |
-| `tenant_id` | varchar(36) FK → `tenants.id` | unique (1:1 with tenant for MVP) |
-| `corp_id` | varchar(64) | WeCom CorpID |
-| `agent_id` | varchar(64) | WeCom Agent ID (self-built app) |
-| `app_secret` | text | Phase 1: plaintext (internal only). Phase 3: encrypt at rest. **Do not log.** |
-| `callback_domain` | varchar(255) | OAuth trusted domain registered in WeCom Admin |
-| `is_active` | boolean | Active configs must have unique `corp_id` (partial unique index) |
+| `tenant_id` | varchar(36) FK → `tenants.id` | one active config row per tenant |
+| `corp_id` | varchar(64) | WeCom CorpID; one active config per CorpID |
+| `agent_id` | varchar(64) | WeCom Agent ID or trusted third-party binding value |
+| `app_secret` | text | target tenant path: Fernet ciphertext for the archive credential; legacy bootstrap rows may contain an older plaintext OAuth value and are transitional |
+| `private_key_encrypted` | text | encrypted tenant archive RSA private key; nullable only for compatibility/migration |
+| `callback_*_encrypted` | text | encrypted tenant archive callback Token/AES key; nullable only for legacy environment compatibility |
+| `publickey_version` | integer | WeCom archive public-key version for decrypt resolution |
+| `callback_domain` | varchar(255) | retained configuration metadata |
+| `is_active` | boolean | config enablement; active configs have unique `corp_id` (partial unique index) |
 | `created_at` | timestamptz | auto-set on insert |
 | `updated_at` | timestamptz | auto-updated on write |
 
-Populated by `scripts/bootstrap_default_tenant.py` from `WECOM_CORP_ID`,
-`WECOM_AGENT_ID`, `WECOM_OAUTH_SECRET`, `ADMIN_DOMAIN` env vars.
+`scripts/bootstrap_default_tenant.py` remains a legacy/local bootstrap path
+using environment values. Self-service tenants are created from a trusted
+third-party organization binding and receive their archive configuration via
+the provisioning service.
 
 ---
 
@@ -651,9 +660,20 @@ The WeCom SDK returns an encrypted envelope JSON object containing both `encrypt
 
 `publickey_ver` is stored on every message row. `key_versions` maps each version to a key path. To handle a new key: insert a row into `key_versions`, set `is_active = true` for the new row, and update `WECOM_PUBLIC_KEY_VERSION` in the environment.
 
-### `app_secret` plaintext storage (Phase 1)
+### Tenant credential encryption
 
-`tenant_wecom_configs.app_secret` stores `WECOM_OAUTH_SECRET` in plaintext in Phase 1. This is acceptable for an internal single-tenant deployment. Phase 3 must encrypt at rest using Fernet (symmetric) or a Vault/KMS integration before storing, and must not log the value.
+The target tenant-scoped archive path stores `app_secret`,
+`private_key_encrypted`, and archive callback credentials through the
+field-encryption boundary. `app_secret` is a historical column name; the
+current tenant archive runtime resolves it as the tenant archive credential.
+
+`bootstrap_default_tenant.py` predates this model and can leave a default-row
+`app_secret` in its historical plaintext OAuth format. That row is not proof
+that plaintext tenant credentials remain supported: tenant-scoped archive
+resolution rejects unreadable/legacy credential formats and fails closed. The
+bootstrap/env compatibility path is transitional runtime debt in
+[`architecture/runtime-debt.md`](architecture/runtime-debt.md). Do not create
+or repair a SaaS tenant by copying that legacy format.
 
 ---
 

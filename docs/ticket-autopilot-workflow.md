@@ -16,6 +16,9 @@
 > - 原 §8「`tasks/` 目录约定」→ `AGENTS.md` § Ticket artifacts（产物清单已按新流程改写）
 >
 > **与 `AGENTS.md` 冲突时一律以 `AGENTS.md` 为准。** 恢复本流程前请先与 Haisu 确认。
+> 下方全部内容是 2026-07-29 的历史流程记录；不定义当前工单系统、
+> agent 角色或交付要求。当前系统为 GitHub Issues，唯一工作流事实源为
+> `AGENTS.md`。
 
 ---
 
@@ -215,7 +218,7 @@ tasks/
 
 **命名规范（强制）**：`RND-<n>-dev-prompt.md` / `RND-<n>-qa-prompt.md` / `RND-<n>-qa-verdict.json` / `RND-<n>-qa-report.md`。前缀大写 `RND-`。同一工单有多份开发提示词时用后缀区分，如 `RND-229-dev-prompt-search-pagination-flake.md`。
 
-**归档规则**：工单在 Linear 置为 Done 或 Canceled 后，把该工单的**全部**文件（dev/qa prompt + verdict + report）一次性 `git mv` 到 `tasks/archive/`。`tasks/` 根目录始终只剩「还要用的」，一眼可见待办面。归档只搬文件、不改内容，仅修正跨文件引用路径。
+**历史归档规则**：工单在当时的工单系统置为 Done 或 Canceled 后，把该工单的**全部**文件（dev/qa prompt + verdict + report）一次性 `git mv` 到 `tasks/archive/`。`tasks/` 根目录始终只剩「还要用的」，一眼可见待办面。归档只搬文件、不改内容，仅修正跨文件引用路径。
 
 ### 8.1 双产线合并收口（2026-07-29 起，2026-07-31 完成）
 

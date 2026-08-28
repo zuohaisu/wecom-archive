@@ -1,9 +1,11 @@
 """Tenant-scoped private-key providers used by the decrypt CLI.
 
-``local_file`` preserves self-hosted deployments: a KeyVersion contains a PEM
-path, with the legacy ``WECOM_PRIVATE_KEY_PATH`` available as a fallback while
-old deployments populate KeyVersion. ``kms_envelope`` stores a Fernet envelope
-in that same legacy column; the decrypted PEM exists only in process memory.
+``local_file`` preserves legacy/local-file compatibility: a KeyVersion contains
+an on-host PEM path, with ``WECOM_PRIVATE_KEY_PATH`` available as a fallback
+while old deployments populate KeyVersion. ``kms_envelope`` stores a Fernet
+envelope in that same legacy column; the decrypted PEM exists only in process
+memory. These fallbacks are transitional runtime debt, not a hosted-product
+self-hosting commitment.
 """
 from __future__ import annotations
 
@@ -45,7 +47,7 @@ class KeyProvider(ABC):
 
 
 class LocalFileKeyProvider(KeyProvider):
-    """Load tenant key PEM files for self-hosted installations."""
+    """Load tenant key PEM files for legacy/local-file-compatible installations."""
 
     def __init__(self, session: Session, legacy_private_key_path: str | None = None) -> None:
         super().__init__(session)
@@ -63,7 +65,7 @@ class LocalFileKeyProvider(KeyProvider):
         try:
             key_version = self._key_version(tenant_id, publickey_ver)
         except Exception as exc:
-            # Existing self-hosted installations may not yet have the newly
+            # Existing legacy/local-file installations may not yet have the
             # tenant-scoped table when their CLI is upgraded.
             if not self._legacy_private_key_path:
                 raise KeyProviderError("Private key retrieval failed") from exc

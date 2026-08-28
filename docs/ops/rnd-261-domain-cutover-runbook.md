@@ -1,7 +1,10 @@
 # RND-261 域名切换人工执行 Runbook
 
 > qwhhcd.crowntime.cn → archive.crowntime.cn（归档服务规范公网域名）
-> Linear: https://linear.app/xyzhs1897/issue/RND-261/二级域名变更qwhhcdcrowntimecn-archivecrowntimecn
+> Historical Linear provenance: RND-261
+> **Status: historical runbook and production record.** It cannot prove the
+> current production state; use read-only Ops evidence and GitHub Issues for
+> any new work.
 > 风险等级：**R3**（生产 DNS / TLS / 部署 / OAuth）
 > 执行边界：**本 runbook 所有生产写操作均由 Haisu 或获授权的人工运维执行**。Ops agent 只逐步提示、记录证据并在每个 gate 等待人工确认，不得自行登录生产、修改 DNS/Nginx/WeCom/证书、重启服务或读取/输出任何密钥。
 
@@ -81,7 +84,7 @@ Nginx catch-all 修复的问题。此前将根地址 404 视为正常或将根�
    ```bash
    curl --fail --silent --show-error https://qwhhcd.crowntime.cn/health/ready
    ```
-4. 将结果（时间、操作者、HTTP 状态）写入 Linear 评论或受控运维记录。**失败则停止切换**。
+4. 将结果（时间、操作者、HTTP 状态）写入相关 GitHub Issue 或受控运维记录。**失败则停止切换**。
 
 **Gate 0 判定**：旧入口 2xx + 备份与校验值已记录 → PASS；否则 FAIL 并停止。
 
@@ -155,7 +158,7 @@ Nginx catch-all 修复的问题。此前将根地址 404 视为正常或将根�
 | AC-4 | `ARCHIVE_DOMAIN` 生产值为 `archive.crowntime.cn`；`ADMIN_DOMAIN` 仅在需要时更新 | Gate 2 |
 | AC-5 | 旧域名行为符合 Haisu 在 Gate 0 的明确决策（P4） | Gate 3 |
 | AC-6 | 主站 `crowntime.cn` / `www.crowntime.cn` 未受影响 | Gate 3 |
-| AC-7 | 生产密钥、完整 `.env`、生产聊天内容及证书私钥未出现在仓库、Linear 评论或 agent 输出中 | 全程 |
+| AC-7 | 生产密钥、完整 `.env`、生产聊天内容及证书私钥未出现在仓库、GitHub Issue 或 agent 输出中 | 全程 |
 
 ---
 
@@ -166,7 +169,7 @@ Nginx catch-all 修复的问题。此前将根地址 404 视为正常或将根�
 1. **停止后续变更**，记录失败时间与脱敏错误。
 2. 恢复 Gate 0 备份的入口/Nginx 配置和 `backend/.env` 域名值（`ARCHIVE_DOMAIN` → 旧值，`ADMIN_DOMAIN` 若改过则恢复），按既有运维流程重载服务。
 3. 在 WeCom 已变更时恢复原可信域名/回调配置。
-4. 验证旧域名 `/health/ready` 与登录流程恢复；在 Linear 标记 `BLOCKED_NEEDS_HUMAN`，附脱敏证据和下一步建议。
+4. 验证旧域名 `/health/ready` 与登录流程恢复；在相关 GitHub Issue 标记 `BLOCKED_NEEDS_HUMAN`，附脱敏证据和下一步建议。
 
 ---
 

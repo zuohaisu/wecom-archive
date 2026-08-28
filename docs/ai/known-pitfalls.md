@@ -1,5 +1,9 @@
 # Known Pitfalls — Crowntime WeCom Archive
 
+> **Status:** supplemental traps only. For current authority boundaries and
+> transitional runtime paths, start with
+> [`docs/architecture/current-state.md`](../architecture/current-state.md).
+
 Common traps, gotchas, and "don't touch this" areas that have caused problems in the past.
 
 ---
@@ -72,7 +76,7 @@ The archive worker runs sync **then** decrypt. If only sync runs (decrypt fails)
 
 - The media download worker is a single unified pipeline covering image/voice/video/file/emotion (RND-147 image, RND-199 voice/video/file/emotion).
 - The timer uses `--since-hours 72` to limit candidates — old messages may have expired WeCom download windows.
-- `--retry` is intentionally **not** used by the timer — retries are manual only.
+- The reconciliation timer uses `--retry`; durable retry eligibility is bounded by the configured attempt budget and backoff. Do not replace it with ad-hoc retries.
 
 ---
 

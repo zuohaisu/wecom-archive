@@ -34,7 +34,7 @@ Qiniu bucket、SMTP 或生产密钥。
 
 ## 安全配置通道
 
-运行时密钥**不进入 Git、Linear、PR、GitHub Actions 日志或命令行**。唯一批准的通道是
+运行时密钥**不进入 Git、GitHub Issue、PR、GitHub Actions 日志或命令行**。唯一批准的通道是
 由 `wecomarchive-nonprod` 拥有且权限严格为 `0600` 的
 `/etc/wecom-archive-365/nonprod.env`。创建或轮换必须在受控主机上由获批运维人员使用
 组织批准的秘密管理系统完成；不得通过 `scp`、shell history、`echo KEY=value`、截图或

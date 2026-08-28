@@ -1,5 +1,8 @@
 # RND-202 验证步骤与限制说明：企业版 `audio_archive`（语音通话存档）
 
+> **Historical verification record.** GitHub Issues are the active work system;
+> this document's RND references preserve provenance only.
+>
 > **状态标注（硬约束，见 RND-202 工单描述）**：本轨道当前状态为 **「已实现（代码 + fixture）」**，**未 Production Verified**。
 > 本环境没有真实企业版 WeCom 权限、没有真实录音数据，因此本文档只能覆盖到"代码可以正确解析/存储/播放一段已知格式的音频字节"这一层。**没有真实企业版环境时，不得宣称 Production Verified** —— 这条边界来自 RND-202 工单本身，本文档据此如实标注。
 
@@ -36,7 +39,7 @@
 3. **确认媒体下载**：运行 `scripts/download_wecom_media_once.py`（默认 `--types` 已包含 `audio_archive`，无需显式指定）后，检查对应 `media_files` 行 `download_status='downloaded'`、`storage_ref` 路径包含 `call_recordings/`，且下载的字节能被 `ffprobe`/播放器正确识别为音频（验证 §2 提到的字节签名假设）。
 4. **确认时间线可见与鉴权**：在审阅控制台打开该对话，确认卡片正确显示类型标签/结束时间/（如信封确有该字段）开始时间与时长/对方，且能听到真实录音播放；换一个非该 tenant 的账号访问同一 `/media/access` 链接确认返回 401/403/404（tenant isolation，复用既有 `/media/access` 鉴权，未新增校验逻辑）。
 5. **确认日志/URL 不泄漏**：抓取 worker 日志与浏览器网络面板，确认 `sdkfileid`、签名 URL 的密钥参数、私钥内容均未出现在任何日志或前端可见位置（复用既有 RND-199/RND-174 的日志脱敏约定，未新增日志点）。
-6. **验证结果回填**：完成以上 6 步后，将本文档 §1 的状态从「已实现（代码 + fixture）」更新为「已 Production Verified」，并在 Linear RND-202 下附上验证环境（企业/日期）与关键截图/日志片段（不得包含私钥/密文/录音内容本身）。
+6. **验证结果回填**：完成以上 6 步后，将本文档 §1 的状态从「已实现（代码 + fixture）」更新为「已 Production Verified」，并在相关 GitHub Issue 或受控运维记录中附上验证环境（企业/日期）与关键截图/日志片段（不得包含私钥/密文/录音内容本身）。
 
 ## 4. 非目标（未做，不在本轨道范围）
 
