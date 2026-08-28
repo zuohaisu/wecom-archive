@@ -2,6 +2,8 @@
 Description=WeCom Archive WeChat Payment T+1 Reconciliation Batch
 After=network-online.target postgresql.service
 Wants=network-online.target
+# GH-107: alert on unit failure (see deploy/systemd/wecom-job-failure-alert@.service)
+OnFailure=wecom-job-failure-alert@%n.service
 
 [Service]
 Type=oneshot

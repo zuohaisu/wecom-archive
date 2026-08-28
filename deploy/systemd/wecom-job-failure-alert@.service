@@ -1,0 +1,26 @@
+[Unit]
+Description=WeCom Archive Job-Failure Alert — %i (GH-107)
+# Standard systemd "failure notification" recipe: referenced via
+# OnFailure=wecom-job-failure-alert@%n.service on critical one-shot units
+# (see deploy/systemd/MANAGED_UNITS and docs/operations/alerting.md).
+# %i carries the failed unit's own name; this unit never runs on a timer
+# and is never `systemctl enable`d itself — deploy_server.sh only copies
+# it into place so systemd can instantiate it on demand.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wecomarchive
+WorkingDirectory=/srv/apps/wecom-archive-365/current
+EnvironmentFile=-/srv/apps/wecom-archive-365/current/backend/.env
+# notify.sh degrades to a log-only line when ALERT_WEBHOOK_URL is unset, so
+# this never fails a caller's OnFailure chain just because alerting isn't
+# configured yet.
+ExecStart=/srv/apps/wecom-archive-365/current/ssl-renew/notify.sh ERROR %i "systemd unit failed — see journalctl -u %i for detail"
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/srv/apps/wecom-archive-365 /usr /etc
+PrivateTmp=true
