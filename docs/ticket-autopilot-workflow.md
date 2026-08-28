@@ -3,9 +3,10 @@
 > ## ⚠️ 已停用（2026-08-28）
 >
 > **本文档描述的 Ticket Autopilot 流程当前不再使用。** 现行流程是：dev 角色 agent
-> 实现完成后**自行 QA**（跑 `make verify`、写 QA Summary），推交付分支开 PR，**由
-> required CI 作为判定闸**；CI 红则打回同一个 dev 会话修复。不再生成
-> dev/qa 提示词对，不再有独立 QA agent 与 `qa-verdict.json`。
+> 实现完成后跑 `make verify` 自查，推交付分支开 PR，**由 required CI 作为判定
+> 闸**；CI 红则打回同一个 dev 会话修复。不再生成 dev/qa 提示词对，不再有独立 QA
+> agent 与 `qa-verdict.json`。**2026-08-28 起也不再要求书面 QA Summary**——CI 直接
+> 把关，dev 不必再产出总结文档。
 >
 > 本文档保留为休眠参考（"暂时用不上"，非作废），因为 `tasks/` 下大量历史提示词引用
 > 它。**其中两条与 autopilot 无关、至今仍然成立的项目不变量已上收至 `AGENTS.md`：**
@@ -218,7 +219,7 @@ tasks/
 
 **命名规范（强制）**：`RND-<n>-dev-prompt.md` / `RND-<n>-qa-prompt.md` / `RND-<n>-qa-verdict.json` / `RND-<n>-qa-report.md`。前缀大写 `RND-`。同一工单有多份开发提示词时用后缀区分，如 `RND-229-dev-prompt-search-pagination-flake.md`。
 
-**历史归档规则**：工单在当时的工单系统置为 Done 或 Canceled 后，把该工单的**全部**文件（dev/qa prompt + verdict + report）一次性 `git mv` 到 `tasks/archive/`。`tasks/` 根目录始终只剩「还要用的」，一眼可见待办面。归档只搬文件、不改内容，仅修正跨文件引用路径。
+**历史归档规则**：工单在当时的工单系统置为 Done 或 Canceled 后，把该工单的**全部**文件（dev/qa prompt + verdict + report）一次性搬到 `tasks/archive/`（`tasks/` 现已 gitignore，用普通 `mv` 即可，不必 `git mv`）。`tasks/` 根目录始终只剩「还要用的」，一眼可见待办面。归档只搬文件、不改内容，仅修正跨文件引用路径。
 
 ### 8.1 双产线合并收口（2026-07-29 起，2026-07-31 完成）
 

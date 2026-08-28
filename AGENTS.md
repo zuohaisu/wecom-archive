@@ -49,7 +49,7 @@ what binds is the role, not which tool is running it.
 
 | Role | Owns | Never |
 |---|---|---|
-| **dev** | Implementing the approved ticket scope in the assigned delivery worktree. Runs the required checks, self-QAs, writes the QA Summary, and fixes what CI rejects. | Expands scope, commits/pushes without approval, changes CI/CD or deployment settings |
+| **dev** | Implementing the approved ticket scope in the assigned delivery worktree. Runs the required checks, self-QAs, and fixes what CI rejects. | Expands scope, commits/pushes without approval, changes CI/CD or deployment settings |
 | **qa** | *Optional.* Independent verification that Haisu assigns for a high-risk change. Issues a pass/fail verdict; does not commit. | Runs in the same conversation as the dev that wrote the code; edits files beyond a bounded, approved fix |
 | **ops** | Deployment, infrastructure, systemd/CD/TLS, incident response, runbooks. Reads production state. | Touches production data or databases, or changes deploy settings, without explicit approval per incident |
 | **research** | Read-only investigation: evidence gathering, external API/vendor behaviour, feasibility. Produces a report under `tasks/`. | Writes implementation code, changes ticket status, or presents inference as verified fact |
@@ -57,9 +57,9 @@ what binds is the role, not which tool is running it.
 
 Rules:
 
-- **dev self-QAs; CI is the gate.** The dev role runs the required checks, writes
-  its own QA Summary, and opens the PR. Required CI decides. A red check comes back
-  to the same dev conversation to fix.
+- **dev self-QAs; CI is the gate.** The dev role runs the required checks and opens
+  the PR. Required CI decides. A red check comes back to the same dev conversation
+  to fix.
 - When Haisu assigns the optional **qa** role, it must be a **separate
   conversation** — a conversation that wrote the code cannot be the one that
   certifies it.
@@ -89,7 +89,7 @@ GitHub Issue [RND-<n>] / [GH-<n>]  ──►  claim (assign to self, verify)
 Assigned delivery worktree + non-main branch (based on latest origin/main)
         │
         ▼
-dev implements one ticket  ──►  make verify  ──►  self-QA + QA Summary
+dev implements one ticket  ──►  make verify  ──►  self-QA
         │
         ▼
 Haisu approves the ticket's single commit
@@ -131,8 +131,9 @@ Before creating a worktree or branch, editing a file, or starting a sub-agent:
     `gh issue list --state all --search "RND-183"`.
   - **`GH-<n>`** — issues opened natively in GitHub, where `<n>` *is* the issue
     number.
-- Git history, `tasks/**`, and documentation reference these keys. Do not renumber
-  existing `RND-<n>` tickets.
+- Git history and documentation reference these keys, as do local files under
+  `tasks/**` (gitignored, not tracked — see [Ticket artifacts](#ticket-artifacts)).
+  Do not renumber existing `RND-<n>` tickets.
 - Epics have no native GitHub equivalent. Until Haisu decides otherwise, an Epic is
   an issue whose body carries a task list of its children, and its children carry
   the Epic's key in the body. Do not invent a different scheme without approval.
@@ -150,8 +151,12 @@ worktrees.
 ## Git workflow
 
 - Base every delivery branch on an up-to-date `origin/main`.
-- Branch naming: `agent/<type>-<short-kebab-description>`, `<type>` ∈
-  `feat` `fix` `docs` `refactor` `test` `chore` `ci` `security`.
+- Branch naming: `<git-identity>/<short-kebab-description>` — prefix with the
+  operator's git identity (e.g. `zuohaisu/`), then a short kebab description that
+  usually leads with the ticket key (`zuohaisu/rnd-386-tenant-config-wizard`,
+  `zuohaisu/issue-56`). A bare `issue-<n>` is also seen and acceptable. This
+  reflects actual practice; the older `agent/<type>-<description>` scheme is not
+  required, though still valid if used.
 - At preflight and again before any approved commit/push, verify
   `git branch --show-current` is the assigned delivery branch and not `main`.
 - Push only the assigned delivery branch.
@@ -205,9 +210,7 @@ exist to prevent destroying work that is not yours.
   broad staging shortcut.
 - Name every path you stage.
 - Before committing, run `git status --short` and `git diff --cached --stat` and
-  confirm the staged set matches the ticket's scope exactly. The QA Summary's
-  "only intentional files changed" line must be backed by that check, never by
-  assumption.
+  confirm the staged set matches the ticket's scope exactly, never by assumption.
 
 ### Protect uncommitted work
 
@@ -310,7 +313,8 @@ report it — do not deliver them as one ticket.
 
 Run the additional service-backed, migration, frontend, or security checks the
 changed scope calls for. The same checks run again in CI; passing locally is not
-the gate, it is how you avoid wasting a CI round trip.
+the gate, it is how you avoid wasting a CI round trip. If a check fails, do not
+commit until it is fixed or Haisu explicitly accepts the risk.
 
 ### Test integrity
 
@@ -320,7 +324,7 @@ the gate, it is how you avoid wasting a CI round trip.
 - **Never weaken, skip, delete, `xfail`, or loosen an assertion in a test merely to
   make a check pass.** If a test fails, either the code is wrong or the test's
   expectation is genuinely obsolete — and calling it obsolete requires saying so
-  explicitly in the QA Summary and getting Haisu's agreement first.
+  explicitly and getting Haisu's agreement first.
 - If a required service, tool, or environment blocks a check, report the exact
   limitation and what remains unverified. Never report it as passed.
 
@@ -346,53 +350,25 @@ expectation is obsolete" is true by construction, and its allowed scope is narro
 ### Ticket artifacts
 
 **All ticket artifacts live in `tasks/` — nowhere else.** Never create them at the
-repo root, under `.workbuddy/`, or in `deliverables/`.
+repo root, under `.workbuddy/`, or in `deliverables/`. **`tasks/` is gitignored** —
+these are local working files, not tracked in git, not part of any commit or PR.
 
 Naming is `tasks/<TICKET-KEY>-<kind>.md`, key prefix uppercase:
 
 | Artifact | When |
 |---|---|
-| `<KEY>-qa-summary.md` | Every ticket. Written by dev after `make verify`. |
 | `<KEY>-dev-prompt.md` | When the ticket is handed to another conversation, or when the implementing agent wants a traceable scope record. Optional. |
 | `<KEY>-research-report.md` | research role output. |
 | `<KEY>-e2e-evidence.md`, `<KEY>-*.md` | Any other evidence the ticket produced. |
 
-When the GitHub issue is closed, `git mv` the ticket's **whole** file set into
+When the GitHub issue is closed, `mv` the ticket's **whole** file set into
 `tasks/archive/` in one move — content unchanged, only cross-file reference paths
-fixed. `tasks/` root then shows only open work at a glance.
+fixed. There is no git history to preserve, so a plain `mv` is correct (no need for
+`git mv`). `tasks/` root then shows only open work at a glance.
 
-`<KEY>-qa-prompt.md` and `<KEY>-qa-verdict.json` belong to the retired independent-QA
-flow; do not generate new ones unless Haisu assigns the optional qa role.
-
-### QA Summary
-
-```
-## QA Summary
-
-Files changed:
-- <file>: <what changed>
-
-Acceptance criteria:
-- [ ] <criterion>: pass / fail / n/a
-
-Commands run:
-- make verify: <result>
-- git diff --check: <result>
-- <other command>: <result>
-
-Manual verification:
-- <check>: <result>
-
-Risks or gaps:
-- <risk or none>
-
-No secrets introduced: confirmed
-Only intentional files changed: confirmed (verified with git status --short)
-No test weakened, skipped, or deleted: confirmed
-Staged paths listed explicitly, no `git add .`: confirmed
-```
-
-If qa fails, do not commit until it is fixed or Haisu explicitly accepts the risk.
+`<KEY>-qa-summary.md`, `<KEY>-qa-prompt.md`, and `<KEY>-qa-verdict.json` belong to the
+retired independent-QA flow; do not generate new ones unless Haisu assigns the
+optional qa role. QA now runs through required CI — see [Required checks](#required-checks).
 
 ---
 
