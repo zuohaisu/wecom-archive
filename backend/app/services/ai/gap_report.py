@@ -3,7 +3,7 @@
 Produces a Markdown report grouping unresolved AI questions, feedback, and
 human-classified handoff outcomes into candidate improvement items. This
 module only ever returns text for a human to read and manually act on — it
-never calls the Linear API and never writes anywhere but the returned
+never calls any issue-tracker API and never writes anywhere but the returned
 string (the caller decides where, if anywhere, to persist it).
 """
 
@@ -86,7 +86,7 @@ def render_gap_report_markdown(data: GapReportData, *, generated_at: str) -> str
         "",
         f"生成时间：{generated_at}",
         "",
-        "本报告只生成候选改进项草稿，不自动创建、修改或关闭 Linear issue，需人工确认后再建票。",
+        "本报告只生成候选改进项草稿，不自动创建、修改或关闭工单（GitHub Issue），需人工确认后再建票。",
         "",
         "## 1. 高频未解决问题",
         "",
@@ -142,7 +142,7 @@ def render_gap_report_markdown(data: GapReportData, *, generated_at: str) -> str
         lines.append(f"- 【文档改进】{doc_related} 条转人工记录归因为文档缺失/过期，建议排查 RND-355 manifest 覆盖范围。")
     if data.handoff_resolution_counts.get("product_bug", 0):
         lines.append(
-            f"- 【产品缺陷】{data.handoff_resolution_counts['product_bug']} 条转人工记录归因为产品 Bug，建议人工确认后单独建 Linear issue。"
+            f"- 【产品缺陷】{data.handoff_resolution_counts['product_bug']} 条转人工记录归因为产品 Bug，建议人工确认后单独建 GitHub issue。"
         )
     if data.feedback_type_counts.get("bug", 0):
         lines.append(f"- 【Bug 反馈】{data.feedback_type_counts['bug']} 条用户主动反馈的 Bug，建议逐条复核。")

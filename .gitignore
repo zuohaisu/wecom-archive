@@ -271,3 +271,9 @@ ppt-365-intro/.cache/
 
 # Internal IP-protection plan — untracked, keep out of open source
 docs/ip-protection-plan-365huifang.md
+
+# Local WorkBuddy runtime state — never commit
+.workbuddy/
+
+# Local task artifacts — never commit
+tasks/

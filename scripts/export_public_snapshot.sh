@@ -3,7 +3,7 @@
 # Export the public open-source snapshot from this private repository.
 #
 # The project ships under a two-repository model (decided 2026-07-27): the
-# private repo keeps every internal artifact — Linear ticket files, agent
+# private repo keeps every internal artifact — ticket files, agent
 # automation, design sources, roadmaps — so development machines can sync
 # them over git, and the public repo receives only a curated snapshot.
 # This script IS that curation step. Until it existed the two-repo model

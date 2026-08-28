@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the periodic AI knowledge/product-improvement candidate report
 (RND-359 / T5) as a Markdown file under docs/ai/reports/. Never creates,
-modifies, or closes a Linear issue — output is a draft for a human to read
+modifies, or closes a GitHub issue — output is a draft for a human to read
 and act on."""
 
 from __future__ import annotations
