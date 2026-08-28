@@ -14,3 +14,15 @@ wecom-archive-worker.service
 wecom-archive-worker.timer
 wecom-external-contact-reconcile.service
 wecom-external-contact-reconcile.timer
+
+# GH-106 commercial-loop executors. These are intentionally a closed set:
+# billing lifecycle and notifications apply to commercial tenants; WeChat
+# recovery/reconciliation query existing orders but never create checkout.
+wecom-billing-lifecycle.service
+wecom-billing-lifecycle.timer
+wecom-billing-notifications.service
+wecom-billing-notifications.timer
+wecom-payment-recovery.service
+wecom-payment-recovery.timer
+wecom-payment-reconciliation.service
+wecom-payment-reconciliation.timer

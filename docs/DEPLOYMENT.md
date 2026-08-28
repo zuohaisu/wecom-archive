@@ -282,51 +282,28 @@ RND-360 incident mitigation. The effective worker environment must select
 local final ZIP. No production unit is installed, enabled, or changed by
 repository changes alone.
 
-Billing lifecycle state transitions (RND-402; operator action only) — scans only
-commercial tenants that already have a Subscription; legacy tenants without a
-Subscription are intentionally not reprojected:
+Payment and billing runtime (GH-106): the lifecycle, notification, WeChat
+recovery, and WeChat T+1 reconciliation service/timer pairs are all listed in
+`MANAGED_UNITS`. On an approved deploy, step 10 installs the versioned files
+and enables the four timers; do not use a separate manual `cp`/`enable`
+procedure that can recreate deployment drift. The deploy's non-fatal sudoers
+warning means a green web deploy alone is not execution evidence.
 
-```bash
-sudo cp deploy/systemd/wecom-billing-lifecycle.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-billing-lifecycle.timer
-sudo systemctl status wecom-billing-lifecycle.timer --no-pager
-```
+These jobs have different safety prerequisites and provider scope. Lifecycle
+scans only tenants that already have a Subscription; legacy tenants are never
+reprojected. The recovery jobs query existing **WeChat** orders and never
+create checkout, but still require valid WeChat credentials even when new
+checkout is disabled. Automatic Alipay recovery/reconciliation is not yet
+implemented and must not be inferred from these units. Apply the migration
+head before enabling the notification executor; notification delivery also
+requires a public HTTPS `ADMIN_DOMAIN`, SMTP transport, and a valid recipient.
 
-Billing lifecycle and anomaly notifications (RND-401; operator action only):
+The canonical state machines, bounded retries/leases/idempotency guarantees,
+production aggregate assessment, successful-run evidence, and disable/rollback
+procedure are in [operations/payment-billing-runtime.md](operations/payment-billing-runtime.md).
+Do not put payment credentials, order references, customer data, or raw
+provider payloads in deployment evidence.
 
-```bash
-sudo cp deploy/systemd/wecom-billing-notifications.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-billing-notifications.timer
-sudo systemctl status wecom-billing-notifications.timer --no-pager
-```
-
-Payment recovery and T+1 reconciliation (RND-390; operator action only). These units
-query existing WeChat payment orders; installing them does **not** enable new WeChat
-payment creation. Keep `WECHAT_PAY_ENABLED=false` unless Haisu has separately approved
-the production Go gate, and inject no credentials through this repository, chat, or logs:
-
-```bash
-sudo cp deploy/systemd/wecom-payment-{recovery,reconciliation}.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-payment-recovery.timer wecom-payment-reconciliation.timer
-sudo systemctl status wecom-payment-recovery.timer wecom-payment-reconciliation.timer --no-pager
-```
-
-Apply Alembic migration `0053` before enabling the timer. Configure a public
-HTTPS `ADMIN_DOMAIN` and real SMTP delivery (`SMTP_HOST` and `SMTP_FROM`, plus
-relay credentials where required). Missing transport, action link or recipient
-is recorded as a fixed retryable failure code; it is never reported as sent.
-`BILLING_NOTIFICATION_BATCH_SIZE` defaults to `20` and is capped at `100`.
-All event timestamps are evaluated and rendered in UTC. The outbox stores no
-email address, provider transaction detail, CorpID, UserID, secret or message
-content.
-
-Rollback is two-stage: first disable the timer, then revert application code.
-Do not downgrade `0053` while retaining notification history; its downgrade
-drops the intent and append-only attempt tables. A code rollback can safely
-leave those unused tables in place.
 
 RND-343 defaults are intentionally staggered: archive reconciliation at
 `:00/:30`, generic media reconciliation at `:15/:45`. Callback → archive
