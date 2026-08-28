@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db.schema_check import full_readiness_check
 from app.db.session import get_engine
+from app.log_safety import configure_secret_safe_logging
 from app.routers.admin_audit_page import router as admin_audit_page_router
 from app.routers.admin_cleanup_page import router as admin_cleanup_page_router
 from app.routers.analytics import router as analytics_router
@@ -57,6 +58,12 @@ from app.services.branding import BrandingHostMiddleware
 from app.services.wechat_pay import validate_wechat_pay_configuration_if_configured
 
 logger = logging.getLogger(__name__)
+
+# GH-107: keep httpx/httpcore's own request/response logging (which prints
+# the full URL, and WeCom/payment providers put secrets in the query string)
+# off regardless of import order, rather than depending on it as a side
+# effect of importing app.services.wecom_org_authorization.
+configure_secret_safe_logging()
 
 
 class _RedactOAuthCallbackQueryFilter(logging.Filter):

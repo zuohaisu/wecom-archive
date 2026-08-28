@@ -22,6 +22,7 @@ from app.db.models import (
     ExternalContact,
     TenantWecomConfig,
 )
+from app.log_safety import configure_secret_safe_logging
 from app.services.avatar_sync import (
     reconcile_internal_contact_avatars,
     sync_external_contact_avatar,
@@ -513,6 +514,7 @@ def reconcile_active_tenants(
 
 def main() -> int:
     """Run the idempotent daily reconciliation for every active tenant."""
+    configure_secret_safe_logging()
     logging.basicConfig(level=logging.INFO)
     try:
         database_url = _require_env("DATABASE_URL")

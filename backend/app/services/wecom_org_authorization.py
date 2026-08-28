@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import secrets
 import time
 import uuid
@@ -20,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.auth import strict_int_equals
 from app.crypto import encrypt_value
 from app.db.models import WecomAuthorizationAttempt, WecomAuthorizationProof
+from app.log_safety import configure_secret_safe_logging
 from app.services.wecom_suite_ticket import (
     SuiteTicketUnavailable,
     load_fresh_suite_ticket,
@@ -33,10 +33,10 @@ SUITE_TOKEN_MAX_TTL_SECONDS = 2 * 60 * 60
 SUITE_TOKEN_REFRESH_WINDOW_SECONDS = 5 * 60
 
 # httpx/httpcore diagnostic logs can include provider URLs whose query string
-# carries suite_access_token. Keep those libraries at warnings/errors; this
-# service reports only fixed, coarse errors of its own.
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
+# carries suite_access_token (GH-107). This service reports only fixed,
+# coarse errors of its own, so raw httpx/httpcore request logging is not
+# needed here.
+configure_secret_safe_logging()
 
 
 class WecomAuthorizationError(RuntimeError):

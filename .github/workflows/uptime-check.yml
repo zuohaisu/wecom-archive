@@ -1,0 +1,95 @@
+name: External Uptime Check
+
+# GH-107 Scope C: runs on a GitHub Actions runner, i.e. outside the
+# production ECS failure domain, so a host-down or network-down condition
+# on that single host is still externally detectable. The existing
+# host-local resource-check timer (scripts/disk_usage_check.sh) cannot see
+# this class of failure by construction — see docs/operations/alerting.md.
+#
+# Uses no repository secrets to perform the checks themselves: the checked
+# URLs are public production endpoints, not credentials. ALERT_WEBHOOK_URL
+# is only read, never echoed, when routing a failure alert.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      send_test_alert:
+        description: "Send a test alert through ALERT_WEBHOOK_URL without checking production (acceptance criterion: verify delivery without causing a real outage)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime-check
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_URL: https://archive.crowntime.cn/
+  READINESS_URL: https://archive.crowntime.cn/health/ready
+
+jobs:
+  test-alert:
+    name: Send test alert
+    if: github.event_name == 'workflow_dispatch' && inputs.send_test_alert
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: POST test alert
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          if [ -z "$ALERT_WEBHOOK_URL" ]; then
+            echo "ALERT_WEBHOOK_URL repository secret is not configured — nothing to test. See docs/operations/alerting.md."
+            exit 1
+          fi
+          payload=$(printf '{"domain":"external-uptime-check","hostname":"github-actions","failed_stage":"manual_test","timestamp":"%s","error_summary":"test alert requested via workflow_dispatch — not a real outage"}' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+          http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+            -X POST "$ALERT_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$payload")
+          echo "webhook responded HTTP $http_code"
+          case "$http_code" in
+            2??) ;;
+            *) echo "::warning::webhook returned non-2xx (HTTP $http_code)" ;;
+          esac
+
+  check:
+    name: Public endpoint + readiness check
+    if: github.event_name != 'workflow_dispatch' || ! inputs.send_test_alert
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check public endpoint availability
+        id: public
+        run: |
+          http_code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 "$PRODUCTION_URL" || echo "000")
+          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
+          echo "production endpoint responded HTTP $http_code"
+          test "$http_code" = "200"
+
+      - name: Check /health/ready
+        id: ready
+        if: always()
+        run: |
+          http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$READINESS_URL" || echo "000")
+          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
+          echo "/health/ready responded HTTP $http_code"
+          test "$http_code" = "200"
+
+      - name: Send alert on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          if [ -z "$ALERT_WEBHOOK_URL" ]; then
+            echo "ALERT_WEBHOOK_URL repository secret is not configured — alert not sent, see workflow run status only. See docs/operations/alerting.md."
+            exit 0
+          fi
+          summary="public=${{ steps.public.outputs.http_code }} ready=${{ steps.ready.outputs.http_code }}"
+          payload=$(printf '{"domain":"external-uptime-check","hostname":"github-actions","failed_stage":"public_endpoint_or_readiness","timestamp":"%s","error_summary":"%s"}' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$summary")
+          curl -s -o /dev/null --max-time 10 -X POST "$ALERT_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' -d "$payload" || true
