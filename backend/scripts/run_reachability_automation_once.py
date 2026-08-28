@@ -4,8 +4,8 @@
 Usage (from backend/):
     python scripts/run_reachability_automation_once.py incremental|reconcile
 
-Tenant scope is resolved from the active configured corporation in the
-process environment; it is intentionally never accepted on argv or emitted.
+Tenant scope comes from an explicit worker tenant selector or all active
+TenantWecomConfig rows. It is intentionally never accepted on argv or emitted.
 """
 
 from __future__ import annotations
@@ -24,6 +24,11 @@ from sqlalchemy.orm import Session
 
 from app.db.models import TenantWecomConfig
 from app.services.reachability_automation_service import AUTOMATION_MODES, run_automation
+from app.services.tenant_credentials import (
+    active_tenant_configs,
+    active_tenant_ids,
+    tenant_log_tag,
+)
 
 _DEFAULT_LOCK_PATH = "/srv/apps/wecom-archive-365/shared/run/wecom-archive-reachability-check.lock"
 
@@ -60,9 +65,8 @@ def _release_lock(fd: int) -> None:
         pass
 
 
-def _resolve_tenant_id(db: Session) -> str | None:
-    # Per-tenant mode first: WECOM_TENANT_ID is authoritative when set (the
-    # per-tenant worker chain merges it into the child environment).
+def _resolve_tenant_ids(db: Session) -> tuple[list[str], list[str]]:
+    """Return selected and config-missing active tenants without CorpID lookup."""
     tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
     if tenant_id_env:
         row = (
@@ -73,16 +77,12 @@ def _resolve_tenant_id(db: Session) -> str | None:
             )
             .first()
         )
-        return row[0] if row else None
-    corp_id = os.environ.get("WECOM_CORP_ID", "").strip()
-    if not corp_id:
-        return None
-    row = (
-        db.query(TenantWecomConfig.tenant_id)
-        .filter(TenantWecomConfig.corp_id == corp_id, TenantWecomConfig.is_active.is_(True))
-        .first()
-    )
-    return row[0] if row else None
+        return ([tenant_id_env], []) if row else ([], [tenant_id_env])
+
+    active_ids = active_tenant_ids(db)
+    configured_ids = [config.tenant_id for config in active_tenant_configs(db)]
+    configured_set = set(configured_ids)
+    return configured_ids, [tenant_id for tenant_id in active_ids if tenant_id not in configured_set]
 
 
 def main() -> int:
@@ -101,18 +101,52 @@ def main() -> int:
             return 1
         try:
             with Session(create_engine(database_url)) as db:
-                tenant_id = _resolve_tenant_id(db)
-                if tenant_id is None:
-                    print(f"[FAIL] reachability automation mode={args.mode} status=tenant_unavailable count=0", flush=True)
-                    return 1
-                outcome = run_automation(db, tenant_id, args.mode)
+                tenant_ids, missing_config_ids = _resolve_tenant_ids(db)
+                completed = failed = 0
+                for missing_tenant_id in missing_config_ids:
+                    failed += 1
+                    print(
+                        f"[WARN] reachability automation tenant={tenant_log_tag(missing_tenant_id)} "
+                        "status=tenant_config_unavailable count=0",
+                        flush=True,
+                    )
+                for tenant_id in tenant_ids:
+                    try:
+                        outcome = run_automation(db, tenant_id, args.mode)
+                    except Exception:  # noqa: BLE001 -- one tenant must not stop another
+                        db.rollback()
+                        failed += 1
+                        print(
+                            f"[WARN] reachability automation tenant={tenant_log_tag(tenant_id)} "
+                            "status=error count=0",
+                            flush=True,
+                        )
+                        continue
+                    if outcome in {"completed", "no_data", "locked"}:
+                        completed += 1
+                    else:
+                        failed += 1
+                    level = "PASS" if outcome in {"completed", "no_data", "locked"} else "FAIL"
+                    print(
+                        f"[{level}] reachability automation tenant={tenant_log_tag(tenant_id)} "
+                        f"mode={args.mode} status={outcome} count=0",
+                        flush=True,
+                    )
         except Exception:
             print(f"[FAIL] reachability automation mode={args.mode} status=error count=0", flush=True)
             return 1
-        code = 0 if outcome in {"completed", "no_data", "locked"} else 1
-        level = "PASS" if code == 0 else "FAIL"
-        print(f"[{level}] reachability automation mode={args.mode} status={outcome} count=0", flush=True)
-        return code
+        if not tenant_ids and not missing_config_ids:
+            print(
+                f"[INFO] reachability automation mode={args.mode} status=no-active-tenants count=0",
+                flush=True,
+            )
+            return 0
+        print(
+            f"[INFO] reachability automation mode={args.mode} tenant_completed={completed} "
+            f"tenant_failed={failed} count=0",
+            flush=True,
+        )
+        return 1 if completed == 0 and failed else 0
     finally:
         _release_lock(lock_fd)
 

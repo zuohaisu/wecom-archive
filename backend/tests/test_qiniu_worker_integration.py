@@ -277,18 +277,15 @@ def _run_qiniu_main_with_one_candidate(monkeypatch, tmp_path, provider, jpeg_or_
 
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download.lock"))
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_TENANT_ID", "tenant-a")
     monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
-    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "secret")
     monkeypatch.setenv("MEDIA_STORAGE_PROVIDER", "qiniu_kodo")
 
-    tenant_row = SimpleNamespace(tenant_id="tenant-a")
+
     candidate_msg = SimpleNamespace(id=1, sdkfileid="sdk-secret-1", msgtype="image")
     media_file_row = MediaFile(sdkfileid="sdk-secret-1", archive_message_id=1, download_status="pending")
 
     def _query(model):
-        if model is script.TenantWecomConfig:
-            return _query_mock(first_result=tenant_row)
         if model is script.Tenant:
             return _query_mock(first_result=SimpleNamespace(lifecycle_status="active"))
         if model is MediaFile:
@@ -304,6 +301,13 @@ def _run_qiniu_main_with_one_candidate(monkeypatch, tmp_path, provider, jpeg_or_
 
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(
+        script,
+        "resolve_tenant_archive_credentials",
+        lambda *_args: SimpleNamespace(
+            tenant_id="tenant-a", corp_id="tenant-scoped-corp", archive_secret="tenant-secret"
+        ),
+    )
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([candidate_msg], [], 1))
     # RND-200: this mock session only models the pre-existing --types
     # candidate path — the nested mixed/chatrecord candidate scan is a

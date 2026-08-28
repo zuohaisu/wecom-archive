@@ -23,7 +23,11 @@ starts this existing CLI in `wecom-archive-media-event.service`.
 | `manual` | Operator invokes the same CLI | Operator waits |
 
 The public WeCom callback only requests Archive Worker execution. It never
-parses, selects, or downloads media in the HTTP request.
+parses, selects, or downloads media in the HTTP request. The normal media
+entrypoint discovers every active `TenantWecomConfig`; each candidate query,
+SDK initialization, quota check, storage reference, retry record, and outcome
+is scoped to that tenant. Ambient `WECOM_CORP_ID` and
+`WECOM_ARCHIVE_SECRET` are not media-worker selectors.
 
 ## Default reconciliation schedule
 
@@ -83,6 +87,8 @@ cd /srv/apps/wecom-archive-365/current/backend
 source .venv/bin/activate
 set -a; source .env; set +a
 
+# This discovers all active tenant configurations. Do not add a global
+# WECOM_CORP_ID/WECOM_ARCHIVE_SECRET selector to this command.
 # Fresh/pending generic media, newest first
 python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 20 --trigger-source manual
 
@@ -90,9 +96,11 @@ python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --li
 python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 20 --retry --trigger-source manual
 ```
 
-The normal output is aggregate-only, for example `attempted`, `succeeded`,
-`failed`, `retryable`, `skipped`, `duration_ms`, `cpu_ms`, `peak_rss_kb`, and
-safe failure categories. Every exit (including invalid configuration, a lock
+The normal output is aggregate-only, for example tenant-tagged `attempted`,
+`succeeded`, `failed`, `retryable`, `skipped`, `duration_ms`, `cpu_ms`,
+`peak_rss_kb`, and safe failure categories. A missing or unreadable tenant
+configuration is a fail-closed per-tenant outcome; another configured tenant
+may still reconcile. Every exit (including invalid configuration, a lock
 no-op, and an unexpected failure) ends with one `lifecycle=ended` line that
 contains `result`, `error_class`, and `completed_at`.
 Do not add `sdkfileid`, a local path, storage key, signed URL, message body,

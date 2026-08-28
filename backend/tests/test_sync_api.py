@@ -180,9 +180,15 @@ def test_manual_worker_uses_the_shared_archive_worker_seam(
     from app.routers import sync
 
     failures: list[tuple[str, str]] = []
-    monkeypatch.setattr(sync, "run_archive_worker_once", lambda **_kwargs: False)
+    dispatches: list[dict] = []
+    monkeypatch.setattr(
+        sync,
+        "run_archive_worker_once",
+        lambda **kwargs: dispatches.append(kwargs) or False,
+    )
     monkeypatch.setattr(sync, "_mark_worker_failed", lambda tenant_id, corp_id: failures.append((tenant_id, corp_id)))
 
     sync._run_archive_worker("tenant-sentinel", "corp-sentinel")
 
+    assert dispatches == [{"trigger_source": "manual", "tenant_id": "tenant-sentinel"}]
     assert failures == [("tenant-sentinel", "corp-sentinel")]

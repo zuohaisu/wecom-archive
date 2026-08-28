@@ -22,17 +22,15 @@ Usage (from backend/):
     python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 10
     python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 20 --retry --trigger-source timer
 
-Required environment variables (only DATABASE_URL plus either
-WECOM_TENANT_ID or WECOM_CORP_ID are needed for --count-only, since that
-mode never touches the SDK or filesystem):
+Required environment variables (only DATABASE_URL is needed for
+--count-only, since that mode never touches the SDK or filesystem):
     DATABASE_URL          PostgreSQL connection string
-    WECOM_TENANT_ID       Per-tenant mode: resolves the active tenant config
-                          row and uses its stored CorpID / archive secret
-                          (FIELD_ENCRYPTION_KEY must be set)
-    WECOM_CORP_ID         Legacy mode: WeCom corporation ID (resolves the
-                          active tenant)
+    WECOM_TENANT_ID       Optional explicit tenant selector. When absent,
+                          every active tenant config is processed separately.
+                          CorpID and archive secret are resolved from that
+                          tenant's encrypted configuration (FIELD_ENCRYPTION_KEY
+                          must be set).
     WECOM_SDK_LIB_PATH    Absolute path to libWeWorkFinanceSdk_C.so
-    WECOM_ARCHIVE_SECRET  WeCom conversation archive secret (legacy mode)
     STORAGE_LOCAL_PATH    Media storage root (same variable RND-144 reads)
 
 Optional environment variables:
@@ -44,9 +42,11 @@ Optional environment variables:
     EVENT_MEDIA_DOWNLOAD_BACKOFF_SECONDS
                              Exponential retry backoff base (default 30)
 
-Tenant scoping: resolved server-side from WECOM_TENANT_ID or WECOM_CORP_ID
-via tenant_wecom_configs — there is no --tenant-id flag; this codebase's
-rule is that tenant_id is never accepted from caller-supplied input.
+Tenant scoping: an optional process-local WECOM_TENANT_ID selects one
+server-side config; without it, every active TenantWecomConfig is processed
+independently. There is no --tenant-id flag, so tenant identity is never
+accepted from caller-supplied input. WECOM_CORP_ID and WECOM_ARCHIVE_SECRET
+are deliberately not media-worker selectors.
 
 Concurrency: acquires a non-blocking process-level file lock (fcntl.flock)
 before touching the database at all. If another invocation already holds
@@ -96,7 +96,7 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.audit import AuditAction, AuditObjectType
-from app.db.models import ArchiveMessage, AuditLog, MediaFile, Tenant, TenantWecomConfig
+from app.db.models import ArchiveMessage, AuditLog, MediaFile, Tenant
 from app.media_download import (
     GENERIC_DOWNLOAD_MSGTYPES,
     count_candidates_with_existing_media_row,
@@ -120,8 +120,11 @@ from app.services.media_worker import (  # noqa: F401 -- re-exported for backwar
 )
 from app.services.service_access import WORKER_MEDIA, tenant_service_denial
 from app.services.tenant_credentials import (
+    TenantArchiveCredentials,
     TenantCredentialError,
-    config_for_tenant,
+    active_tenant_configs,
+    active_tenant_ids,
+    credentials_for_active_config,
     resolve_tenant_archive_credentials,
     tenant_log_tag,
 )
@@ -164,7 +167,9 @@ def _fail(error_class: str, message: str) -> None:
     raise MediaWorkerExit(1, error_class)
 
 
-def _gate_tenant_service(session: Session, tenant_id: str) -> None:
+def _gate_tenant_service(
+    session: Session, tenant_id: str, *, return_on_denial: bool = False
+) -> bool:
     """RND-402: deny the media capability for a frozen/suspended tenant.
 
     Runs at tenant resolution, before any candidate selection or SDK
@@ -179,7 +184,7 @@ def _gate_tenant_service(session: Session, tenant_id: str) -> None:
         status = row.lifecycle_status
     denial = tenant_service_denial(status, WORKER_MEDIA)
     if denial is None:
-        return
+        return True
     try:
         session.add(
             AuditLog(
@@ -206,6 +211,8 @@ def _gate_tenant_service(session: Session, tenant_id: str) -> None:
         flush=True,
     )
     print("[PASS] tenant service gate denies media downloads — exiting without work", flush=True)
+    if return_on_denial:
+        return False
     sys.exit(0)
 
 
@@ -270,27 +277,6 @@ def _release_lock(lock_fd: int) -> None:
 # ---------------------------------------------------------------------------
 # Tenant resolution
 # ---------------------------------------------------------------------------
-
-
-def _require_tenant_id(session: Session, corp_id: str) -> str:
-    try:
-        row = (
-            session.query(TenantWecomConfig)
-            .filter(
-                TenantWecomConfig.corp_id == corp_id,
-                TenantWecomConfig.is_active.is_(True),
-            )
-            .first()
-        )
-    except Exception:  # noqa: BLE001 -- DB detail can contain a connection string
-        _fail("database_unavailable", "Unable to resolve active tenant")
-
-    if row is None:
-        _fail(
-            "tenant_unavailable",
-            "No active tenant found. Run bootstrap_default_tenant.py first.",
-        )
-    return row.tenant_id
 
 
 # ---------------------------------------------------------------------------
@@ -569,206 +555,288 @@ def main() -> None:
     raise SystemExit(exit_code)
 
 
-def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
-    database_url = _require_env("DATABASE_URL")
+def _run_tenant(
+    session: Session,
+    args: argparse.Namespace,
+    msgtypes: frozenset[str],
+    credentials: TenantArchiveCredentials,
+) -> str:
+    """Process one tenant without consulting ambient legacy credentials."""
+    tenant_id = credentials.tenant_id
+    tag = tenant_log_tag(tenant_id)
+    if not _gate_tenant_service(session, tenant_id, return_on_denial=True):
+        return "skipped"
 
-    engine = create_engine(database_url)
+    since_ms = _since_ms_cutoff(args.since_hours) if args.since_hours is not None else None
+    actionable, stale_repairs, total_eligible = select_candidates(
+        session,
+        tenant_id,
+        msgtypes,
+        args.retry,
+        args.limit,
+        since_ms=since_ms,
+        newest_first=args.newest_first,
+    )
+    candidates: list[ArchiveMessage] = list(actionable) + [m for m, _mf in stale_repairs]
 
-    tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
-    with Session(engine) as session:
-        if tenant_id_env:
-            config = config_for_tenant(session, tenant_id_env)
-            if config is None:
-                _fail(
-                    "tenant_config_unavailable",
-                    "Tenant archive configuration is unavailable",
-                )
-            corp_id = config.corp_id
-            tenant_id = config.tenant_id
-        else:
-            corp_id = _require_env("WECOM_CORP_ID")
-            tenant_id = _require_tenant_id(session, corp_id)
-
-        # RND-402: authoritative worker gate at tenant resolution. A
-        # frozen/suspended tenant never downloads, even if a signal or
-        # timer already fired for it.
-        _gate_tenant_service(session, tenant_id)
-
-        since_ms = _since_ms_cutoff(args.since_hours) if args.since_hours is not None else None
-
-        actionable, stale_repairs, total_eligible = select_candidates(
-            session,
-            tenant_id,
-            msgtypes,
-            args.retry,
-            args.limit,
-            since_ms=since_ms,
-            newest_first=args.newest_first,
-        )
-        candidates: list[ArchiveMessage] = list(actionable) + [m for m, _mf in stale_repairs]
-
-        print(f"[INFO] types: {sorted(msgtypes)}", flush=True)
-        print(f"[INFO] candidate_total: {total_eligible}", flush=True)
-        print(f"[INFO] candidate_selected: {len(candidates)}", flush=True)
-        if stale_repairs:
-            print(f"[INFO] stale_downloaded_repair_selected: {len(stale_repairs)}", flush=True)
-
-        nested_item_candidates: list = []
-        nested_messages_scanned = 0
-        if not args.skip_nested:
-            # --retry and --since-hours are honored here exactly as they
-            # are for the --types pass above (RND-200 QA fix — an earlier
-            # revision silently ignored both for nested candidates).
-            # --newest-first has no nested equivalent: see
-            # build_nested_media_candidate_query's docstring for why.
-            nested_item_candidates, nested_messages_scanned = select_nested_media_candidates(
-                session, tenant_id, args.limit, retry=args.retry, since_ms=since_ms
-            )
-            print(f"[INFO] nested_candidate_messages_scanned: {nested_messages_scanned}", flush=True)
-            print(f"[INFO] nested_candidate_items_selected: {len(nested_item_candidates)}", flush=True)
-
-        retry_count, backoff_seconds = _retry_settings()
-        retry_policy_skipped = 0
-        if args.retry:
-            candidates, nested_item_candidates, retry_policy_skipped = _filter_retryable_candidates(
-                session,
-                tenant_id,
-                candidates,
-                nested_item_candidates,
-                retry_count,
-                backoff_seconds,
-            )
-            if retry_policy_skipped:
-                print(f"[INFO] retry_policy_skipped: {retry_policy_skipped}", flush=True)
-
-        if args.count_only:
-            print(
-                f"[INFO] candidate_ordering: {'newest_first' if args.newest_first else 'oldest_first'}",
-                flush=True,
-            )
-            if since_ms is not None:
-                within_window = build_within_window_count(session, tenant_id, msgtypes, args.retry, since_ms)
-                print(f"[INFO] since_hours: {args.since_hours}", flush=True)
-                print(f"[INFO] candidates_in_window: {within_window}", flush=True)
-                print(f"[INFO] candidates_excluded_by_window: {total_eligible - within_window}", flush=True)
-            existing_media_count = count_candidates_with_existing_media_row(session, tenant_id, msgtypes)
-            print(f"[INFO] candidates_with_existing_media_row: {existing_media_count}", flush=True)
-            print("[PASS] count-only mode — no writes performed", flush=True)
-            sys.exit(0)
-
-        if not candidates and not nested_item_candidates:
-            print(
-                f"[INFO] media_worker trigger_source={args.trigger_source} "
-                f"trigger=no-work attempted=0 succeeded=0 failed=0 retryable=0 "
-                f"skipped={retry_policy_skipped}",
-                flush=True,
-            )
-            print("[PASS] no candidates to process", flush=True)
-            sys.exit(0)
-
-        lib_path = _require_env("WECOM_SDK_LIB_PATH")
-        if tenant_id_env:
-            try:
-                secret = resolve_tenant_archive_credentials(
-                    session, tenant_id_env
-                ).archive_secret
-            except TenantCredentialError as exc:
-                _fail(
-                    exc.error_class,
-                    "Tenant archive credentials are unavailable",
-                )
-        else:
-            secret = _require_env("WECOM_ARCHIVE_SECRET")
-        timeout = _optional_int_env("WECOM_MEDIA_TIMEOUT", _DEFAULT_TIMEOUT)
-        write_backend_name = get_configured_write_backend_name()
-        storage_provider = _media_storage_provider(write_backend_name)
-
-        try:
-            lib = wecom_sdk.load_sdk(lib_path)
-        except FileNotFoundError:
-            _fail("sdk_load_failed", "SDK library was not found")
-        except OSError:
-            _fail("sdk_load_failed", "SDK library could not be loaded")
-
-        try:
-            wecom_sdk.configure_sdk(lib)
-            wecom_sdk.configure_sdk_media_data(lib)
-        except AttributeError:
-            _fail("sdk_configuration_failed", "SDK media-download symbols are unavailable")
-
-        handle = wecom_sdk.new_sdk(lib)
-        if not handle:
-            _fail("sdk_initialization_failed", "SDK returned a null handle")
-
-        init_ret = wecom_sdk.init_sdk(lib, handle, corp_id, secret)
-        if init_ret != 0:
-            print(
-                f"[FAIL] media_worker error_class=sdk_initialization_failed sdk_return_code={init_ret}",
-                flush=True,
-            )
-            try:
-                wecom_sdk.destroy_sdk(lib, handle)
-            except Exception:  # noqa: BLE001, S110 -- SDK cleanup must not replace a safe init failure
-                pass
-            raise MediaWorkerExit(1, "sdk_initialization_failed")
-
-        selected_sdkfileids = {message.sdkfileid for message in candidates if message.sdkfileid}
-        selected_sdkfileids.update(
-            ref["sdkfileid"] for _message, ref in nested_item_candidates
-        )
-        summary = download_media_candidates(
-            session,
-            tenant_id,
-            lib,
-            handle,
-            storage_provider,
-            write_backend_name,
-            timeout,
-            candidates,
-            nested_item_candidates,
-            record_attempt=True,
-            enforce_quota=True,
-        )
-
-        try:
-            wecom_sdk.destroy_sdk(lib, handle)
-        except Exception:  # noqa: BLE001, S110 -- SDK cleanup must not change media persistence truth
-            pass
-
-        succeeded = summary.downloaded + summary.nested_downloaded
-        failed = summary.failed + summary.nested_failed
-        quota_blocked = summary.quota_blocked + summary.nested_quota_blocked
-        retryable = _remaining_retryable_count(
-            session, tenant_id, selected_sdkfileids, retry_count
-        )
-        skipped = summary.skipped + retry_policy_skipped
+    print(f"[INFO] media_worker tenant={tag} types: {sorted(msgtypes)}", flush=True)
+    print(f"[INFO] media_worker tenant={tag} candidate_total: {total_eligible}", flush=True)
+    print(f"[INFO] media_worker tenant={tag} candidate_selected: {len(candidates)}", flush=True)
+    if stale_repairs:
         print(
-            f"[INFO] media_worker trigger_source={args.trigger_source} "
-            f"trigger=completed attempted={summary.attempted} succeeded={succeeded} "
-            f"failed={failed} quota_blocked={quota_blocked} "
-            f"retryable={retryable} skipped={skipped}",
+            f"[INFO] media_worker tenant={tag} stale_downloaded_repair_selected: {len(stale_repairs)}",
             flush=True,
         )
-        print(f"[INFO] downloaded: {summary.downloaded}", flush=True)
-        print(f"[INFO] failed: {summary.failed}", flush=True)
-        print(f"[INFO] quota_blocked: {summary.quota_blocked}", flush=True)
-        if summary.reason_counts:
-            diag = ", ".join(f"{k}={v}" for k, v in sorted(summary.reason_counts.items()))
-            print(f"[INFO] failed_reasons: {diag}", flush=True)
-        if not args.skip_nested:
-            print(f"[INFO] nested_downloaded: {summary.nested_downloaded}", flush=True)
-            print(f"[INFO] nested_failed: {summary.nested_failed}", flush=True)
+
+    nested_item_candidates: list = []
+    nested_messages_scanned = 0
+    if not args.skip_nested:
+        nested_item_candidates, nested_messages_scanned = select_nested_media_candidates(
+            session, tenant_id, args.limit, retry=args.retry, since_ms=since_ms
+        )
+        print(
+            f"[INFO] media_worker tenant={tag} nested_candidate_messages_scanned: "
+            f"{nested_messages_scanned}",
+            flush=True,
+        )
+        print(
+            f"[INFO] media_worker tenant={tag} nested_candidate_items_selected: "
+            f"{len(nested_item_candidates)}",
+            flush=True,
+        )
+
+    retry_count, backoff_seconds = _retry_settings()
+    retry_policy_skipped = 0
+    if args.retry:
+        candidates, nested_item_candidates, retry_policy_skipped = _filter_retryable_candidates(
+            session,
+            tenant_id,
+            candidates,
+            nested_item_candidates,
+            retry_count,
+            backoff_seconds,
+        )
+        if retry_policy_skipped:
             print(
-                f"[INFO] nested_quota_blocked: {summary.nested_quota_blocked}",
+                f"[INFO] media_worker tenant={tag} retry_policy_skipped: {retry_policy_skipped}",
                 flush=True,
             )
-            if summary.nested_reason_counts:
-                nested_diag = ", ".join(
-                    f"{k}={v}" for k, v in sorted(summary.nested_reason_counts.items())
+
+    if args.count_only:
+        print(
+            f"[INFO] media_worker tenant={tag} candidate_ordering: "
+            f"{'newest_first' if args.newest_first else 'oldest_first'}",
+            flush=True,
+        )
+        if since_ms is not None:
+            within_window = build_within_window_count(
+                session, tenant_id, msgtypes, args.retry, since_ms
+            )
+            print(f"[INFO] media_worker tenant={tag} since_hours: {args.since_hours}", flush=True)
+            print(
+                f"[INFO] media_worker tenant={tag} candidates_in_window: {within_window}",
+                flush=True,
+            )
+            print(
+                f"[INFO] media_worker tenant={tag} candidates_excluded_by_window: "
+                f"{total_eligible - within_window}",
+                flush=True,
+            )
+        existing_media_count = count_candidates_with_existing_media_row(session, tenant_id, msgtypes)
+        print(
+            f"[INFO] media_worker tenant={tag} candidates_with_existing_media_row: "
+            f"{existing_media_count}",
+            flush=True,
+        )
+        print("[PASS] count-only mode — no writes performed", flush=True)
+        return "completed"
+
+    if not candidates and not nested_item_candidates:
+        print(
+            f"[INFO] media_worker tenant={tag} trigger_source={args.trigger_source} "
+            "trigger=no-work attempted=0 succeeded=0 failed=0 retryable=0 "
+            f"skipped={retry_policy_skipped}",
+            flush=True,
+        )
+        print("[PASS] no candidates to process", flush=True)
+        return "completed"
+
+    lib_path = _require_env("WECOM_SDK_LIB_PATH")
+    timeout = _optional_int_env("WECOM_MEDIA_TIMEOUT", _DEFAULT_TIMEOUT)
+    write_backend_name = get_configured_write_backend_name()
+    storage_provider = _media_storage_provider(write_backend_name)
+
+    try:
+        lib = wecom_sdk.load_sdk(lib_path)
+    except FileNotFoundError:
+        _fail("sdk_load_failed", "SDK library was not found")
+    except OSError:
+        _fail("sdk_load_failed", "SDK library could not be loaded")
+
+    try:
+        wecom_sdk.configure_sdk(lib)
+        wecom_sdk.configure_sdk_media_data(lib)
+    except AttributeError:
+        _fail("sdk_configuration_failed", "SDK media-download symbols are unavailable")
+
+    handle = wecom_sdk.new_sdk(lib)
+    if not handle:
+        _fail("sdk_initialization_failed", "SDK returned a null handle")
+
+    init_ret = wecom_sdk.init_sdk(lib, handle, credentials.corp_id, credentials.archive_secret)
+    if init_ret != 0:
+        print(
+            f"[FAIL] media_worker tenant={tag} error_class=sdk_initialization_failed "
+            f"sdk_return_code={init_ret}",
+            flush=True,
+        )
+        try:
+            wecom_sdk.destroy_sdk(lib, handle)
+        except Exception:  # noqa: BLE001, S110 -- SDK cleanup must not replace a safe init failure
+            pass
+        raise MediaWorkerExit(1, "sdk_initialization_failed")
+
+    selected_sdkfileids = {message.sdkfileid for message in candidates if message.sdkfileid}
+    selected_sdkfileids.update(ref["sdkfileid"] for _message, ref in nested_item_candidates)
+    summary = download_media_candidates(
+        session,
+        tenant_id,
+        lib,
+        handle,
+        storage_provider,
+        write_backend_name,
+        timeout,
+        candidates,
+        nested_item_candidates,
+        record_attempt=True,
+        enforce_quota=True,
+    )
+
+    try:
+        wecom_sdk.destroy_sdk(lib, handle)
+    except Exception:  # noqa: BLE001, S110 -- SDK cleanup must not change media persistence truth
+        pass
+
+    succeeded = summary.downloaded + summary.nested_downloaded
+    failed = summary.failed + summary.nested_failed
+    quota_blocked = summary.quota_blocked + summary.nested_quota_blocked
+    retryable = _remaining_retryable_count(session, tenant_id, selected_sdkfileids, retry_count)
+    skipped = summary.skipped + retry_policy_skipped
+    print(
+        f"[INFO] media_worker tenant={tag} trigger_source={args.trigger_source} "
+        f"trigger=completed attempted={summary.attempted} succeeded={succeeded} "
+        f"failed={failed} quota_blocked={quota_blocked} retryable={retryable} skipped={skipped}",
+        flush=True,
+    )
+    print(f"[INFO] media_worker tenant={tag} downloaded: {summary.downloaded}", flush=True)
+    print(f"[INFO] media_worker tenant={tag} failed: {summary.failed}", flush=True)
+    print(f"[INFO] media_worker tenant={tag} quota_blocked: {summary.quota_blocked}", flush=True)
+    if summary.reason_counts:
+        diag = ", ".join(f"{k}={v}" for k, v in sorted(summary.reason_counts.items()))
+        print(f"[INFO] media_worker tenant={tag} failed_reasons: {diag}", flush=True)
+    if not args.skip_nested:
+        print(
+            f"[INFO] media_worker tenant={tag} nested_downloaded: {summary.nested_downloaded}",
+            flush=True,
+        )
+        print(
+            f"[INFO] media_worker tenant={tag} nested_failed: {summary.nested_failed}",
+            flush=True,
+        )
+        print(
+            f"[INFO] media_worker tenant={tag} nested_quota_blocked: "
+            f"{summary.nested_quota_blocked}",
+            flush=True,
+        )
+        if summary.nested_reason_counts:
+            nested_diag = ", ".join(
+                f"{k}={v}" for k, v in sorted(summary.nested_reason_counts.items())
+            )
+            print(
+                f"[INFO] media_worker tenant={tag} nested_failed_reasons: {nested_diag}",
+                flush=True,
+            )
+    print("[PASS] download_wecom_media_once completed", flush=True)
+    return "completed"
+
+
+def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
+    """Run one explicit tenant or every active configured tenant.
+
+    The normal timer/event path deliberately ignores ``WECOM_CORP_ID`` and
+    ``WECOM_ARCHIVE_SECRET``.  Those ambient values are legacy archive
+    selectors, not media-work ownership.  Each SDK session instead receives
+    the CorpID and archive secret resolved for the candidate-owning tenant.
+    """
+    database_url = _require_env("DATABASE_URL")
+    engine = create_engine(database_url)
+    tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
+
+    with Session(engine) as session:
+        if tenant_id_env:
+            try:
+                credentials = resolve_tenant_archive_credentials(session, tenant_id_env)
+            except TenantCredentialError as exc:
+                _fail(exc.error_class, "Tenant archive credentials are unavailable")
+            _run_tenant(session, args, msgtypes, credentials)
+            return
+
+        active_ids = active_tenant_ids(session)
+        configs = active_tenant_configs(session)
+        if not active_ids:
+            print("[INFO] media_worker tenant_count=0 trigger=no-active-tenants", flush=True)
+            return
+
+        configured_ids = {config.tenant_id for config in configs}
+        completed = 0
+        failed = 0
+        for missing_tenant_id in active_ids:
+            if missing_tenant_id in configured_ids:
+                continue
+            failed += 1
+            print(
+                f"[WARN] media_worker tenant={tenant_log_tag(missing_tenant_id)} "
+                "trigger=skipped-failed error_class=tenant_config_unavailable",
+                flush=True,
+            )
+
+        for config in configs:
+            tag = tenant_log_tag(config.tenant_id)
+            try:
+                credentials = credentials_for_active_config(config)
+                _run_tenant(session, args, msgtypes, credentials)
+                completed += 1
+            except TenantCredentialError as exc:
+                session.rollback()
+                failed += 1
+                print(
+                    f"[WARN] media_worker tenant={tag} trigger=skipped-failed "
+                    f"error_class={exc.error_class}",
+                    flush=True,
                 )
-                print(f"[INFO] nested_failed_reasons: {nested_diag}", flush=True)
-        print("[PASS] download_wecom_media_once completed", flush=True)
-        sys.exit(0)
+            except MediaWorkerExit as exc:
+                session.rollback()
+                failed += 1
+                print(
+                    f"[WARN] media_worker tenant={tag} trigger=failed "
+                    f"error_class={exc.error_class}",
+                    flush=True,
+                )
+            except Exception:  # noqa: BLE001 -- one tenant must not abort another
+                session.rollback()
+                failed += 1
+                print(
+                    f"[WARN] media_worker tenant={tag} trigger=failed "
+                    "error_class=tenant_processing_failed",
+                    flush=True,
+                )
+
+        print(
+            f"[INFO] media_worker tenant_runs_completed={completed} tenant_runs_failed={failed}",
+            flush=True,
+        )
+        if completed == 0:
+            _fail("all_tenants_failed", "No active tenant media run completed")
 
 
 if __name__ == "__main__":

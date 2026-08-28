@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from sqlalchemy import exists, func, or_, select
@@ -31,6 +31,13 @@ from app.services.external_contact_identity import (
     safe_display_nickname,
     sync_external_contact_identity,
 )
+from app.services.tenant_credentials import (
+    TenantCredentialError,
+    active_tenant_configs,
+    active_tenant_ids,
+    credentials_for_active_config,
+    tenant_log_tag,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +45,7 @@ logger = logging.getLogger(__name__)
 # Each batch is used in two ``IN`` clauses. Keep it comfortably below common
 # SQLite parameter limits while still avoiding one archive scan per contact.
 _INTERACTION_STATS_BATCH_SIZE = 300
+_DEFAULT_RECONCILE_TENANT_LIMIT = 25
 
 
 @dataclass
@@ -359,54 +367,191 @@ def _require_tenant_id(session: Session, corp_id: str) -> str:
     return row.tenant_id
 
 
-def main() -> int:
-    """Run the idempotent full refresh used for backfill/reconciliation."""
-    logging.basicConfig(level=logging.INFO)
+@dataclass
+class ReconciliationSummary:
+    """Aggregate-only outcomes for independent tenant reconciliation runs."""
+
+    tenant_count: int = 0
+    tenant_deferred: int = 0
+    tenant_completed: int = 0
+    tenant_failed: int = 0
+    total: int = 0
+    inserted: int = 0
+    updated: int = 0
+    skipped: int = 0
+    failed: int = 0
+    nickname_changes: int = 0
+    follow_relationship_changes: int = 0
+    internal_avatar_selected: int = 0
+    internal_avatar_ready: int = 0
+    internal_avatar_unavailable: int = 0
+
+
+def _positive_int(value: str, default: int) -> int:
     try:
-        database_url = _require_env("DATABASE_URL")
-        corp_id = _require_env("WECOM_CORP_ID")
-    except RuntimeError as exc:
-        logger.error("%s", exc)
-        return 1
+        return max(1, int(value))
+    except ValueError:
+        return default
 
-    external_secret = os.environ.get("WECOM_EXTERNAL_CONTACT_SECRET", "").strip()
 
-    from sqlalchemy import create_engine
+def _bounded_tenant_ids(active_ids: list[str], limit: int, at: datetime | None = None) -> list[str]:
+    """Return a daily-rotated bounded tenant slice without a persistent cursor."""
+    if len(active_ids) <= limit:
+        return active_ids
+    day = (at or datetime.now(timezone.utc)).date().toordinal()
+    offset = day % len(active_ids)
+    rotated = active_ids[offset:] + active_ids[:offset]
+    return rotated[:limit]
 
-    engine = create_engine(database_url)
-    try:
-        with Session(engine) as session:
-            tenant_id = _require_tenant_id(session, corp_id)
+
+def reconcile_active_tenants(
+    session: Session,
+    external_secret: str,
+    oauth_secret: str,
+    *,
+    tenant_limit: int = _DEFAULT_RECONCILE_TENANT_LIMIT,
+    at: datetime | None = None,
+) -> ReconciliationSummary:
+    """Reconcile a bounded, daily-rotated active-tenant slice.
+
+    ``WECOM_EXTERNAL_CONTACT_SECRET`` and ``WECOM_OAUTH_SECRET`` remain
+    separate integration configuration. They are never used to choose a
+    tenant. The CorpID passed to WeCom is read only from that tenant's active
+    encrypted TenantWecomConfig, and a failed tenant is rolled back before
+    the next tenant begins. The rotation avoids starving later tenants while
+    keeping each daily run bounded without adding a second scheduling state.
+    """
+    aggregate = ReconciliationSummary()
+    active_ids = active_tenant_ids(session)
+    selected_ids = _bounded_tenant_ids(active_ids, max(1, tenant_limit), at)
+    aggregate.tenant_count = len(selected_ids)
+    aggregate.tenant_deferred = len(active_ids) - len(selected_ids)
+    selected_id_set = set(selected_ids)
+    configs_by_tenant_id = {
+        config.tenant_id: config
+        for config in active_tenant_configs(session)
+        if config.tenant_id in selected_id_set
+    }
+    configured_ids = set(configs_by_tenant_id)
+    for missing_tenant_id in selected_ids:
+        if missing_tenant_id in configured_ids:
+            continue
+        aggregate.tenant_failed += 1
+        logger.warning(
+            "external_contact_reconcile tenant=%s result=failed "
+            "error_class=tenant_config_unavailable",
+            tenant_log_tag(missing_tenant_id),
+        )
+
+    for tenant_id in selected_ids:
+        config = configs_by_tenant_id.get(tenant_id)
+        if config is None:
+            continue
+        tag = tenant_log_tag(config.tenant_id)
+        try:
+            # This is a fail-closed configuration authority check. The
+            # external-contact API does not receive the archive secret, but
+            # a tenant whose encrypted runtime config cannot be read must not
+            # be selected through another tenant or a global CorpID.
+            credentials = credentials_for_active_config(config)
+        except TenantCredentialError as exc:
+            session.rollback()
+            aggregate.tenant_failed += 1
+            logger.warning(
+                "external_contact_reconcile tenant=%s result=failed error_class=%s",
+                tag,
+                exc.error_class,
+            )
+            continue
+
+        try:
             summary = (
                 sync_external_contacts(
                     session,
-                    tenant_id,
-                    corp_id,
+                    credentials.tenant_id,
+                    credentials.corp_id,
                     external_secret,
                     commit_every=100,
                 )
                 if external_secret
                 else RunSummary()
             )
-            # The existing daily reconciliation unit is also the bounded
-            # fallback for internal archive-seat avatars. It never runs in
-            # archive/decrypt request paths and degrades to initials when the
-            # OAuth credential or an individual profile is unavailable.
+            # The daily reconciliation remains the bounded fallback for
+            # internal archive-seat avatars. It runs after the tenant-scoped
+            # contact pass and uses the same tenant CorpID.
             internal_avatars = reconcile_internal_contact_avatars(
                 session,
-                tenant_id,
-                corp_id,
-                os.environ.get("WECOM_OAUTH_SECRET", ""),
+                credentials.tenant_id,
+                credentials.corp_id,
+                oauth_secret,
             )
             session.commit()
+        except Exception:  # noqa: BLE001 -- one tenant must not affect another
+            session.rollback()
+            aggregate.tenant_failed += 1
+            logger.warning(
+                "external_contact_reconcile tenant=%s result=failed "
+                "error_class=tenant_processing_failed",
+                tag,
+            )
+            continue
+
+        aggregate.tenant_completed += 1
+        aggregate.total += summary.total
+        aggregate.inserted += summary.inserted
+        aggregate.updated += summary.updated
+        aggregate.skipped += summary.skipped
+        aggregate.failed += summary.failed
+        aggregate.nickname_changes += summary.nickname_changes
+        aggregate.follow_relationship_changes += summary.follow_relationship_changes
+        aggregate.internal_avatar_selected += internal_avatars.selected
+        aggregate.internal_avatar_ready += internal_avatars.ready
+        aggregate.internal_avatar_unavailable += internal_avatars.unavailable
+
+    return aggregate
+
+
+def main() -> int:
+    """Run the idempotent daily reconciliation for every active tenant."""
+    logging.basicConfig(level=logging.INFO)
+    try:
+        database_url = _require_env("DATABASE_URL")
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        return 1
+
+    external_secret = os.environ.get("WECOM_EXTERNAL_CONTACT_SECRET", "").strip()
+    oauth_secret = os.environ.get("WECOM_OAUTH_SECRET", "").strip()
+    tenant_limit = _positive_int(
+        os.environ.get("EXTERNAL_CONTACT_RECONCILE_TENANT_LIMIT", ""),
+        _DEFAULT_RECONCILE_TENANT_LIMIT,
+    )
+
+    from sqlalchemy import create_engine
+
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            summary = reconcile_active_tenants(
+                session,
+                external_secret,
+                oauth_secret,
+                tenant_limit=tenant_limit,
+            )
     except Exception as exc:
         logger.error("External-contact sync failed: %s", type(exc).__name__)
         return 1
 
     logger.info(
-        "External-contact sync complete: total=%d inserted=%d updated=%d skipped=%d "
-        "failed=%d nickname_changes=%d follow_relationship_changes=%d "
-        "internal_avatar_selected=%d internal_avatar_ready=%d internal_avatar_unavailable=%d",
+        "external_contact_reconcile status=completed tenant_count=%d "
+        "tenant_deferred=%d tenant_completed=%d tenant_failed=%d total=%d inserted=%d updated=%d "
+        "skipped=%d failed=%d nickname_changes=%d follow_relationship_changes=%d "
+        "internal_avatar_selected=%d internal_avatar_ready=%d "
+        "internal_avatar_unavailable=%d external_contact_configured=%s",
+        summary.tenant_count,
+        summary.tenant_deferred,
+        summary.tenant_completed,
+        summary.tenant_failed,
         summary.total,
         summary.inserted,
         summary.updated,
@@ -414,11 +559,12 @@ def main() -> int:
         summary.failed,
         summary.nickname_changes,
         summary.follow_relationship_changes,
-        internal_avatars.selected,
-        internal_avatars.ready,
-        internal_avatars.unavailable,
+        summary.internal_avatar_selected,
+        summary.internal_avatar_ready,
+        summary.internal_avatar_unavailable,
+        "true" if external_secret else "false",
     )
-    return 0
+    return 1 if summary.tenant_count and not summary.tenant_completed else 0
 
 
 if __name__ == "__main__":

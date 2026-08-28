@@ -197,9 +197,14 @@ controlled deployment, step 10 updates the existing same-named unit files,
 performs one `daemon-reload` only when a file changed, and re-arms only
 `wecom-archive-worker.timer`; it never enables the oneshot service directly or
 creates a second timer. The versioned timer preserves the existing five-minute
-cadence (`OnCalendar=*:0/5`). Do not use a manual `cp`/`enable` workflow for
-this pair; production deployment, reload, enable/restart, and verification
-remain separately approved operations.
+cadence (`OnCalendar=*:0/5`). The versioned service invokes the worker through
+`env -u WECOM_CORP_ID -u WECOM_ARCHIVE_SECRET`, so its normal timer process
+enters all-active-tenants mode even while the shared EnvironmentFile retains
+the pair for transition compatibility. Do not use a manual `cp`/`enable`
+workflow for this pair; production deployment, reload, enable/restart, and
+verification remain separately approved operations. Do not remove the #77
+operator drop-in until Ops has verified the deployed effective unit, archive
+cycles, callback, media, and external-contact reconciliation.
 
 External-contact refresh and daily reconciliation:
 

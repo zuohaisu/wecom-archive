@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.db.models import ExternalContactRefreshTask, Tenant, TenantWecomConfig
+from app.db.models import ExternalContactRefreshTask
 from app.services.external_contact_sync import refresh_external_contact
 
 _MAX_RETRY_DELAY = timedelta(hours=24)
@@ -41,34 +41,23 @@ def _retry_at(attempt_count: int, now: datetime) -> datetime:
     return now + min(delay, _MAX_RETRY_DELAY)
 
 
-def _active_tenant_id(session: Session, corp_id: str) -> str | None:
-    row = (
-        session.query(TenantWecomConfig.tenant_id)
-        .join(Tenant, Tenant.id == TenantWecomConfig.tenant_id)
-        .filter(
-            TenantWecomConfig.corp_id == corp_id,
-            TenantWecomConfig.is_active.is_(True),
-            # RND-402: contact refresh is part of the archive sync
-            # pipeline; a frozen/suspended tenant must not refresh.
-            Tenant.lifecycle_status == "active",
-        )
-        .first()
-    )
-    return row[0] if row is not None else None
-
-
 def run_external_contact_refresh_queue(
     session: Session,
+    tenant_id: str,
     corp_id: str,
     external_secret: str,
     *,
     limit: int = 25,
     now: datetime | None = None,
 ) -> RefreshQueueSummary:
-    """Refresh a bounded ready-task batch and commit each task independently."""
+    """Refresh one tenant's bounded ready-task batch independently.
+
+    Callers must resolve the active TenantWecomConfig before calling this
+    worker. Accepting both the selected tenant id and its CorpID prevents the
+    queue from deriving ownership from an ambient global selector.
+    """
     summary = RefreshQueueSummary()
-    tenant_id = _active_tenant_id(session, corp_id)
-    if tenant_id is None or not external_secret.strip():
+    if not tenant_id or not corp_id or not external_secret.strip():
         return summary
 
     observed_at = now or _utc_now()

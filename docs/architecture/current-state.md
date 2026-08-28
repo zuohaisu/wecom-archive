@@ -58,7 +58,8 @@ module” or reuse credentials across them.
 | Provider instruction callback | independent instruction Token/AES key; `WecomSuiteTicketState` | `/api/wecom/third-party/instructions`; `wecom_provider_instructions.py` |
 | Archive callback | active per-tenant callback credentials in `TenantWecomConfig`; transitional env candidate described below | `/api/wecom/archive/events`; `wecom_events.py` and `tenant_callback_resolution.py` |
 | Tenant archive configuration | encrypted `TenantWecomConfig` fields and trusted `ThirdPartyOrganizationBinding` | provisioning config routes; `tenant_config_service.py` |
-| Archive runtime credentials | encrypted tenant config resolved by `tenant_credentials.py` | explicit-tenant/all-tenants worker paths; legacy environment path is transitional |
+| Archive runtime credentials | encrypted tenant config resolved by `tenant_credentials.py` | explicit-tenant/all-tenants worker paths; legacy archive environment path is transitional |
+| External-contact reconciliation identity | active `TenantWecomConfig` resolved by `tenant_credentials.py`; provider API settings remain separate | daily reconciliation and durable refresh workers run one tenant at a time; a tenant never derives identity from global `WECOM_CORP_ID` |
 
 The provider instruction callback has an intentional asymmetric receiver
 contract verified in `test_rnd350_suite_ticket_lifecycle.py`:
@@ -93,10 +94,19 @@ media-worker entry point.
 
 A validated archive callback resolves one active tenant and dispatches an
 explicit-tenant worker without waiting for completion. The archive timer is
-reconciliation, not a second authority. After successful sync/decrypt, the
-worker may wake the generic media worker; media has its own lock and durable
-retry/capacity state. Timer and callback trigger names are operational
-attribution, not business inputs.
+reconciliation, not a second authority. The repository-managed archive unit
+unsets the legacy selector pair before entering this mode; the temporary #77
+operator drop-in remains a production-transition safeguard until Ops verifies
+the deployed unit. After successful sync/decrypt, the worker may wake the
+generic media worker; media has its own lock and durable retry/capacity state.
+Its normal timer/event path discovers every active tenant and initializes one
+SDK session from that tenant's own encrypted archive credentials, never from
+ambient `WECOM_CORP_ID` / `WECOM_ARCHIVE_SECRET`. External-contact daily and
+refresh workers use the same tenant discovery and isolate a tenant failure
+before continuing. The daily job processes a bounded, daily-rotated tenant
+slice (`EXTERNAL_CONTACT_RECONCILE_TENANT_LIMIT`) without changing its 04:15
+schedule. Timer and callback trigger names are operational attribution, not
+business inputs.
 
 The repository versions archive, media, payment, lifecycle, and other systemd
 units. `deploy/systemd/MANAGED_UNITS` is a narrow auto-sync allowlist, not a
