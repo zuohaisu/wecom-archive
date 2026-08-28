@@ -1,10 +1,10 @@
-## Linear issues and commits
+## GitHub issues and commits
 
 One ticket must map to exactly one final commit. Add one row per ticket.
 
 | Issue | Commit | Goal |
 |---|---|---|
-| RND-<N> | `<sha>` | <one-sentence outcome> |
+| RND-<N> / GH-<N> | `<sha>` | <one-sentence outcome> |
 
 ## Scope
 
@@ -31,7 +31,7 @@ Commands and results:
 ## Delivery gates
 
 - [ ] Source is an assigned delivery worktree/branch; the source branch is not `main`.
-- [ ] Every Linear issue maps to exactly one final commit, and no commit mixes issues.
+- [ ] Every GitHub issue maps to exactly one final commit, and no commit mixes issues.
 - [ ] All tickets in this PR form one coherent delivery, normally within the same Epic.
 - [ ] If this PR contains multiple tickets, the selected merge strategy preserves their
       individual commits; the PR will not be squash-merged into one commit.

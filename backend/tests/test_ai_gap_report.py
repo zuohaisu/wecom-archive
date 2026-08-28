@@ -123,7 +123,7 @@ def test_render_markdown_includes_key_sections_and_no_auto_ticket_language() -> 
 
     assert "高频未解决问题" in markdown
     assert "怎么设置存储配额但文档没覆盖" in markdown
-    assert "不自动创建、修改或关闭 Linear issue" in markdown
+    assert "不自动创建、修改或关闭工单（GitHub Issue）" in markdown
     assert "候选改进任务草稿" in markdown
     assert "文档改进" in markdown
     assert "产品缺陷" in markdown
