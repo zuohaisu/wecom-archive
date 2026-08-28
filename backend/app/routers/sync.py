@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple  # noqa: UP035 -- Python 3.9 runtime compatibility
 
@@ -83,8 +82,8 @@ def _mark_worker_failed(tenant_id: str, corp_id: str) -> None:
 
 
 def _run_archive_worker(tenant_id: str, corp_id: str) -> None:
-    """Run the shared worker seam after the 202 response has been sent."""
-    if not run_archive_worker_once(trigger_source="manual"):
+    """Run the shared worker seam for the authenticated tenant after 202."""
+    if not run_archive_worker_once(trigger_source="manual", tenant_id=tenant_id):
         _mark_worker_failed(tenant_id, corp_id)
 
 
@@ -121,13 +120,6 @@ def sync_now(
     config = _active_config(db, tenant_id)
     if config is None:
         raise HTTPException(status_code=409, detail="Sync is not configured")
-
-    # The deployed worker has one environment-scoped archive credential. Do
-    # not let an authenticated user of a different tenant accidentally cause
-    # that worker to archive another tenant's corp data.
-    configured_corp_id = os.environ.get("WECOM_CORP_ID", "").strip()
-    if configured_corp_id and configured_corp_id != config.corp_id:
-        raise HTTPException(status_code=409, detail="Sync worker is unavailable for this tenant")
 
     now = datetime.now(timezone.utc)
     row = _sync_state(db, tenant_id, config.corp_id)

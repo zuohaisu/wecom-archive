@@ -42,7 +42,6 @@ def test_worker_deletes_successful_tasks_one_at_a_time(
     with Session(queue_engine) as session:
         session.add_all([_task("wm-001", now), _task("wm-002", now)])
         session.commit()
-        monkeypatch.setattr(worker, "_active_tenant_id", lambda *_args: "tenant-a")
         calls: list[tuple[str, bool]] = []
 
         def _success(_session, _tenant, _corp, _secret, external_userid, **kwargs):
@@ -51,7 +50,7 @@ def test_worker_deletes_successful_tasks_one_at_a_time(
 
         monkeypatch.setattr(worker, "refresh_external_contact", _success)
         summary = worker.run_external_contact_refresh_queue(
-            session, "corp-a", "secret", limit=1, now=now
+            session, "tenant-a", "corp-a", "secret", limit=1, now=now
         )
 
         assert summary.selected == 1
@@ -68,7 +67,6 @@ def test_worker_backoffs_unavailable_task_without_dropping_it(
     with Session(queue_engine) as session:
         session.add(_task("wm-001", now))
         session.commit()
-        monkeypatch.setattr(worker, "_active_tenant_id", lambda *_args: "tenant-a")
         monkeypatch.setattr(
             worker,
             "refresh_external_contact",
@@ -76,7 +74,7 @@ def test_worker_backoffs_unavailable_task_without_dropping_it(
         )
 
         summary = worker.run_external_contact_refresh_queue(
-            session, "corp-a", "secret", now=now
+            session, "tenant-a", "corp-a", "secret", now=now
         )
 
         task = session.query(ExternalContactRefreshTask).one()

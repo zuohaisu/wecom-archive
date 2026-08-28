@@ -9,7 +9,11 @@ User=wecomarchive
 WorkingDirectory=/srv/apps/wecom-archive-365/current/backend
 EnvironmentFile=/srv/apps/wecom-archive-365/current/backend/.env
 Environment=ARCHIVE_WORKER_TRIGGER_SOURCE=timer
-ExecStart=/srv/apps/wecom-archive-365/current/backend/.venv/bin/python scripts/run_archive_worker_once.py
+# The shared EnvironmentFile retains the legacy pair temporarily for other
+# workloads. This versioned unit must never let those ambient selectors choose
+# the archive mode: the worker enters all-active-tenants unless an explicit
+# tenant dispatch supplies WECOM_TENANT_ID.
+ExecStart=/usr/bin/env -u WECOM_CORP_ID -u WECOM_ARCHIVE_SECRET /srv/apps/wecom-archive-365/current/backend/.venv/bin/python scripts/run_archive_worker_once.py
 
 # Security hardening (safe subset — must not break access to any of:
 # backend directory, .env, SQLite/database path, private key path,

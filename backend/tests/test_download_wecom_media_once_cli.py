@@ -90,12 +90,20 @@ def test_main_downloads_candidate_and_prints_expected_summary(
 
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media.lock"))
     monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_TENANT_ID", _TENANT_A)
     monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
-    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "secret")
     monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
 
     monkeypatch.setattr(script, "create_engine", lambda _url: engine)
+    monkeypatch.setattr(
+        script,
+        "resolve_tenant_archive_credentials",
+        lambda *_args: type(
+            "Credentials",
+            (),
+            {"tenant_id": _TENANT_A, "corp_id": "tenant-corp", "archive_secret": "tenant-secret"},
+        )(),
+    )
     monkeypatch.setattr(sys, "argv", ["prog", "--types", "voice"])
 
     with pytest.raises(SystemExit) as exc:
@@ -103,10 +111,10 @@ def test_main_downloads_candidate_and_prints_expected_summary(
     assert exc.value.code == 0
 
     out = capsys.readouterr().out
-    assert "[INFO] candidate_selected: 1" in out
-    assert "media_worker trigger_source=manual trigger=completed attempted=1 succeeded=1 failed=0" in out
-    assert "[INFO] downloaded: 1" in out
-    assert "[INFO] failed: 0" in out
+    assert "media_worker tenant=" in out and "candidate_selected: 1" in out
+    assert "media_worker tenant=" in out and "trigger_source=manual trigger=completed attempted=1 succeeded=1 failed=0" in out
+    assert "media_worker tenant=" in out and "downloaded: 1" in out
+    assert "media_worker tenant=" in out and "failed: 0" in out
     assert "[PASS] download_wecom_media_once completed" in out
     assert "media_worker trigger_source=manual lifecycle=ended result=completed" in out
     assert "error_class=none" in out
@@ -141,11 +149,19 @@ def test_main_hides_secret_like_provider_value_and_emits_failed_lifecycle(
     unsafe_provider = "https://storage.invalid/private/path?sig=fixture-only"
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media.lock"))
     monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_TENANT_ID", _TENANT_A)
     monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
-    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "test-secret")
     monkeypatch.setenv("MEDIA_STORAGE_PROVIDER", unsafe_provider)
     monkeypatch.setattr(script, "create_engine", lambda _url: worker_engine)
+    monkeypatch.setattr(
+        script,
+        "resolve_tenant_archive_credentials",
+        lambda *_args: type(
+            "Credentials",
+            (),
+            {"tenant_id": _TENANT_A, "corp_id": "tenant-corp", "archive_secret": "tenant-secret"},
+        )(),
+    )
     monkeypatch.setattr(sys, "argv", ["prog"])
 
     with pytest.raises(SystemExit) as exc:

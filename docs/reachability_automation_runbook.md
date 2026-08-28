@@ -41,8 +41,9 @@ python scripts/run_reachability_automation_once.py reconcile
 ```
 
 `incremental` is the corresponding local worker hook mode. Neither command
-accepts a tenant argument; the active tenant is resolved from the configured
-corp. Do not run a real SDK/sync/decrypt command merely to test this diagnostic.
+accepts a tenant argument; an archive-worker child supplies its tenant selector,
+and an independent reconciliation discovers all active tenant configurations.
+Do not run a real SDK/sync/decrypt command merely to test this diagnostic.
 
 ## 4. Local safe invocation
 
@@ -51,7 +52,6 @@ Use a disposable database and an isolated lock path, never a production URL:
 ```bash
 DATABASE_URL='postgresql://…/wecom_archive_test' \
 REACHABILITY_AUTOMATION_LOCK_PATH="$PWD/.reachability-test.lock" \
-WECOM_CORP_ID=example-test-corp \
 python backend/scripts/run_reachability_automation_once.py reconcile
 ```
 

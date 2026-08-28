@@ -821,14 +821,11 @@ def test_count_only_performs_no_writes(tmp_path, monkeypatch, capsys) -> None:
 
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download.lock"))
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_TENANT_ID", "tenant-a")
 
-    tenant_row = SimpleNamespace(tenant_id="tenant-a")
     candidate_msg = SimpleNamespace(id=1, sdkfileid="sdk-should-not-be-printed", msgtype="voice")
 
     def _query(model):
-        if model is script.TenantWecomConfig:
-            return _query_mock(first_result=tenant_row)
         if model is script.Tenant:
             return _query_mock(first_result=SimpleNamespace(lifecycle_status="active"))
         if model is script.ArchiveMessage:
@@ -846,6 +843,13 @@ def test_count_only_performs_no_writes(tmp_path, monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(
+        script,
+        "resolve_tenant_archive_credentials",
+        lambda *_args: SimpleNamespace(
+            tenant_id="tenant-a", corp_id="tenant-scoped-corp", archive_secret="tenant-secret"
+        ),
+    )
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([candidate_msg], [], 3))
     # RND-200: this test's mock session only stubs TenantWecomConfig/
     # ArchiveMessage queries for the pre-existing --types candidate path —
@@ -876,18 +880,14 @@ def _run_main_with_one_candidate(monkeypatch, tmp_path, msgtype, chunks, extra_a
 
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download.lock"))
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_TENANT_ID", "tenant-a")
     monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
-    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "secret")
     monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
 
-    tenant_row = SimpleNamespace(tenant_id="tenant-a")
     candidate_msg = SimpleNamespace(id=1, sdkfileid="sdk-secret-1", msgtype=msgtype)
     media_file_row = MediaFile(sdkfileid="sdk-secret-1", archive_message_id=1, download_status="pending")
 
     def _query(model):
-        if model is script.TenantWecomConfig:
-            return _query_mock(first_result=tenant_row)
         if model is script.Tenant:
             return _query_mock(first_result=SimpleNamespace(lifecycle_status="active"))
         if model is MediaFile:
@@ -903,6 +903,13 @@ def _run_main_with_one_candidate(monkeypatch, tmp_path, msgtype, chunks, extra_a
 
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(
+        script,
+        "resolve_tenant_archive_credentials",
+        lambda *_args: SimpleNamespace(
+            tenant_id="tenant-a", corp_id="tenant-scoped-corp", archive_secret="tenant-secret"
+        ),
+    )
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([candidate_msg], [], 1))
     # RND-200: see the identical stub in test_count_only_performs_no_writes
     # above — this mock session doesn't model the nested mixed/chatrecord
@@ -1476,9 +1483,8 @@ def test_main_nested_mixed_media_downloads_multiple_items_with_distinct_storage_
 
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download.lock"))
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_TENANT_ID", "tenant-a")
     monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
-    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "secret")
     monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
 
     engine = _make_sqlite_engine(tmp_path, "nested-e2e.db")
@@ -1509,7 +1515,13 @@ def test_main_nested_mixed_media_downloads_multiple_items_with_distinct_storage_
 
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
-    monkeypatch.setattr(script, "_require_tenant_id", lambda _session, _corp_id: "tenant-a")
+    monkeypatch.setattr(
+        script,
+        "resolve_tenant_archive_credentials",
+        lambda *_args: SimpleNamespace(
+            tenant_id="tenant-a", corp_id="tenant-scoped-corp", archive_secret="tenant-secret"
+        ),
+    )
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([], [], 0))
     monkeypatch.setattr(script.wecom_sdk, "load_sdk", lambda _path: MagicMock())
     monkeypatch.setattr(script.wecom_sdk, "configure_sdk", lambda _lib: None)
@@ -1551,7 +1563,7 @@ def test_main_skip_nested_flag_disables_nested_processing(tmp_path, monkeypatch,
 
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download.lock"))
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_TENANT_ID", "tenant-a")
     monkeypatch.setenv("STORAGE_LOCAL_PATH", str(tmp_path))
 
     engine = _make_sqlite_engine(tmp_path, "nested-skip.db")
@@ -1574,7 +1586,13 @@ def test_main_skip_nested_flag_disables_nested_processing(tmp_path, monkeypatch,
 
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
-    monkeypatch.setattr(script, "_require_tenant_id", lambda _session, _corp_id: "tenant-a")
+    monkeypatch.setattr(
+        script,
+        "resolve_tenant_archive_credentials",
+        lambda *_args: SimpleNamespace(
+            tenant_id="tenant-a", corp_id="tenant-scoped-corp", archive_secret="tenant-secret"
+        ),
+    )
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([], [], 0))
     monkeypatch.setattr(sys, "argv", ["prog", "--skip-nested"])
 
@@ -1594,7 +1612,7 @@ def test_count_only_reports_nested_candidates_without_writes(tmp_path, monkeypat
 
     monkeypatch.setenv("MEDIA_DOWNLOAD_LOCK_PATH", str(tmp_path / "media-download-count.lock"))
     monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
+    monkeypatch.setenv("WECOM_TENANT_ID", "tenant-a")
 
     engine = _make_sqlite_engine(tmp_path, "nested-count-only.db")
     session = RealSession(engine)
@@ -1619,7 +1637,13 @@ def test_count_only_reports_nested_candidates_without_writes(tmp_path, monkeypat
 
     monkeypatch.setattr(script, "create_engine", lambda _url: "fake-engine")
     monkeypatch.setattr(script, "Session", _fake_session)
-    monkeypatch.setattr(script, "_require_tenant_id", lambda _session, _corp_id: "tenant-a")
+    monkeypatch.setattr(
+        script,
+        "resolve_tenant_archive_credentials",
+        lambda *_args: SimpleNamespace(
+            tenant_id="tenant-a", corp_id="tenant-scoped-corp", archive_secret="tenant-secret"
+        ),
+    )
     monkeypatch.setattr(script, "select_candidates", lambda *_a, **_k: ([], [], 0))
     monkeypatch.setattr(sys, "argv", ["prog", "--count-only"])
 
@@ -1631,6 +1655,104 @@ def test_count_only_reports_nested_candidates_without_writes(tmp_path, monkeypat
     assert "nested_candidate_messages_scanned: 1" in captured.out
     assert "nested_candidate_items_selected: 2" in captured.out
     assert session.query(MediaFile).count() == 0
+def test_all_active_media_selects_each_tenants_own_credentials_without_legacy_env(
+    monkeypatch,
+) -> None:
+    """A timer with the legacy pair still present must not select either value."""
+    import scripts.download_wecom_media_once as script
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
+    monkeypatch.setenv("WECOM_CORP_ID", "legacy-corp")
+    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "legacy-secret")
+    monkeypatch.delenv("WECOM_TENANT_ID", raising=False)
+
+    session = MagicMock()
+
+    @contextmanager
+    def _fake_session(_engine):
+        yield session
+
+    configs = [SimpleNamespace(tenant_id="tenant-a"), SimpleNamespace(tenant_id="tenant-b")]
+    credentials = {
+        "tenant-a": SimpleNamespace(
+            tenant_id="tenant-a", corp_id="corp-a", archive_secret="secret-a"
+        ),
+        "tenant-b": SimpleNamespace(
+            tenant_id="tenant-b", corp_id="corp-b", archive_secret="secret-b"
+        ),
+    }
+    selected: list[tuple[str, str, str]] = []
+
+    monkeypatch.setattr(script, "create_engine", lambda _url: object())
+    monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(script, "active_tenant_ids", lambda _session: ["tenant-a", "tenant-b"])
+    monkeypatch.setattr(script, "active_tenant_configs", lambda _session: configs)
+    monkeypatch.setattr(
+        script, "credentials_for_active_config", lambda config: credentials[config.tenant_id]
+    )
+    monkeypatch.setattr(
+        script,
+        "_run_tenant",
+        lambda _session, _args, _types, resolved: selected.append(
+            (resolved.tenant_id, resolved.corp_id, resolved.archive_secret)
+        )
+        or "completed",
+    )
+
+    script._run(SimpleNamespace(), frozenset({"voice"}))
+
+    assert selected == [
+        ("tenant-a", "corp-a", "secret-a"),
+        ("tenant-b", "corp-b", "secret-b"),
+    ]
+
+
+def test_all_active_media_failure_isolated_and_missing_config_fails_closed(
+    monkeypatch, capsys
+) -> None:
+    import scripts.download_wecom_media_once as script
+    from app.services.tenant_credentials import TenantCredentialError
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
+    monkeypatch.delenv("WECOM_TENANT_ID", raising=False)
+    session = MagicMock()
+
+    @contextmanager
+    def _fake_session(_engine):
+        yield session
+
+    configs = [SimpleNamespace(tenant_id="tenant-a"), SimpleNamespace(tenant_id="tenant-b")]
+    successful: list[str] = []
+    monkeypatch.setattr(script, "create_engine", lambda _url: object())
+    monkeypatch.setattr(script, "Session", _fake_session)
+    monkeypatch.setattr(
+        script, "active_tenant_ids", lambda _session: ["tenant-a", "tenant-b", "tenant-missing"]
+    )
+    monkeypatch.setattr(script, "active_tenant_configs", lambda _session: configs)
+
+    def _credentials(config):
+        if config.tenant_id == "tenant-a":
+            raise TenantCredentialError("tenant_credentials_key_mismatch")
+        return SimpleNamespace(
+            tenant_id="tenant-b", corp_id="corp-b", archive_secret="secret-b"
+        )
+
+    monkeypatch.setattr(script, "credentials_for_active_config", _credentials)
+    monkeypatch.setattr(
+        script,
+        "_run_tenant",
+        lambda _session, _args, _types, resolved: successful.append(resolved.tenant_id) or "completed",
+    )
+
+    script._run(SimpleNamespace(), frozenset({"voice"}))
+
+    assert successful == ["tenant-b"]
+    out = capsys.readouterr().out
+    assert "tenant_config_unavailable" in out
+    assert "tenant_credentials_key_mismatch" in out
+    assert "tenant_runs_completed=1 tenant_runs_failed=2" in out
+
+
 @pytest.fixture(autouse=True)
 def _allow_capacity_for_pre_rnd385_worker_contracts(monkeypatch):
     """Legacy worker tests isolate media semantics, not billing fixtures."""

@@ -537,7 +537,7 @@ def test_media_dispatch_skips_frozen_tenant(monkeypatch, factory) -> None:
 
 
 def test_contact_refresh_worker_skips_frozen_tenant(factory) -> None:
-    from app.services.external_contact_refresh_worker import _active_tenant_id
+    from app.services.tenant_credentials import active_tenant_configs
 
     with factory() as db:
         db.add(
@@ -562,8 +562,7 @@ def test_contact_refresh_worker_skips_frozen_tenant(factory) -> None:
         )
         db.commit()
         _set_lifecycle(db, "tenant-frozen", "frozen")
-        assert _active_tenant_id(db, "corp-frozen") is None
-        assert _active_tenant_id(db, "corp-active") == "tenant-a"
+        assert [config.tenant_id for config in active_tenant_configs(db)] == ["tenant-a"]
 
 
 # ---------------------------------------------------------------------------

@@ -46,6 +46,24 @@ class TenantArchiveCredentials:
     publickey_version: int | None
 
 
+def active_tenant_ids(db: Session) -> list[str]:
+    """Live tenant ids in a stable order, including rows missing a config.
+
+    Worker loops use this alongside ``active_tenant_configs`` so an active
+    tenant without configuration is observed as a fail-closed per-tenant
+    failure instead of being silently omitted from reconciliation.
+    """
+    return [
+        tenant_id
+        for (tenant_id,) in (
+            db.query(Tenant.id)
+            .filter(Tenant.is_active.is_(True), Tenant.lifecycle_status == "active")
+            .order_by(Tenant.created_at)
+            .all()
+        )
+    ]
+
+
 def active_tenant_configs(db: Session) -> list[TenantWecomConfig]:
     """Active, non-provisioning tenant config rows in stable creation order.
 
