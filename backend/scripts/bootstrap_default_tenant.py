@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Idempotent default-tenant bootstrap for RND-111.
+Historical/default-tenant bootstrap for RND-111.
 
-Run once after alembic upgrade head (migration 0002) has been applied.
+This is a legacy/local bootstrap path, not the current self-service tenant
+provisioning path. Run only when its compatibility behavior is explicitly
+required after `alembic upgrade head`.
 Safe to re-run: all inserts use ON CONFLICT DO NOTHING; NOT NULL enforcement
 is guarded by a pg_attribute check.
 
 Steps:
   1. Create default tenant row (id=DEFAULT_TENANT_ID, slug='default').
-  2. Create tenant_wecom_configs row from WECOM_CORP_ID / WECOM_AGENT_ID /
-     WECOM_OAUTH_SECRET / ADMIN_DOMAIN env vars.
+  2. Create the historical default tenant_wecom_configs row from WECOM_CORP_ID /
+     WECOM_AGENT_ID / WECOM_OAUTH_SECRET / ADMIN_DOMAIN env vars.
   3. Backfill archive_messages.tenant_id WHERE tenant_id IS NULL.
   4. Backfill archive_message_recipients.tenant_id WHERE tenant_id IS NULL.
   5. Backfill sync_states.tenant_id WHERE tenant_id IS NULL.
@@ -32,10 +34,10 @@ Optional env vars:
                     (e.g. admin.yourcompany.com).  Required for Phase 2
                     (RND-110) OAuth; can be left empty for Phase 1.
 
-Security constraints:
-    - WECOM_OAUTH_SECRET is written to tenant_wecom_configs.app_secret.
-      Phase 1 stores it plaintext (internal single-tenant deployment).
-      Phase 3 must encrypt at rest before storing.
+Compatibility constraints:
+    - WECOM_OAUTH_SECRET is written directly to the historical default-row
+      app_secret column. This is not the encrypted tenant-scoped archive
+      credential format and must not be copied to new SaaS tenants.
     - app_secret is NOT printed or logged.
     - No message content, decrypted payloads, or archive data is read.
 """

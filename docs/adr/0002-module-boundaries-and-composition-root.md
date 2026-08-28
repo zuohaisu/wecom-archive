@@ -217,7 +217,7 @@ The existing codebase already conforms to these rules after RND-218~223; this si
 
 ## 5. References
 
-- **Linear**: RND-224 (this ADR), parent RND-212 (modularization chain)
+- **Related work**: RND-224 (this ADR), parent RND-212 (modularization chain); these are historical migration identifiers, while GitHub Issues are the active tracker.
 - **Implementation**: `backend/tests/test_architecture_boundary.py`
 - **Rule Documentation**: `DEV_AGENT_RULES.md` § Architecture Boundaries, `docs/AGENTS.md` § Architecture Boundaries, root `AGENTS.md`
 - **Related Tasks**: RND-218 (legacy routing out of main), RND-219 (listing service), RND-220 (timeline resolution), RND-221 (media access service), RND-222 (worker functions), RND-223 (App Factory + typed settings — this ADR codifies the boundary the chain converged on)

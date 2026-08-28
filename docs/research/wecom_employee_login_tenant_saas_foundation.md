@@ -1,9 +1,14 @@
 # RND-110 / RND-111 Research: WeCom Employee Login + Tenant-Aware SaaS Foundation
 
-**Canonical engineering research and architecture reference.**
-Readable by Claude Code, Codex QA, and future maintainers.
+**Historical engineering research.**
 
-**Status:** Research complete. Ready for Phase 1 implementation.
+> **Superseded as a current architecture reference (GitHub #92).** This
+> pre-multi-tenant research describes phased internal/single-tenant assumptions
+> that current code has passed. It remains useful only as historical rationale;
+> use `docs/architecture/current-state.md` and executable sources for current
+> architecture.
+
+**Status:** Research complete; implementation-phase record, not current guidance.
 
 ---
 

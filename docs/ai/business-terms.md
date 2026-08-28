@@ -1,12 +1,15 @@
 # Business Terms — Crowntime WeCom Archive
 
+> **Status:** terminology aid only. Current authority boundaries are in
+> [`docs/architecture/current-state.md`](../architecture/current-state.md).
+
 ## Domain Terminology
 
 ### Core Concepts
 
 | Term | Chinese | Definition |
 |------|---------|------------|
-| **Tenant** | 租户 | A company/organization using the system. Each tenant has its own WeCom credentials, archive data, and admin users. Current MVP has one default tenant. |
+| **Tenant** | 租户 | A customer company/organization isolation root. Each tenant has its own WeCom credentials, archive data, users, lifecycle, and commercial state. |
 | **WeCom (企业微信)** | 企业微信 | Enterprise WeChat — Tencent's enterprise communication platform. The source of archived conversations. |
 | **Corp** | 企业 | A corporation/company on WeCom platform. Maps 1:1 with a Tenant in the current data model. `corp_id` is the WeCom-level identifier. |
 | **Archive** | 存档 | The encrypted conversation data pulled from WeCom's Conversation Archive API. Not a backup — a compliance/audit record. |
@@ -20,8 +23,9 @@
 
 | Term | Definition |
 |------|------------|
-| **Administrator** | A human who has authenticated via WeCom OAuth (or password) and can access the Review Console. Stored in `admin_users`. |
-| **Reviewer** | An administrator performing conversation review. Same as administrator — no separate role. |
+| **Tenant user** | A tenant-scoped `AdminUser` with an `owner`, `admin`, `compliance`, `legal`, or `readonlyaudit` role. Access derives from its authenticated tenant session. |
+| **Owner** | A tenant user with `role="owner"`; the trusted third-party provisioning flow creates the initial Owner. |
+| **PlatformAdmin** | Tenant-less, separately authenticated platform operator. It is not a tenant user or an Owner. |
 | **Archive Seat** | A monitored account's position in the archive. Determined at query time (no formal seat roster exists). |
 
 ### Feature Areas

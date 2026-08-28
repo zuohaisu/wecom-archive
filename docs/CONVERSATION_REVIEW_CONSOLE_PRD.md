@@ -1,5 +1,10 @@
 # Conversation Review Console PRD
 
+> **Status:** historical feature PRD. It defines a review-console problem and
+> interaction model, not the current product/deployment/identity architecture.
+> Use [`architecture/current-state.md`](architecture/current-state.md) for
+> current authority boundaries.
+
 Related issue: RND-99
 
 ---

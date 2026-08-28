@@ -1,8 +1,9 @@
 # Project Documentation Report — 365 WeCom Archive
 
 > Historical QA artifact from the 2026-07-10 documentation refresh review.
-> Use the live documents in `README.md` and `docs/` as the current source of
-> truth; this report captures a point-in-time assessment before subsequent fixes.
+> This report captures a point-in-time assessment before subsequent fixes and
+> is not a current-source claim. Use `AGENTS.md` and
+> `docs/architecture/current-state.md` as the current documentation hierarchy.
 
 **Generated:** 2026-07-10
 

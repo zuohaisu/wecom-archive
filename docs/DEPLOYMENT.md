@@ -36,7 +36,7 @@ Versioned in this repository:
 | Payment recovery/reconciliation unit/timers | `deploy/systemd/wecom-payment-{recovery,reconciliation}.{service,timer}` | Bounded recovery every five minutes and T+1 reconciliation at 02:30 UTC; neither unit enables new payment creation (RND-390) |
 | AI KB reindex unit/timer | `deploy/systemd/wecom-ai-kb-reindex.{service,timer}` | Rebuild the AI support knowledge-base index from `backend/app/ai_kb/manifest.json` hourly (`:15`); no-op if `AI_SUPPORT_ENABLED` is unset (RND-356) |
 | AI KB eval unit/timer | `deploy/systemd/wecom-ai-kb-eval.{service,timer}` | Daily (05:00) retrieval-quality launch gate against the fixed eval set; records `ai_eval_runs`, exits non-zero on a blocked run (RND-359) |
-| AI KB gap report unit/timer | `deploy/systemd/wecom-ai-kb-gap-report.{service,timer}` | Weekly (Mon 06:00) Markdown candidate-improvement report under `docs/ai/reports/` — never writes Linear (RND-359) |
+| AI KB gap report unit/timer | `deploy/systemd/wecom-ai-kb-gap-report.{service,timer}` | Weekly (Mon 06:00) Markdown candidate-improvement report under `docs/ai/reports/` — never creates, changes, or closes GitHub Issues (RND-359) |
 | AI retention sweep unit/timer | `deploy/systemd/wecom-ai-retention-sweep.{service,timer}` | Daily (03:30) deletes AI chat sessions/messages past `AI_RETENTION_DAYS` (default 90) (RND-359) |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
 | GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
@@ -278,8 +278,8 @@ local final ZIP. No production unit is installed, enabled, or changed by
 repository changes alone.
 
 Billing lifecycle state transitions (RND-402; operator action only) — scans only
-commercial tenants that already have a Subscription; legacy/self-host tenants are
-never touched:
+commercial tenants that already have a Subscription; legacy tenants without a
+Subscription are intentionally not reprojected:
 
 ```bash
 sudo cp deploy/systemd/wecom-billing-lifecycle.{service,timer} /etc/systemd/system/

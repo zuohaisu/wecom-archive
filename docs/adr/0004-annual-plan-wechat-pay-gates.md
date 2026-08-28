@@ -132,7 +132,7 @@ Plan 失活后不得创建新订单，但既有订单、支付和订阅历史必
 
 启用时必须同时完整提供全部变量；任一缺失、PEM 无效、API v3 key 长度无效、notify URL 非 HTTPS，
 应用启动/支付 readiness 必须失败关闭。配置值不得出现在前端、异常正文、日志、测试 fixture、
-Linear 或 git diff 中。
+GitHub Issue、聊天或 git diff 中。
 
 ### 2.6 支付渠道抽象与支付宝边界
 
