@@ -190,9 +190,19 @@ def record_callback_failure(
     kind: str,
     at: datetime | None = None,
 ) -> None:
-    """Persist one globally rate-limited, payload-free callback failure."""
+    """Persist only actionable callback-processing failures.
+
+    A signature verification failure means the public callback endpoint
+    correctly rejected an untrusted request.  Without a trusted payment
+    identity there is nothing to recover, so it must not become an open,
+    critical payment-recovery finding or trigger an urgent payment-system
+    notification.  Decrypt failures happen only after signature verification
+    succeeds and therefore remain actionable operational findings.
+    """
     if kind not in {FINDING_CALLBACK_SIGNATURE_FAILURE, FINDING_CALLBACK_DECRYPT_FAILURE}:
         raise ValueError("unsupported callback finding")
+    if kind == FINDING_CALLBACK_SIGNATURE_FAILURE:
+        return
     checked_at = _utc(at or datetime.now(timezone.utc))
     with session_factory() as db:
         _open_finding(db, kind=kind, severity="critical", at=checked_at)
@@ -238,7 +248,8 @@ def _claim_recovery_candidates(
             order.recovery_lease_until = at + RECOVERY_LEASE
             order.last_query_at = at
             claims.append(
-                _Claim(order.id, order.tenant_id, order.status))
+                _Claim(order.id, order.tenant_id, order.status)
+            )
         db.commit()
         return claims
 
