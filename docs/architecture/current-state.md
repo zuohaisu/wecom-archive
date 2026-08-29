@@ -110,7 +110,10 @@ business inputs.
 
 The repository versions archive, media, payment, lifecycle, and other systemd
 units. `deploy/systemd/MANAGED_UNITS` is a narrow auto-sync allowlist, not a
-claim that every versioned unit is installed. See `docs/DEPLOYMENT.md` for the
+claim that every versioned unit is installed — `deploy/systemd/WORKLOAD_MANIFEST`
+(GH-104) is the authoritative classification of which units are required,
+deferred, manual, deprecated, or out of scope; see
+`docs/operations/scheduled-workload-manifest.md`. See `docs/DEPLOYMENT.md` for the
 repo-owned/operator-managed boundary.
 
 ## Commercial and storage authority map
