@@ -6,13 +6,15 @@ name: External Uptime Check
 # host-local resource-check timer (scripts/disk_usage_check.sh) cannot see
 # this class of failure by construction — see docs/operations/alerting.md.
 #
+# Scheduled checks are intentionally paused during the pre-promotion phase.
+# Keep workflow_dispatch available for manual production verification.
+# Re-enable schedule when the product enters active external promotion.
+#
 # Uses no repository secrets to perform the checks themselves: the checked
 # URLs are public production endpoints, not credentials. ALERT_WEBHOOK_URL
 # is only read, never echoed, when routing a failure alert.
 
 on:
-  schedule:
-    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       send_test_alert:
