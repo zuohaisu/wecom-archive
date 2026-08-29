@@ -84,14 +84,13 @@ def test_disk_and_backup_checks_keep_their_own_alerting_and_no_onfailure() -> No
         assert "notify.sh" in script_text
 
 
-def test_uptime_workflow_checks_public_endpoint_and_readiness_outside_ecs() -> None:
+def test_uptime_workflow_manual_checks_remain_available_while_schedule_is_paused() -> None:
     with UPTIME_WORKFLOW.open(encoding="utf-8") as fh:
         workflow = yaml.safe_load(fh)
 
-    # The `schedule:` trigger is intentionally paused during the
-    # pre-promotion phase (see the workflow's own header comment and the
-    # "ops: pause scheduled external uptime checks" commit) — manual
-    # verification via workflow_dispatch must stay available regardless.
+    # GH-104 intentionally pauses scheduled external checks until the
+    # pre-promotion work is complete. Manual workflow_dispatch remains the
+    # supported verification path and must keep all check/alert wiring intact.
     assert "schedule" not in workflow[True]
     assert "workflow_dispatch" in workflow[True]
     assert workflow["env"]["PRODUCTION_URL"] == "https://archive.crowntime.cn/"
