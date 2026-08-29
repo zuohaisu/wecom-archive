@@ -88,7 +88,12 @@ def test_uptime_workflow_checks_public_endpoint_and_readiness_outside_ecs() -> N
     with UPTIME_WORKFLOW.open(encoding="utf-8") as fh:
         workflow = yaml.safe_load(fh)
 
-    assert "schedule" in workflow[True]
+    # The `schedule:` trigger is intentionally paused during the
+    # pre-promotion phase (see the workflow's own header comment and the
+    # "ops: pause scheduled external uptime checks" commit) — manual
+    # verification via workflow_dispatch must stay available regardless.
+    assert "schedule" not in workflow[True]
+    assert "workflow_dispatch" in workflow[True]
     assert workflow["env"]["PRODUCTION_URL"] == "https://archive.crowntime.cn/"
     assert workflow["env"]["READINESS_URL"] == "https://archive.crowntime.cn/health/ready"
 
