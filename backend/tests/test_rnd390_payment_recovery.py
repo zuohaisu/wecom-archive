@@ -224,7 +224,7 @@ def test_daily_reconciliation_marks_terminal_channel_check_without_reopening_che
         assert order.checkout_url is None
 
 
-def test_callback_crypto_failures_are_global_daily_deduplicated_operations_findings(factory) -> None:
+def test_untrusted_callback_signature_failures_do_not_create_recovery_findings(factory) -> None:
     record_callback_failure(
         factory,
         kind=FINDING_CALLBACK_SIGNATURE_FAILURE,
@@ -237,12 +237,4 @@ def test_callback_crypto_failures_are_global_daily_deduplicated_operations_findi
     )
 
     with factory() as db:
-        findings = db.scalars(select(PaymentRecoveryFinding)).all()
-        assert len(findings) == 1
-        finding = findings[0]
-        assert finding.tenant_id is None
-        assert finding.payment_order_id is None
-        assert finding.kind == FINDING_CALLBACK_SIGNATURE_FAILURE
-        assert finding.severity == "critical"
-        assert finding.occurrence_count == 2
-        assert _utc(finding.last_detected_at) == NOW + timedelta(minutes=1)
+        assert db.scalars(select(PaymentRecoveryFinding)).all() == []
