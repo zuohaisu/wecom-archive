@@ -19,6 +19,8 @@ Versioned in this repository:
 | Deploy script | `scripts/deploy_server.sh` | Pull latest code, install deps, run+verify Alembic migration, restart app service, gate on readiness, auto-rollback on failure (see §7) |
 | Revision verification | `backend/scripts/verify_alembic_head.py` | Non-interactive DB-revision-vs-repo-head check used by the deploy script and independently testable |
 | Deploy integration tests | `scripts/tests/deploy_server.bats` | Mocked end-to-end coverage of the deploy script's ordering and rollback behavior |
+| Scheduled-workload manifest (GH-104) | `deploy/systemd/WORKLOAD_MANIFEST` | The one authoritative classification (required/deferred/manual-oneshot/deprecated/static-helper/template/out-of-scope) for every unit below; `MANAGED_UNITS` is a mechanical view of it — see [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md) |
+| Scheduled-workload assertion (GH-104) | `scripts/assert_scheduled_workloads.sh` (+ `scripts/tests/assert_scheduled_workloads.bats`) | Repo-mode: manifest/MANAGED_UNITS/ExecStart consistency (CI-safe). `--server` mode: real installed/enabled/active state — run on the host post-deploy |
 | Worker unit | `deploy/systemd/wecom-archive-worker.service` | One-shot sync + decrypt |
 | Worker timer | `deploy/systemd/wecom-archive-worker.timer` | Callback-primary archive reconciliation every 30 minutes by default (`:00`, `:30`) |
 | External-contact refresh unit | `deploy/systemd/wecom-external-contact-refresh.service` | Small, durable event-driven metadata refresh worker |
@@ -38,6 +40,8 @@ Versioned in this repository:
 | AI KB eval unit/timer | `deploy/systemd/wecom-ai-kb-eval.{service,timer}` | Daily (05:00) retrieval-quality launch gate against the fixed eval set; records `ai_eval_runs`, exits non-zero on a blocked run (RND-359) |
 | AI KB gap report unit/timer | `deploy/systemd/wecom-ai-kb-gap-report.{service,timer}` | Weekly (Mon 06:00) Markdown candidate-improvement report under `docs/ai/reports/` — never creates, changes, or closes GitHub Issues (RND-359) |
 | AI retention sweep unit/timer | `deploy/systemd/wecom-ai-retention-sweep.{service,timer}` | Daily (03:30) deletes AI chat sessions/messages past `AI_RETENTION_DAYS` (default 90) (RND-359) |
+| Backup unit/timer | `deploy/systemd/wecom-backup.{service,timer}` | Daily (03:17) encrypted DB + media backup (RND-193); listed in `MANAGED_UNITS` as of GH-104 — cadence/retention/encryption unchanged, closes a "required but unmanaged" drift only; #105 owns off-host/offsite DR |
+| Disk/resource usage check unit/timer | `deploy/systemd/wecom-disk-usage-check.{service,timer}` | Every 15 minutes (`:9/15`) capacity/webhook alerting (RND-193); listed in `MANAGED_UNITS` as of GH-104, cadence unchanged |
 | Job-failure alert unit (templated) | `deploy/systemd/wecom-job-failure-alert@.service` | `OnFailure=` target for the six critical one-shot units below; POSTs through the existing `notify.sh`/`ALERT_WEBHOOK_URL` contract (GH-107, see [operations/alerting.md](operations/alerting.md)) |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
 | GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
@@ -52,6 +56,8 @@ Not versioned in this repository:
 | Reverse proxy config (Nginx / equivalent) | Operator-managed |
 | TLS certificates | Operator-managed |
 | `STATIC_SITE_DIR_NAME` env var | Operator-set in `backend/.env`; must match the `root` in the operator-managed Nginx config for the static homepage (see `static_site/company_homepage/README.md`), or step 8 below silently syncs to a directory Nginx never serves |
+| Wildcard SSL renewal (`qiniu-ssl-renew-wildcard.{service,timer}` + `renew-wildcard.sh`) | Server-only, never committed — a tracked GH-104 reproducibility gap, not an intentional exclusion; see [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#wildcard-ssl-renewal-known-gap) |
+| `qiniu-telegram-relay.service` | Deprecated stale server artifact, never versioned here; see [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#telegram-relay) |
 
 ---
 
@@ -179,6 +185,13 @@ Health endpoints (RND-227):
 
 ## 5. Worker / Timer Installation
 
+See [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md)
+for the canonical classification (required / deferred / manual-oneshot /
+deprecated / static-helper / template / out-of-scope) of every unit below,
+and `deploy/systemd/WORKLOAD_MANIFEST` for its machine-checkable form
+(GH-104). `MANAGED_UNITS`, described next, is a mechanical view of that
+manifest's `auto_install=true` rows.
+
 **Units listed in `deploy/systemd/MANAGED_UNITS` are now installed and
 enabled automatically by `scripts/deploy_server.sh` on every deploy to
 main** — see that script's step 10. This closes the gap where a *new* unit
@@ -208,21 +221,18 @@ verification remain separately approved operations. Do not remove the #77
 operator drop-in until Ops has verified the deployed effective unit, archive
 cycles, callback, media, and external-contact reconciliation.
 
-External-contact refresh and daily reconciliation:
-
-```bash
-sudo cp deploy/systemd/wecom-external-contact-refresh.{service,path,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-external-contact-refresh.path
-sudo systemctl enable --now wecom-external-contact-refresh.timer
-```
-
-`wecom-external-contact-reconcile.{service,timer}` — the daily job that also
-drives internal/external contact **avatar sync** (RND-371) — is listed in
-`deploy/systemd/MANAGED_UNITS`, so `scripts/deploy_server.sh` installs and
-enables it automatically; no manual `cp`/`enable --now` step is needed for
-it once the step-10 sudoers grant exists. The commands above remain for
-`wecom-external-contact-refresh.*`, which is not in that manifest.
+External-contact refresh (`.service`/`.path`/`.timer`) and daily
+reconciliation (`.service`/`.timer`) — the daily job that also drives
+internal/external contact **avatar sync** (RND-371) — are all listed in
+`deploy/systemd/MANAGED_UNITS` (GH-104), so `scripts/deploy_server.sh`
+installs and enables all five automatically; no manual `cp`/
+`enable --now` step is needed for either once the step-10 sudoers grant
+exists. Do not use a manual `cp`/`enable` workflow for these units;
+production deployment, reload, enable/restart, and verification remain
+separately approved operations. See
+[operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md)
+for why the `.path` is the primary trigger and the `.timer` is a
+retry/recovery fallback only, never the other way around.
 
 The five-minute archive timer continues to sync/decrypt messages; it no longer
 calls the full external-contact API. Callback events and direct inbound
@@ -244,28 +254,25 @@ for manual invocation, journal inspection, lock behavior, and rollback. To
 roll back, an operator disables this timer before reverting the corresponding
 code and reviewed migration.
 
-Media event wake-up and reconciliation worker:
+Media event wake-up and reconciliation worker (GH-104: all four units are
+listed in `MANAGED_UNITS` — no manual `cp`/`enable` step needed once the
+step-10 sudoers grant exists):
 
-```bash
-sudo cp deploy/systemd/wecom-archive-media-event.service /etc/systemd/system/
-sudo cp deploy/systemd/wecom-archive-media-event.path /etc/systemd/system/
-sudo cp deploy/systemd/wecom-archive-media-download.service /etc/systemd/system/
-sudo cp deploy/systemd/wecom-archive-media-download.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-archive-media-event.path
-sudo systemctl enable --now wecom-archive-media-download.timer
-```
+- `wecom-archive-media-event.service`/`.path` — the primary, low-latency
+  archive-complete trigger.
+- `wecom-archive-media-download.service`/`.timer` — the 30-minute
+  fallback/recovery cadence (RND-343 canonical design). GH-104's managed
+  sync also overwrites any stale server copy still polling every 5
+  minutes without `--retry`/`--trigger-source timer`.
 
-Export generation and seven-day cleanup (RND-360; operator action only):
+See
+[operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md)
+for why these two triggers cannot create duplicate media records.
 
-```bash
-sudo cp deploy/systemd/wecom-export-jobs.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wecom-export-jobs.timer
-sudo systemctl status wecom-export-jobs.timer --no-pager
-```
+Export generation and seven-day cleanup (RND-360; GH-104: listed in
+`MANAGED_UNITS`, no manual `cp`/`enable` step needed):
 
-Before enabling this timer, apply Alembic migrations through `0050`, set a
+Before this unit is deployed/updated, apply Alembic migrations through `0050`, set a
 public HTTPS `ADMIN_DOMAIN`, and configure real SMTP delivery (`SMTP_HOST` and
 `SMTP_FROM`; plus credentials where the relay requires them). Export requests
 are rejected when either the requesting Owner email or SMTP transport is not
@@ -277,12 +284,15 @@ response, writes only a private index and manifest, then asks Qiniu Dora to
 assemble the ZIP in the bucket. It never stages the final ZIP or its source
 media on the application host.
 
-Before deploying this change, inspect `systemctl cat wecom-export-jobs.service`
+Before deploying GH-104, inspect `systemctl cat wecom-export-jobs.service`
 and remove any worker-only `MEDIA_STORAGE_PROVIDER=local` override left by the
 RND-360 incident mitigation. The effective worker environment must select
 `qiniu_kodo`; otherwise new media-export jobs fail closed instead of creating a
-local final ZIP. No production unit is installed, enabled, or changed by
-repository changes alone.
+local final ZIP. This is a manual Ops step: `scripts/deploy_server.sh` step 10
+only synchronizes the base `wecom-export-jobs.service` file content — it
+never touches a `wecom-export-jobs.service.d/*.conf` drop-in layered on top,
+so a stale override survives a GH-104 deploy unless removed explicitly. See
+[operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#export-jobs-storage).
 
 Payment and billing runtime (GH-106): the lifecycle, notification, WeChat
 recovery, and WeChat T+1 reconciliation service/timer pairs are all listed in
@@ -769,6 +779,10 @@ These are documentation truths, not hidden assumptions:
   `shared/www/$STATIC_SITE_DIR_NAME`. There is no automated check that
   the two are consistent; confirm manually on the host if the live
   homepage stops matching `main`
+- production's wildcard `*.crowntime.cn` SSL renewal (`qiniu-ssl-renew-wildcard.{service,timer}`
+  plus a server-only `renew-wildcard.sh`) has never been committed to this
+  repository — a real, tracked GH-104 gap, not an oversight. See
+  [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#wildcard-ssl-renewal-known-gap)
 
 Keep this document honest if that boundary changes.
 

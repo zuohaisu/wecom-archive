@@ -1,0 +1,110 @@
+# WORKLOAD_MANIFEST — canonical production scheduled-workload intended state
+# (GH-104 Phase B).
+#
+# This is the ONE authoritative intended-state declaration for every
+# production-relevant systemd service/timer/path under deploy/systemd/.
+# MANAGED_UNITS remains the literal allowlist scripts/deploy_server.sh
+# reads to install/enable units — it is a mechanical VIEW derived from
+# this manifest (every row below with auto_install=true), not a second,
+# independently-maintained source of truth. backend/tests/
+# test_gh104_scheduled_workload_reconciliation.py asserts the two files
+# cannot silently drift apart.
+#
+# Columns (pipe-delimited, no spaces around `|`):
+#
+#   unit           — exact filename under deploy/systemd/, OR a synthetic
+#                    identifier in angle brackets for a workload that is
+#                    intentionally NOT YET represented by a repo file (see
+#                    repo_status=absent below). Never a real path outside
+#                    deploy/systemd/.
+#   classification — one of:
+#     required        must be running in production; standard deploy
+#                      installs/updates it, and enables --now the
+#                      timer/path member of the pair.
+#     deferred         repo keeps the unit; production intentionally does
+#                      NOT auto-install/auto-enable it pending explicit
+#                      policy/PM approval. Its absence must never fail a
+#                      required-unit assertion.
+#     manual-oneshot   no [Install] section by design; started by hand
+#                      only, never via a timer/path, never auto-enabled.
+#     deprecated       must not re-enter the managed install/enable set;
+#                      if a repo file exists it is documentation-only.
+#     static-helper    exists on disk for other units to invoke on demand
+#                      (systemd template instantiation or OnFailure=);
+#                      itself is never `enable`d/`start`ed by name.
+#     template         a `@`-instantiated unit template; not itself
+#                      installed/enabled — a future concrete instance
+#                      would be added as its own row.
+#     out-of-scope     intentionally outside this manifest's ownership
+#                      (a different lifecycle/deployment owns it); listed
+#                      here only so its absence is never mistaken for an
+#                      oversight.
+#   repo_status    — present (file exists under deploy/systemd/) or
+#                    absent (classification=required workload with NO
+#                    repo file yet — a known, explicitly tracked
+#                    reproducibility gap; see the notes column and
+#                    docs/operations/scheduled-workload-manifest.md).
+#   auto_install   — true if scripts/deploy_server.sh step 10 installs/
+#                    updates this file every deploy (i.e. it is listed in
+#                    MANAGED_UNITS). Always false when repo_status=absent
+#                    (nothing to install) or classification is anything
+#                    other than required/static-helper.
+#   auto_enable    — true if step 10 also runs `enable --now` on it.
+#                    Only ever true for a .timer/.path row; a .service
+#                    row is installed (so its trigger can find it) but
+#                    never enabled directly — see MANAGED_UNITS' own
+#                    header for why.
+#   trigger_type   — timer | path | oneshot-on-demand | template | n/a
+#   destructive    — true if unintended activation deletes/mutates
+#                    customer data irreversibly. A destructive row that
+#                    is somehow found enabled in production must FAIL a
+#                    post-deploy assertion, not just WARN.
+#   notes          — human-readable reason/context.
+
+wecom-archive-worker.service|required|present|true|false|oneshot|false|Callback-primary archive sync/decrypt worker; the timer below is the reconciliation fallback, not the primary trigger.
+wecom-archive-worker.timer|required|present|true|true|timer|false|5-minute fallback reconciliation (OnCalendar=*:0/5) behind the callback-primary path.
+wecom-external-contact-reconcile.service|required|present|true|false|oneshot|false|Daily full external-contact metadata + avatar-sync reconciliation; backstops the incremental refresh path below.
+wecom-external-contact-reconcile.timer|required|present|true|true|timer|false|Daily 04:15 full reconciliation.
+wecom-external-contact-refresh.service|required|present|true|false|oneshot|false|Bounded (EXTERNAL_CONTACT_REFRESH_BATCH_SIZE, default 25), tenant-scoped, retry/backoff-safe incremental refresh queue drain.
+wecom-external-contact-refresh.path|required|present|true|true|path|false|PRIMARY low-latency trigger: producer touches a coalescing mtime-only signal after enqueueing a refresh task; carries no task payload.
+wecom-external-contact-refresh.timer|required|present|true|true|timer|false|FALLBACK/recovery trigger only (OnBootSec=10min, OnUnitInactiveSec=15min) — recovers retryable tasks after a restart or a missed/failed path wake-up. The .path above is primary; this timer must never be treated as the low-latency path.
+wecom-archive-media-download.service|required|present|true|false|oneshot|false|Generic pending/retryable media reconciliation (RND-343 canonical design); reused verbatim by the event path below — not a second downloader.
+wecom-archive-media-download.timer|required|present|true|true|timer|false|FALLBACK/recovery cadence only: every 30 minutes (OnCalendar=*:15/30). This is the PM-approved canonical cadence — do not regress to the old 5-minute polling semantics observed on production pre-GH-104.
+wecom-archive-media-event.service|required|present|true|false|oneshot|false|Archive-complete event handler; invokes the identical generic media worker CLI as the timer above, so the two triggers can never create duplicate media records or divergent behavior.
+wecom-archive-media-event.path|required|present|true|true|path|false|PRIMARY low-latency trigger: archive worker signals this coalescing mtime-only path only when a successful commit left pending media. The 30-minute timer above is the fallback for a missed signal, not a competing primary.
+wecom-export-jobs.service|required|present|true|false|oneshot|false|Generates queued export ZIPs, retries notification email, deletes seven-day-expired artifacts. Requires the effective worker environment to resolve MEDIA_STORAGE_PROVIDER=qiniu_kodo from backend/.env alone — see docs/operations/scheduled-workload-manifest.md's export-jobs section for the systemd drop-in that must NOT exist.
+wecom-export-jobs.timer|required|present|true|true|timer|false|Every 5 minutes (OnCalendar=*:04/5).
+wecom-ai-kb-eval.service|required|present|true|false|oneshot|false|Daily retrieval-quality launch gate against the fixed eval set; records ai_eval_runs.
+wecom-ai-kb-eval.timer|required|present|true|true|timer|false|Daily 05:00.
+wecom-ai-kb-gap-report.service|required|present|true|false|oneshot|false|Weekly Markdown candidate-improvement report under docs/ai/reports/; never creates, changes, or closes GitHub Issues.
+wecom-ai-kb-gap-report.timer|required|present|true|true|timer|false|Weekly Monday 06:00.
+wecom-ai-kb-reindex.service|required|present|true|false|oneshot|false|Rebuilds the AI support knowledge-base retrieval index from backend/app/ai_kb/manifest.json; no-op if AI_SUPPORT_ENABLED is unset.
+wecom-ai-kb-reindex.timer|required|present|true|true|timer|false|Hourly at :15.
+wecom-ai-retention-sweep.service|required|present|true|false|oneshot|false|Deletes AI chat sessions/messages past AI_RETENTION_DAYS (default 90). Distinct from the deferred public-retention sweep below.
+wecom-ai-retention-sweep.timer|required|present|true|true|timer|false|Daily 03:30.
+wecom-billing-lifecycle.service|required|present|true|false|oneshot|false|GH-106 commercial-loop lifecycle projector; row-locked, idempotent, failure-isolated; scans only tenants that already have a Subscription.
+wecom-billing-lifecycle.timer|required|present|true|true|timer|false|Every 5 minutes (OnCalendar=*:07/5).
+wecom-billing-notifications.service|required|present|true|false|oneshot|false|GH-106 lifecycle/payment-activation/refund-anomaly notification dispatch.
+wecom-billing-notifications.timer|required|present|true|true|timer|false|Every 5 minutes (OnCalendar=*:02/5).
+wecom-payment-recovery.service|required|present|true|false|oneshot|false|GH-106 bounded WeChat order recovery; queries existing orders only, never creates checkout.
+wecom-payment-recovery.timer|required|present|true|true|timer|false|Every 5 minutes (OnCalendar=*:04/5).
+wecom-payment-reconciliation.service|required|present|true|false|oneshot|false|GH-106 T+1 WeChat order reconciliation; queries existing orders only, never creates checkout.
+wecom-payment-reconciliation.timer|required|present|true|true|timer|false|Daily 02:30 UTC.
+wecom-backup.service|required|present|true|false|oneshot|false|Daily encrypted DB + media backup (RND-193). #105 owns off-host/offsite DR; this manifest does not change backup cadence/retention/encryption semantics.
+wecom-backup.timer|required|present|true|true|timer|false|Daily 03:17 local — production already runs this cadence; GH-104 only closes the "required but unmanaged" gap, it does not change business behavior.
+wecom-disk-usage-check.service|required|present|true|false|oneshot|false|Disk/log/backup/PostgreSQL-connection capacity check with webhook alerting.
+wecom-disk-usage-check.timer|required|present|true|true|timer|false|Every 15 minutes (OnCalendar=*:9/15) — production already runs this cadence.
+wecom-job-failure-alert@.service|static-helper|present|true|false|oneshot-on-demand|false|GH-107 OnFailure= target for critical one-shot units. systemd instantiates it on demand; it is never `enable`d or `start`ed by name — a post-deploy assertion must not require UnitFileState=enabled for this row.
+<qiniu-ssl-renew-wildcard>|required|absent|false|false|timer|false|Production runs qiniu-ssl-renew-wildcard.service/.timer plus a server-only, never-committed ssl-renew/renew-wildcard.sh (see the 2026-08-03 RND-261 domain-cutover runbook). This is a KNOWN, EXPLICITLY TRACKED reproducibility gap, not an oversight — see docs/operations/scheduled-workload-manifest.md. Do not add a guessed implementation to MANAGED_UNITS; Ops must commit the real, already-field-proven script in a follow-up change before this row's repo_status can become present.
+qiniu-ssl-renew@.service|template|present|false|false|template|false|Per-domain Qiniu Kodo CDN custom-domain cert template (instance = domain, e.g. media-origin.crowntime.cn). Not currently instantiated on production (no active qiniu-ssl-renew@<domain>.timer observed in the 2026-08-28 baseline). Distinct from, and not superseded by, the wildcard nginx-facing renewal above — keep both; do not delete this template.
+qiniu-ssl-renew@.timer|template|present|false|false|template|false|See qiniu-ssl-renew@.service.
+wecom-archive-reachability-check.service|deferred|present|false|false|oneshot|false|Manual/deferred internal reachability RECONCILIATION — a different responsibility from the external uptime workflow (.github/workflows/uptime-check.yml), which PM has separately paused. Do not conflate the two.
+wecom-archive-reachability-check.timer|deferred|present|false|false|timer|false|Must never be auto-enabled by standard deploy; if found enabled in production, a post-deploy assertion should WARN (non-destructive).
+wecom-message-purge.service|deferred|present|false|false|oneshot|true|Destructive (permanent recycle-bin purge). Production retention-policy activation has not been approved by PM. Presence in repo is intentional; production must not install or enable it.
+wecom-message-purge.timer|deferred|present|false|false|timer|true|Must never be auto-installed/enabled. If found enabled in production, a post-deploy assertion must FAIL, not warn.
+wecom-message-cleanup.service|deferred|present|false|false|oneshot|true|Destructive bulk message cleanup; same unapproved-retention-policy gate as message-purge above.
+wecom-message-cleanup.timer|deferred|present|false|false|timer|true|Must never be auto-installed/enabled. If found enabled in production, a post-deploy assertion must FAIL, not warn.
+wecom-ai-public-retention-sweep.service|deferred|present|false|false|oneshot|false|Exists in repository; NOT production-auto-enabled; manual/deferred pending explicit policy activation. Not classified destructive (retention sweep of AI chat data, not user archive content), but still requires explicit activation before production use.
+wecom-ai-public-retention-sweep.timer|deferred|present|false|false|timer|false|Must never be auto-enabled by standard deploy.
+wecom-thumbnail-backfill.service|manual-oneshot|present|false|false|n/a|false|RND-207 historical thumbnail backfill. Deliberately ships with no [Install] section and no .timer — run by hand in controlled batches only.
+wecom-archive-365-nonprod.service|out-of-scope|present|false|false|n/a|false|Non-production web service lifecycle; owned by the separate controlled non-production deployment (.github/workflows/deploy-nonprod.yml, scripts/deploy_nonprod.sh), not this production scheduled-workload manifest.

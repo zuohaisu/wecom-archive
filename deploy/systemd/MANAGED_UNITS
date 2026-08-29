@@ -2,14 +2,28 @@
 # scripts/deploy_server.sh on every deploy to main, and (for .timer/.path
 # triggers only) enabled --now. This is a deliberate, explicit allowlist —
 # NOT every file under deploy/systemd/ — because that directory also holds
-# templated (@) units (qiniu-ssl-renew@.*) and manual/one-off units (e.g.
-# wecom-thumbnail-backfill.service) that must never be auto-enabled.
+# templated (@) units (qiniu-ssl-renew@.*) and manual/one-off or
+# deferred units (e.g. wecom-thumbnail-backfill.service,
+# wecom-message-purge.*, wecom-archive-reachability-check.*) that must
+# never be auto-enabled.
 #
-# To add a new auto-managed background job: list both its .service and its
-# .timer/.path here. List the .service even though it is never enabled
-# directly — it still needs to land in /etc/systemd/system/ for its
-# .timer/.path to be able to trigger it. Units NOT listed here keep
-# following the manual install steps in docs/DEPLOYMENT.md.
+# GH-104: this file is now a mechanical VIEW of deploy/systemd/
+# WORKLOAD_MANIFEST — every row there with auto_install=true (and
+# auto_enable=true for its .timer/.path member) belongs here, and nothing
+# else does. WORKLOAD_MANIFEST is the authoritative classification
+# (required / deferred / manual-oneshot / deprecated / static-helper /
+# template / out-of-scope); this file stays a plain allowlist because
+# that is all scripts/deploy_server.sh needs to parse. Read that manifest
+# — not this comment — before adding, removing, or reclassifying a unit;
+# backend/tests/test_gh104_scheduled_workload_reconciliation.py fails the
+# build if the two ever disagree.
+#
+# To add a new auto-managed background job: add it to WORKLOAD_MANIFEST
+# first, then list both its .service and its .timer/.path here. List the
+# .service even though it is never enabled directly — it still needs to
+# land in /etc/systemd/system/ for its .timer/.path to be able to trigger
+# it. Units NOT listed here keep following the manual install steps in
+# docs/DEPLOYMENT.md, or stay intentionally unmanaged per WORKLOAD_MANIFEST.
 # GH-107: OnFailure= target for the units below. No .timer/.path partner —
 # systemd instantiates it on demand, it is never `enable`d itself.
 wecom-job-failure-alert@.service
@@ -18,6 +32,41 @@ wecom-archive-worker.service
 wecom-archive-worker.timer
 wecom-external-contact-reconcile.service
 wecom-external-contact-reconcile.timer
+
+# GH-104: incremental external-contact refresh. The .path is the PRIMARY
+# low-latency trigger; the .timer is a boot + 15-minute retry/recovery
+# fallback for a missed or failed path wake-up — both are required, they
+# are not alternatives to each other.
+wecom-external-contact-refresh.service
+wecom-external-contact-refresh.path
+wecom-external-contact-refresh.timer
+
+# GH-104: generic media reconciliation. wecom-archive-media-event.path is
+# the PRIMARY archive-complete signal; wecom-archive-media-download.timer
+# is the 30-minute fallback/recovery cadence (RND-343 canonical design —
+# do not shorten it back to the old 5-minute polling semantics). Both
+# invoke the identical CLI entrypoint, so there is no risk of duplicate
+# media records between the two triggers.
+wecom-archive-media-event.service
+wecom-archive-media-event.path
+wecom-archive-media-download.service
+wecom-archive-media-download.timer
+
+# GH-104: export ZIP generation, notification retry, and 7-day cleanup.
+wecom-export-jobs.service
+wecom-export-jobs.timer
+
+# GH-104: AI knowledge-base and AI chat-retention jobs (RND-356/RND-359).
+# Distinct from wecom-ai-public-retention-sweep, which stays deferred —
+# see WORKLOAD_MANIFEST.
+wecom-ai-kb-reindex.service
+wecom-ai-kb-reindex.timer
+wecom-ai-kb-eval.service
+wecom-ai-kb-eval.timer
+wecom-ai-kb-gap-report.service
+wecom-ai-kb-gap-report.timer
+wecom-ai-retention-sweep.service
+wecom-ai-retention-sweep.timer
 
 # GH-106 commercial-loop executors. These are intentionally a closed set:
 # billing lifecycle and notifications apply to commercial tenants; WeChat
@@ -30,3 +79,12 @@ wecom-payment-recovery.service
 wecom-payment-recovery.timer
 wecom-payment-reconciliation.service
 wecom-payment-reconciliation.timer
+
+# GH-104: already running on production (installed manually, cadence/
+# retention/business-behavior unchanged by this manifest) but previously
+# "required but unmanaged" — closing that drift, not changing behavior.
+# #105 owns off-host/offsite backup DR, not this file.
+wecom-backup.service
+wecom-backup.timer
+wecom-disk-usage-check.service
+wecom-disk-usage-check.timer
