@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -92,6 +93,29 @@ from app.web.sidenav import render_provisioning_sidenav, render_sidenav
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+
+def _log_wechat_pay_callback_verification_rejected(
+    error: WechatPaySignatureVerificationError, raw_body: bytes
+) -> None:
+    """Emit sufficient verification evidence without retaining untrusted inputs."""
+    metadata = error.metadata
+    logger.warning(
+        "event=wechat_pay_callback_verification_rejected "
+        "failure_class=%s route=/api/payments/wechat/notify "
+        "header_serial_present=%s header_timestamp_present=%s "
+        "header_nonce_present=%s header_signature_present=%s "
+        "serial_match=%s sign_test=%s body_length=%d body_sha256=%s",
+        error.failure_class.value,
+        metadata.header_serial_present,
+        metadata.header_timestamp_present,
+        metadata.header_nonce_present,
+        metadata.header_signature_present,
+        metadata.serial_match,
+        metadata.sign_test,
+        len(raw_body),
+        hashlib.sha256(raw_body).hexdigest(),
+    )
 
 
 def get_payment_provider() -> PaymentProvider:
@@ -535,7 +559,8 @@ async def wechat_payment_notification(
             status_code=500,
             content={"code": "FAIL", "message": "temporary processing failure"},
         )
-    except WechatPaySignatureVerificationError:
+    except WechatPaySignatureVerificationError as error:
+        _log_wechat_pay_callback_verification_rejected(error, raw_body)
         try:
             record_callback_failure(
                 _factory(db), kind=FINDING_CALLBACK_SIGNATURE_FAILURE

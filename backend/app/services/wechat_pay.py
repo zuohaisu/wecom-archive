@@ -15,6 +15,7 @@ import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 
@@ -63,8 +64,41 @@ class WechatPayVerificationError(WechatPayProtocolError):
     pass
 
 
+class WechatPaySignatureFailureClass(str, Enum):
+    """Stable, non-sensitive reasons for rejecting a WeChat Pay signature."""
+
+    MISSING_SIGNATURE_HEADERS = "MISSING_SIGNATURE_HEADERS"
+    UNKNOWN_PUBLIC_KEY_ID = "UNKNOWN_PUBLIC_KEY_ID"
+    INVALID_TIMESTAMP = "INVALID_TIMESTAMP"
+    STALE_TIMESTAMP = "STALE_TIMESTAMP"
+    INVALID_SIGNATURE_ENCODING = "INVALID_SIGNATURE_ENCODING"
+    SIGNATURE_MISMATCH = "SIGNATURE_MISMATCH"
+    SIGNTEST = "SIGNTEST"
+
+
+@dataclass(frozen=True)
+class WechatPayVerificationMetadata:
+    """Safe verification state for telemetry; never contains header values."""
+
+    header_serial_present: bool
+    header_timestamp_present: bool
+    header_nonce_present: bool
+    header_signature_present: bool
+    serial_match: bool
+    sign_test: bool
+
+
 class WechatPaySignatureVerificationError(WechatPayVerificationError):
-    """A callback/API signature could not be verified."""
+    """A callback/API signature could not be verified without exposing inputs."""
+
+    def __init__(
+        self,
+        failure_class: WechatPaySignatureFailureClass,
+        metadata: WechatPayVerificationMetadata,
+    ) -> None:
+        super().__init__(f"WeChat Pay signature verification failed: {failure_class.value}")
+        self.failure_class = failure_class
+        self.metadata = metadata
 
 
 class WechatPayDecryptError(WechatPayVerificationError):
@@ -282,30 +316,57 @@ class WechatPayProvider:
             f'serial_no="{self._config.merchant_serial_no}"'
         )
 
+    @staticmethod
+    def _header_value(headers: Mapping[str, str], name: str) -> str | None:
+        """Read a signed header without normalizing or retaining its value."""
+        value = headers.get(name)
+        return headers.get(name.lower()) if value is None else value
+
     def _verify_headers(self, headers: Mapping[str, str], raw_body: bytes) -> None:
-        serial = headers.get("Wechatpay-Serial") or headers.get("wechatpay-serial")
-        timestamp_raw = headers.get("Wechatpay-Timestamp") or headers.get(
-            "wechatpay-timestamp"
+        serial = self._header_value(headers, "Wechatpay-Serial")
+        timestamp_raw = self._header_value(headers, "Wechatpay-Timestamp")
+        nonce = self._header_value(headers, "Wechatpay-Nonce")
+        signature_raw = self._header_value(headers, "Wechatpay-Signature")
+        metadata = WechatPayVerificationMetadata(
+            header_serial_present=serial is not None,
+            header_timestamp_present=timestamp_raw is not None,
+            header_nonce_present=nonce is not None,
+            header_signature_present=signature_raw is not None,
+            serial_match=serial == self._config.public_key_id,
+            # SIGNTEST is an observable WeChat Pay signature-test marker.
+            # It remains subject to the normal RSA verification below.
+            sign_test=signature_raw == "SIGNTEST",
         )
-        nonce = headers.get("Wechatpay-Nonce") or headers.get("wechatpay-nonce")
-        signature_raw = headers.get("Wechatpay-Signature") or headers.get(
-            "wechatpay-signature"
-        )
-        if serial != self._config.public_key_id:
-            raise WechatPaySignatureVerificationError("unknown WeChat Pay public key ID")
-        if not timestamp_raw or not nonce or not signature_raw:
-            raise WechatPaySignatureVerificationError("missing WeChat Pay signature headers")
+        if not serial or not timestamp_raw or not nonce or not signature_raw:
+            raise WechatPaySignatureVerificationError(
+                WechatPaySignatureFailureClass.MISSING_SIGNATURE_HEADERS,
+                metadata,
+            )
+        if not metadata.serial_match:
+            raise WechatPaySignatureVerificationError(
+                WechatPaySignatureFailureClass.UNKNOWN_PUBLIC_KEY_ID,
+                metadata,
+            )
         try:
             timestamp = int(timestamp_raw)
         except ValueError as error:
-            raise WechatPaySignatureVerificationError("invalid WeChat Pay timestamp") from error
+            raise WechatPaySignatureVerificationError(
+                WechatPaySignatureFailureClass.INVALID_TIMESTAMP,
+                metadata,
+            ) from error
         now_timestamp = int(_utc(self._now()).timestamp())
         if abs(now_timestamp - timestamp) > CALLBACK_TOLERANCE_SECONDS:
-            raise WechatPaySignatureVerificationError("stale WeChat Pay signature")
+            raise WechatPaySignatureVerificationError(
+                WechatPaySignatureFailureClass.STALE_TIMESTAMP,
+                metadata,
+            )
         try:
             signature = base64.b64decode(signature_raw, validate=True)
         except (binascii.Error, ValueError) as error:
-            raise WechatPaySignatureVerificationError("invalid WeChat Pay signature") from error
+            raise WechatPaySignatureVerificationError(
+                WechatPaySignatureFailureClass.INVALID_SIGNATURE_ENCODING,
+                metadata,
+            ) from error
         message = timestamp_raw.encode() + b"\n" + nonce.encode() + b"\n" + raw_body + b"\n"
         try:
             self._config.public_key.verify(
@@ -315,7 +376,14 @@ class WechatPayProvider:
                 hashes.SHA256(),
             )
         except InvalidSignature as error:
-            raise WechatPaySignatureVerificationError("invalid WeChat Pay signature") from error
+            raise WechatPaySignatureVerificationError(
+                (
+                    WechatPaySignatureFailureClass.SIGNTEST
+                    if metadata.sign_test
+                    else WechatPaySignatureFailureClass.SIGNATURE_MISMATCH
+                ),
+                metadata,
+            ) from error
 
     def _request(self, method: str, canonical_url: str, body: str = "") -> bytes:
         headers = {
