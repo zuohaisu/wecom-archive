@@ -213,3 +213,120 @@ rm -rf /srv/apps/wecom-archive-365/shared/backups/.tmp/restored.dump
 - **`ALERT_WEBHOOK_URL` 尚未配置**——磁盘/inode/内存/PG连接告警目前只写入 journal，没有推送到任何外部渠道（Slack/钉钉/短信等）。需要时直接复用 `ssl-renew/notify.sh` 的既有约定配置该变量即可，脚本本身无需改动。
 - **单机本地备份不是完整灾备**——见 §5.7。
 - **磁盘/日志增长速率目前是单点测量，不是长期趋势**——`disk_usage_check.sh` 从 2026-07-27 起才开始每 15 分钟运行一次；几周后可以基于 journal 历史记录回看真实增长曲线，本文档的 RED 数字仅代表启用监控前的单次快照。
+
+---
+
+## 8. GH-105：异地恢复配置包（recovery-config bundle）
+
+### 8.1 这一节要解决什么
+
+§5.7 已经写明："单机本地备份 ≠ 完整灾备方案"——`backup_once.sh` 产出的 DB/媒体加密备份，本身也只存放在同一台阿里云 ECS 的同一块磁盘上。GH-105 三 failure-domain 审计进一步确认：`BACKUP_GPG_PASSPHRASE` 已经在运维本人的 KeePassXC 中有独立副本（因此"备份无法解密"这个 P0 已消除），但**恢复一台全新服务器所需要的 config / 密钥材料本身没有任何异地副本**——这些内容不在 Git 里（`.gitignore` 排除 `.env`/`*.pem`），不在任何 provider 控制台里，也不在密码管理器里。阿里云整机丢失 = 这些文件永久丢失，即使 DB/媒体密文备份本身完好，也无法在新主机上还原出一个可运行的应用（`FIELD_ENCRYPTION_KEY` 丢失会让 `key_versions` 表里每一个 `kms_envelope` 存储的租户私钥永久不可解密——见 `backend/app/crypto.py`、`backend/app/key_provider.py`、`docs/key-hosting-and-tenant-isolation.md`）。
+
+`scripts/dr_config_bundle.sh` 补的就是这一个缺口：把这些 recovery-critical 文件本身（不是 DB/媒体数据）打包、加密、生成 checksum/manifest，交给 Ops 拉到腾讯云新加坡 + 本地 Mac 两个异地目的地。它完全独立于 `backup_once.sh`，不复用 `BACKUP_GPG_PASSPHRASE`，不改动现有备份主链。
+
+### 8.2 Recovery-critical inventory（显式 allowlist，不递归打包 `shared/`）
+
+| 路径 | Required? | 判断依据 |
+|---|---|---|
+| `backend/.env` | **必需** | 运行时全部机密的唯一来源：DB 凭据、`WECOM_ARCHIVE_SECRET`、`FIELD_ENCRYPTION_KEY`（`key_versions` 字段加密根密钥）、支付/短信等第三方凭据。不在 Git、provider 控制台或密码管理器里，无法重建。 |
+| `shared/keys/` | **必需** | 磁盘上的 RSA 私钥材料（如 `private_key_v1.pem`）。WeCom 无法"重新签发"丢失的私钥，只能轮换出一把新的——那是一次生产事故，不是一次恢复。 |
+| `shared/private_keys/` | 可选 | §4 "绝不清理"清单里与 `shared/keys` 并列出现的历史路径命名；不确定当前是否仍在使用，存在则一并打包，不存在不影响恢复（不 fail-closed）。 |
+| `shared/backup.env` | 可选 | 只含 `BACKUP_GPG_PASSPHRASE`——该密码已在 KeePassXC 有独立副本，**不是**本 bundle 要补的缺口；作为纵深防御选择性打入密文内部（bundle 目的地本身只落密文，不会因此在异地暴露明文）。 |
+| `shared/certs/` | 可选 | 通配符 `*.crowntime.cn` 证书可通过 acme.sh 重新签发（见 `docs/operations/scheduled-workload-manifest.md`），不是"唯一副本"；打入 bundle 纯粹是为了缩短 RTO，不是恢复的硬依赖。 |
+| `shared/deploy_state/` | 可选 | `last_known_good_sha` 等内容可以从新 checkout 的 `main` HEAD 直接推导，不是不可重建状态；打入 bundle 只是为了让恢复后的自动回滚目标保持连续。 |
+
+**明确排除、不进 inventory：** `shared/gnupg`（GNUPGHOME，只是 gpg 对称加密的会话/信任状态，不含密钥材料，`mkdir -p && chmod 700` 即可重建，无需备份）。
+
+Required 项缺失时脚本 fail closed（非零退出，不写出任何 bundle），且只打印"缺了哪个 label"，从不打印文件内容。Optional 项缺失时正常跳过，不影响 bundle 生成。
+
+### 8.3 生成 bundle
+
+```bash
+export RECOVERY_PASSPHRASE='...'   # 独立密钥，不复用 BACKUP_GPG_PASSPHRASE，只从环境变量读取
+cd /srv/apps/wecom-archive-365/current
+bash scripts/dr_config_bundle.sh
+```
+
+产出（默认写入 `shared/dr_bundles/`，与 `backup_once.sh` 的 `shared/backups/` 是两个独立目录，互不干扰各自的保留策略）：
+
+- `wecom_archive-recovery-config-<UTC时间戳>.tar.gz.gpg` —— 唯一的明文落地就是这个文件的加密结果；staging 目录全程 `umask 077` + `mktemp -d` + `chmod 700`，成功/失败都通过 `trap` 清理，从不在磁盘上留下明文 tar。
+- `....tar.gz.gpg.sha256` —— 标准 `sha256sum`/`sha256sum -c` 兼容格式，校验的是密文本身。
+- `....manifest.json` —— `bundle_version`、`bundle_type`、`artifact`、`sha256`、`size_bytes`、`created_at`，以及每一项 inventory 的 `required`/`included` 状态。**不含任何密钥值、env 值，也不含 passphrase**。
+
+`RECOVERY_PASSPHRASE` 全程只经 `--passphrase-fd 0` 管道传给 gpg，从不出现在 argv/`ps`/日志/manifest 中——与 `backup_once.sh` 对 `BACKUP_GPG_PASSPHRASE` 的处理方式完全一致（同一个已验证安全的模式）。
+
+默认不做任何保留策略清理（不硬编码 Aliyun/腾讯云/Mac 各自的保留期——那是 Ops policy）；如需要，显式设置 `BUNDLE_RETENTION_DAYS` 才会清理这台机器自己产出的旧 bundle。
+
+### 8.4 异地拉取 + 校验（`dr_pull.sh`，在目的地运行）
+
+腾讯云新加坡与本地 Mac 两个目的地需要完全相同的"先校验、通过才能成为新的 known-good，校验失败绝不覆盖已有 known-good"逻辑，这部分容易出错，且两个目的地要复用同一套——因此提供了这一个小工具，而不是每个目的地各写一份 shell 一次性脚本。它只负责这一个 bundle 的拉取校验，**不覆盖** `backup_once.sh` 的 DB/媒体 `*.gpg`（那些目前没有配套 checksum 文件，属于 Ops 可以直接用 `rsync`/`sha256sum` 手动处理的范围，见 §5.6）。
+
+```bash
+# 在目的地（腾讯云主机 或 Mac）上运行，从生产拉取
+export PULL_SOURCE='wecomarchive@ali-xy-qw:/srv/apps/wecom-archive-365/shared/dr_bundles/'
+export PULL_DEST_DIR='/path/to/local/verified/tree'
+bash scripts/dr_pull.sh
+```
+
+不变量（已通过 `scripts/tests/dr_pull.bats` 覆盖）：
+
+- 校验失败 → 该文件不进入 `PULL_DEST_DIR`，之前已验证的旧副本原样保留，**从不被覆盖或删除**。
+- 缺 `.sha256` 伴随文件 → 视为无法校验，同样不 promote。
+- 重复执行 → 已校验且未变化的文件直接 SKIP，不是错误。
+- 生产侧 `dr_config_bundle.sh` 正在写 `.tmp/` 明文暂存目录时也在跑 pull → `.tmp` 被显式排除在 rsync 之外，永远不会被拉取或 promote。
+
+Ops 后续负责：把这条命令接到腾讯云和 Mac 各自的调度（cron/launchd/systemd timer 均可），以及两地各自的保留策略——这些不属于本次 repo 改动范围。
+
+### 8.5 Scenario — 阿里云整机丢失后的完整恢复顺序
+
+1. **置备替代主机**（腾讯云或任意新 ECS/VPS）——Ops 操作，本文档不覆盖具体云厂商步骤。
+2. **恢复仓库/应用**：`git clone` 本仓库到新主机的 `/srv/apps/wecom-archive-365/current`（参照 `docs/DEPLOYMENT.md` §2 Bootstrap）。
+3. **取回加密的 DB/媒体备份**：从腾讯云或 Mac 上已同步的 `shared/backups/*.gpg` 副本（Ops 异地同步产物，不是本次改动范围）。
+4. **取回加密的 recovery-config bundle**：从 `dr_pull.sh` 已校验的 `PULL_DEST_DIR` 中取最新的 `wecom_archive-recovery-config-*.tar.gz.gpg`。
+5. **从运维本人的密码管理器取回 `RECOVERY_PASSPHRASE`**（以及需要时的 `BACKUP_GPG_PASSPHRASE`）——两把密码都只存在于人的记忆/密码管理器中，任何脚本都不会替你读取。
+6. **解密 config bundle**：
+   ```bash
+   printf '%s' "$RECOVERY_PASSPHRASE" | \
+     gpg --batch --yes --passphrase-fd 0 --pinentry-mode loopback \
+       -d wecom_archive-recovery-config-<TS>.tar.gz.gpg > /tmp/recovery-config.tar.gz
+   tar xzf /tmp/recovery-config.tar.gz -C /tmp/
+   shred -u /tmp/recovery-config.tar.gz 2>/dev/null || rm -f /tmp/recovery-config.tar.gz
+   ```
+7. **恢复 required/optional config/密钥材料到正确位置，并设置正确权限**（见 §8.6 权限表）：
+   ```bash
+   cp /tmp/wecom_archive-recovery-config-<TS>/backend/.env \
+     /srv/apps/wecom-archive-365/current/backend/.env
+   cp -a /tmp/wecom_archive-recovery-config-<TS>/shared/keys/. \
+     /srv/apps/wecom-archive-365/shared/keys/
+   # shared/private_keys、shared/backup.env、shared/certs、shared/deploy_state
+   # 同理，仅在 bundle 中实际存在时才需要恢复
+   chown -R wecomarchive:wecomarchive /srv/apps/wecom-archive-365/shared /srv/apps/wecom-archive-365/current/backend/.env
+   rm -rf /tmp/wecom_archive-recovery-config-<TS>
+   ```
+8. **恢复 PostgreSQL**：解密 §5.6 取回的 DB dump，`pg_restore` 到新建的生产库（不是先恢复到临时库——新主机上没有"生产库"这回事，直接建目标库）。
+9. **恢复/重新挂接媒体**：本地历史媒体走 §5.6 同样的 `tar xz` 流程；七牛 Kodo 媒体本来就在七牛的持久化对象存储里，不需要恢复，只需确认新主机的七牛凭据（已随 `backend/.env` 一起恢复）可用。
+10. **按需重签发外部依赖**：TLS 证书如果 bundle 里没有 `shared/certs/`（或已过期），走 acme.sh 正常签发流程；DNS 指向新主机 IP。
+11. **启动应用**：按 `docs/DEPLOYMENT.md` §4-6 走 systemd 安装/`deploy_server.sh` 首次部署流程。
+12. **跑健康检查/冒烟测试**：`/health`、`/health/ready`，以及一次真实的登录+归档查询链路，确认 `FIELD_ENCRYPTION_KEY` 恢复正确（能成功解密至少一个租户的 `key_versions` 记录）。
+
+### 8.6 恢复后的权限/所有者（不新造一套，复用现状已验证的约定）
+
+| 文件/目录 | 所有者 | 权限 | 依据 |
+|---|---|---|---|
+| `backend/.env` | `wecomarchive:wecomarchive` | `600` | 与 `shared/backup.env` 同级机密文件的现状约定（§5.2） |
+| `shared/keys/`、`shared/private_keys/`（及内部 `.pem`） | `wecomarchive:wecomarchive` | 目录 `700`，文件 `600` | 私钥材料，不应对 group/other 可读——比 `shared/certs/` 更严格，因为这里没有 nginx 之类的第二个读取者需要照顾 |
+| `shared/backup.env` | `wecomarchive:wecomarchive` | `600` | 现状文档约定（§5.2），原样恢复 |
+| `shared/certs/` | `wecomarchive:wecomarchive` | 目录 `750`，文件 `640` | 沿用 `docs/ops/rnd-261-domain-cutover-runbook.md` 已验证过的约定（nginx master 以 root 身份仍可读） |
+| `shared/deploy_state/` | `wecomarchive:wecomarchive` | 目录默认 `755`，文件 `644` | 非机密内容（只是一个 SHA），沿用 `deploy_server.sh` 现有写入行为 |
+
+**恢复后绝不能是 world-readable。** 任何一步 `cp`/`tar xzf` 之后，如果最终权限比上表更宽，视为恢复流程本身的缺陷，需要在下一次恢复演练中修正。
+
+### 8.7 Ops 交接清单（本次 repo 改动不包含，需要 Ops 后续完成）
+
+- [ ] 腾讯云新加坡主机上配置 `dr_pull.sh` 的调度（cron/systemd timer）与 `PULL_SOURCE`/`PULL_DEST_DIR`
+- [ ] 本地 Mac + 外接盘上同样配置 `dr_pull.sh` 的调度
+- [ ] 首次真实异地拷贝：确认两个目的地都能成功拉到至少一份 `recovery-config` bundle 并通过校验
+- [ ] 两个目的地各自的保留策略（`BUNDLE_RETENTION_DAYS` 是否启用、保留多久）——本文档不代 Ops 做这个决定
+- [ ] `shared/keys/`、`shared/private_keys/`（如存在）、`shared/certs/` 的实际内容需要 Ops 在生产上核实一遍——本次改动基于文档/代码交叉验证定义了 inventory，未登录生产逐项核对目录实际内容
+- [ ] 一次完整的异地恢复演练（比照 §6 对 DB/媒体做过的那次，这次针对 recovery-config bundle：真实解密 → 真实恢复到一台干净主机 → 真实启动应用）
+- [ ] 告警投递：`dr_config_bundle.sh`/`dr_pull.sh` 失败时的 `notify.sh`/`ALERT_WEBHOOK_URL` 投递路径需要 Ops 验证真的能送达（本次改动只保证失败时调用了 `notify.sh` 并且非零退出，不保证 webhook 已配置——见 §3.3 同样的已知缺口）
