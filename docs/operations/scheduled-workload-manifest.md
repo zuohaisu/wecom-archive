@@ -183,8 +183,8 @@ Kodo CDN custom domain** and binds the cert through Qiniu's own HTTPS API
 `validate_domain` in `ssl-renew/lib/common.sh` rejects a leading `*.`
 label by design). Follow-up B captured the real, already-proven
 production script rather than repurposing this template — see
-`ssl-renew/renew-wildcard.sh`'s own module docstring for exactly which
-`lib/qiniu.sh`/`lib/common.sh` functions it reuses unchanged.
+the production-parity `ssl-renew/renew-wildcard.sh` and
+[the wildcard renewal behavior contract](wildcard-ssl-renewal.md).
 
 `WORKLOAD_MANIFEST` now carries this as `repo_status=present`,
 `auto_install=true` for both units, `auto_enable=true` for the timer
