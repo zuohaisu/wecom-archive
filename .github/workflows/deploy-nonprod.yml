@@ -56,6 +56,38 @@ jobs:
               echo "ERROR: expected commit is not a fast-forward from the non-production checkout." >&2
               exit 1
             fi
+
+            # Newly-tracked-file / pre-existing-untracked-artifact
+            # reconciliation (GH-126, mirrors deploy.yml): a file this
+            # range of commits tracks for the first time can already exist
+            # on disk as an untracked artifact. `git checkout` correctly
+            # refuses to clobber it, so detect that class -- untracked on
+            # disk AND newly added between PREV_SHA and EXPECTED_SHA --
+            # verify the on-disk bytes match the incoming commit's version
+            # byte-for-byte, and move the pre-existing copy aside (never
+            # delete, and never silently overwrite something that
+            # differs) before the checkout below.
+            RECONCILE_BACKUP_DIR="/srv/apps/wecom-archive-365-nonprod/shared/deploy_state/pre-git-backups/${EXPECTED_SHA}-$(date -u +%Y%m%dT%H%M%SZ)"
+            while IFS= read -r -d '' new_path; do
+              [ -e "$new_path" ] || continue
+              if git ls-files --error-unmatch -- "$new_path" >/dev/null 2>&1; then
+                continue
+              fi
+              if [ ! -f "$new_path" ]; then
+                echo "ERROR: '$new_path' is newly tracked by $EXPECTED_SHA but already exists on disk as something other than a regular file (untracked). Refusing to deploy -- reconcile manually." >&2
+                exit 1
+              fi
+              incoming_hash="$(git show "$EXPECTED_SHA:$new_path" | sha256sum | awk '{print $1}')"
+              ondisk_hash="$(sha256sum "$new_path" | awk '{print $1}')"
+              if [ "$incoming_hash" != "$ondisk_hash" ]; then
+                echo "ERROR: untracked '$new_path' already exists on disk and differs from the version $EXPECTED_SHA newly tracks (on-disk sha256=$ondisk_hash, incoming sha256=$incoming_hash). Refusing to deploy -- reconcile manually." >&2
+                exit 1
+              fi
+              mkdir -p "$RECONCILE_BACKUP_DIR/$(dirname "$new_path")"
+              mv "$new_path" "$RECONCILE_BACKUP_DIR/$new_path"
+              echo "INFO: moved pre-existing untracked '$new_path' aside to $RECONCILE_BACKUP_DIR/$new_path (byte-identical to the version $EXPECTED_SHA now tracks)"
+            done < <(git diff -z --name-only --diff-filter=A "$PREV_SHA" "$EXPECTED_SHA")
+
             git checkout -B main "$EXPECTED_SHA"
 
             # fd 9 is inherited by the wrapper and then deploy_server.sh.
