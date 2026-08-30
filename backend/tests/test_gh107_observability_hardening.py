@@ -22,6 +22,7 @@ RUNBOOK = ROOT / "docs/operations/alerting.md"
 ALERTED_UNITS = [
     "wecom-archive-worker",
     "wecom-external-contact-reconcile",
+    "wecom-external-contact-refresh",
     "wecom-billing-lifecycle",
     "wecom-billing-notifications",
     "wecom-payment-recovery",

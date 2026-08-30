@@ -89,6 +89,7 @@ scheduled-workload failures, which nothing previously alerted on:
 | Backup job failure | `scripts/backup_once.sh` → `notify.sh` | pre-existing |
 | `wecom-archive-worker` failure | `OnFailure=` → `wecom-job-failure-alert@.service` → `notify.sh` | **GH-107** |
 | `wecom-external-contact-reconcile` failure | same | **GH-107** |
+| `wecom-external-contact-refresh` failure | same | **GH-104 Follow-up A** |
 | `wecom-billing-lifecycle` failure | same | **GH-107** |
 | `wecom-billing-notifications` failure | same | **GH-107** |
 | `wecom-payment-recovery` failure | same | **GH-107** |
@@ -182,7 +183,8 @@ verifies the webhook path end-to-end.
 | `disk-usage-check` (disk/inode/memory/swap/pg_connections) | A resource threshold was breached, or PostgreSQL was unreachable when checked | `ssh` in, `systemctl status wecom-disk-usage-check.service` / `journalctl -u wecom-disk-usage-check.service -n 50` for the specific failing check; see [2c2g-runbook.md](2c2g-runbook.md) |
 | `backup-once` / backup job name | The nightly encrypted backup did not complete | Check `journalctl -u wecom-backup.service`; re-run manually (`scripts/backup_once.sh`) once the underlying cause is fixed; do not let two consecutive nights fail silently |
 | `wecom-archive-worker.service` | Sync+decrypt failed for one or more tenants | `journalctl -u wecom-archive-worker.service`; check WeCom credential validity and reachability before assuming a code regression |
-| `wecom-external-contact-reconcile.service` | Daily full reconcile failed | `journalctl -u wecom-external-contact-reconcile.service`; the incremental refresh path (`wecom-external-contact-refresh.service`, not yet installed per the 2026-08-28 baseline) is not currently a safety net for this |
+| `wecom-external-contact-reconcile.service` | Daily full reconcile failed | `journalctl -u wecom-external-contact-reconcile.service`; the incremental refresh path (`wecom-external-contact-refresh.service`) backstops this between daily runs |
+| `wecom-external-contact-refresh.service` | Incremental refresh queue drain failed (GH-104 Follow-up A: a missing sys.path bootstrap previously made every run fail with `ModuleNotFoundError`, silently, with no alert — this OnFailure= wiring closes that blind spot) | `journalctl -u wecom-external-contact-refresh.service`; the daily full reconcile above is the safety net between refresh cycles, not a substitute for fixing the refresh path itself |
 | `wecom-billing-*` / `wecom-payment-*` `.service` | A commercial-loop batch failed | Treat as high priority — see [payment-billing-runtime.md](payment-billing-runtime.md); do not manually re-trigger checkout, only investigate the batch job |
 | `external-uptime-check` (`public_endpoint_or_readiness`) | Production is unreachable or not ready from outside the ECS | Check `archive.crowntime.cn` reachability yourself; `ssh` in and check `systemctl status wecom-archive-365.service`, `nginx`, and `postgresql`; this is the alert most likely to indicate a full host/network outage rather than a single job failure |
 
@@ -209,6 +211,6 @@ Code/config in this repository is ready but inert until an operator:
    `ALERT_WEBHOOK_URL` GitHub Actions repository secret and runs the
    workflow's `send_test_alert` input once;
 4. deploys `main` so `deploy/systemd/wecom-job-failure-alert@.service` and
-   the six updated `OnFailure=` unit files land on the server (steps 7 and
+   the seven updated `OnFailure=` unit files land on the server (steps 7 and
    10 of `scripts/deploy_server.sh`; no manual install step needed since
-   all six are already in `MANAGED_UNITS`).
+   all seven are already in `MANAGED_UNITS`).
