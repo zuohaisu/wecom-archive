@@ -1,11 +1,17 @@
 #!/usr/bin/env bats
-# renew-wildcard.sh (GH-104 Follow-up B, corrected) — captured production
-# wildcard *.crowntime.cn renewal pipeline: acme.sh (DNS-01, wildcard SAN,
-# exit 2 = not due yet but STILL falls through to the fingerprint check,
-# never an early exit) -> local fingerprint short-circuit -> Qiniu upload
-# -> CDN bind -> origin bind -> nginx cert copy (only if the destination
-# directory and both source files already exist) -> `sudo -n
-# /usr/bin/systemctl reload nginx`.
+# renew-wildcard.sh (GH-104 Follow-up B, corrected twice) — captured
+# production wildcard *.crowntime.cn renewal pipeline: acme.sh (DNS-01,
+# wildcard SAN, exit 2 = not due yet but STILL falls through to the
+# fingerprint check, never an early exit) -> local fingerprint
+# short-circuit -> Qiniu upload (captured via `out=$(cmd) && st=$? ||
+# st=$?`, NOT a bare assignment, so a failure is caught by the intended
+# `if ... die` check instead of silently killing the script one line
+# earlier under `set -e`) -> CDN bind -> origin bind -> fingerprint/TLS-
+# marker bookkeeping (BEFORE the nginx step, so a downstream nginx
+# failure never discards a Qiniu deployment that already succeeded) ->
+# nginx cert copy, structured as `if cp && cp; then ... if sudo reload;
+# then ... else warn; fi; else warn; fi` (an `&&`/`if` context, which is
+# exempt from `set -e`) -> `sudo -n /usr/bin/systemctl reload nginx`.
 #
 # IMPORTANT, faithfully preserved production defect: this script calls
 # `warn`/`die` on every failure path, but — unlike renew.sh, which defines
@@ -122,6 +128,7 @@ EOF
     # to a real deploy -- this is the corrected behavior (exit=2 is not an
     # early return, unlike the earlier, incorrect capture).
     [[ "$output" == *"bound to CDN domain $CDN_DOMAIN"* ]]
+    [[ "$output" == *"nginx cert deployed + reloaded"* ]]
     grep -q "sudo -n /usr/bin/systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
 }
 
@@ -188,6 +195,7 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"bound to CDN domain $CDN_DOMAIN"* ]]
     [[ "$output" == *"bound to origin domain $ORIGIN_DOMAIN"* ]]
+    [[ "$output" == *"nginx cert deployed + reloaded"* ]]
 
     [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
     [ -f "$NGINX_CERT_DIR/privkey.pem" ]
@@ -285,7 +293,7 @@ PYEOF
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-@test "KNOWN DEFECT: a missing nginx cert directory ALSO halts the script at exit 127 instead of gracefully skipping" {
+@test "KNOWN DEFECT: a missing nginx cert directory still halts at exit 127 (warn undefined), but the fingerprint IS already recorded by then" {
     fake_acme_sh 0
     fake_sudo 0
     use_mock_qiniu_helper success
@@ -295,7 +303,59 @@ PYEOF
     run "$WILDCARD"
     [ "$status" -eq 127 ]
     [[ "$output" == *"command not found"* ]]
+    # Correction #2: the fingerprint/TLS-marker bookkeeping now happens
+    # right after the Qiniu binds, BEFORE the nginx block -- so a
+    # downstream nginx failure (here: destination directory missing) no
+    # longer discards the record of a Qiniu deployment that DID succeed.
+    # A follow-up run will correctly short-circuit as "already deployed"
+    # instead of redundantly re-uploading to Qiniu.
+    [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+}
+
+@test "CORRECTION: a Qiniu upload failure is caught by the intended die() check, not silently killed earlier by set -e" {
+    fake_acme_sh 0
+    fake_sudo 0
+
+    cat >"$MOCK_BIN_DIR/qiniu_upload_fail_helper.py" <<'PYEOF'
+import sys, json
+sys.exit(1)
+PYEOF
+    export QINIU_HELPER_PYTHON="python3"
+    export QINIU_HELPER_SCRIPT="$MOCK_BIN_DIR/qiniu_upload_fail_helper.py"
+
+    run "$WILDCARD"
+    # Still 127 (die is undefined -- the KNOWN DEFECT is unchanged), but
+    # the key regression this locks: `upload_output=$(...) && upload_status=$?
+    # || upload_status=$?` correctly exempts the assignment from `set -e`,
+    # so execution actually reaches `if [ "$upload_status" -ne 0 ]; then
+    # die ...`. Before this correction, a bare `upload_output=$(...)`
+    # assignment under `set -e` would have killed the script AT THAT LINE
+    # instead, with no "command not found" and never attempting die() at
+    # all -- i.e. the exact same 127 you'd see here is not proof by
+    # itself; the "command not found" text is.
+    [ "$status" -eq 127 ]
+    [[ "$output" == *"command not found"* ]]
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+}
+
+@test "CORRECTION: nginx reload failure (cp succeeded) also hits the undefined warn(), but the fingerprint and cert files are already in place" {
+    fake_acme_sh 0
+    fake_sudo 1
+    use_mock_qiniu_helper success
+    export MOCK_QINIU_CERT_ID="wildcard-certid" MOCK_QINIU_ACTUAL_CERT_ID="wildcard-certid"
+
+    run "$WILDCARD"
+    [ "$status" -eq 127 ]
+    [[ "$output" == *"command not found"* ]]
+    # The nginx cp/chmod step is isolated from the reload step (an
+    # `if cp && cp; then ... if sudo reload; then ... else warn; fi;
+    # else warn; fi` structure) -- a reload-only failure must not have
+    # prevented the certificate files from already landing on disk.
+    [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ -f "$NGINX_CERT_DIR/privkey.pem" ]
+    [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    grep -q "sudo -n /usr/bin/systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
 }
 
 @test "no warn()/die() function is defined by this script, and notify.sh is never sourced or invoked" {
