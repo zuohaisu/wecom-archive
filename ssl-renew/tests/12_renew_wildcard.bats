@@ -332,6 +332,25 @@ PYEOF
     [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
 }
 
+@test "CORRECTION: nginx reload failure (cp succeeded) also hits the undefined warn(), but the fingerprint and cert files are already in place" {
+    fake_acme_sh 0
+    fake_sudo 1
+    use_mock_qiniu_helper success
+    export MOCK_QINIU_CERT_ID="wildcard-certid" MOCK_QINIU_ACTUAL_CERT_ID="wildcard-certid"
+
+    run "$WILDCARD"
+    [ "$status" -eq 127 ]
+    [[ "$output" == *"command not found"* ]]
+    # The nginx cp/chmod step is isolated from the reload step (an
+    # `if cp && cp; then ... if sudo reload; then ... else warn; fi;
+    # else warn; fi` structure) -- a reload-only failure must not have
+    # prevented the certificate files from already landing on disk.
+    [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ -f "$NGINX_CERT_DIR/privkey.pem" ]
+    [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    grep -q "sudo -n /usr/bin/systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
+}
+
 @test "no warn()/die() function is defined by this script, and notify.sh is never sourced or invoked" {
     run grep -nE '^(warn|die)\s*\(\)' "$WILDCARD_SOURCE"
     [ "$status" -ne 0 ]
