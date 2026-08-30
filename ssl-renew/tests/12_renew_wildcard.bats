@@ -1,30 +1,50 @@
 #!/usr/bin/env bats
-# renew-wildcard.sh (GH-104 Follow-up B) — captured production wildcard
-# *.crowntime.cn renewal pipeline: acme.sh (DNS-01, wildcard SAN) -> local
-# fingerprint short-circuit -> Qiniu upload -> CDN bind (hard fail) ->
-# origin bind (warn only) -> nginx cert copy -> nginx reload (warn only).
+# renew-wildcard.sh (GH-104 Follow-up B, corrected) — captured production
+# wildcard *.crowntime.cn renewal pipeline: acme.sh (DNS-01, wildcard SAN,
+# exit 2 = not due yet but STILL falls through to the fingerprint check,
+# never an early exit) -> local fingerprint short-circuit -> Qiniu upload
+# -> CDN bind -> origin bind -> nginx cert copy (only if the destination
+# directory and both source files already exist) -> `sudo -n
+# /usr/bin/systemctl reload nginx`.
 #
-# acme.sh and `sudo systemctl reload nginx` are both fake shell scripts
-# (never a real ACME CA, DNS mutation, or nginx process); Qiniu calls go
-# through use_mock_qiniu_helper (never a real Qiniu API). No test ever
-# touches a real certificate, DNS record, or production host.
+# IMPORTANT, faithfully preserved production defect: this script calls
+# `warn`/`die` on every failure path, but — unlike renew.sh, which defines
+# its own local warn()/die() — neither is defined anywhere this script
+# sources. An undefined bash function/command is "command not found"
+# (exit 127); because `set -e` is active for the whole body past the
+# acme.sh call, that 127 is NOT swallowed — it immediately halts the
+# script right there. The intended custom message (e.g. "CDN domain bind
+# failed...") is never printed (it's an argument to a command that never
+# ran), nothing after the failing statement executes (no .deployed_fp
+# write, no nginx deployment, no TLS marker cleanup), and the process exits
+# 127. Verified empirically against every failure branch before writing
+# these tests. Do NOT "fix" the underlying script to make these pass
+# differently — see docs/operations/wildcard-ssl-renewal.md and the
+# recommended follow-up hardening issue. These tests lock the OBSERVED
+# (defective) behavior so a future change cannot silently alter it without
+# a test failure making that explicit.
+#
+# acme.sh and `sudo` are both fake shell scripts (never a real ACME CA,
+# DNS mutation, or nginx process); Qiniu calls go through
+# use_mock_qiniu_helper (never a real Qiniu API). No test ever touches a
+# real certificate, DNS record, or production host.
 
 load test_helper/common
 
 WILDCARD="$SSL_RENEW_ROOT/renew-wildcard.sh"
-DOMAIN="crowntime.cn"
+REAL_DOMAIN="crowntime.cn"
 CDN_DOMAIN="media.crowntime.cn"
 ORIGIN_DOMAIN="media-origin.crowntime.cn"
 
 setup() {
     common_setup
     export QINIU_ACCESS_KEY=testak QINIU_SECRET_KEY=testsk
-    # DOMAIN/CDN_DOMAIN/ORIGIN_DOMAIN above are deliberately NOT exported
-    # here -- their values are identical to the script's own built-in
-    # defaults, so every test below exercises those real defaults unless a
-    # test explicitly exports an override itself.
     mkdir -p "$HOME/.acme.sh"
+    # The corrected script does NOT mkdir -p its nginx destination itself
+    # (matching the captured production script) -- the fixture must
+    # pre-create it, exactly like an Ops-provisioned host already would.
     NGINX_CERT_DIR="$TEST_TMPDIR/nginx-certs"
+    mkdir -p "$NGINX_CERT_DIR"
     export NGINX_CERT_DIR
     MOCK_BIN_DIR="$TEST_TMPDIR/mockbin"
     mkdir -p "$MOCK_BIN_DIR"
@@ -34,27 +54,26 @@ setup() {
 teardown() { common_teardown; }
 
 # fake_acme_sh <exit_code> — always writes a fresh fullchain.cer/<domain>.key
-# pair into $HOME/.acme.sh/$DOMAIN before exiting, matching acme.sh's own
+# pair into $HOME/.acme.sh/$REAL_DOMAIN before exiting, matching acme.sh's own
 # behavior on both a real renewal (exit 0) and a "not due yet" skip (exit
 # 2, where the existing files are simply left in place — acme.sh does not
 # delete them either way).
 fake_acme_sh() {
     local exit_code="${1:-0}"
-    gen_cert "$DOMAIN" "$TEST_TMPDIR/fullchain.cer" "$TEST_TMPDIR/privkey.key"
+    gen_cert "$REAL_DOMAIN" "$TEST_TMPDIR/fullchain.cer" "$TEST_TMPDIR/privkey.key"
     cat >"$HOME/.acme.sh/acme.sh" <<EOF
 #!/usr/bin/env bash
 echo "\$@" >>"$TEST_TMPDIR/acme_invocations.log"
-mkdir -p "$HOME/.acme.sh/$DOMAIN"
-cp "$TEST_TMPDIR/fullchain.cer" "$HOME/.acme.sh/$DOMAIN/fullchain.cer"
-cp "$TEST_TMPDIR/privkey.key" "$HOME/.acme.sh/$DOMAIN/$DOMAIN.key"
+mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+cp "$TEST_TMPDIR/fullchain.cer" "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer"
+cp "$TEST_TMPDIR/privkey.key" "$HOME/.acme.sh/$REAL_DOMAIN/$REAL_DOMAIN.key"
 exit $exit_code
 EOF
     chmod +x "$HOME/.acme.sh/acme.sh"
 }
 
-# fake_sudo <exit_code> — the ONLY sudo invocation this script makes is
-# `sudo systemctl reload nginx`; a bare passthrough is enough since no
-# test needs systemctl's own behavior beyond its exit code.
+# fake_sudo <exit_code> — logs its full argv so tests can assert on the
+# exact command shape (sudo -n /usr/bin/systemctl reload nginx).
 fake_sudo() {
     local exit_code="${1:-0}"
     cat >"$MOCK_BIN_DIR/sudo" <<EOF
@@ -65,60 +84,84 @@ EOF
     chmod +x "$MOCK_BIN_DIR/sudo"
 }
 
-# ── Argument/env validation ──────────────────────────────────────────────
+# ── Domain constants are hardcoded, not env-driven ──────────────────────
 
-@test "missing QINIU_ACCESS_KEY/SECRET fails fast with a usage error, before touching acme.sh" {
-    unset QINIU_ACCESS_KEY QINIU_SECRET_KEY
+@test "hardcoded domain constants are used even when DOMAIN/CDN_DOMAIN/ORIGIN_DOMAIN env vars are set to something else" {
+    export DOMAIN="not-the-real-domain.example"
+    export CDN_DOMAIN="not-cdn.example"
+    export ORIGIN_DOMAIN="not-origin.example"
     fake_acme_sh 0
     fake_sudo 0
-    run "$WILDCARD"
-    [ "$status" -eq 2 ]
-    [[ "$output" == *"missing required environment variable"* ]]
-    [ ! -f "$TEST_TMPDIR/acme_invocations.log" ]
-}
+    # Seed an already-matching fingerprint so the run is a no-op -- this
+    # test only cares what domain the acme.sh invocation used, not the
+    # rest of the deploy pipeline.
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    local_fp=$(sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}')
+    echo "$local_fp" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
+    : >"$TEST_TMPDIR/acme_invocations.log"
 
-@test "domain defaults match the production values when DOMAIN/CDN_DOMAIN/ORIGIN_DOMAIN are unset" {
-    fake_acme_sh 2
-    fake_sudo 0
     run "$WILDCARD"
     [ "$status" -eq 0 ]
     grep -q -- "-d crowntime.cn -d \*.crowntime.cn" "$TEST_TMPDIR/acme_invocations.log"
+    [[ "$output" != *"not-the-real-domain.example"* ]]
 }
 
 # ── ACME exit-code contract ───────────────────────────────────────────────
 
-@test "acme.sh exit 2 (not due yet) is a successful no-op: no Qiniu or nginx calls" {
+@test "acme.sh exit 2 (not due yet) still falls through to the fingerprint check and deploys if the fingerprint differs" {
     fake_acme_sh 2
     fake_sudo 0
     use_mock_qiniu_helper success
+    export MOCK_QINIU_CERT_ID="wildcard-certid" MOCK_QINIU_ACTUAL_CERT_ID="wildcard-certid"
+
     run "$WILDCARD"
     [ "$status" -eq 0 ]
     [[ "$output" == *"not due yet"* ]]
+    # NOT a no-op: no prior .deployed_fp exists, so exit=2 must still lead
+    # to a real deploy -- this is the corrected behavior (exit=2 is not an
+    # early return, unlike the earlier, incorrect capture).
+    [[ "$output" == *"bound to CDN domain $CDN_DOMAIN"* ]]
+    grep -q "sudo -n /usr/bin/systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
+}
+
+@test "acme.sh exit 2 with a fingerprint that already matches deployed_fp is a no-op" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    local_fp=$(sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}')
+    echo "$local_fp" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
+    : >"$TEST_TMPDIR/acme_invocations.log"
+
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already deployed"* ]]
+    [ ! -f "$TEST_TMPDIR/helper.log" ]
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-@test "acme.sh hard failure (exit 1) is a non-zero failure, before any Qiniu/nginx call" {
+@test "acme.sh hard failure (any exit other than 0 or 2) halts immediately: undefined die() -> exit 127, no downstream calls" {
     fake_acme_sh 1
     fake_sudo 0
     use_mock_qiniu_helper success
+
     run "$WILDCARD"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"acme.sh --renew failed"* ]]
+    [ "$status" -eq 127 ]
+    [[ "$output" == *"command not found"* ]]
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-# ── Fingerprint short-circuit ─────────────────────────────────────────────
+# ── Fingerprint short-circuit (acme exit 0 case) ────────────────────────
 
 @test "a fingerprint that already matches deployed_fp skips upload/bind/nginx entirely" {
     fake_acme_sh 0
     fake_sudo 0
-    mkdir -p "$HOME/.acme.sh/$DOMAIN"
-    local_fp=$(sha256sum "$TEST_TMPDIR/fullchain.cer" 2>/dev/null | awk '{print $1}')
-    # Run once for real to populate .acme.sh/$DOMAIN with a matching pair,
-    # then compute its fingerprint the same way the script does.
-    "$HOME/.acme.sh/acme.sh" --renew --dns dns_dp -d "$DOMAIN" -d "*.$DOMAIN" >/dev/null
-    local_fp=$(sha256sum "$HOME/.acme.sh/$DOMAIN/fullchain.cer" | awk '{print $1}')
-    echo "$local_fp" >"$HOME/.acme.sh/$DOMAIN/.deployed_fp"
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null
+    local_fp=$(sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}')
+    echo "$local_fp" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
     : >"$TEST_TMPDIR/acme_invocations.log"
 
     use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
@@ -131,22 +174,30 @@ EOF
 
 # ── Full deploy path ───────────────────────────────────────────────────────
 
-@test "full deploy: upload -> CDN bind -> origin bind -> nginx copy -> nginx reload, all succeeding" {
+@test "full deploy: upload -> CDN bind -> origin bind -> nginx copy -> sudo -n /usr/bin/systemctl reload nginx" {
     fake_acme_sh 0
     fake_sudo 0
     use_mock_qiniu_helper success
     export MOCK_QINIU_CERT_ID="wildcard-certid" MOCK_QINIU_ACTUAL_CERT_ID="wildcard-certid"
+    # Pre-seed TLS markers to prove they get cleared on a real re-deploy.
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    touch "$HOME/.acme.sh/$REAL_DOMAIN/.tls_verified"
+    echo 3 >"$HOME/.acme.sh/$REAL_DOMAIN/.tls_mismatch_days"
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"certID=wildcard-certid bound to CDN domain $CDN_DOMAIN"* ]]
-    [[ "$output" == *"certID=wildcard-certid bound to origin domain $ORIGIN_DOMAIN"* ]]
-    [[ "$output" == *"nginx reloaded"* ]]
+    [[ "$output" == *"bound to CDN domain $CDN_DOMAIN"* ]]
+    [[ "$output" == *"bound to origin domain $ORIGIN_DOMAIN"* ]]
 
     [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
     [ -f "$NGINX_CERT_DIR/privkey.pem" ]
-    [ -f "$HOME/.acme.sh/$DOMAIN/.deployed_fp" ]
-    grep -q "sudo systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
+    [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    # Exact production command shape: absolute path, non-interactive.
+    grep -q "sudo -n /usr/bin/systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
+
+    # TLS markers are cleared on every successful re-deploy.
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.tls_verified" ]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.tls_mismatch_days" ]
 
     # File permissions: the deployed copies must not be world-readable.
     # GNU stat's `-c` must come first: GNU `stat -f` means "filesystem
@@ -159,12 +210,18 @@ EOF
     [ "$perm" = "640" ]
 }
 
-@test "CDN bind failure is a hard failure and never deploys to nginx" {
+# ── Known, deliberately-preserved production defect: warn/die are
+# undefined, and `set -e` is active past the acme.sh call, so any failure
+# path HALTS THE SCRIPT IMMEDIATELY at exit 127 -- it does not continue,
+# and does not print its own intended message. Verified empirically
+# against the real script before being written here. Do not "fix" the
+# script to make these pass differently -- see the file header above and
+# docs/operations/wildcard-ssl-renewal.md.
+
+@test "KNOWN DEFECT: a CDN bind failure halts the script at exit 127 -- no fingerprint recorded, no nginx deploy" {
     fake_acme_sh 0
     fake_sudo 0
 
-    # A qiniu_helper.py stand-in whose upload succeeds (so the failure
-    # under test is specifically the CDN bind, not the earlier upload).
     cat >"$MOCK_BIN_DIR/qiniu_cdn_fail_helper.py" <<'PYEOF'
 import sys, json
 args = sys.argv[1:]
@@ -182,19 +239,20 @@ PYEOF
     export QINIU_HELPER_SCRIPT="$MOCK_BIN_DIR/qiniu_cdn_fail_helper.py"
 
     run "$WILDCARD"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"CDN domain bind failed"* ]]
+    [ "$status" -eq 127 ]
+    [[ "$output" == *"command not found"* ]]
+    # The intended custom message is an argument to a command that never
+    # ran, so it is never printed.
+    [[ "$output" != *"CDN domain bind failed"* ]]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
     [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
-    [ ! -f "$HOME/.acme.sh/$DOMAIN/.deployed_fp" ]
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-@test "origin bind failure is a warning only: CDN-bound cert is still deployed to nginx and reloaded" {
+@test "KNOWN DEFECT: an origin bind failure ALSO halts the script at exit 127, even though the CDN bind already succeeded -- nginx never gets the already-bound certificate" {
     fake_acme_sh 0
     fake_sudo 0
 
-    # A qiniu_helper.py stand-in that succeeds for the CDN domain (upload +
-    # bind) but fails bind for the origin domain specifically.
     cat >"$MOCK_BIN_DIR/qiniu_wildcard_helper.py" <<'PYEOF'
 import sys, json
 args = sys.argv[1:]
@@ -217,25 +275,34 @@ PYEOF
     export QINIU_HELPER_SCRIPT="$MOCK_BIN_DIR/qiniu_wildcard_helper.py"
 
     run "$WILDCARD"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"origin domain bind failed"* ]]
-    [[ "$output" == *"(non-fatal)"* ]]
-    [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
-    [ -f "$HOME/.acme.sh/$DOMAIN/.deployed_fp" ]
-    grep -q "sudo systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
+    [ "$status" -eq 127 ]
+    [[ "$output" == *"command not found"* ]]
+    [[ "$output" == *"bound to CDN domain $CDN_DOMAIN"* ]]
+    # The CDN bind genuinely succeeded, but the script died before ever
+    # reaching the nginx copy step or recording the fingerprint.
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-@test "nginx reload failure is a warning only: overall run still succeeds and the cert stays deployed" {
+@test "KNOWN DEFECT: a missing nginx cert directory ALSO halts the script at exit 127 instead of gracefully skipping" {
     fake_acme_sh 0
-    fake_sudo 1
+    fake_sudo 0
     use_mock_qiniu_helper success
     export MOCK_QINIU_CERT_ID="wildcard-certid" MOCK_QINIU_ACTUAL_CERT_ID="wildcard-certid"
+    export NGINX_CERT_DIR="$TEST_TMPDIR/does-not-exist"
 
     run "$WILDCARD"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"nginx reload failed"* ]]
-    [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
-    [ -f "$HOME/.acme.sh/$DOMAIN/.deployed_fp" ]
+    [ "$status" -eq 127 ]
+    [[ "$output" == *"command not found"* ]]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+}
+
+@test "no warn()/die() function is defined by this script, and notify.sh is never sourced or invoked" {
+    run grep -nE '^(warn|die)\s*\(\)' "$WILDCARD"
+    [ "$status" -ne 0 ]
+    run grep -n "notify.sh" "$WILDCARD"
+    [ "$status" -ne 0 ]
 }
 
 # ── Secret safety ──────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@
 | `requirements.txt` / `requirements-dev.txt` | `qiniu_helper.py` 的 Python 依赖 |
 | `examples/domain.env.example` | 每域名 systemd `EnvironmentFile` 配置模板 (per-domain 模板用) |
 | `examples/wildcard-domain.env.example` | 通配符 `EnvironmentFile` 配置模板 (`renew-wildcard.sh` 用，仅列变量名，不含真实值) |
-| `tests/` | bats + pytest 测试套件 (155 个测试) + mock 基础设施 |
+| `tests/` | bats + pytest 测试套件 (156 个测试) + mock 基础设施 |
 | `Dockerfile` | Linux + systemd 工具验证环境 (macOS 无 systemd 时使用) |
 | `../deploy/systemd/qiniu-ssl-renew@.service` | systemd service 模板 (per-domain instance) |
 | `../deploy/systemd/qiniu-ssl-renew@.timer` | systemd timer 模板 |
@@ -145,7 +145,7 @@ systemctl enable --now qiniu-ssl-renew@api.example.com.timer
 ## 本地测试 (不需要真实 secrets)
 
 ```bash
-# 1. 完整自动化测试套件 (126 个 bats + 29 个 pytest = 155 个测试，全部 mock/本地服务，
+# 1. 完整自动化测试套件 (126 个 bats + 29 个 pytest = 156 个测试，全部 mock/本地服务，
 #    不访问任何真实外部服务)
 make ssl-test
 
