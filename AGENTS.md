@@ -18,8 +18,9 @@ repository root. Deviation requires explicit approval from Haisu.
    branch.** Two narrow exceptions in [`main` direct-commit exception](#main-direct-commit-exception).
 3. **Every change reaches `main` through a pull request whose required CI passed.**
    A merge that touches deployable paths triggers CD.
-4. **Commit, push, and merge each require Haisu's explicit approval.** Agents never
-   merge, never enable auto-merge, never tag, never deploy.
+4. **After required local checks pass, dev agents commit, push their assigned
+   delivery branch, and open the focused pull request directly.** Haisu alone
+   merges; agents never merge, enable auto-merge, tag, or deploy.
 5. **Never destroy work that is not yours** — see [Git operation boundaries](#git-operation-boundaries).
 6. **The smallest correct change beats a broad refactor.**
 7. **Haisu is Product Owner and final scope authority.**
@@ -49,11 +50,11 @@ what binds is the role, not which tool is running it.
 
 | Role | Owns | Never |
 |---|---|---|
-| **dev** | Implementing the approved ticket scope in the assigned delivery worktree. Runs the required checks, self-QAs, and fixes what CI rejects. | Expands scope, commits/pushes without approval, changes CI/CD or deployment settings |
+| **dev** | Implementing the approved ticket scope in the assigned delivery worktree. Runs the required checks, self-QAs, commits, pushes the delivery branch, opens the focused PR, and fixes what CI rejects. | Expands scope, changes CI/CD or deployment settings |
 | **qa** | *Optional.* Independent verification that Haisu assigns for a high-risk change. Issues a pass/fail verdict; does not commit. | Runs in the same conversation as the dev that wrote the code; edits files beyond a bounded, approved fix |
 | **ops** | Deployment, infrastructure, systemd/CD/TLS, incident response, runbooks. Reads production state. | Touches production data or databases, or changes deploy settings, without explicit approval per incident |
 | **research** | Read-only investigation: evidence gathering, external API/vendor behaviour, feasibility. Produces a report under `tasks/`. | Writes implementation code, changes ticket status, or presents inference as verified fact |
-| **Haisu** (human) | Product direction, ticket priority, scope approval, role assignment, commit/push approval, PR merge, rule override. | — |
+| **Haisu** (human) | Product direction, ticket priority, scope approval, role assignment, PR merge, rule override. | — |
 
 Rules:
 
@@ -92,7 +93,7 @@ Assigned delivery worktree + non-main branch (based on latest origin/main)
 dev implements one ticket  ──►  make verify  ──►  self-QA
         │
         ▼
-Haisu approves the ticket's single commit
+dev creates the ticket's single commit
         │
         ▼
 optional: repeat serially for the next related ticket in the same Epic
@@ -142,7 +143,7 @@ Before creating a worktree or branch, editing a file, or starting a sub-agent:
 
 A worktree/branch/PR is a delivery container, not a ticket identity. It may carry
 several related tickets from one Epic, but they run **serially**: finish the
-self-QA and get the current ticket's commit approved before starting the next. Never let
+self-QA and commit the current ticket before starting the next. Never let
 uncommitted changes from two tickets coexist. Parallel tickets use separate
 worktrees.
 
@@ -157,7 +158,7 @@ worktrees.
   `zuohaisu/issue-56`). A bare `issue-<n>` is also seen and acceptable. This
   reflects actual practice; the older `agent/<type>-<description>` scheme is not
   required, though still valid if used.
-- At preflight and again before any approved commit/push, verify
+- At preflight and again before any commit/push, verify
   `git branch --show-current` is the assigned delivery branch and not `main`.
 - Push only the assigned delivery branch.
 - Preserve per-ticket commits when merging a multi-ticket PR. **Never squash it
@@ -178,9 +179,8 @@ Only two kinds of commit may land on `main` without a delivery branch and PR:
 2. **A change Haisu explicitly authorizes** for that specific commit.
 
 Verify scope with `git status --short` **before** staging, not after committing.
-Neither exception is a standing licence, and neither removes the commit/push
-approval requirement. If this list and `deploy.yml` ever disagree, the workflow
-file is authoritative and this section is out of date.
+Neither exception is a standing licence. If this list and `deploy.yml` ever
+disagree, the workflow file is authoritative and this section is out of date.
 
 ### Required `main` policy
 
@@ -248,7 +248,7 @@ approval. Never rewrite human-authored history.
 
 ## Commit rules
 
-Do not commit unless Haisu explicitly asks. An approved commit is created on the
+After the required local checks pass, create the ticket's single commit on the
 assigned delivery branch, never on `main` outside the exception above.
 
 ```
@@ -256,17 +256,17 @@ assigned delivery branch, never on `main` outside the exception above.
 
 [optional body: what changed and why]
 
-RND-<n> (#<github-issue-number>)
+<TICKET-KEY> (#<github-issue-number>)
 ```
 
 Allowed types: `feat` `fix` `docs` `refactor` `test` `chore` `ci`.
 
-- Reference exactly one ticket per commit. Include both keys — `RND-<n>` keeps the
-  history greppable, `#<n>` lets GitHub auto-link the issue.
+- Reference exactly one ticket per commit. Include its `RND-<n>` or `GH-<n>` key
+  plus `#<n>` so the history remains greppable and GitHub auto-links the issue.
 - Imperative mood, concise subject.
 - No WIP commits. No unrelated changes.
 - If review or CI forces follow-ups, consolidate the mergeable history back to one
-  commit per ticket. Any amend/rebase/force-push still needs explicit approval.
+  commit per ticket. Any rebase or force-push still needs explicit approval.
 
 ---
 
@@ -274,7 +274,7 @@ Allowed types: `feat` `fix` `docs` `refactor` `test` `chore` `ci`.
 
 Open one focused PR from the delivery branch to `main`. Its body must contain:
 
-- **Ticket → commit mapping** — `RND-<n> (#<n>) → <sha> <subject>`, one line each.
+- **Ticket → commit mapping** — `<TICKET-KEY> (#<n>) → <sha> <subject>`, one line each.
 - **Summary** — the delivered behaviour, not a file listing.
 - **Validation** — the exact commands run and their real results.
 - **Risk / safety boundaries** — what could break; which architecture, secret, or
@@ -294,22 +294,33 @@ blockers with evidence rather than retrying blindly.
 
 ### Required checks
 
-Run in the delivery worktree assigned to this ticket, on the delivery branch,
-never on `main`:
+Run checks in the delivery worktree assigned to this ticket, on the delivery
+branch, never on `main`:
 
 ```bash
-make verify         # lint-diff + typecheck + build + test
 git diff --check    # whitespace damage and stray conflict markers
 git status --short  # confirm only intentional files changed
 ```
 
+For any change to executable code, tests, dependencies, configuration, migrations,
+or deployable paths, also run:
+
+```bash
+make verify         # lint-diff + typecheck + build + test
+```
+
+A documentation/task-only diff confined to the CD-ignored paths has no executable
+surface, so `make verify` is optional; `git diff --check` and `git status --short`
+are sufficient. If such documentation is bundled with a code change, follow the
+code-change requirement.
+
 `make verify` validates the integration state of the whole delivery branch, so in a
-worktree carrying several tickets from one Epic it also re-checks the earlier
-approved commits. Before running it, confirm the current branch is not `main` and
-use `git status`, `git diff`, and `git log origin/main..HEAD` to separate *this*
-ticket's diff from earlier approved commits on the branch. If uncommitted changes
-from two tickets are mixed, or the branch carries an unapproved commit, stop and
-report it — do not deliver them as one ticket.
+worktree carrying several tickets from one Epic it also re-checks earlier completed
+tickets. Before running it, confirm the current branch is not `main` and use
+`git status`, `git diff`, and `git log origin/main..HEAD` to separate *this*
+ticket's diff from earlier ticket commits on the branch. If uncommitted changes
+from two tickets are mixed, or the branch carries a commit outside the completed
+serial ticket sequence, stop and report it — do not deliver them as one ticket.
 
 Run the additional service-backed, migration, frontend, or security checks the
 changed scope calls for. The same checks run again in CI; passing locally is not
@@ -480,7 +491,7 @@ external outcome as success.
 
 An agent must not:
 
-- Commit, push, force-push, or rewrite git history.
+- Force-push or rewrite git history.
 - Push directly to `main` outside the documented exception.
 - Delete a remote branch, or delete/prune/remove a worktree or its directory.
 - Discard, reset, revert, or stash uncommitted changes belonging to another ticket.

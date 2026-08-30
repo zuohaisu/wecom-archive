@@ -690,7 +690,7 @@ def test_billing_surface_allowed_for_frozen_and_suspended_owner(app_client) -> N
     assert response.status_code == 200
     # RND-404: a manual suspension still renders the read-only billing page
     # (an accurate status instead of an opaque 403) — payment-write actions
-    # remain gated separately via get_billing_manager/get_billing_owner.
+    # remain gated separately via get_billing_manager.
     response = client.get("/admin/billing", cookies={"session_id": suspended_session})
     assert response.status_code == 200
 

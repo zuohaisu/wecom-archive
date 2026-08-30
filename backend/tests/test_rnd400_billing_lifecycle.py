@@ -27,11 +27,9 @@ from app.db.models import (
     Tenant,
 )
 from app.services.billing_lifecycle import (
-    BillingLifecycleAuthorizationError,
     BillingLifecycleError,
     reconcile_tenant_billing_lifecycle,
     resume_tenant_service,
-    set_cancel_at_period_end,
     suspend_tenant_service,
 )
 from app.services.entitlements import (
@@ -383,51 +381,6 @@ def test_resume_after_subscription_expiry_returns_to_frozen_not_active(factory) 
         assert tenant.frozen_at.replace(tzinfo=timezone.utc) == NOW + timedelta(
             minutes=1
         )
-
-
-def test_cancel_at_period_end_is_intent_only_idempotent_and_tenant_scoped(
-    factory,
-) -> None:
-    with factory() as db:
-        subscription = _assign(db, ends_at=NOW + timedelta(days=30))
-        original_end = subscription.ends_at
-        db.commit()
-
-        first = set_cancel_at_period_end(
-            db,
-            "tenant-a",
-            enabled=True,
-            owner_admin_user_id="owner-a",
-            at=NOW,
-        )
-        db.commit()
-        replay = set_cancel_at_period_end(
-            db,
-            "tenant-a",
-            enabled=True,
-            owner_admin_user_id="owner-a",
-            at=NOW + timedelta(minutes=1),
-        )
-        db.commit()
-
-        assert first.subscription_changed is True
-        assert replay.subscription_changed is False
-        assert subscription.cancel_at_period_end is True
-        assert subscription.ends_at == original_end
-        assert subscription.status == "active"
-        assert db.query(SubscriptionHistory).count() == 2
-        assert db.query(AuditLog).filter_by(
-            action=AuditAction.SUBSCRIPTION_CANCEL_INTENT_CHANGED
-        ).count() == 1
-
-        with pytest.raises(BillingLifecycleAuthorizationError):
-            set_cancel_at_period_end(
-                db,
-                "tenant-a",
-                enabled=False,
-                owner_admin_user_id="owner-b",
-                at=NOW,
-            )
 
 
 def test_mutations_reject_naive_time_without_side_effects(factory) -> None:

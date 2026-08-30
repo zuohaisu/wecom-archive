@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <link rel="stylesheet" href="/web/static/billing.css?v=__STATIC_VERSION__">
 </head>
-<body data-billing-mode="__BILLING_MODE__" data-billing-can-order="__BILLING_CAN_ORDER__" data-billing-is-owner="__BILLING_IS_OWNER__">
+<body data-billing-mode="__BILLING_MODE__" data-billing-can-order="__BILLING_CAN_ORDER__">
 __I18N_SCRIPT__
 <div class="shell">
 __SIDENAV__
@@ -74,10 +74,6 @@ __SIDENAV__
           <div id="suspended-notice" class="alert alert-danger suspended-notice" role="alert" hidden>
             <p data-i18n="billing.suspended.notice">账号已被平台风控暂停，续费不会自动解封；请联系平台处理。</p>
             <a id="suspended-contact" class="btn btn-primary" href="/admin/support" data-i18n="billing.suspended.contact">联系平台</a>
-          </div>
-          <div id="cancel-intent" class="cancel-intent" hidden>
-            <p id="cancel-intent-status" class="cancel-intent-status"></p>
-            <button id="cancel-intent-toggle" class="btn" type="button"></button>
           </div>
         </div>
       </section>
