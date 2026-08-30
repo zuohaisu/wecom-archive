@@ -149,7 +149,13 @@ EOF
     grep -q "sudo systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
 
     # File permissions: the deployed copies must not be world-readable.
-    perm=$(stat -f '%Lp' "$NGINX_CERT_DIR/privkey.pem" 2>/dev/null || stat -c '%a' "$NGINX_CERT_DIR/privkey.pem")
+    # GNU stat's `-c` must come first: GNU `stat -f` means "filesystem
+    # status" (a different report entirely) and silently succeeds with
+    # unrelated output instead of failing, so a `-f`-first fallback chain
+    # never reaches `-c` on Linux. `-c` is unrecognized by BSD/macOS stat
+    # and fails cleanly there, correctly falling through to `-f`. Same
+    # order as scripts/nonprod_deployment_lib.sh's existing helper.
+    perm=$(stat -c '%a' "$NGINX_CERT_DIR/privkey.pem" 2>/dev/null || stat -f '%Lp' "$NGINX_CERT_DIR/privkey.pem")
     [ "$perm" = "640" ]
 }
 
