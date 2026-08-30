@@ -10,19 +10,23 @@
 
 | 文件 | 用途 |
 |------|------|
-| `renew.sh` | 主脚本: 续期 + 部署 + 验证编排 |
+| `renew.sh` | 主脚本: 续期 + 部署 + 验证编排 (单域名, per-domain Qiniu CDN 证书绑定) |
+| `renew-wildcard.sh` | 通配符 `*.crowntime.cn` 续期脚本 (GH-104 Follow-up B, 从生产已验证实现原样纳入): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。与 `renew.sh` 语义不同，详见 [docs/operations/wildcard-ssl-renewal.md](../docs/operations/wildcard-ssl-renewal.md) |
 | `notify.sh` | 通用 Webhook 告警 (支持任意接受 JSON POST 的端点) |
 | `verify_https.sh` | 独立 HTTPS/TLS 验证 (可单独运行) |
 | `install.sh` | 幂等安装 / 预检脚本 |
-| `lib/common.sh` | 日志、secret 脱敏、域名校验、配置加载、超时包装 |
-| `lib/qiniu.sh` | 调用 `qiniu_helper.py` 的薄 shell 封装 (dry-run 感知) |
+| `lib/common.sh` | 日志、secret 脱敏、域名校验、配置加载、超时包装 (`renew.sh` 与 `renew-wildcard.sh` 共用) |
+| `lib/qiniu.sh` | 调用 `qiniu_helper.py` 的薄 shell 封装 (dry-run 感知，`renew.sh` 与 `renew-wildcard.sh` 共用) |
 | `qiniu_helper.py` | Qiniu upload/bind/verify — 官方 `qiniu` Python SDK 签名，见下方"Qiniu 签名与 Secret 运行时安全" |
 | `requirements.txt` / `requirements-dev.txt` | `qiniu_helper.py` 的 Python 依赖 |
-| `examples/domain.env.example` | 每域名 systemd `EnvironmentFile` 配置模板 |
-| `tests/` | bats + pytest 测试套件 (137 个测试) + mock 基础设施 |
+| `examples/domain.env.example` | 每域名 systemd `EnvironmentFile` 配置模板 (per-domain 模板用) |
+| `examples/wildcard-domain.env.example` | 通配符 `EnvironmentFile` 配置模板 (`renew-wildcard.sh` 用，仅列变量名，不含真实值) |
+| `tests/` | bats + pytest 测试套件 (155 个测试) + mock 基础设施 |
 | `Dockerfile` | Linux + systemd 工具验证环境 (macOS 无 systemd 时使用) |
 | `../deploy/systemd/qiniu-ssl-renew@.service` | systemd service 模板 (per-domain instance) |
 | `../deploy/systemd/qiniu-ssl-renew@.timer` | systemd timer 模板 |
+| `../deploy/systemd/qiniu-ssl-renew-wildcard.service` | 通配符续期 systemd service (GH-104 Follow-up B，从生产实现原样纳入) |
+| `../deploy/systemd/qiniu-ssl-renew-wildcard.timer` | 通配符续期 systemd timer — 每日 00:15 + 最多 15 分钟随机延迟 |
 
 ## 运行模式 — dry-run / staging / production
 
@@ -132,10 +136,16 @@ systemctl enable --now qiniu-ssl-renew@api.example.com.timer
 每个域名的状态文件 (`.deployed_fp` / `.tls_verified` / `.renew.lock`) 都存放在该域名自己的
 `$HOME/.acme.sh/<domain>/` 目录下（或通过 `CERT_DIR`/`STATE_DIR` 显式覆盖），互不冲突。
 
+**通配符 (`*.crowntime.cn`) 是独立的固定 flow，不属于这套"新增域名"机制**：只有一个
+`renew-wildcard.sh` + `qiniu-ssl-renew-wildcard.{service,timer}` 实例，配置文件
+`/etc/qiniu-ssl-renew/media.crowntime.cn.env`（见 `examples/wildcard-domain.env.example`），
+不通过 `qiniu-ssl-renew@<domain>` 模板实例化。详见
+[docs/operations/wildcard-ssl-renewal.md](../docs/operations/wildcard-ssl-renewal.md)。
+
 ## 本地测试 (不需要真实 secrets)
 
 ```bash
-# 1. 完整自动化测试套件 (108 个 bats + 29 个 pytest = 137 个测试，全部 mock/本地服务，
+# 1. 完整自动化测试套件 (126 个 bats + 29 个 pytest = 155 个测试，全部 mock/本地服务，
 #    不访问任何真实外部服务)
 make ssl-test
 

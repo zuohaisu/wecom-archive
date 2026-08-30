@@ -88,3 +88,23 @@ wecom-backup.service
 wecom-backup.timer
 wecom-disk-usage-check.service
 wecom-disk-usage-check.timer
+
+# GH-104 Follow-up B: wildcard *.crowntime.cn TLS renewal, captured from
+# the already-proven production implementation (see
+# docs/operations/wildcard-ssl-renewal.md). This is the first non-wecom-*
+# entry in this file — _sync_managed_systemd_units in deploy_server.sh has
+# no wecom-* restriction of its own, but production's documented sudoers
+# grant for `systemctl enable --now` IS literally scoped to
+# `wecom-*.timer`/`wecom-*.path` (see that script's header comment). Do
+# NOT broaden that grant to a `qiniu-*` glob — that would also cover any
+# future qiniu-ssl-renew@<domain> instance. The one-time Ops action this
+# needs is an EXACT, literal addition:
+#   wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now qiniu-ssl-renew-wildcard.timer
+# The `cp .../deploy/systemd/*.timer /etc/systemd/system/` grant already
+# documented for step 10 is not prefix-restricted and should already
+# cover installing this file; confirm during rollout (see this PR's
+# rollout plan) rather than assuming. Until/unless that grant exists,
+# deploy_server.sh degrades to a non-fatal WARN for this unit only — every
+# other managed unit is unaffected.
+qiniu-ssl-renew-wildcard.service
+qiniu-ssl-renew-wildcard.timer

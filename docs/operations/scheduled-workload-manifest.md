@@ -43,7 +43,7 @@ manifest wins and this document is stale — file a fix.
 | Backup | Required | timer, daily 03:17 | Yes (newly) | Already running on production; was "required but unmanaged" — GH-104 closes that drift only. Cadence/retention/encryption unchanged; #105 owns off-host/offsite DR. |
 | Disk/resource usage check | Required | timer, every 15 min | Yes (newly) | Same "required but unmanaged" drift as backup. Cadence unchanged. |
 | Job-failure alert (`@` template) | Static helper | `OnFailure=` on demand | Installed, never enabled | GH-107; systemd instantiates it, it is never `enable`d/`start`ed by name. |
-| Production wildcard SSL renewal | Required | timer | **Not yet reproducible** | See "Wildcard SSL renewal — known gap" below. |
+| Production wildcard SSL renewal | Required | timer | Yes | Captured from production (GH-104 Follow-up B) — see [wildcard-ssl-renewal.md](wildcard-ssl-renewal.md). |
 | Qiniu Kodo per-domain SSL template | Template | timer (per instance) | No | Not currently instantiated on production; kept for a future single-domain Qiniu CDN cert. Distinct from, not superseded by, the wildcard flow. |
 | Internal reachability check | Deferred | timer, daily 04:30 | No | Manual/deferred per PM decision; internal reachability RECONCILIATION, a different responsibility from the external uptime workflow (paused separately — see below). |
 | Message purge (recycle bin) | Deferred, **destructive** | timer, daily 02:45 | No | Retention-policy activation not yet approved. |
@@ -152,62 +152,71 @@ These are two different responsibilities and must not be conflated:
   commit) — that decision does not change the reachability-check
   classification, and GH-104 does not re-enable either.
 
-## Wildcard SSL renewal (known gap)
+## Wildcard SSL renewal
 
-Production actually renews the `*.crowntime.cn` wildcard certificate with
-`qiniu-ssl-renew-wildcard.service`/`.timer` plus a **server-only script,
-`ssl-renew/renew-wildcard.sh`, that has never been committed to this
-repository** (confirmed via `git log --all` — zero history). It was
-introduced by the 2026-08-03 RND-261 domain-cutover runbook
+**Status: captured (GH-104 Follow-up B).** Production renews the
+`*.crowntime.cn` wildcard certificate with
+`qiniu-ssl-renew-wildcard.service`/`.timer` plus `ssl-renew/renew-wildcard.sh`
+— until Follow-up B, this script had never been committed to this
+repository (confirmed via `git log --all` — zero history prior to
+capture), a real reproducibility gap this PR closes, not an oversight
+carried forward. It was introduced by the 2026-08-03 RND-261
+domain-cutover runbook
 (`docs/ops/rnd-261-domain-cutover-runbook.md`) as a hand-authored,
-already-field-proven script that performs `acme.sh` DNS-01 renewal for
-the wildcard domain, deploys the resulting certificate under
+already-field-proven script (41/41 successful runs observed in the 30
+days before capture) that performs `acme.sh` DNS-01 renewal for the
+wildcard domain, binds it to Qiniu's `media.crowntime.cn` (CDN,
+hard-fail) and `media-origin.crowntime.cn` (origin, warn-only) domains,
+deploys the resulting certificate under
 `shared/certs/wildcard.crowntime.cn/`, and reloads nginx through a
-narrowly-scoped sudoers grant.
+narrowly-scoped sudoers grant. Full behavior contract, environment
+variables, sudoers dependency, and manual verification commands are in
+[wildcard-ssl-renewal.md](wildcard-ssl-renewal.md) — this section stays a
+summary.
 
 This is conceptually **different** from `deploy/systemd/qiniu-ssl-renew@.service`
 (the repo's existing template): that template renews a **single Qiniu
 Kodo CDN custom domain** and binds the cert through Qiniu's own HTTPS API
 — it does not touch nginx and cannot express a wildcard SAN (its
 `validate_domain` in `ssl-renew/lib/common.sh` rejects a leading `*.`
-label by design). Repurposing it for the wildcard flow would require
-non-trivial, security-sensitive changes to code this PR has never seen
-run — and the RND-261 runbook shows a batch-tested, working alternative
-already exists in production.
+label by design). Follow-up B captured the real, already-proven
+production script rather than repurposing this template — see
+`ssl-renew/renew-wildcard.sh`'s own module docstring for exactly which
+`lib/qiniu.sh`/`lib/common.sh` functions it reuses unchanged.
 
-**GH-104 deliberately does not fabricate a replacement.** Guessing at the
-sudoers/nginx-reload integration for TLS termination on the public site
-carries a severe blast-radius risk if wrong, and the issue's own
-constraints rule out SSH access to fetch the real file or triggering a
-real renewal to test a guess. `WORKLOAD_MANIFEST` instead carries this as
-an explicit `repo_status=absent`, `classification=required` row so the
-gap is tracked, not silently dropped:
+`WORKLOAD_MANIFEST` now carries this as `repo_status=present`,
+`auto_install=true` for both units, `auto_enable=true` for the timer
+only — the same shape as every other required workload:
 
 ```
-<qiniu-ssl-renew-wildcard>|required|absent|false|false|timer|false|...
+qiniu-ssl-renew-wildcard.service|required|present|true|false|oneshot|false|...
+qiniu-ssl-renew-wildcard.timer|required|present|true|true|timer|false|...
 ```
 
-**Follow-up required (tracked here, not closed by this PR):** Ops should
-commit the existing, already-proven `ssl-renew/renew-wildcard.sh` and its
-`qiniu-ssl-renew-wildcard.service`/`.timer` unit files into this
-repository in a dedicated follow-up change, after which this row's
-`repo_status` becomes `present` and it can join `MANAGED_UNITS` like any
-other required workload. Until then, standard deployment must not attempt
-to install or enable anything for this row, and this gap does not block
-the rest of GH-104 — every other required workload here has real,
-versioned unit content behind it.
+One residual, explicitly-tracked deployment dependency remains: standard
+deployment's `systemctl enable --now` sudoers grant is documented as
+scoped to `wecom-*.timer`/`wecom-*.path` — `qiniu-ssl-renew-wildcard.timer`
+needs one additional, **exact** (non-glob) sudoers line before the first
+automated enable can succeed. See this PR's rollout plan and
+`MANAGED_UNITS`' own comment for the precise grant. Until that grant
+exists, `scripts/deploy_server.sh` degrades to a non-fatal WARN for this
+one unit — identical to every other unit's missing-sudoers behavior — it
+does not block or roll back the rest of the deploy.
 
 ## Qiniu Kodo per-domain SSL template
 
 `qiniu-ssl-renew@.service`/`.timer` is kept as a `template`-classified
 row, not deleted: the 2026-08-28 baseline found no active
-`qiniu-ssl-renew@<domain>.timer` instance on production (the wildcard cert
-may now cover `media-origin.crowntime.cn` too, or Qiniu's own managed
-certificate service may apply — this repository cannot determine which
-without server access), but the template remains a valid, tested
-mechanism for a future single-domain Qiniu CDN certificate. Deleting it
-would be an irreversible, unforced move; marking it clearly template-only
-here is sufficient to prevent it being confused with the wildcard flow.
+`qiniu-ssl-renew@<domain>.timer` instance on production. GH-104 Follow-up B
+confirmed why — `media-origin.crowntime.cn` (the domain this template was
+originally built for) is now bound to the wildcard certificate by
+`ssl-renew/renew-wildcard.sh` itself (see
+[wildcard-ssl-renewal.md](wildcard-ssl-renewal.md)), so no per-domain
+instance of this template is currently needed. The template remains a
+valid, tested mechanism for a future single-domain Qiniu CDN certificate
+outside the wildcard's coverage. Deleting it would be an irreversible,
+unforced move; marking it clearly template-only here is sufficient to
+prevent it being confused with the wildcard flow.
 
 ## Telegram relay
 

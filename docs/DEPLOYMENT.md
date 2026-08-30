@@ -45,6 +45,7 @@ Versioned in this repository:
 | DR destination-side pull/verify (GH-105) | `scripts/dr_pull.sh` (+ `scripts/tests/dr_pull.bats`) | Optional helper for the Tencent/Mac off-host destinations: rsync-pulls `dr_config_bundle.sh` artifacts, verifies checksum before promoting, never overwrites a previous known-good copy on mismatch. Not wired to any schedule by this change — Ops decides cadence/destination |
 | Disk/resource usage check unit/timer | `deploy/systemd/wecom-disk-usage-check.{service,timer}` | Every 15 minutes (`:9/15`) capacity/webhook alerting (RND-193); listed in `MANAGED_UNITS` as of GH-104, cadence unchanged |
 | Job-failure alert unit (templated) | `deploy/systemd/wecom-job-failure-alert@.service` | `OnFailure=` target for the seven critical one-shot units below; POSTs through the existing `notify.sh`/`ALERT_WEBHOOK_URL` contract (GH-107, see [operations/alerting.md](operations/alerting.md)) |
+| Wildcard SSL renewal unit/timer (GH-104 Follow-up B) | `deploy/systemd/qiniu-ssl-renew-wildcard.{service,timer}`, `ssl-renew/renew-wildcard.sh` | Daily 00:15 (+15min random delay) `*.crowntime.cn` renewal, captured from the already-proven production implementation; see [operations/wildcard-ssl-renewal.md](operations/wildcard-ssl-renewal.md) |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
 | GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
 | GitHub Actions external uptime check | `.github/workflows/uptime-check.yml` | Runs outside the production ECS on a 10-minute schedule; checks the public endpoint and `/health/ready` and alerts on failure (GH-107, see [operations/alerting.md](operations/alerting.md)) |
@@ -58,7 +59,6 @@ Not versioned in this repository:
 | Reverse proxy config (Nginx / equivalent) | Operator-managed |
 | TLS certificates | Operator-managed |
 | `STATIC_SITE_DIR_NAME` env var | Operator-set in `backend/.env`; must match the `root` in the operator-managed Nginx config for the static homepage (see `static_site/company_homepage/README.md`), or step 8 below silently syncs to a directory Nginx never serves |
-| Wildcard SSL renewal (`qiniu-ssl-renew-wildcard.{service,timer}` + `renew-wildcard.sh`) | Server-only, never committed — a tracked GH-104 reproducibility gap, not an intentional exclusion; see [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#wildcard-ssl-renewal-known-gap) |
 | `qiniu-telegram-relay.service` | Deprecated stale server artifact, never versioned here; see [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#telegram-relay) |
 
 ---
@@ -781,10 +781,14 @@ These are documentation truths, not hidden assumptions:
   `shared/www/$STATIC_SITE_DIR_NAME`. There is no automated check that
   the two are consistent; confirm manually on the host if the live
   homepage stops matching `main`
-- production's wildcard `*.crowntime.cn` SSL renewal (`qiniu-ssl-renew-wildcard.{service,timer}`
-  plus a server-only `renew-wildcard.sh`) has never been committed to this
-  repository — a real, tracked GH-104 gap, not an oversight. See
-  [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#wildcard-ssl-renewal-known-gap)
+- standard deployment's `systemctl enable --now` sudoers grant is
+  documented as scoped to `wecom-*.timer`/`wecom-*.path` only —
+  `qiniu-ssl-renew-wildcard.timer` (GH-104 Follow-up B) needs one
+  additional, exact (non-glob) sudoers line before its first automated
+  enable can succeed; see [operations/wildcard-ssl-renewal.md](operations/wildcard-ssl-renewal.md)
+  and this repository's GH-104 Follow-up B PR for the precise grant. The
+  deploy degrades to a non-fatal WARN for this one unit until that grant
+  exists, identical to any other unit's missing-sudoers behavior
 - GH-105 (`scripts/dr_config_bundle.sh` + `scripts/dr_pull.sh`) is repo
   CAPABILITY only — no off-host destination is actually configured yet.
   Until Ops stands up the Tencent Cloud Singapore and local-Mac pull

@@ -241,18 +241,48 @@ def test_backup_cadence_and_retention_semantics_are_unchanged() -> None:
 # ── 11. SSL production renewal path is represented ──────────────────────
 
 
-def test_wildcard_ssl_renewal_gap_is_explicitly_tracked() -> None:
-    rows = [row for row in _rows() if "ssl-renew-wildcard" in row["unit"]]
-    assert rows, "the production wildcard SSL renewal workload must have an explicit manifest row"
-    row = rows[0]
-    assert row["classification"] == "required"
-    assert row["repo_status"] == "absent"
-    assert row["auto_install"] == "false"
-    assert row["auto_enable"] == "false"
-    assert MANIFEST_DOC.is_file(), "the wildcard SSL reproducibility gap must be documented"
+def test_wildcard_ssl_renewal_is_captured_and_reproducible() -> None:
+    """GH-104 Follow-up B: the wildcard SSL workload used to be an
+    explicitly-tracked repo_status=absent gap (a server-only, never-
+    committed script) — it is now fully repo-backed, matching every other
+    required workload's contract."""
+    service_row = _row("qiniu-ssl-renew-wildcard.service")
+    timer_row = _row("qiniu-ssl-renew-wildcard.timer")
+
+    assert service_row["classification"] == "required"
+    assert service_row["repo_status"] == "present"
+    assert service_row["auto_install"] == "true"
+    assert service_row["auto_enable"] == "false"
+
+    assert timer_row["classification"] == "required"
+    assert timer_row["repo_status"] == "present"
+    assert timer_row["auto_install"] == "true"
+    assert timer_row["auto_enable"] == "true"
+
+    assert (ROOT / "ssl-renew/renew-wildcard.sh").is_file()
+    assert (DEPLOY_SYSTEMD / "qiniu-ssl-renew-wildcard.service").is_file()
+    assert (DEPLOY_SYSTEMD / "qiniu-ssl-renew-wildcard.timer").is_file()
+    assert "qiniu-ssl-renew-wildcard.service" in _managed_lines()
+    assert "qiniu-ssl-renew-wildcard.timer" in _managed_lines()
+
+    assert MANIFEST_DOC.is_file()
     doc_text = MANIFEST_DOC.read_text(encoding="utf-8")
     assert "wildcard" in doc_text.lower()
     assert "renew-wildcard.sh" in doc_text
+
+
+def test_wildcard_timer_cadence_matches_captured_production_schedule() -> None:
+    text = (DEPLOY_SYSTEMD / "qiniu-ssl-renew-wildcard.timer").read_text(encoding="utf-8")
+    assert "OnCalendar=*-*-* 00:15:00" in text
+    assert "Persistent=true" in text
+    assert "RandomizedDelaySec=900" in text
+
+
+def test_wildcard_service_does_not_add_hardening_beyond_the_captured_unit() -> None:
+    lines = (DEPLOY_SYSTEMD / "qiniu-ssl-renew-wildcard.service").read_text(encoding="utf-8").splitlines()
+    directive_lines = [line for line in lines if not line.lstrip().startswith("#")]
+    for directive in ("NoNewPrivileges=", "ProtectSystem=", "CapabilityBoundingSet="):
+        assert not any(line.startswith(directive) for line in directive_lines), directive
 
 
 def test_ssl_template_is_marked_template_only_and_not_deleted() -> None:
