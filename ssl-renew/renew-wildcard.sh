@@ -57,8 +57,7 @@ fi
 
 log "[INFO] local_fp != deployed_fp (local=$local_fp, deployed=${deployed_fp:-none}) — proceeding to deploy ..."
 
-upload_output=$(deploy_to_qiniu "$WILDCARD_DOMAIN" "$CERT_DIR" 2>&1)
-upload_status=$?
+upload_output=$(deploy_to_qiniu "$WILDCARD_DOMAIN" "$CERT_DIR" 2>&1) && upload_status=$? || upload_status=$?
 if [ "$upload_status" -ne 0 ]; then
 	die "$upload_output"
 fi
@@ -76,18 +75,20 @@ else
 	log "[INFO] bound to origin domain $ORIGIN_DOMAIN"
 fi
 
-if [ -d "$NGINX_CERT_DIR" ] && [ -f "$FULLCHAIN_FILE" ] && [ -f "$PRIVKEY_FILE" ]; then
-	cp -f "$FULLCHAIN_FILE" "$NGINX_CERT_DIR/fullchain.pem"
-	cp -f "$PRIVKEY_FILE" "$NGINX_CERT_DIR/privkey.pem"
-	chmod 640 "$NGINX_CERT_DIR/fullchain.pem" "$NGINX_CERT_DIR/privkey.pem"
-	sudo -n /usr/bin/systemctl reload nginx
-else
-	warn "nginx cert directory or source files missing — skipped nginx deployment"
-fi
-
 echo "$local_fp" >"$FP_FILE"
 rm -f "$TLS_OK_FILE"
 rm -f "$MISMATCH_FILE"
+
+if cp -f "$FULLCHAIN_FILE" "$NGINX_CERT_DIR/fullchain.pem" && cp -f "$PRIVKEY_FILE" "$NGINX_CERT_DIR/privkey.pem"; then
+	chmod 640 "$NGINX_CERT_DIR/fullchain.pem" "$NGINX_CERT_DIR/privkey.pem" 2>/dev/null || true
+	if sudo -n /usr/bin/systemctl reload nginx 2>/dev/null; then
+		log "[INFO] nginx cert deployed + reloaded"
+	else
+		warn "nginx reload failed (sudo) — cert files updated, manual reload needed"
+	fi
+else
+	warn "nginx cert copy failed — files NOT updated"
+fi
 
 log "[OK] wildcard deployment complete (fp=$local_fp)"
 exit "$EXIT_OK"
