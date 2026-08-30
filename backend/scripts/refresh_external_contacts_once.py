@@ -13,6 +13,15 @@ import sys
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+# Canonical bootstrap used by every other backend/scripts/*.py entrypoint
+# invoked as `python scripts/<name>.py` from WorkingDirectory=backend/ (see
+# e.g. process_export_jobs_once.py): a plain script's sys.path[0] is its own
+# containing directory (backend/scripts/), not backend/ itself, so `app` is
+# not importable without this. Missing it here caused a 100% production
+# failure (ModuleNotFoundError: No module named 'app') for every scheduled
+# and event-triggered run of this unit — see GH-104 Follow-up A.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from app.services.external_contact_refresh_worker import run_external_contact_refresh_queue
 from app.services.tenant_credentials import (
     TenantCredentialError,
