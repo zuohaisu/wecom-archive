@@ -160,6 +160,18 @@ jobs:
       - name: "[GATE] deploy script integration tests (bats)"
         run: bats scripts/tests/deploy_server.bats scripts/tests/nonprod_deploy.bats scripts/tests/assert_scheduled_workloads.bats
 
+      # ── Gate 3b: wildcard SSL renewal capture (GH-104 Follow-up B) ──
+      # Scoped narrowly to the units/script this PR adds (plus the
+      # sibling qiniu-ssl-renew@ structural checks 10_systemd_units.bats
+      # already covers) — NOT the full ssl-renew suite (`make ssl-test`),
+      # which depends on the real `qiniu` Python package and is not yet
+      # wired into CI; see ssl-renew/README.md for running it locally.
+      - name: "[GATE] Shellcheck wildcard SSL renewal script"
+        run: shellcheck ssl-renew/renew-wildcard.sh
+
+      - name: "[GATE] wildcard SSL renewal tests (bats, fully mocked)"
+        run: bats ssl-renew/tests/10_systemd_units.bats ssl-renew/tests/12_renew_wildcard.bats
+
       # ── Round 1: offline / SQLite-compatible tests ─────────────
       - name: "Offline / SQLite-compatible tests"
         run: |

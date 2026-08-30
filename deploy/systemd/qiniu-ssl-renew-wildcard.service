@@ -1,0 +1,38 @@
+[Unit]
+Description=Qiniu Wildcard SSL Certificate Renewal — *.crowntime.cn (one shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wecomarchive
+Group=wecomarchive
+WorkingDirectory=/srv/apps/wecom-archive-365/current/ssl-renew
+EnvironmentFile=/etc/qiniu-ssl-renew/media.crowntime.cn.env
+Environment=HOME=/home/wecomarchive
+
+ExecStart=/srv/apps/wecom-archive-365/current/ssl-renew/renew-wildcard.sh
+
+# TimeoutStartSec (600s): acme.sh DNS-01 propagation plus two Qiniu bind
+# calls comfortably exceeds systemd's implicit 90s default — same margin
+# as qiniu-ssl-renew@.service's per-domain template.
+TimeoutStartSec=600
+
+# GH-104 Follow-up B: this unit is captured as-is from the already-proven
+# production copy (41/41 successful runs as of this capture). It
+# deliberately does NOT set NoNewPrivileges=, ProtectSystem=, or
+# CapabilityBoundingSet= — those hardening directives are not present on
+# the production unit this was captured from. Do not add them here; open
+# a separate hardening ticket if that is ever wanted. The one privilege
+# this unit actually exercises — `sudo systemctl reload nginx` — is
+# scoped by a narrow, pre-existing sudoers grant (see
+# docs/operations/wildcard-ssl-renewal.md).
+UMask=0077
+PrivateTmp=yes
+ReadWritePaths=/home/wecomarchive/.acme.sh /var/log/qiniu-ssl-renew
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# Log output goes to journal + /var/log/qiniu-ssl-renew/ (same convention
+# as qiniu-ssl-renew@.service).
+StandardOutput=append:/var/log/qiniu-ssl-renew/renew.log
+StandardError=append:/var/log/qiniu-ssl-renew/renew.log

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Qiniu Wildcard SSL Certificate Renewal — *.crowntime.cn
+
+[Timer]
+OnCalendar=*-*-* 00:15:00
+Persistent=true
+RandomizedDelaySec=900
+Unit=qiniu-ssl-renew-wildcard.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 SSL_DIR := ssl-renew
-SSL_SCRIPTS := $(SSL_DIR)/renew.sh $(SSL_DIR)/notify.sh $(SSL_DIR)/verify_https.sh $(SSL_DIR)/install.sh
+SSL_SCRIPTS := $(SSL_DIR)/renew.sh $(SSL_DIR)/renew-wildcard.sh $(SSL_DIR)/notify.sh $(SSL_DIR)/verify_https.sh $(SSL_DIR)/install.sh
 SSL_LIB := $(SSL_DIR)/lib/common.sh $(SSL_DIR)/lib/qiniu.sh
 SSL_TEST_HELPERS := $(SSL_DIR)/tests/systemd_static_check.sh $(SSL_DIR)/tests/test_helper/mock_curl.sh
 SSL_PYTHON_FILES := $(SSL_DIR)/qiniu_helper.py $(SSL_DIR)/tests/test_qiniu_helper.py \
@@ -225,7 +225,7 @@ ssl-dry-run:
 ## (clearly labeled as non-authoritative) when neither is available —
 ## this never silently reports success as if the real tool ran.
 ssl-verify-systemd:
-	@units="deploy/systemd/qiniu-ssl-renew@.service deploy/systemd/qiniu-ssl-renew@.timer"; \
+	@units="deploy/systemd/qiniu-ssl-renew@.service deploy/systemd/qiniu-ssl-renew@.timer deploy/systemd/qiniu-ssl-renew-wildcard.service deploy/systemd/qiniu-ssl-renew-wildcard.timer"; \
 	if command -v systemd-analyze >/dev/null 2>&1; then \
 		echo "Using native systemd-analyze verify"; \
 		systemd-analyze verify $$units; \
