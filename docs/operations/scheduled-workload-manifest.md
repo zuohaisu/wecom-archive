@@ -165,14 +165,16 @@ domain-cutover runbook
 (`docs/ops/rnd-261-domain-cutover-runbook.md`) as a hand-authored,
 already-field-proven script (41/41 successful runs observed in the 30
 days before capture) that performs `acme.sh` DNS-01 renewal for the
-wildcard domain, binds it to Qiniu's `media.crowntime.cn` (CDN,
-hard-fail) and `media-origin.crowntime.cn` (origin, warn-only) domains,
-deploys the resulting certificate under
-`shared/certs/wildcard.crowntime.cn/`, and reloads nginx through a
-narrowly-scoped sudoers grant. Full behavior contract, environment
-variables, sudoers dependency, and manual verification commands are in
-[wildcard-ssl-renewal.md](wildcard-ssl-renewal.md) — this section stays a
-summary.
+wildcard domain, binds it to Qiniu's `media.crowntime.cn` (CDN) and
+`media-origin.crowntime.cn` (origin) domains, deploys the resulting
+certificate under `shared/certs/wildcard.crowntime.cn/`, and reloads
+nginx through a narrowly-scoped sudoers grant. Full behavior contract
+(including a known production defect that currently makes every failure
+path — CDN bind, origin bind, and nginx deployment alike — a hard,
+uninformative stop rather than the graceful degradation it was designed
+for), environment variables, sudoers dependency, and manual verification
+commands are in [wildcard-ssl-renewal.md](wildcard-ssl-renewal.md) — this
+section stays a summary.
 
 This is conceptually **different** from `deploy/systemd/qiniu-ssl-renew@.service`
 (the repo's existing template): that template renews a **single Qiniu
