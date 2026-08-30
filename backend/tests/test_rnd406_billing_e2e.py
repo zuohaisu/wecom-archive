@@ -1039,11 +1039,11 @@ def test_scenario9b_manual_suspension_is_never_cleared_by_payment(monkeypatch) -
 
 
 # ---------------------------------------------------------------------------
-# Scenario 10 — Owner“到期不续费”不提前终止、不自动退款
+# Scenario 10 — historical do-not-renew data does not end early or refund
 # ---------------------------------------------------------------------------
 
 
-def test_scenario10_owner_cancel_at_period_end_does_not_end_early_or_refund(monkeypatch) -> None:
+def test_scenario10_historical_cancel_intent_does_not_end_early_or_refund(monkeypatch) -> None:
     factory = _new_factory()
     ends_at = NOW + timedelta(days=200)
     with factory() as db:
@@ -1056,6 +1056,7 @@ def test_scenario10_owner_cancel_at_period_end_does_not_end_early_or_refund(monk
             status="active",
             starts_at=NOW - timedelta(days=165),
             ends_at=ends_at,
+            cancel_at_period_end=True,
         )
         db.commit()
 
@@ -1063,14 +1064,13 @@ def test_scenario10_owner_cancel_at_period_end_does_not_end_early_or_refund(monk
     base = _app(monkeypatch, factory, provider)
     owner = _client_with_session(base, "session-alpha")
 
-    set_true = owner.post("/api/billing/subscription/cancel-intent", json={"enabled": True})
-    assert set_true.status_code == 200
-    body = set_true.json()
-    assert body["cancel_at_period_end"] is True
-    assert datetime.fromisoformat(body["ends_at"]) == ends_at
+    owner_view = owner.get("/api/billing/subscription")
+    assert owner_view.status_code == 200
+    assert "cancel_at_period_end" not in owner_view.json()
 
     subscription = _subscription(factory, "tenant-alpha")
     tenant = _tenant(factory, "tenant-alpha")
+    assert subscription.cancel_at_period_end is True
     assert subscription.ends_at == ends_at
     assert subscription.status == "active"
     assert tenant.lifecycle_status == "active"
@@ -1229,7 +1229,8 @@ def test_scenario12_owner_and_superadmin_views_agree(monkeypatch) -> None:
     assert datetime.fromisoformat(owner_view["ends_at"]) == datetime.fromisoformat(
         detail["subscription_ends_at"]
     )
-    assert owner_view["cancel_at_period_end"] == detail["cancel_at_period_end"] is True
+    assert "cancel_at_period_end" not in owner_view
+    assert detail["cancel_at_period_end"] is True
 
     # Refund status agreement.
     order_id = _pay(

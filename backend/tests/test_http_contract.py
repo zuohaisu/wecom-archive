@@ -404,8 +404,8 @@ def test_router_count() -> None:
     # list/detail/new, usage, ledger, infra, analytics, audit.
     # RND-415 adds three platform account HTML shells and four guarded/public
     # account APIs: list, invite, invitation acceptance, and self password
-    # rotation.
-    assert route_count == 212
+    # rotation. GH-122 removes the customer cancel-intent API.
+    assert route_count == 211
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -508,7 +508,6 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/billing/capacity",
             "/api/billing/capacity/trend",
             "/api/billing/subscription",
-            "/api/billing/subscription/cancel-intent",
             "/api/billing/orders/latest",
             "/api/billing/orders/{order_id}",
             "/api/billing/orders/{order_id}/close",
@@ -910,12 +909,6 @@ def test_route_snapshot_with_real_model_names() -> None:
         (
             "/api/billing/subscription",
             frozenset({"GET"}),
-            "SubscriptionOverviewOut",
-            "None",
-        ),
-        (
-            "/api/billing/subscription/cancel-intent",
-            frozenset({"POST"}),
             "SubscriptionOverviewOut",
             "None",
         ),

@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType
-from app.db.models import AdminUser, AuditLog, PlatformAdmin, Subscription, Tenant
+from app.db.models import AuditLog, PlatformAdmin, Subscription, Tenant
 from app.services.entitlements import (
     append_subscription_history,
     effective_subscription_status,
@@ -291,65 +291,6 @@ def restore_tenant_after_paid_subscription(
     )
     db.flush()
     return changed
-
-
-def set_cancel_at_period_end(
-    db: Session,
-    tenant_id: str,
-    *,
-    enabled: bool,
-    owner_admin_user_id: str,
-    at: datetime | None = None,
-) -> BillingLifecycleResult:
-    """Record a renewal intent only; never shorten service or move money."""
-    normalized_tenant_id = _tenant_id(tenant_id)
-    checked_at = _explicit_utc(at)
-    tenant = _locked_tenant(db, normalized_tenant_id)
-    owner = db.scalar(
-        select(AdminUser.id).where(
-            AdminUser.id == owner_admin_user_id,
-            AdminUser.tenant_id == normalized_tenant_id,
-            AdminUser.role == "owner",
-            AdminUser.status == "active",
-        )
-    )
-    if owner is None:
-        raise BillingLifecycleAuthorizationError("active tenant owner is required")
-    subscription = _locked_subscription(db, normalized_tenant_id)
-    if subscription is None:
-        raise BillingLifecycleNotFoundError("subscription does not exist")
-    changed = bool(subscription.cancel_at_period_end) != enabled
-    if changed:
-        subscription.cancel_at_period_end = enabled
-        subscription.revision += 1
-        append_subscription_history(
-            db,
-            subscription,
-            change_kind=("cancel_intent_set" if enabled else "cancel_intent_cleared"),
-        )
-        _audit(
-            db,
-            tenant_id=tenant.id,
-            action=AuditAction.SUBSCRIPTION_CANCEL_INTENT_CHANGED,
-            object_type=AuditObjectType.SUBSCRIPTION,
-            object_id=subscription.id,
-            at=checked_at,
-            detail={
-                "cancel_at_period_end": enabled,
-                "owner_admin_user_id": owner_admin_user_id,
-                "subscription_revision": subscription.revision,
-            },
-        )
-        db.flush()
-    return BillingLifecycleResult(
-        tenant_id=tenant.id,
-        subscription_status=subscription.status,
-        tenant_lifecycle_status=tenant.lifecycle_status,
-        subscription_revision=subscription.revision,
-        tenant_lifecycle_revision=tenant.lifecycle_revision,
-        subscription_changed=changed,
-        tenant_changed=False,
-    )
 
 
 def _platform_admin_exists(db: Session, platform_admin_id: str) -> bool:

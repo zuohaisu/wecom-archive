@@ -769,8 +769,8 @@ def get_billing_context(
     RND-402: a billing-frozen tenant's Owner keeps the billing / renewal /
     payment-query surface (the recovery path), while a manually
     ``suspended`` tenant is denied — payment must never clear a manual
-    suspension; ``get_billing_manager``/``get_billing_owner`` set
-    ``allowed_lifecycle`` to ``{"active", "frozen"}`` accordingly.
+    suspension; ``get_billing_manager`` sets ``allowed_lifecycle`` to
+    ``{"active", "frozen"}`` accordingly.
     Role-gate the payment-write endpoints by depending on the
     ``get_billing_manager`` instance instead.
 
@@ -851,13 +851,6 @@ get_billing_viewer = get_billing_context(
 get_billing_manager = get_billing_context(
     *BILLING_MANAGER_ROLES, allowed_lifecycle=frozenset({"active", "frozen"})
 )
-# Owner-only billing access for the cancel-at-period-end intent endpoint
-# (RND-404): billing_lifecycle.set_cancel_at_period_end already requires an
-# active owner AdminUser row, so the role gate here matches that contract.
-get_billing_owner = get_billing_context(
-    "owner", allowed_lifecycle=frozenset({"active", "frozen"})
-)
-
 
 # Sentinel wecom_user_id prefix used for password-mode AdminUser rows.
 PASSWORD_MODE_WECOM_PREFIX = "__pwd__"

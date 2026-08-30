@@ -241,7 +241,7 @@ def test_frozen_owner_can_view_billing_page_and_create_order(monkeypatch) -> Non
 # ── AC-2: suspended Owner reads status but cannot write ──
 
 
-def test_suspended_owner_can_read_status_but_not_pay_or_change_intent(monkeypatch) -> None:
+def test_suspended_owner_can_read_status_but_not_pay(monkeypatch) -> None:
     base, _factory = _setup(monkeypatch)
     client = _client_with_session(base, "session-owner-suspended")
 
@@ -253,55 +253,34 @@ def test_suspended_owner_can_read_status_but_not_pay_or_change_intent(monkeypatc
         headers={"Idempotency-Key": "rnd404-suspended-order-key"},
         json={"plan_code": ANNUAL_PLAN_CODE},
     )
-    cancel_intent = client.post(
-        "/api/billing/subscription/cancel-intent", json={"enabled": True}
-    )
-
     assert page.status_code == 200
     assert subscription.status_code == 200
     assert subscription.json()["tenant_lifecycle_status"] == "suspended"
     assert refund.status_code == 200
     assert refund.json() is None
     assert create.status_code == 403
-    assert cancel_intent.status_code == 403
 
 
-# ── AC-3: cancel-at-period-end intent is reversible and does not move ends_at ──
+# ── AC-3: the customer cancel-intent API and response field are removed ──
 
 
-def test_owner_can_set_and_restore_cancel_at_period_end(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "session_id",
+    ["session-owner-active", "session-admin-active", "session-owner-suspended"],
+)
+def test_cancel_intent_is_not_a_customer_billing_api(monkeypatch, session_id) -> None:
     base, _factory = _setup(monkeypatch)
-    client = _client_with_session(base, "session-owner-active")
-
-    before = client.get("/api/billing/subscription").json()
-    assert before["cancel_at_period_end"] is False
-
-    set_true = client.post("/api/billing/subscription/cancel-intent", json={"enabled": True})
-    assert set_true.status_code == 200
-    body = set_true.json()
-    assert body["cancel_at_period_end"] is True
-    assert body["ends_at"] == before["ends_at"]
-
-    set_false = client.post("/api/billing/subscription/cancel-intent", json={"enabled": False})
-    assert set_false.status_code == 200
-    restored = set_false.json()
-    assert restored["cancel_at_period_end"] is False
-    assert restored["ends_at"] == before["ends_at"]
-
-
-# ── AC-4: only the owner role may change the cancel-at-period-end intent ──
-
-
-def test_admin_role_cannot_change_cancel_at_period_end(monkeypatch) -> None:
-    base, _factory = _setup(monkeypatch)
-    client = _client_with_session(base, "session-admin-active")
+    client = _client_with_session(base, session_id)
 
     response = client.post("/api/billing/subscription/cancel-intent", json={"enabled": True})
+    overview = client.get("/api/billing/subscription")
 
-    assert response.status_code == 403
+    assert response.status_code == 404
+    assert overview.status_code == 200
+    assert "cancel_at_period_end" not in overview.json()
 
 
-# ── AC-5: refund status is read-only and reflects the stored provider state ──
+# ── AC-4: refund status is read-only and reflects the stored provider state ──
 
 
 @pytest.mark.parametrize(

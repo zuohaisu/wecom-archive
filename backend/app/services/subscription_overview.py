@@ -46,7 +46,6 @@ class SubscriptionOverview:
     starts_at: datetime | None
     ends_at: datetime | None
     grace_ends_at: datetime | None
-    cancel_at_period_end: bool
     entitlements: tuple[str, ...]
     renewal_count: int
     measured_at: datetime
@@ -118,7 +117,6 @@ def get_subscription_overview(
             starts_at=None,
             ends_at=None,
             grace_ends_at=None,
-            cancel_at_period_end=False,
             entitlements=(),
             renewal_count=0,
             measured_at=measured_at,
@@ -135,7 +133,6 @@ def get_subscription_overview(
         starts_at=summary.starts_at,
         ends_at=summary.ends_at,
         grace_ends_at=summary.grace_ends_at,
-        cancel_at_period_end=summary.cancel_at_period_end,
         entitlements=summary.entitlements,
         renewal_count=summary.renewal_count,
         measured_at=measured_at,

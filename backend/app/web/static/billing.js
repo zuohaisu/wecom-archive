@@ -9,13 +9,10 @@
   var trend = null;
   var pollTimer = null;
   var busy = false;
-  var cancelIntentBusy = false;
   var billingMode = document.body.dataset.billingMode || 'admin';
   var canOrder = document.body.dataset.billingCanOrder === 'true';
-  var isOwner = document.body.dataset.billingIsOwner === 'true';
   var terminal = { succeeded: true, closed: true, failed: true };
   var activeOrder = { creating: true, pending: true, paid_activation_pending: true };
-  var cancelableSubscriptionStatus = { trial: true, active: true, grace: true };
 
   function t(key, values) {
     var value = I18N.t(key);
@@ -214,7 +211,6 @@
     trial.hidden = remaining === null;
     trial.textContent = remaining === null ? '' : t('billing.trialRemaining', { days: remaining });
     renderTenantStatus();
-    renderCancelIntent();
     renderActions();
   }
 
@@ -229,24 +225,6 @@
     banner.hidden = false;
     banner.textContent = t('billing.tenantStatus.' + status);
     banner.className = 'alert tenant-status-banner ' + (status === 'suspended' ? 'alert-danger' : 'alert-warning');
-  }
-
-  function renderCancelIntent() {
-    var block = node('cancel-intent');
-    var status = node('cancel-intent-status');
-    var toggle = node('cancel-intent-toggle');
-    var eligible = Boolean(
-      subscription
-      && isOwner
-      && subscription.tenant_lifecycle_status !== 'suspended'
-      && cancelableSubscriptionStatus[subscription.stored_status]
-    );
-    block.hidden = !eligible;
-    if (!eligible) { return; }
-    var canceled = Boolean(subscription.cancel_at_period_end);
-    status.textContent = t(canceled ? 'billing.cancelIntent.active' : 'billing.cancelIntent.inactive');
-    toggle.textContent = t(canceled ? 'billing.cancelIntent.restore' : 'billing.cancelIntent.set');
-    toggle.disabled = cancelIntentBusy;
   }
 
   function renderRefund() {
@@ -575,27 +553,6 @@
     renderRefund();
   }
 
-  function toggleCancelIntent() {
-    if (!subscription || !isOwner || cancelIntentBusy) { return; }
-    cancelIntentBusy = true;
-    showError('');
-    renderCancelIntent();
-    var nextEnabled = !subscription.cancel_at_period_end;
-    request('/api/billing/subscription/cancel-intent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: nextEnabled })
-    }).then(function (value) {
-      subscription = value;
-      renderSubscription();
-    }).catch(function () {
-      showError(t('billing.error.cancelIntent'));
-    }).finally(function () {
-      cancelIntentBusy = false;
-      renderCancelIntent();
-    });
-  }
-
   window.doLogout = function () {
     fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).finally(function () {
       window.location = '/admin/login';
@@ -604,7 +561,6 @@
   node('create-order').addEventListener('click', createOrder);
   node('refresh-order').addEventListener('click', refreshOrder);
   node('close-order').addEventListener('click', closeOrder);
-  node('cancel-intent-toggle').addEventListener('click', toggleCancelIntent);
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible' && order && activeOrder[order.status]) {
       loadOrder(order.order_id);
