@@ -40,7 +40,9 @@ Versioned in this repository:
 | AI KB eval unit/timer | `deploy/systemd/wecom-ai-kb-eval.{service,timer}` | Daily (05:00) retrieval-quality launch gate against the fixed eval set; records `ai_eval_runs`, exits non-zero on a blocked run (RND-359) |
 | AI KB gap report unit/timer | `deploy/systemd/wecom-ai-kb-gap-report.{service,timer}` | Weekly (Mon 06:00) Markdown candidate-improvement report under `docs/ai/reports/` — never creates, changes, or closes GitHub Issues (RND-359) |
 | AI retention sweep unit/timer | `deploy/systemd/wecom-ai-retention-sweep.{service,timer}` | Daily (03:30) deletes AI chat sessions/messages past `AI_RETENTION_DAYS` (default 90) (RND-359) |
-| Backup unit/timer | `deploy/systemd/wecom-backup.{service,timer}` | Daily (03:17) encrypted DB + media backup (RND-193); listed in `MANAGED_UNITS` as of GH-104 — cadence/retention/encryption unchanged, closes a "required but unmanaged" drift only; #105 owns off-host/offsite DR |
+| Backup unit/timer | `deploy/systemd/wecom-backup.{service,timer}` | Daily (03:17) encrypted DB + media backup (RND-193); listed in `MANAGED_UNITS` as of GH-104 — cadence/retention/encryption unchanged |
+| Recovery-config bundle (GH-105) | `scripts/dr_config_bundle.sh` (+ `scripts/tests/dr_config_bundle.bats`) | Encrypts the explicit recovery-critical config/key inventory (`backend/.env`, `shared/keys/`, ...) not covered by `backup_once.sh` into a checksummed, versioned `.tar.gz.gpg` bundle. Independent `RECOVERY_PASSPHRASE`, not wired to a systemd timer by this change — see [operations/2c2g-runbook.md §8](operations/2c2g-runbook.md) |
+| DR destination-side pull/verify (GH-105) | `scripts/dr_pull.sh` (+ `scripts/tests/dr_pull.bats`) | Optional helper for the Tencent/Mac off-host destinations: rsync-pulls `dr_config_bundle.sh` artifacts, verifies checksum before promoting, never overwrites a previous known-good copy on mismatch. Not wired to any schedule by this change — Ops decides cadence/destination |
 | Disk/resource usage check unit/timer | `deploy/systemd/wecom-disk-usage-check.{service,timer}` | Every 15 minutes (`:9/15`) capacity/webhook alerting (RND-193); listed in `MANAGED_UNITS` as of GH-104, cadence unchanged |
 | Job-failure alert unit (templated) | `deploy/systemd/wecom-job-failure-alert@.service` | `OnFailure=` target for the seven critical one-shot units below; POSTs through the existing `notify.sh`/`ALERT_WEBHOOK_URL` contract (GH-107, see [operations/alerting.md](operations/alerting.md)) |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
@@ -783,6 +785,13 @@ These are documentation truths, not hidden assumptions:
   plus a server-only `renew-wildcard.sh`) has never been committed to this
   repository — a real, tracked GH-104 gap, not an oversight. See
   [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#wildcard-ssl-renewal-known-gap)
+- GH-105 (`scripts/dr_config_bundle.sh` + `scripts/dr_pull.sh`) is repo
+  CAPABILITY only — no off-host destination is actually configured yet.
+  Until Ops stands up the Tencent Cloud Singapore and local-Mac pull
+  destinations, there is still no real off-host copy of either the
+  encrypted DB/media backup or the recovery-config bundle; see
+  [operations/2c2g-runbook.md §8.7](operations/2c2g-runbook.md) for the
+  Ops handoff checklist
 
 Keep this document honest if that boundary changes.
 
