@@ -1,9 +1,15 @@
 # Wildcard SSL Renewal (`*.crowntime.cn`)
 
-**GH-104 Follow-up B.** This captures — with the smallest possible semantic
-delta — the production wildcard TLS renewal implementation that was
-already running successfully (41/41 observed runs in the 30 days before
-capture) but had never been committed to this repository. It was
+**GH-104 Follow-up B / GH-126.** This captures the production wildcard TLS
+renewal implementation that was already running successfully (41/41 observed
+runs in the 30 days before capture) but had never been committed to this
+repository. GH-126 verified the live 2026-08-03 script after secret-safety
+review and restored its runtime behavior after the earlier capture drifted.
+The repository adds exactly two `shellcheck` suppression comments for
+production's intentionally unused assignments; they have no shell behavior,
+and removing only those comments yields the verified live SHA-256. The same
+source is deliberately excluded from `shfmt` only; its parity test is the
+stronger guard against any unreviewed reformat or behavior drift. It was
 introduced by the 2026-08-03 RND-261 domain-cutover
 ([docs/ops/rnd-261-domain-cutover-runbook.md](../ops/rnd-261-domain-cutover-runbook.md))
 as a hand-authored script that stayed server-only until now. This document
@@ -27,9 +33,12 @@ different mechanism entirely, see
 ## Renewal mechanism
 
 `ssl-renew/renew-wildcard.sh`, triggered daily by
-`deploy/systemd/qiniu-ssl-renew-wildcard.timer`. `WILDCARD_DOMAIN`,
-`CDN_DOMAIN`, and `ORIGIN_DOMAIN` are **hardcoded constants in the
-script** (`crowntime.cn` / `media.crowntime.cn` / `media-origin.crowntime.cn`)
+`deploy/systemd/qiniu-ssl-renew-wildcard.timer`. The script deliberately
+sources its helpers from the production checkout's absolute
+`/srv/apps/wecom-archive-365/current/ssl-renew` path; this is production
+truth, not a portable-script redesign. `WILDCARD_DOMAIN`, `CDN_DOMAIN`, and
+`ORIGIN_DOMAIN` are **hardcoded constants in the script** (`crowntime.cn` /
+`media.crowntime.cn` / `media-origin.crowntime.cn`)
 — not environment-driven, even though a `DOMAIN=` line exists in the
 EnvironmentFile for naming-convention consistency with every other
 `.env` in this subsystem. The script does not read it.
@@ -60,17 +69,18 @@ EnvironmentFile for naming-convention consistency with every other
      non-fatal warning; the CDN domain is what end users hit. See "Known
      production defect" below for why this intent is not actually what
      happens today.
-4. **nginx deployment — only if all three already exist**: the nginx
+4. **Record the Qiniu deployment before nginx handling.** After both binds
+   succeed, the script writes `.deployed_fp` and clears its TLS markers.
+   This ordering is production truth: a later nginx failure can therefore
+   leave the fingerprint recorded.
+5. **nginx deployment — only if all three already exist**: the nginx
    certificate destination directory, the local `fullchain.cer`, and the
    local private key. If any is missing, the script does **not** create
-   the directory (no `mkdir -p` here) — see "Known production defect"
-   below for what actually happens on that path today. When all three are
-   present: copies `fullchain.cer` → `fullchain.pem` and the private key →
-   `privkey.pem` (mode `640`), then records the new deployed fingerprint.
-5. **`sudo -n /usr/bin/systemctl reload nginx`** — exact command shape,
-   absolute path, non-interactive (`-n`). *Intended* to be a non-fatal
-   step (the certificate is already on disk by this point). See "Known
-   production defect" below.
+   the directory (no `mkdir -p` here). When all three are present it copies
+   `fullchain.cer` → `fullchain.pem` and the private key → `privkey.pem`,
+   attempts mode `640` (best effort), then runs `sudo -n
+   /usr/bin/systemctl reload nginx`. The reload's exact command shape is
+   absolute and non-interactive (`-n`). See "Known production defect" below.
 
 ## Known production defect: `warn`/`die` are called but never defined
 
@@ -96,8 +106,8 @@ printed (it was only ever an argument to a command that never ran), and
 | Qiniu upload fails | Hard failure | Halts at exit 127; `.deployed_fp` never written |
 | CDN bind fails | Hard failure | Halts at exit 127; same as above |
 | **Origin bind fails** | **Non-fatal warning, continue to nginx deploy** | **Halts at exit 127 — nginx never receives the certificate even though the CDN bind already succeeded**, and `.deployed_fp` is never written |
-| nginx dir/files missing | Non-fatal warning, skip nginx step | Halts at exit 127 instead of skipping gracefully |
-| `sudo -n systemctl reload nginx` fails | Non-fatal warning (cert already on disk) | Not independently exercised by the current control flow the same way — see the script for the exact statement — but the same undefined-command hazard applies to every other `warn`/`die` call site |
+| nginx dir/files missing | Non-fatal warning, skip nginx step | Halts at exit 127 instead of skipping gracefully, **after** `.deployed_fp` is written |
+| `sudo -n systemctl reload nginx` fails | Non-fatal warning (cert already on disk) | Halts at exit 127 after certificate copies and `.deployed_fp` are written |
 
 The net effect: what was designed as a resilient pipeline with two
 deliberately-non-fatal steps (origin bind, nginx reload) currently behaves
@@ -206,6 +216,69 @@ Do **not** run `renew-wildcard.sh` by hand against production to "test" it
 days, but there is no reason to invoke it outside its timer for this PR's
 acceptance; historical evidence (41/41) plus repo/server file-content
 equivalence is sufficient (see the Rollout Plan).
+
+## One-time server-only → tracked adoption (GH-126)
+
+This is a **human-approved production operation**, not a deployment-script
+cleanup. It is necessary exactly once because the live script pre-dated the
+tracked repository path. Do it only after the intended commit is on `main`
+and CD has safely stopped at the ownership collision; never use `git clean`,
+`git reset --hard`, a forced checkout, or a broad untracked-file cleanup.
+
+1. Confirm the service is inactive and arrange a maintenance window in which
+   its timer cannot start. The active script must never be moved while it is
+   executing.
+2. In the production checkout, verify that the current untracked path and the
+   target `origin/main` blob have the same canonical SHA-256. The target has
+   exactly two lint-only comments matching the shown prefix; remove only those
+   comments for the comparison. Abort on any mismatch or unexpected comment
+   count; a non-equivalent active renewal script must not be replaced.
+
+   ```bash
+   cd /srv/apps/wecom-archive-365/current
+   path=ssl-renew/renew-wildcard.sh
+   lint_comment='^# shellcheck disable=SC2034 # production parity:'
+   target_lint_count=$(git show "origin/main:$path" | grep -c "$lint_comment")
+   test "$target_lint_count" = 2 || {
+     echo "unexpected wildcard-script lint annotation count" >&2
+     exit 1
+   }
+   target_sha=$(git show "origin/main:$path" | sed "/$lint_comment/d" | sha256sum | awk '{print $1}')
+   live_sha=$(sha256sum "$path" | awk '{print $1}')
+   test "$target_sha" = "$live_sha" || {
+     echo "refusing non-equivalent wildcard-script transition" >&2
+     exit 1
+   }
+   ```
+
+3. Preserve the verified file outside the checkout, then move **only** that
+   path out of the checkout. Do not touch unrelated untracked diagnostic
+   files. The target backup must not already exist, and its post-move hash
+   must still match the verified live hash.
+
+   ```bash
+   systemctl is-active --quiet qiniu-ssl-renew-wildcard.service && {
+     echo "renewal service is active; aborting transition" >&2
+     exit 1
+   }
+   backup_dir=/srv/apps/wecom-archive-365/shared/deploy_state/ownership-transition-backups
+   backup="$backup_dir/renew-wildcard.sh.$live_sha"
+   install -d -m 0750 "$backup_dir"
+   test ! -e "$backup" || {
+     echo "refusing to overwrite existing wildcard-script backup" >&2
+     exit 1
+   }
+   mv -- "$path" "$backup"
+   test "$(sha256sum "$backup" | awk '{print $1}')" = "$live_sha" || {
+     echo "backup hash mismatch; aborting before CD retry" >&2
+     exit 1
+   }
+   ```
+
+4. Retry the standard CD workflow. Its normal checkout installs the already
+   canonical-hash-verified tracked blob; it must not be replaced manually.
+5. Verify the timer/service state and certificate serving afterwards. Keep the
+   external backup until a later approved retention decision.
 
 ## Rollback
 

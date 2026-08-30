@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# renew-wildcard.sh (GH-104 Follow-up B, corrected) — captured production
+# renew-wildcard.sh (GH-104 Follow-up B / GH-126) — byte-verified production
 # wildcard *.crowntime.cn renewal pipeline: acme.sh (DNS-01, wildcard SAN,
 # exit 2 = not due yet but STILL falls through to the fingerprint check,
 # never an early exit) -> local fingerprint short-circuit -> Qiniu upload
@@ -31,13 +31,21 @@
 
 load test_helper/common
 
-WILDCARD="$SSL_RENEW_ROOT/renew-wildcard.sh"
+WILDCARD_SOURCE="$SSL_RENEW_ROOT/renew-wildcard.sh"
+PRODUCTION_WILDCARD_SHA256="665ddae691fdc8797ef9b0f49dc3223b3c387ff20e0b44977a6c9c661a2eed6a"
 REAL_DOMAIN="crowntime.cn"
 CDN_DOMAIN="media.crowntime.cn"
 ORIGIN_DOMAIN="media-origin.crowntime.cn"
 
 setup() {
     common_setup
+    # The source script intentionally preserves production's absolute source
+    # path. Run an otherwise byte-identical test copy with only that bootstrap
+    # path redirected to this checkout's tested helper modules.
+    WILDCARD="$TEST_TMPDIR/renew-wildcard.sh"
+    sed 's|^SCRIPT_DIR="/srv/apps/wecom-archive-365/current/ssl-renew"$|SCRIPT_DIR="'"$SSL_RENEW_ROOT"'"|' \
+        "$WILDCARD_SOURCE" >"$WILDCARD"
+    chmod +x "$WILDCARD"
     export QINIU_ACCESS_KEY=testak QINIU_SECRET_KEY=testsk
     mkdir -p "$HOME/.acme.sh"
     # The corrected script does NOT mkdir -p its nginx destination itself
@@ -84,7 +92,20 @@ EOF
     chmod +x "$MOCK_BIN_DIR/sudo"
 }
 
-# ── Domain constants are hardcoded, not env-driven ──────────────────────
+# ── Production source integrity and hardcoded domains ───────────────────
+
+@test "source script is runtime-identical to the verified production artifact" {
+    # These two comments are the only permitted difference: shellcheck needs
+    # them for production's intentionally unused diagnostic assignments. They
+    # are removed before comparing the source bytes to the captured artifact.
+    run grep -c '^# shellcheck disable=SC2034 # production parity:' "$WILDCARD_SOURCE"
+    [ "$status" -eq 0 ]
+    [ "$output" = "2" ]
+    actual=$(sed '/^# shellcheck disable=SC2034 # production parity:/d' "$WILDCARD_SOURCE" | sha256sum | awk '{print $1}')
+    [ "$actual" = "$PRODUCTION_WILDCARD_SHA256" ]
+    run grep -Fx 'SCRIPT_DIR="/srv/apps/wecom-archive-365/current/ssl-renew"' "$WILDCARD_SOURCE"
+    [ "$status" -eq 0 ]
+}
 
 @test "hardcoded domain constants are used even when DOMAIN/CDN_DOMAIN/ORIGIN_DOMAIN env vars are set to something else" {
     export DOMAIN="not-the-real-domain.example"
@@ -119,9 +140,8 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"not due yet"* ]]
     # NOT a no-op: no prior .deployed_fp exists, so exit=2 must still lead
-    # to a real deploy -- this is the corrected behavior (exit=2 is not an
-    # early return, unlike the earlier, incorrect capture).
-    [[ "$output" == *"bound to CDN domain $CDN_DOMAIN"* ]]
+    # to a real deploy -- this is the verified production behavior.
+    [[ "$output" == *"bound to $CDN_DOMAIN (CDN)"* ]]
     grep -q "sudo -n /usr/bin/systemctl reload nginx" "$TEST_TMPDIR/sudo_invocations.log"
 }
 
@@ -186,8 +206,8 @@ EOF
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"bound to CDN domain $CDN_DOMAIN"* ]]
-    [[ "$output" == *"bound to origin domain $ORIGIN_DOMAIN"* ]]
+    [[ "$output" == *"bound to $CDN_DOMAIN (CDN)"* ]]
+    [[ "$output" == *"bound to $ORIGIN_DOMAIN (origin)"* ]]
 
     [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
     [ -f "$NGINX_CERT_DIR/privkey.pem" ]
@@ -277,7 +297,7 @@ PYEOF
     run "$WILDCARD"
     [ "$status" -eq 127 ]
     [[ "$output" == *"command not found"* ]]
-    [[ "$output" == *"bound to CDN domain $CDN_DOMAIN"* ]]
+    [[ "$output" == *"bound to $CDN_DOMAIN (CDN)"* ]]
     # The CDN bind genuinely succeeded, but the script died before ever
     # reaching the nginx copy step or recording the fingerprint.
     [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
@@ -285,7 +305,7 @@ PYEOF
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-@test "KNOWN DEFECT: a missing nginx cert directory ALSO halts the script at exit 127 instead of gracefully skipping" {
+@test "KNOWN DEFECT: a missing nginx cert directory records the deployment fingerprint before warn() halts at exit 127" {
     fake_acme_sh 0
     fake_sudo 0
     use_mock_qiniu_helper success
@@ -295,11 +315,25 @@ PYEOF
     run "$WILDCARD"
     [ "$status" -eq 127 ]
     [[ "$output" == *"command not found"* ]]
-    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+}
+
+@test "KNOWN DEFECT: nginx reload failure leaves copied files and fingerprint before warn() halts at exit 127" {
+    fake_acme_sh 0
+    fake_sudo 1
+    use_mock_qiniu_helper success
+    export MOCK_QINIU_CERT_ID="wildcard-certid" MOCK_QINIU_ACTUAL_CERT_ID="wildcard-certid"
+
+    run "$WILDCARD"
+    [ "$status" -eq 127 ]
+    [[ "$output" == *"command not found"* ]]
+    [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ -f "$NGINX_CERT_DIR/privkey.pem" ]
+    [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
 }
 
 @test "no warn()/die() function is defined by this script, and notify.sh is never sourced or invoked" {
-    run grep -nE '^(warn|die)\s*\(\)' "$WILDCARD"
+    run grep -nE '^(warn|die)\s*\(\)' "$WILDCARD_SOURCE"
     [ "$status" -ne 0 ]
     run grep -n "notify.sh" "$WILDCARD"
     [ "$status" -ne 0 ]
