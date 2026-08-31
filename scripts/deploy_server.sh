@@ -127,8 +127,8 @@
 #     deploy that changes this script's own logic already runs the new
 #     logic — this script also carries its own EXPECTED_SHA-aware
 #     fetch/checkout as a fallback for direct/manual invocation. Falls
-#     back to `git pull --ff-only origin main` when EXPECTED_SHA is
-#     unset entirely (manual/first-run use, no pinning at all).
+#     back to fetch -> resolve target -> preflight -> checkout when
+#     EXPECTED_SHA is unset entirely (manual/first-run use, no pinning at all).
 #   - A non-blocking flock on $DEPLOY_STATE_DIR/deploy.lock refuses to
 #     run if another invocation is already in progress, rather than
 #     letting two overlapping runs race each other's PREV_SHA capture,
@@ -186,9 +186,9 @@ GIT_BRANCH="${GIT_BRANCH:-main}"
 # rapid pushes to main can race: run A's CI tests commit X, but by the
 # time run A's deploy step SSHes in and pulls, `origin/main` may already
 # be at commit Y (pushed after X, possibly by a run whose own CI hasn't
-# finished or even failed) — `git pull --ff-only` would silently deploy
-# Y, which THIS run never tested. Left unset (e.g. the documented manual
-# first-run), falls back to the original floating `git pull --ff-only`.
+# finished or even failed) — a floating pull would silently deploy Y, which
+# THIS run never tested. Left unset (e.g. the documented manual first-run),
+# the script fetches, resolves, preflights, and checks out one fetched target.
 EXPECTED_SHA="${EXPECTED_SHA:-}"
 
 # By default the deployment keeps its existing checkout-local configuration.
@@ -377,6 +377,11 @@ _load_deploy_environment() {
 }
 
 _git() { "$GIT_BIN" "$@"; }
+
+# shellcheck source=deploy_preflight.sh
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/deploy_preflight.sh"
+export DEPLOY_PREFLIGHT_GIT_BIN="$GIT_BIN"
 
 _systemctl_restart() {
     if [ -n "$SUDO_BIN" ]; then
@@ -711,8 +716,8 @@ fi
 # clobbering an operator's unreviewed local edit) if tracked files are
 # known-unchanged — enforce that here by checking for modifications to
 # tracked files only. Untracked files (.env.bak.*, qn-py-sdk/, etc.) do
-# not block deployment (git pull --ff-only will still refuse to
-# overwrite one that conflicts with an incoming tracked file).
+# not block deployment (the target-tree preflight and final checkout will
+# still refuse an incoming tracked-file collision).
 if [ -n "$(_git status --porcelain --untracked-files=no)" ]; then
     echo "ERROR: Working tree at $DEPLOY_DIR has modified tracked files." >&2
     echo "  This script will not proceed while tracked files are locally" >&2
@@ -764,12 +769,29 @@ elif [ -n "$EXPECTED_SHA" ]; then
         echo "ERROR: EXPECTED_SHA ($EXPECTED_SHA) is not a fast-forward from the current commit ($PREV_SHA) — refusing to deploy a non-fast-forward or unknown commit." >&2
         exit 1
     fi
+    if ! deploy_preflight_check_untracked_collisions "$EXPECTED_SHA"; then
+        exit 1
+    fi
     if ! _git checkout -B "$GIT_BRANCH" "$EXPECTED_SHA" >/dev/null 2>&1; then
         echo "ERROR: could not check out EXPECTED_SHA ($EXPECTED_SHA)." >&2
         exit 1
     fi
 else
-    _git pull --ff-only "$GIT_REMOTE" "$GIT_BRANCH"
+    # Resolve one fetched target before the preflight and checkout so a manual
+    # deploy cannot inspect one revision then pull a newer, unchecked one.
+    _git fetch --quiet "$GIT_REMOTE" "$GIT_BRANCH"
+    TARGET_SHA=$(_git rev-parse FETCH_HEAD)
+    if ! _git merge-base --is-ancestor "$PREV_SHA" "$TARGET_SHA"; then
+        echo "ERROR: fetched target ($TARGET_SHA) is not a fast-forward from the current commit ($PREV_SHA) — refusing to deploy a non-fast-forward or unknown commit." >&2
+        exit 1
+    fi
+    if ! deploy_preflight_check_untracked_collisions "$TARGET_SHA"; then
+        exit 1
+    fi
+    if ! _git checkout -B "$GIT_BRANCH" "$TARGET_SHA" >/dev/null 2>&1; then
+        echo "ERROR: could not check out fetched target ($TARGET_SHA)." >&2
+        exit 1
+    fi
 fi
 
 CURRENT_SHA=$(_git rev-parse HEAD)
