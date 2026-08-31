@@ -16,7 +16,8 @@ Versioned in this repository:
 
 | Asset | Path | Purpose |
 |------|------|---------|
-| Deploy script | `scripts/deploy_server.sh` | Pull latest code, install deps, run+verify Alembic migration, restart app service, gate on readiness, auto-rollback on failure (see §7) |
+| Deploy script | `scripts/deploy_server.sh` | Resolve a target revision, reject untracked-path ownership collisions before checkout, install deps, run+verify Alembic migration, restart app service, gate on readiness, auto-rollback on failure (see §7) |
+| Checkout ownership-transition preflight (GH-121) | `scripts/deploy_preflight.sh` | Read-only target-tree versus untracked-working-tree collision check, used by CD before checkout and by direct/manual deploys |
 | Revision verification | `backend/scripts/verify_alembic_head.py` | Non-interactive DB-revision-vs-repo-head check used by the deploy script and independently testable |
 | Deploy integration tests | `scripts/tests/deploy_server.bats` | Mocked end-to-end coverage of the deploy script's ordering and rollback behavior |
 | Deploy sudoers capability model (GH-133) | [operations/deploy-sudoers.md](operations/deploy-sudoers.md) | Capability matrix, ffmpeg host-prerequisite decision, systemd wildcard scoping decision, and the production sudoers migration runbook — the source of truth for what root capability the deploy user needs and why |
@@ -390,7 +391,9 @@ flowchart TD
     F_LOCK -->|already held| FAILLOCK[["Deploy FAILS immediately —\nanother deploy in progress,\nnothing pulled, nothing touched"]]
     F_LOCK --> F0["same SSH session, lock still held:\nclean-tree guard, checkout EXPECTED_SHA=github.sha\n-- in the WORKFLOW itself, not deploy_server.sh"]
     F0 -->|non-fast-forward / dirty tree| FAIL0[["Deploy FAILS —\nnothing pulled, nothing touched"]]
-    F0 --> F["same SSH session, same held lock\n(inherited via fd 9):\nrun the just-checked-out scripts/deploy_server.sh"]
+    F0 --> P["GH-121 read-only ownership-transition preflight:\ntarget tree ∩ untracked paths = ∅"]
+    P -->|collision| FAILP[["Deploy FAILS —\npaths listed; no checkout or cleanup"]]
+    P --> F["same SSH session, same held lock\n(inherited via fd 9):\nrun the just-checked-out scripts/deploy_server.sh"]
 
     F --> G["1-3: install deps, compileall"]
     G -->|fails| ROLLBACK_CODE["Restore working tree to\nprevious commit — NO restart\n(old process still running old code)"]
@@ -411,6 +414,37 @@ flowchart TD
     ROLLBACK_CODE --> FAIL1[["Deploy FAILS (non-zero exit)"]]
     ROLLBACK_FULL --> FAIL2[["Deploy FAILS (non-zero exit)\neven if rollback itself succeeded"]]
 ```
+
+#### Checkout ownership-transition preflight (GH-121)
+
+After the clean-tree guard, fetch, and fast-forward check resolve the exact
+`EXPECTED_SHA`, CD performs a **read-only** preflight before `git checkout`.
+It compares the current non-ignored untracked working-tree paths with the
+complete target tree and also catches Git-relevant hierarchy conflicts (for
+example, an untracked symlink at `a` when the target needs `a/b`, or an
+untracked `a/b` beneath a target regular file/symlink at `a`). A collision
+fails the deploy before checkout and prints only the colliding relative paths,
+never artifact contents or hashes.
+
+The workflow reads the helper from `EXPECTED_SHA` with `git show`, rather than
+from the old checkout, so the preflight protects the very deployment that adds
+or changes it. Direct/manual `deploy_server.sh` invocations fetch and resolve
+one target SHA, run the same check, then check out that same SHA. The preflight
+never moves, deletes, overwrites, cleans, or resets a production path; Git's
+checkout protection remains the final backstop for a race after the check.
+
+A collision is an **ownership-transition conflict**, not a generic checkout
+failure. An operator must:
+
+1. verify the server-only artifact and target repository artifact are
+   equivalent and intended to transition ownership;
+2. preserve a backup outside the checkout;
+3. move or remove **only** the verified colliding path (never use `git clean`,
+   `git reset --hard`, or a forced checkout); and
+4. retry the standard CD workflow.
+
+The wildcard SSL migration has additional service-safety and canonical-hash
+steps in [its dedicated adoption runbook](operations/wildcard-ssl-renewal.md#one-time-server-only--tracked-adoption-gh-126).
 
 **Why the checkout happens in the workflow, not only in
 `deploy_server.sh`.** A self-pulling deploy script has an inherent
@@ -456,16 +490,16 @@ candidate that is allowed to enter protected `main`. After merge, the `deploy`
 job passes
 `EXPECTED_SHA=${{ github.sha }}` into the SSH step's script (§7.1), which
 checks out that exact commit (fast-forward only — refuses and exits
-non-zero otherwise) instead of a floating `git pull --ff-only origin
-main`, then invokes the just-checked-out `deploy_server.sh` in the same
-session. This closes a real race: without SHA pinning, if a second push
-lands on `main` while this deploy's SSH step is still starting up,
-`git pull` would silently deploy that second commit instead of the one that
-triggered this CD run. `deploy_server.sh` also carries its own EXPECTED_SHA-aware
-fetch/checkout, reached only for direct/manual invocation (when
-`EXPECTED_SHA` is set but the caller has not already checked it out) —
-`EXPECTED_SHA` unset entirely (e.g. the documented manual first-run with
-no pinning at all) falls back to the original floating pull.
+non-zero otherwise) instead of resolving a floating branch, then invokes the
+just-checked-out `deploy_server.sh` in the same session. This closes a real
+race: without SHA pinning, if a second push lands on `main` while this deploy's
+SSH step is still starting up, a floating deployment could deploy that second
+commit instead of the one that triggered this CD run. `deploy_server.sh` also
+carries its own EXPECTED_SHA-aware fetch/preflight/checkout path, reached only
+for direct/manual invocation (when `EXPECTED_SHA` is set but the caller has
+not already checked it out) — `EXPECTED_SHA` unset entirely (e.g. the
+documented manual first-run with no pinning at all) fetches, resolves,
+preflights, and checks out one fetched target.
 
 **Concurrency protection.** Two layers, matching the two ways a second
 invocation could start:
@@ -603,7 +637,7 @@ server) in `scripts/tests/deploy_server.bats` — all four required
 scenarios (migration success, migration failure, revision mismatch,
 readiness failure + rollback) plus the public-only-failure,
 rollback-also-fails, SHA-pinning, lock-ordering, and
-last-known-good-durability edge cases (26 tests total; re-run
+last-known-good-durability and ownership-transition-preflight edge cases (50 tests total; re-run
 `bats scripts/tests/deploy_server.bats` after any change to this file
 or its test suite, since this count drifts).
 
@@ -614,7 +648,7 @@ The rollback target (`<rollback-target>` above) is read from
 `/srv/apps/wecom-archive-365/shared/deploy_state/last_known_good_sha` —
 deliberately **outside** the git working tree, so it can never trip the
 clean-tree guard in step 1), **not** simply the commit captured right
-before this run's `git pull`/checkout (call that `PREV_SHA`).
+before this run's target checkout (call that `PREV_SHA`).
 
 Why the distinction matters: `PREV_SHA` is only trustworthy as "known
 good" if the *previous* deploy attempt fully succeeded, or its own

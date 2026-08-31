@@ -6,7 +6,7 @@
 # own *_BIN override variables, and DEPLOY_DIR pointed at a per-test mktemp
 # fixture tree — never a real repository, venv, systemd service, network
 # endpoint, or production host. Covers the four scenarios RND-227 requires:
-#   1. full success (pull -> install -> compile -> migrate -> verify ->
+#   1. full success (fetch/checkout -> install -> compile -> migrate -> verify ->
 #      restart -> readiness -> success)
 #   2. migration failure (deploy stops before restart)
 #   3. revision mismatch after a "successful" upgrade command (deploy stops
@@ -31,14 +31,15 @@ line_of() {
 # Scenario 1 — Migration Success
 # ---------------------------------------------------------------------
 
-@test "scenario 1: full success runs pull -> install -> compile -> migrate -> verify -> restart -> readiness -> success" {
+@test "scenario 1: full success runs fetch/checkout -> install -> compile -> migrate -> verify -> restart -> readiness -> success" {
 	run run_deploy
 	[ "$status" -eq 0 ]
 	assert_output_contains "Deploy complete"
 
-	# Ordering: pull before pip before compileall before alembic before
-	# verify_alembic_head.py before systemctl restart before curl.
-	pull_line=$(line_of "git pull")
+	# Ordering: target fetch/checkout before pip before compileall before
+	# alembic before verify_alembic_head.py before systemctl restart before curl.
+	fetch_line=$(line_of "git fetch")
+	checkout_line=$(line_of "git checkout")
 	pip_line=$(line_of "python -m pip install")
 	compile_line=$(line_of "python -m compileall")
 	alembic_line=$(line_of "python -m alembic upgrade head")
@@ -46,7 +47,8 @@ line_of() {
 	restart_line=$(line_of "systemctl restart")
 	curl_line=$(line_of "curl")
 
-	[ -n "$pull_line" ]
+	[ -n "$fetch_line" ]
+	[ -n "$checkout_line" ]
 	[ -n "$pip_line" ]
 	[ -n "$compile_line" ]
 	[ -n "$alembic_line" ]
@@ -54,7 +56,8 @@ line_of() {
 	[ -n "$restart_line" ]
 	[ -n "$curl_line" ]
 
-	[ "$pull_line" -lt "$pip_line" ]
+	[ "$fetch_line" -lt "$checkout_line" ]
+	[ "$checkout_line" -lt "$pip_line" ]
 	[ "$pip_line" -lt "$compile_line" ]
 	[ "$compile_line" -lt "$alembic_line" ]
 	[ "$alembic_line" -lt "$verify_line" ]
@@ -230,13 +233,13 @@ line_of() {
 # Guards
 # ---------------------------------------------------------------------
 
-@test "guard: a dirty working tree aborts before any pull, install, or restart" {
+@test "guard: a dirty working tree aborts before any fetch, checkout, install, or restart" {
 	export MOCK_GIT_DIRTY=1
 	run run_deploy
 	[ "$status" -ne 0 ]
 	assert_output_contains "modified tracked files"
 
-	run grep -c "git pull" "$CMD_LOG"
+	run grep -cE "git fetch|git checkout" "$CMD_LOG"
 	[ "$status" -ne 0 ]
 	run grep -c "systemctl restart" "$CMD_LOG"
 	[ "$status" -ne 0 ]
@@ -280,7 +283,7 @@ line_of() {
 	assert_output_not_contains "Rolling back"
 }
 
-@test "QA-05 regression: a missing .venv after a successful pull restores the working tree (not left mid-deploy)" {
+@test "QA-05 regression: a missing .venv after a successful checkout restores the working tree (not left mid-deploy)" {
 	rm -rf "$DEPLOY_DIR/backend/.venv"
 	run run_deploy
 	[ "$status" -ne 0 ]
@@ -291,7 +294,7 @@ line_of() {
 	[ "$status" -ne 0 ] # never restarted
 }
 
-@test "QA-05 regression: a missing backend/.env after a successful pull restores the working tree" {
+@test "QA-05 regression: a missing backend/.env after a successful checkout restores the working tree" {
 	rm -f "$DEPLOY_DIR/backend/.env"
 	run run_deploy
 	[ "$status" -ne 0 ]
@@ -334,7 +337,7 @@ EOF
 	[ "$(known_good)" = "$NEW_SHA" ]
 }
 
-@test "QA-04: rollback targets the persisted last-known-good commit, not just pre-pull HEAD" {
+@test "QA-04: rollback targets the persisted last-known-good commit, not just pre-checkout HEAD" {
 	# Simulates: an EARLIER deploy left HEAD at a torn/unverified commit
 	# ("torn-sha") without updating last-known-good, which still points
 	# at the actual last-proven-healthy commit ("real-good-sha"). THIS
@@ -352,7 +355,7 @@ EOF
 	[ "$(known_good)" = "real-good-sha-000000000000000000000" ]
 }
 
-@test "QA-04: with no persisted state yet, rollback falls back to pre-pull HEAD (bootstrap case)" {
+@test "QA-04: with no persisted state yet, rollback falls back to pre-checkout HEAD (bootstrap case)" {
 	# No seed_known_good call -- $DEPLOY_STATE_DIR/last_known_good_sha
 	# does not exist, exactly like the first deploy after adopting
 	# RND-227 on a server that predates it.
@@ -363,7 +366,96 @@ EOF
 	[ "$(current_head)" = "$PREV_SHA" ]
 }
 
-@test "QA-01: EXPECTED_SHA pins the deploy to the CI-tested commit instead of a floating pull" {
+# ---------------------------------------------------------------------
+# GH-121 — untracked-path / target-tree checkout preflight
+# ---------------------------------------------------------------------
+
+@test "GH-121: no untracked collision permits the pinned deploy to proceed" {
+	export EXPECTED_SHA="$NEW_SHA"
+
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_not_contains "deployment preflight blocked checkout"
+	[ "$(current_head)" = "$NEW_SHA" ]
+}
+
+@test "GH-121: CD reads the target helper before its checkout" {
+	local workflow="$SCRIPTS_ROOT/../.github/workflows/deploy.yml"
+	local preflight_line checkout_line
+	preflight_line=$(grep -n 'git show "$EXPECTED_SHA:scripts/deploy_preflight.sh"' "$workflow" | cut -d: -f1)
+	checkout_line=$(grep -n 'git checkout -B main "$EXPECTED_SHA"' "$workflow" | cut -d: -f1)
+
+	[ -n "$preflight_line" ]
+	[ -n "$checkout_line" ]
+	[ "$preflight_line" -lt "$checkout_line" ]
+}
+
+@test "GH-121: an untracked file colliding with the target fails before checkout without exposing or deleting it" {
+	local collision_path="server-only-artifact"
+	local synthetic_content="synthetic-server-only-content-must-not-appear"
+	printf '%s\n' "$synthetic_content" >"$DEPLOY_DIR/$collision_path"
+	export EXPECTED_SHA="$NEW_SHA"
+	export MOCK_GIT_UNTRACKED_PATHS="$collision_path"
+	export MOCK_GIT_TARGET_PATHS="$collision_path"
+
+	run run_deploy
+	[ "$status" -ne 0 ]
+	assert_output_contains "deployment preflight blocked checkout"
+	assert_output_contains "$collision_path"
+	assert_output_contains "No checkout or cleanup was performed"
+	assert_output_not_contains "$synthetic_content"
+	[ -f "$DEPLOY_DIR/$collision_path" ]
+	[ "$(cat "$DEPLOY_DIR/$collision_path")" = "$synthetic_content" ]
+	[ "$(current_head)" = "$PREV_SHA" ]
+	run grep -c "^git checkout" "$CMD_LOG"
+	[ "$status" -ne 0 ]
+}
+
+@test "GH-121: an unrelated untracked path does not block checkout" {
+	printf 'synthetic-diagnostic\n' >"$DEPLOY_DIR/unrelated-diagnostic"
+	export EXPECTED_SHA="$NEW_SHA"
+	export MOCK_GIT_UNTRACKED_PATHS="unrelated-diagnostic"
+	export MOCK_GIT_TARGET_PATHS="repo-managed-artifact"
+
+	run run_deploy
+	[ "$status" -eq 0 ]
+	[ -f "$DEPLOY_DIR/unrelated-diagnostic" ]
+	[ "$(current_head)" = "$NEW_SHA" ]
+}
+
+@test "GH-121: an untracked symlink blocks a target path below that symlink" {
+	local collision_path="server-only-link"
+	ln -s "/synthetic-server-only-target" "$DEPLOY_DIR/$collision_path"
+	export EXPECTED_SHA="$NEW_SHA"
+	export MOCK_GIT_UNTRACKED_PATHS="$collision_path"
+	export MOCK_GIT_TARGET_PATHS="$collision_path/repo-child"
+
+	run run_deploy
+	[ "$status" -ne 0 ]
+	assert_output_contains "$collision_path"
+	[ -L "$DEPLOY_DIR/$collision_path" ]
+	[ "$(current_head)" = "$PREV_SHA" ]
+	run grep -c "^git checkout" "$CMD_LOG"
+	[ "$status" -ne 0 ]
+}
+
+@test "GH-121: an untracked descendant blocks a target regular-file parent" {
+	mkdir -p "$DEPLOY_DIR/server-only-directory"
+	printf 'synthetic-child\n' >"$DEPLOY_DIR/server-only-directory/child"
+	export EXPECTED_SHA="$NEW_SHA"
+	export MOCK_GIT_UNTRACKED_PATHS="server-only-directory/child"
+	export MOCK_GIT_TARGET_PATHS="server-only-directory"
+
+	run run_deploy
+	[ "$status" -ne 0 ]
+	assert_output_contains "server-only-directory/child"
+	[ -f "$DEPLOY_DIR/server-only-directory/child" ]
+	[ "$(current_head)" = "$PREV_SHA" ]
+	run grep -c "^git checkout" "$CMD_LOG"
+	[ "$status" -ne 0 ]
+}
+
+@test "QA-01: EXPECTED_SHA pins the deploy to the CI-tested commit" {
 	export EXPECTED_SHA="$NEW_SHA"
 	run run_deploy
 	[ "$status" -eq 0 ]
@@ -373,7 +465,7 @@ EOF
 	[ "$status" -ne 0 ] # floating `git pull` must never run when pinned
 }
 
-@test "QA-01: a non-fast-forward EXPECTED_SHA is refused before any pull/restart" {
+@test "QA-01: a non-fast-forward EXPECTED_SHA is refused before checkout/restart" {
 	export EXPECTED_SHA="$NEW_SHA"
 	export MOCK_GIT_MERGE_BASE_MODE=fail
 	run run_deploy
@@ -384,11 +476,15 @@ EOF
 	[ "$(current_head)" = "$PREV_SHA" ] # never even checked out
 }
 
-@test "QA-01: EXPECTED_SHA unset falls back to the original floating git pull (manual/first-run use)" {
+@test "GH-121: EXPECTED_SHA unset resolves, preflights, and checks out one fetched target (manual/first-run use)" {
 	run run_deploy
 	[ "$status" -eq 0 ]
-	run grep -c "^git pull" "$CMD_LOG"
+	run grep -c "^git fetch" "$CMD_LOG"
 	[ "$status" -eq 0 ]
+	run grep -c "^git checkout" "$CMD_LOG"
+	[ "$status" -eq 0 ]
+	run grep -c "^git pull" "$CMD_LOG"
+	[ "$status" -ne 0 ]
 	assert_output_not_contains "Pinned to EXPECTED_SHA"
 }
 
@@ -396,7 +492,7 @@ EOF
 # Independent QA regression tests (RND-227 QA round 2)
 # ---------------------------------------------------------------------
 
-@test "QA round 2 / bootstrap: when the caller already checked out EXPECTED_SHA and exported PREV_SHA, the script skips its own pull/checkout" {
+@test "QA round 2 / bootstrap: when the caller already checked out EXPECTED_SHA and exported PREV_SHA, the script skips its own fetch/checkout" {
 	# Simulates the new .github/workflows/deploy.yml flow: the workflow's
 	# OWN inline script already fetched+checked-out EXPECTED_SHA and
 	# exported PREV_SHA before invoking deploy_server.sh -- this is what

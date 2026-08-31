@@ -25,11 +25,12 @@ backend/requirements-dev.txt
 # ── Deployment reference ────────────────────────────────────────────
 # Sanitized on export (real hostnames and the private repo's deploy path
 # are rewritten to placeholders — see SANITIZERS in the export script).
-# deploy_server.sh and scripts/tests ship together on purpose: the test
-# workflow shellchecks the former and runs the latter's bats suite, so
-# dropping either one turns the public repo's CI red on arrival.
+# deploy_server.sh, its checkout-preflight helper, and scripts/tests ship
+# together on purpose: the test workflow shellchecks the scripts and runs the
+# bats suite, so dropping any of them turns the public repo's CI red on arrival.
 deploy/systemd
 scripts/deploy_server.sh
+scripts/deploy_preflight.sh
 scripts/backup_once.sh
 scripts/disk_usage_check.sh
 scripts/run_with_escalating_timeout.py
