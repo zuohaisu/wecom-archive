@@ -467,20 +467,18 @@ def test_archive_worker_never_runs_full_external_contact_sync(
     calls: list[str] = []
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
     monkeypatch.setenv("ARCHIVE_WORKER_TRIGGER_SOURCE", source)
-    # RND-387: with neither WECOM_TENANT_ID nor WECOM_CORP_ID set, main()
-    # enters the multi-tenant loop mode which needs DATABASE_URL. Pin the
-    # legacy env chain — the contract under test is mode-agnostic.
-    monkeypatch.setenv("WECOM_CORP_ID", "corp-legacy")
-    monkeypatch.setattr(worker, "_run_script", lambda _path, label: calls.append(label))
     monkeypatch.setattr(
         worker,
-        "_run_best_effort_reachability_automation",
-        lambda: calls.append("reachability"),
+        "_run_all_tenants_chain",
+        lambda: calls.extend(
+            ["sync_wecom_archive_once.py", "decrypt_wecom_messages_once.py", "reachability"]
+        )
+        or ["tenant-sentinel"],
     )
     monkeypatch.setattr(
         worker,
         "_request_media_worker_after_archive",
-        lambda: worker.MediaWorkerDispatch.NO_WORK,
+        lambda _tenant_id: worker.MediaWorkerDispatch.NO_WORK,
     )
 
     with pytest.raises(SystemExit) as result:

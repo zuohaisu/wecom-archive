@@ -20,7 +20,6 @@ from app.settings import (
     get_media_storage_settings,
     get_thumbnail_settings,
     get_voice_transcode_settings,
-    get_wecom_callback_settings,
     get_wecom_oauth_settings,
 )
 
@@ -48,8 +47,6 @@ _ENV_ACCESSORS: dict[str, Callable[[], Optional[str]]] = {
     "wecom_corp_id": lambda: get_wecom_oauth_settings().wecom_corp_id,
     "wecom_agent_id": lambda: get_wecom_oauth_settings().wecom_agent_id,
     "wecom_oauth_secret": lambda: get_wecom_oauth_settings().wecom_oauth_secret,
-    "wecom_callback_token": lambda: get_wecom_callback_settings().wecom_callback_token,
-    "wecom_callback_encoding_aes_key": lambda: get_wecom_callback_settings().wecom_callback_encoding_aes_key,
     "media_thumbnail_enabled": lambda: get_thumbnail_settings().media_thumbnail_enabled,
     "media_thumbnail_max_edge": lambda: get_thumbnail_settings().media_thumbnail_max_edge,
     "media_thumbnail_jpeg_quality": lambda: get_thumbnail_settings().media_thumbnail_jpeg_quality,

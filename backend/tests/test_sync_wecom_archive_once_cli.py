@@ -1,12 +1,11 @@
 """
 CLI-equivalence tests for scripts/sync_wecom_archive_once.py (RND-222).
 
-Confirms the thin shell (env parsing, tenant resolution, SDK/slice
-lifecycle, print/exit-code contract) behaves exactly as documented after
-the GetChatData call and persistence logic moved to
-app.services.sync_worker.run_sync_once() — same [INFO]/[FAIL]/[PASS]
-output lines, same exit codes. No declared behavior change for sync (see
-RND-222 ticket §2.3 — the audit fix is decrypt-only).
+Confirms the thin shell resolves its selected tenant's encrypted
+TenantWecomConfig before SDK/slice lifecycle and keeps its documented
+[INFO]/[FAIL]/[PASS] output lines and exit codes. The historical
+``_require_tenant_id`` helper remains importable for non-runtime recovery
+scripts, but normal sync no longer selects a tenant from global CorpID.
 
 Run (from backend/):
     pytest tests/test_sync_wecom_archive_once_cli.py -v
@@ -17,6 +16,7 @@ from __future__ import annotations
 import sys
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
 
 from app.db.models import ArchiveMessage, SyncState
@@ -29,11 +29,17 @@ from tests.fakes import (
 )
 
 
-def _set_required_env(monkeypatch) -> None:
+_FIELD_KEY = Fernet.generate_key().decode("ascii")
+
+
+def _set_required_env(monkeypatch, tenant_id: str = _TENANT_A) -> None:
     monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
     monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
-    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "secret")
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", _FIELD_KEY)
+    monkeypatch.setenv("WECOM_TENANT_ID", tenant_id)
+    # Ambient legacy values must not select credentials for this shell.
+    monkeypatch.setenv("WECOM_CORP_ID", "ambient-oauth-corp")
+    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "ambient-legacy-secret")
 
 
 def _install_fake_sdk(monkeypatch, script, fake: FakeWecomSdk) -> None:
@@ -63,7 +69,9 @@ def test_main_syncs_new_records_and_prints_expected_summary(
     engine = worker_engine
     with Session(engine) as db:
         insert_tenant(db, _TENANT_A)
-        insert_tenant_wecom_config(db, _TENANT_A, "corp1")
+        config = insert_tenant_wecom_config(db, _TENANT_A, "corp1")
+        config.set_app_secret("secret")
+        db.commit()
 
     fake = FakeWecomSdk()
     fake.set_chat_data(
@@ -113,7 +121,9 @@ def test_main_fails_when_get_chat_data_returns_nonzero(
     engine = worker_engine
     with Session(engine) as db:
         insert_tenant(db, _TENANT_A)
-        insert_tenant_wecom_config(db, _TENANT_A, "corp1")
+        config = insert_tenant_wecom_config(db, _TENANT_A, "corp1")
+        config.set_app_secret("secret")
+        db.commit()
 
     fake = FakeWecomSdk()
     fake.set_chat_data([], ret=90002)
@@ -150,7 +160,7 @@ def test_main_fails_fast_when_no_active_tenant_config(monkeypatch, capsys, worke
     assert exc.value.code == 1
 
     out = capsys.readouterr().out
-    assert "[FAIL] No active tenant found for this corp" in out
+    assert "sync_worker error_class=tenant_config_unavailable" in out
 
 
 def test_sync_worker_symbols_remain_importable_from_the_script() -> None:

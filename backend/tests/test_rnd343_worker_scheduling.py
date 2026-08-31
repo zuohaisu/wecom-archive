@@ -51,12 +51,16 @@ def test_successful_archive_dispatches_media_only_after_archive_lock_releases(
     worker = _module()
     calls: list[str] = []
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
     monkeypatch.setenv("ARCHIVE_WORKER_TRIGGER_SOURCE", "callback")
-    monkeypatch.setattr(worker, "_run_script", lambda _path, label: calls.append(label))
-    monkeypatch.setattr(worker, "_run_best_effort_reachability_automation", lambda: calls.append("reachability"))
+    monkeypatch.setattr(
+        worker,
+        "_run_all_tenants_chain",
+        lambda: calls.extend(["sync_wecom_archive_once.py", "decrypt_wecom_messages_once.py", "reachability"])
+        or ["tenant-sentinel"],
+    )
 
-    def _media_dispatch() -> MediaWorkerDispatch:
+    def _media_dispatch(tenant_id: str) -> MediaWorkerDispatch:
+        assert tenant_id == "tenant-sentinel"
         # A second fd can acquire the archive lock only after main()'s finally
         # released it, proving the media child cannot overlap archive work.
         fd = os.open(str(tmp_path / "archive.lock"), os.O_CREAT | os.O_RDWR, 0o640)
@@ -86,17 +90,14 @@ def test_archive_failure_never_dispatches_media(monkeypatch, tmp_path, failing_l
     worker = _module()
     dispatched: list[object] = []
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
     monkeypatch.setattr(
         worker,
-        "_run_script",
-        lambda _path, label: (
-            (_ for _ in ()).throw(worker.ArchiveWorkerExit(1, "child_worker_failed"))
-            if label == failing_label
-            else None
-        ),
+        "_run_all_tenants_chain",
+        lambda: (_ for _ in ()).throw(worker.ArchiveWorkerExit(1, "child_worker_failed")),
     )
-    monkeypatch.setattr(worker, "_request_media_worker_after_archive", lambda: dispatched.append(1))
+    monkeypatch.setattr(
+        worker, "_request_media_worker_after_archive", lambda _tenant_id: dispatched.append(1)
+    )
 
     with pytest.raises(SystemExit) as result:
         worker.main()
@@ -115,11 +116,10 @@ def test_archive_unexpected_failure_is_redacted_and_has_final_lifecycle(
     worker = _module()
     unsafe_detail = "SENTINEL private_path=/srv/private?sig=fixture-only"
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
     monkeypatch.setattr(
         worker,
-        "_run_script",
-        lambda _path, _label: (_ for _ in ()).throw(RuntimeError(unsafe_detail)),
+        "_run_all_tenants_chain",
+        lambda: (_ for _ in ()).throw(RuntimeError(unsafe_detail)),
     )
 
     with pytest.raises(SystemExit) as result:
@@ -171,6 +171,8 @@ def test_timer_templates_are_low_frequency_staggered_and_retryable() -> None:
     assert archive_timer["Unit"] == "wecom-archive-worker.service"
     assert media_timer["Unit"] == "wecom-archive-media-download.service"
     assert archive_service["Environment"] == "ARCHIVE_WORKER_TRIGGER_SOURCE=timer"
+    assert "WECOM_CORP_ID" not in archive_service["ExecStart"]
+    assert "WECOM_ARCHIVE_SECRET" not in archive_service["ExecStart"]
     assert "--retry" in media_service["ExecStart"]
     assert "--trigger-source timer" in media_service["ExecStart"]
     assert media_event_service["Type"] == "oneshot"

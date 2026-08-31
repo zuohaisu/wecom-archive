@@ -17,7 +17,7 @@ from enum import Enum
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Tenant, TenantWecomConfig
+from app.db.models import Tenant
 from app.db.session import get_engine
 from app.media_download import (
     GENERIC_DOWNLOAD_MSGTYPES,
@@ -72,26 +72,6 @@ def _positive(raw: str, default: int) -> int:
         return max(1, int(raw.strip()))
     except (AttributeError, ValueError):
         return default
-
-
-def _active_tenant_id() -> str | None:
-    """Resolve the environment-scoped corp to an active tenant safely."""
-    corp_id = os.environ.get("WECOM_CORP_ID", "").strip()
-    if not corp_id:
-        return None
-    try:
-        with Session(get_engine()) as session:
-            row = (
-                session.query(TenantWecomConfig)
-                .filter(
-                    TenantWecomConfig.corp_id == corp_id,
-                    TenantWecomConfig.is_active.is_(True),
-                )
-                .first()
-            )
-            return row.tenant_id if row is not None else None
-    except Exception:  # noqa: BLE001 -- callback/worker dispatch must fail closed without DB detail
-        return None
 
 
 def _pending_media_check(tenant_id: str) -> PendingMediaCheck:
@@ -181,17 +161,15 @@ def dispatch_media_worker(
     The systemd path unit starts the existing generic media CLI, which owns
     candidate selection, the media lock, retry state, SDK lifecycle, and
     persistence. This read-only preflight prevents no-media archive runs from
-    emitting a meaningless worker wake-up.  A caller that already resolved a
-    tenant (per-tenant worker chain) passes ``tenant_id``; the env-scoped
-    resolution remains the default for the single-corp deployment.
+    emitting a meaningless worker wake-up. A caller that already resolved a
+    tenant passes ``tenant_id``; missing tenant context fails closed rather
+    than deriving archive ownership from ambient process configuration.
     """
     source = _safe_source(trigger_source)
     if not _enabled():
         logger.info("media_worker trigger_source=%s trigger=no-work reason=disabled", source)
         return MediaWorkerDispatch.NO_WORK
 
-    if tenant_id is None:
-        tenant_id = _active_tenant_id()
     if tenant_id is None:
         logger.error("media_worker trigger_source=%s trigger=dispatch-failed error_class=tenant_unavailable", source)
         return MediaWorkerDispatch.FAILED

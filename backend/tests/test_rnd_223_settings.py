@@ -20,14 +20,12 @@ from app.settings import (
     MediaStorageSettings,
     ThumbnailSettings,
     VoiceTranscodeSettings,
-    WecomCallbackSettings,
     WecomOAuthSettings,
     get_auth_settings,
     get_database_settings,
     get_media_storage_settings,
     get_thumbnail_settings,
     get_voice_transcode_settings,
-    get_wecom_callback_settings,
     get_wecom_oauth_settings,
 )
 
@@ -65,19 +63,6 @@ def test_wecom_oauth_settings_defaults(monkeypatch) -> None:
     assert settings.wecom_agent_id == ""
     assert settings.wecom_oauth_secret == ""
     assert settings.admin_domain == ""
-
-
-def test_wecom_callback_settings_defaults(monkeypatch) -> None:
-    for name in (
-        "WECOM_CALLBACK_TOKEN",
-        "WECOM_CALLBACK_ENCODING_AES_KEY",
-        "WECOM_CORP_ID",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    settings = get_wecom_callback_settings()
-    assert settings.wecom_callback_token == ""
-    assert settings.wecom_callback_encoding_aes_key == ""
-    assert settings.wecom_corp_id == ""
 
 
 def test_media_storage_settings_defaults(monkeypatch) -> None:
@@ -182,14 +167,6 @@ def test_wecom_oauth_settings_has_no_process_level_cache(monkeypatch) -> None:
     assert get_wecom_oauth_settings().wecom_corp_id == "corp-b"
 
 
-def test_wecom_callback_settings_has_no_process_level_cache(monkeypatch) -> None:
-    monkeypatch.setenv("WECOM_CALLBACK_TOKEN", "token-a")
-    assert get_wecom_callback_settings().wecom_callback_token == "token-a"
-
-    monkeypatch.setenv("WECOM_CALLBACK_TOKEN", "token-b")
-    assert get_wecom_callback_settings().wecom_callback_token == "token-b"
-
-
 def test_media_storage_settings_has_no_process_level_cache(monkeypatch) -> None:
     monkeypatch.setenv("MEDIA_STORAGE_PROVIDER", "local")
     assert get_media_storage_settings().media_storage_provider == "local"
@@ -221,7 +198,6 @@ def test_factories_are_not_memoized_functions() -> None:
         (get_database_settings, DatabaseSettings),
         (get_auth_settings, AuthSettings),
         (get_wecom_oauth_settings, WecomOAuthSettings),
-        (get_wecom_callback_settings, WecomCallbackSettings),
         (get_media_storage_settings, MediaStorageSettings),
         (get_thumbnail_settings, ThumbnailSettings),
         (get_voice_transcode_settings, VoiceTranscodeSettings),

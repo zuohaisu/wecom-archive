@@ -228,7 +228,7 @@ rm -rf /srv/apps/wecom-archive-365/shared/backups/.tmp/restored.dump
 
 | 路径 | Required? | 判断依据 |
 |---|---|---|
-| `backend/.env` | **必需** | 运行时全部机密的唯一来源：DB 凭据、`WECOM_ARCHIVE_SECRET`、`FIELD_ENCRYPTION_KEY`（`key_versions` 字段加密根密钥）、支付/短信等第三方凭据。不在 Git、provider 控制台或密码管理器里，无法重建。 |
+| `backend/.env` | **必需** | 运行时环境机密的来源：DB 凭据、`FIELD_ENCRYPTION_KEY`（`key_versions` 字段加密根密钥）、支付/短信等第三方凭据。归档 secret 属于加密的 tenant-scoped 配置，不再从全局 `WECOM_ARCHIVE_SECRET` 读取。不在 Git、provider 控制台或密码管理器里，无法重建。 |
 | `shared/keys/` | **必需** | 磁盘上的 RSA 私钥材料（如 `private_key_v1.pem`）。WeCom 无法"重新签发"丢失的私钥，只能轮换出一把新的——那是一次生产事故，不是一次恢复。 |
 | `shared/private_keys/` | 可选 | §4 "绝不清理"清单里与 `shared/keys` 并列出现的历史路径命名；不确定当前是否仍在使用，存在则一并打包，不存在不影响恢复（不 fail-closed）。 |
 | `shared/backup.env` | 可选 | 只含 `BACKUP_GPG_PASSPHRASE`——该密码已在 KeePassXC 有独立副本，**不是**本 bundle 要补的缺口；作为纵深防御选择性打入密文内部（bundle 目的地本身只落密文，不会因此在异地暴露明文）。 |

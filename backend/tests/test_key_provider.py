@@ -3,12 +3,18 @@ from __future__ import annotations
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.fernet import Fernet
+import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import KeyVersion, Tenant
-from app.key_provider import KmsEnvelopeKeyProvider, LocalFileKeyProvider, get_key_provider
+from app.key_provider import (
+    KeyProviderError,
+    KmsEnvelopeKeyProvider,
+    LocalFileKeyProvider,
+    get_key_provider,
+)
 from app.services.decrypt_worker import run_decrypt_once
 from tests.fakes import (
     FakeWecomSdk,
@@ -92,13 +98,12 @@ def test_same_publickey_version_is_allowed_for_two_tenants_but_not_one_tenant() 
         raise AssertionError("same tenant must not reuse a publickey_ver")
 
 
-def test_provider_factory_defaults_to_local_file(monkeypatch, tmp_path) -> None:
+def test_provider_factory_fails_closed_without_a_tenant_key_version(monkeypatch) -> None:
     db = _key_db()
-    private_key, _ = generate_test_rsa_keypair()
-    path = tmp_path / "legacy.pem"
-    path.write_text(_pem(private_key))
     monkeypatch.delenv("KEY_PROVIDER", raising=False)
-    assert get_key_provider(db, legacy_private_key_path=str(path)).get_private_key("unregistered", 1).private_numbers() == private_key.private_numbers()
+
+    with pytest.raises(KeyProviderError, match="Private key retrieval failed"):
+        get_key_provider(db).get_private_key("unregistered", 1)
 
 
 def test_decrypt_batch_writes_key_version_audit_record(worker_db, monkeypatch) -> None:

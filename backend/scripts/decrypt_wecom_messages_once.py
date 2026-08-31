@@ -2,7 +2,7 @@
 """
 One-shot decrypt and normalise pipeline for WeCom archived text messages.
 
-Loads environment, resolves the active tenant for WECOM_CORP_ID,
+Loads environment, resolves the active tenant selected by WECOM_TENANT_ID,
 initialises the WeCom Finance SDK, then delegates the actual decrypt loop
 to app.services.decrypt_worker.run_decrypt_once() (RND-222) — this script
 is now only the CLI shell: env/argument parsing, tenant resolution, SDK
@@ -25,20 +25,15 @@ Required environment variables:
     DATABASE_URL              PostgreSQL connection string
     WECOM_SDK_LIB_PATH        Absolute path to libWeWorkFinanceSdk_C.so
 
-    Either the per-tenant mode:
     WECOM_TENANT_ID           Resolves the active tenant config row and uses
                               its stored CorpID / archive secret / publickey
                               version / RSA private key (FIELD_ENCRYPTION_KEY
-                              must be set), or the legacy single-corp mode:
-    WECOM_CORP_ID             WeCom corporation ID
-    WECOM_ARCHIVE_SECRET      WeCom conversation archive secret
-    WECOM_PRIVATE_KEY_PATH    Absolute path to RSA private key PEM file
-    WECOM_PUBLIC_KEY_VERSION  Expected publickey_ver for current private key
+                              must be set).
 
 Exit codes:
     0  Success (all records processed, possibly some failed)
-    1  Fatal initialisation failure (env, SDK load, DB connect, no active
-       tenant for WECOM_CORP_ID or WECOM_TENANT_ID)
+    1  Fatal initialisation failure (env, SDK load, DB connect, or unavailable
+       tenant-scoped credentials)
 
 Safety constraints:
     - No decrypted message content is printed.
@@ -61,7 +56,6 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from app.crypto import FieldDecryptionError
-from app.db.models import TenantWecomConfig
 from app.key_provider import KeyProviderError, get_key_provider
 from app.sdk import wecom_sdk
 from app.services.decrypt_worker import (  # noqa: F401 -- re-exported for backward-compat imports
@@ -135,48 +129,6 @@ def _load_private_key(pem_path: str) -> rsa.RSAPrivateKey:
 
 
 # ---------------------------------------------------------------------------
-# Tenant resolution
-# ---------------------------------------------------------------------------
-
-
-def _require_tenant_id(session: Session, corp_id: str) -> str:
-    """Return the active tenant_id for *corp_id*, or exit 1.
-
-    Exits non-zero if the tenant_wecom_configs table is absent (migration
-    0002 not applied), no active row matches the corp, or any DB error
-    occurs. Decrypt must never proceed without a valid tenant (RND-222
-    tenant-scope audit fix — see app/services/decrypt_worker.py's module
-    docstring) — caller must not handle SystemExit.
-    """
-    try:
-        row = (
-            session.query(TenantWecomConfig)
-            .filter(
-                TenantWecomConfig.corp_id == corp_id,
-                TenantWecomConfig.is_active == True,  # noqa: E712
-            )
-            .first()
-        )
-    except Exception as exc:
-        print(
-            f"[FAIL] Tenant resolution DB error ({type(exc).__name__}). "
-            "Run alembic upgrade head and bootstrap_default_tenant.py first.",
-            flush=True,
-        )
-        sys.exit(1)
-
-    if row is None:
-        print(
-            "[FAIL] No active tenant found for this corp. "
-            "Run bootstrap_default_tenant.py after migration 0002.",
-            flush=True,
-        )
-        sys.exit(1)
-
-    return row.tenant_id
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -185,73 +137,44 @@ def main() -> None:
     # --- 1. Load environment ---
     database_url = _require_env("DATABASE_URL")
     lib_path = _require_env("WECOM_SDK_LIB_PATH")
-    # Retained as the local_file compatibility fallback. kms_envelope reads
-    # the tenant-scoped encrypted value from KeyVersion instead.
-    private_key_path = os.environ.get("WECOM_PRIVATE_KEY_PATH", "").strip()
-
     engine = create_engine(database_url)
     _configure_sqlite_for_savepoints_if_needed(engine)
 
-    # --- 2. Resolve credentials and tenant (before SDK init — RND-222
-    # tenant-scope audit fix; fail fast, matching the other worker shells'
-    # existing tenant-first ordering). The per-tenant mode reads every
-    # credential from the tenant config row; the env mode is unchanged.
-    tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
-    config = None
-    if tenant_id_env:
-        with Session(engine) as session:
-            try:
-                credentials = resolve_tenant_archive_credentials(session, tenant_id_env)
-            except TenantCredentialError as exc:
-                print(
-                    f"[FAIL] decrypt_worker error_class={exc.error_class} "
-                    "Tenant archive credentials are unavailable",
-                    flush=True,
-                )
-                sys.exit(1)
-            config = credentials.config
-            corp_id = credentials.corp_id
-            secret = credentials.archive_secret
-            tenant_id = credentials.tenant_id
-        expected_pubkey_ver_str = os.environ.get("WECOM_PUBLIC_KEY_VERSION", "").strip()
-        if not expected_pubkey_ver_str and config.publickey_version is not None:
-            expected_pubkey_ver_str = str(config.publickey_version)
-        if not expected_pubkey_ver_str:
+    # --- 2. Resolve credentials and tenant before SDK init. The tenant row
+    # is the sole archive and key-version authority for this normal runtime.
+    tenant_id_env = _require_env("WECOM_TENANT_ID")
+    with Session(engine) as session:
+        try:
+            credentials = resolve_tenant_archive_credentials(session, tenant_id_env)
+        except TenantCredentialError as exc:
             print(
-                "[FAIL] Neither WECOM_PUBLIC_KEY_VERSION nor the tenant "
-                "config publickey_version is set",
+                f"[FAIL] decrypt_worker error_class={exc.error_class} "
+                "Tenant archive credentials are unavailable",
                 flush=True,
             )
             sys.exit(1)
-    else:
-        corp_id = _require_env("WECOM_CORP_ID")
-        secret = _require_env("WECOM_ARCHIVE_SECRET")
-        expected_pubkey_ver_str = _require_env("WECOM_PUBLIC_KEY_VERSION")
-        with Session(engine) as session:
-            tenant_id: str = _require_tenant_id(session, corp_id)
+        config = credentials.config
+        corp_id = credentials.corp_id
+        secret = credentials.archive_secret
+        tenant_id = credentials.tenant_id
 
-    try:
-        expected_pubkey_ver = int(expected_pubkey_ver_str)
-    except ValueError:
-        print(
-            f"[FAIL] WECOM_PUBLIC_KEY_VERSION is not a valid integer: "
-            f"{expected_pubkey_ver_str!r}",
-            flush=True,
-        )
+    expected_pubkey_ver = config.publickey_version
+    if expected_pubkey_ver is None or expected_pubkey_ver < 1:
+        print("[FAIL] Tenant config publickey_version is unavailable", flush=True)
         sys.exit(1)
 
     # --- 3. Resolve the tenant/version private key. The provider owns all
     # file/database key material handling and intentionally exposes no detail
     # on failure, so a PEM can never reach CLI output. When no provider can
-    # serve the key, the per-tenant config row's own stored private key is
-    # the tenant's fallback (the T1 wizard persists it there).
+    # serve the key, the tenant config row's own stored private key is the
+    # tenant-scoped fallback (the T1 wizard persists it there).
     with Session(engine) as session:
         try:
-            private_key = get_key_provider(
-                session, legacy_private_key_path=private_key_path or None
-            ).get_private_key(tenant_id, expected_pubkey_ver)
+            private_key = get_key_provider(session).get_private_key(
+                tenant_id, expected_pubkey_ver
+            )
         except KeyProviderError:
-            if config is None or not config.private_key_encrypted:
+            if not config.private_key_encrypted:
                 print("[FAIL] Private key retrieval failed", flush=True)
                 sys.exit(1)
             try:

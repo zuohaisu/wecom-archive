@@ -1,11 +1,9 @@
 """Tenant-scoped private-key providers used by the decrypt CLI.
 
-``local_file`` preserves legacy/local-file compatibility: a KeyVersion contains
-an on-host PEM path, with ``WECOM_PRIVATE_KEY_PATH`` available as a fallback
-while old deployments populate KeyVersion. ``kms_envelope`` stores a Fernet
-envelope in that same legacy column; the decrypted PEM exists only in process
-memory. These fallbacks are transitional runtime debt, not a hosted-product
-self-hosting commitment.
+``local_file`` resolves the PEM path registered for the selected tenant's
+``KeyVersion``. ``kms_envelope`` stores a Fernet envelope in that same column;
+the decrypted PEM exists only in process memory. Neither provider accepts a
+global private-key fallback.
 """
 from __future__ import annotations
 
@@ -47,11 +45,7 @@ class KeyProvider(ABC):
 
 
 class LocalFileKeyProvider(KeyProvider):
-    """Load tenant key PEM files for legacy/local-file-compatible installations."""
-
-    def __init__(self, session: Session, legacy_private_key_path: str | None = None) -> None:
-        super().__init__(session)
-        self._legacy_private_key_path = legacy_private_key_path
+    """Load a PEM file registered for one tenant-scoped key version."""
 
     @staticmethod
     def _load_pem_file(path: str) -> rsa.RSAPrivateKey:
@@ -65,17 +59,10 @@ class LocalFileKeyProvider(KeyProvider):
         try:
             key_version = self._key_version(tenant_id, publickey_ver)
         except Exception as exc:
-            # Existing legacy/local-file installations may not yet have the
-            # tenant-scoped table when their CLI is upgraded.
-            if not self._legacy_private_key_path:
-                raise KeyProviderError("Private key retrieval failed") from exc
-            key_version = None
-        # The fallback is deliberately local_file-only, preserving the existing
-        # single-tenant CLI until its KeyVersion row is registered.
-        path = key_version.private_key_path if key_version else self._legacy_private_key_path
-        if not path:
+            raise KeyProviderError("Private key retrieval failed") from exc
+        if key_version is None or not key_version.private_key_path:
             raise KeyProviderError("Private key retrieval failed")
-        return self._load_pem_file(path)
+        return self._load_pem_file(key_version.private_key_path)
 
 
 class KmsEnvelopeKeyProvider(KeyProvider):
@@ -103,13 +90,11 @@ class KmsEnvelopeKeyProvider(KeyProvider):
             raise KeyProviderError("Private key retrieval failed") from exc
 
 
-def get_key_provider(
-    session: Session, *, legacy_private_key_path: str | None = None
-) -> KeyProvider:
+def get_key_provider(session: Session) -> KeyProvider:
     """Build the configured provider; local_file remains the safe default."""
     provider_name = os.environ.get("KEY_PROVIDER", "local_file").strip().lower()
     if provider_name == "local_file":
-        return LocalFileKeyProvider(session, legacy_private_key_path)
+        return LocalFileKeyProvider(session)
     if provider_name == "kms_envelope":
         return KmsEnvelopeKeyProvider(session)
     raise KeyProviderError("KEY_PROVIDER must be local_file or kms_envelope")

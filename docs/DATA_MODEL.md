@@ -658,7 +658,7 @@ The WeCom SDK returns an encrypted envelope JSON object containing both `encrypt
 
 ### Key rotation support
 
-`publickey_ver` is stored on every message row. `key_versions` maps each version to a key path. To handle a new key: insert a row into `key_versions`, set `is_active = true` for the new row, and update `WECOM_PUBLIC_KEY_VERSION` in the environment.
+`publickey_ver` is stored on every message row. `key_versions` maps each version to a tenant-scoped key path. To handle a new key: insert a tenant-scoped row into `key_versions`, set `is_active = true` for that version, and update the tenant's encrypted configuration through the controlled tenant configuration path; archive workers do not read `WECOM_PUBLIC_KEY_VERSION` from the environment.
 
 ### Tenant credential encryption
 
@@ -671,7 +671,7 @@ current tenant archive runtime resolves it as the tenant archive credential.
 `app_secret` in its historical plaintext OAuth format. That row is not proof
 that plaintext tenant credentials remain supported: tenant-scoped archive
 resolution rejects unreadable/legacy credential formats and fails closed. The
-bootstrap/env compatibility path is transitional runtime debt in
+bootstrap/env compatibility path is retired runtime provenance in
 [`architecture/runtime-debt.md`](architecture/runtime-debt.md). Do not create
 or repair a SaaS tenant by copying that legacy format.
 

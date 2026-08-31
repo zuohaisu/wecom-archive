@@ -26,8 +26,8 @@ The public WeCom callback only requests Archive Worker execution. It never
 parses, selects, or downloads media in the HTTP request. The normal media
 entrypoint discovers every active `TenantWecomConfig`; each candidate query,
 SDK initialization, quota check, storage reference, retry record, and outcome
-is scoped to that tenant. Ambient `WECOM_CORP_ID` and
-`WECOM_ARCHIVE_SECRET` are not media-worker selectors.
+is scoped to that tenant. Missing tenant context fails closed; no ambient
+global WeCom setting is a media-worker selector.
 
 ## Default reconciliation schedule
 
@@ -88,7 +88,7 @@ source .venv/bin/activate
 set -a; source .env; set +a
 
 # This discovers all active tenant configurations. Do not add a global
-# WECOM_CORP_ID/WECOM_ARCHIVE_SECRET selector to this command.
+# archive selector to this command.
 # Fresh/pending generic media, newest first
 python scripts/download_wecom_media_once.py --since-hours 72 --newest-first --limit 20 --trigger-source manual
 

@@ -45,8 +45,8 @@ Optional environment variables:
 Tenant scoping: an optional process-local WECOM_TENANT_ID selects one
 server-side config; without it, every active TenantWecomConfig is processed
 independently. There is no --tenant-id flag, so tenant identity is never
-accepted from caller-supplied input. WECOM_CORP_ID and WECOM_ARCHIVE_SECRET
-are deliberately not media-worker selectors.
+accepted from caller-supplied input. No ambient global WeCom setting is a
+media-worker selector.
 
 Concurrency: acquires a non-blocking process-level file lock (fcntl.flock)
 before touching the database at all. If another invocation already holds
@@ -763,10 +763,9 @@ def _run_tenant(
 def _run(args: argparse.Namespace, msgtypes: frozenset[str]) -> None:
     """Run one explicit tenant or every active configured tenant.
 
-    The normal timer/event path deliberately ignores ``WECOM_CORP_ID`` and
-    ``WECOM_ARCHIVE_SECRET``.  Those ambient values are legacy archive
-    selectors, not media-work ownership.  Each SDK session instead receives
-    the CorpID and archive secret resolved for the candidate-owning tenant.
+    The normal timer/event path deliberately ignores ambient global WeCom
+    settings. Each SDK session instead receives the CorpID and archive secret
+    resolved for the candidate-owning tenant.
     """
     database_url = _require_env("DATABASE_URL")
     engine = create_engine(database_url)

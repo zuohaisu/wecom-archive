@@ -16,7 +16,6 @@ from app.settings import (
     MediaStorageSettings,
     ThumbnailSettings,
     VoiceTranscodeSettings,
-    WecomCallbackSettings,
     WecomOAuthSettings,
 )
 
@@ -38,8 +37,6 @@ EXPECTED_KEYS = {
     "wecom_corp_id",
     "wecom_agent_id",
     "wecom_oauth_secret",
-    "wecom_callback_token",
-    "wecom_callback_encoding_aes_key",
     "media_thumbnail_enabled",
     "media_thumbnail_max_edge",
     "media_thumbnail_jpeg_quality",
@@ -70,8 +67,6 @@ SETTINGS_INSTANCE_BY_KEY = {
     "wecom_corp_id": WecomOAuthSettings(),
     "wecom_agent_id": WecomOAuthSettings(),
     "wecom_oauth_secret": WecomOAuthSettings(),
-    "wecom_callback_token": WecomCallbackSettings(),
-    "wecom_callback_encoding_aes_key": WecomCallbackSettings(),
     "media_thumbnail_enabled": ThumbnailSettings(),
     "media_thumbnail_max_edge": ThumbnailSettings(),
     "media_thumbnail_jpeg_quality": ThumbnailSettings(),
@@ -123,8 +118,6 @@ def test_secret_metadata_is_consistent_and_only_marks_credentials() -> None:
         "qiniu_access_key",
         "qiniu_secret_key",
         "wecom_oauth_secret",
-        "wecom_callback_token",
-        "wecom_callback_encoding_aes_key",
     }
     assert {key for key, spec in CONFIG_REGISTRY.items() if spec.is_secret} == secret_keys
     for spec in CONFIG_REGISTRY.values():
@@ -138,8 +131,6 @@ def test_wecom_initialization_fields_are_required() -> None:
         "wecom_corp_id",
         "wecom_agent_id",
         "wecom_oauth_secret",
-        "wecom_callback_token",
-        "wecom_callback_encoding_aes_key",
     }
     assert {key for key, spec in CONFIG_REGISTRY.items() if spec.required} == required_keys
 

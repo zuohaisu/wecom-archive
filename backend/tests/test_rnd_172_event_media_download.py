@@ -55,7 +55,7 @@ def test_archive_complete_dispatch_accepts_each_generic_top_level_media_type(
         lambda: signals.append(1) or True,
     )
 
-    assert dispatch_media_worker() is MediaWorkerDispatch.ACCEPTED
+    assert dispatch_media_worker(tenant_id=_TENANT_A) is MediaWorkerDispatch.ACCEPTED
     # The bounded event signal starts the existing generic worker through the
     # systemd path unit; it carries no image-only implementation or IDs.
     assert signals == [1]
@@ -82,7 +82,7 @@ def test_archive_complete_dispatch_accepts_nested_generic_media(worker_db, monke
     signal = MagicMock(return_value=True)
     monkeypatch.setattr(media_event_dispatch, "_signal_media_worker", signal)
 
-    assert dispatch_media_worker() is MediaWorkerDispatch.ACCEPTED
+    assert dispatch_media_worker(tenant_id=_TENANT_A) is MediaWorkerDispatch.ACCEPTED
     signal.assert_called_once()
 
 
@@ -106,7 +106,7 @@ def test_archive_complete_dispatch_does_not_signal_for_no_media(worker_db, monke
     monkeypatch.setattr(media_event_dispatch, "_signal_media_worker", signal)
 
     with caplog.at_level(logging.INFO, logger=media_event_dispatch.__name__):
-        assert dispatch_media_worker() is MediaWorkerDispatch.NO_WORK
+        assert dispatch_media_worker(tenant_id=_TENANT_A) is MediaWorkerDispatch.NO_WORK
 
     signal.assert_not_called()
     log_text = "\n".join(record.getMessage() for record in caplog.records)
@@ -135,11 +135,19 @@ def test_archive_complete_dispatch_failure_is_safe_and_non_raising(worker_db, mo
     )
 
     with caplog.at_level(logging.INFO, logger=media_event_dispatch.__name__):
-        assert dispatch_media_worker() is MediaWorkerDispatch.FAILED
+        assert dispatch_media_worker(tenant_id=_TENANT_A) is MediaWorkerDispatch.FAILED
 
     log_text = "\n".join(record.getMessage() for record in caplog.records)
     assert "trigger=dispatch-failed" in log_text
     assert sentinel not in log_text
+
+
+def test_missing_tenant_context_fails_closed_despite_ambient_legacy_corp(
+    worker_db, monkeypatch
+) -> None:
+    _configure(monkeypatch, worker_db)
+
+    assert dispatch_media_worker() is MediaWorkerDispatch.FAILED
 
 
 def test_generic_retry_policy_defers_old_failure_without_blocking_new_media(worker_db, monkeypatch) -> None:
