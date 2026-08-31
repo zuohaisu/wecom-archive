@@ -177,6 +177,56 @@ line_of() {
 }
 
 # ---------------------------------------------------------------------
+# Step 2 — ffmpeg host prerequisite (GH-133)
+# ---------------------------------------------------------------------
+# ffmpeg is a HOST prerequisite; this deploy only checks for it and never
+# installs it. GH-133 removed the old auto-install fallback (which shelled
+# out to `apt-get` -- a binary that does not even exist on the real
+# Alibaba Cloud Linux 3 / dnf-based production host) in favor of a
+# fail-fast check with an actionable message. Scenario 1 above
+# (FFMPEG_BIN="true", see common.bash) already exercises the present-case
+# happy path end-to-end; these tests cover the missing-case failure and
+# confirm no package manager is ever invoked either way.
+
+@test "step 2: ffmpeg present passes the host-prerequisite check" {
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_contains "Checking ffmpeg host prerequisite"
+}
+
+@test "step 2: ffmpeg missing fails the deploy fast with an actionable message, before any dependency install or restart" {
+	export FFMPEG_BIN="definitely-not-a-real-binary-gh133"
+
+	run run_deploy
+	[ "$status" -ne 0 ]
+	assert_output_contains "ffmpeg is required on the production host but is not installed"
+	assert_output_contains "docs/operations/deploy-sudoers.md"
+	assert_output_contains "does not have package-manager sudo"
+
+	run grep -c "python -m pip install" "$CMD_LOG"
+	[ "$status" -ne 0 ] # dependency install never reached
+
+	run grep -c "systemctl restart" "$CMD_LOG"
+	[ "$status" -ne 0 ] # restart never reached
+
+	# Pre-restart failure -> worktree restored to the previous commit.
+	[ "$(current_head)" = "$PREV_SHA" ]
+}
+
+@test "step 2: neither the present nor the missing ffmpeg path ever shells out to apt-get or dnf" {
+	run run_deploy
+	[ "$status" -eq 0 ]
+	assert_output_not_contains "apt-get"
+	assert_output_not_contains "dnf"
+
+	export FFMPEG_BIN="definitely-not-a-real-binary-gh133"
+	run run_deploy
+	[ "$status" -ne 0 ]
+	assert_output_not_contains "apt-get"
+	assert_output_not_contains "dnf"
+}
+
+# ---------------------------------------------------------------------
 # Guards
 # ---------------------------------------------------------------------
 
