@@ -16,9 +16,8 @@ Required environment variables:
 
     WECOM_TENANT_ID     When set, runs the hard-fail chain for exactly that
                         tenant (used by per-tenant dispatches).
-    WECOM_CORP_ID       When set (and no WECOM_TENANT_ID), the legacy
-                        single-corp environment chain runs unchanged.
-    Neither             Loop mode: the sync+decrypt chain runs once per
+    WECOM_TENANT_ID unset
+                        Loop mode: the sync+decrypt chain runs once per
                         active tenant with per-tenant credentials; one
                         tenant's failure never aborts the others.
 
@@ -191,27 +190,6 @@ def _run_best_effort_reachability_automation(env: dict | None = None) -> None:
         )
 
 
-def _run_script(script_path: str, label: str) -> None:
-    """Run *script_path* as a subprocess; exits the current process with
-    code 1 if it returns non-zero."""
-    print(f"[INFO] archive_worker starting: {label}", flush=True)
-    # Inherit the current environment so the child sees all env vars
-    proc = subprocess.run(
-        [sys.executable, script_path],
-        cwd=_BACKEND_DIR,
-        capture_output=False,   # child writes to our stdout/stderr directly
-        check=False,
-    )
-    if proc.returncode != 0:
-        print(
-            "[FAIL] archive_worker error_class=child_worker_failed "
-            f"child_exit_code={proc.returncode}",
-            flush=True,
-        )
-        raise ArchiveWorkerExit(1, "child_worker_failed")
-    print(f"[INFO] archive_worker finished: {label}", flush=True)
-
-
 def _run_script_env(script_path: str, label: str, env: dict, tag: str) -> bool:
     """Run *script_path* with one tenant's merged environment.
 
@@ -266,17 +244,20 @@ def _tenant_engine():
 def _tenant_env(credentials: TenantArchiveCredentials) -> dict:
     """Merged child environment for one validated tenant worker chain.
 
-    WECOM_TENANT_ID routes every child to the tenant's own DB-stored
-    credentials (including the decrypt private-key fallback); the decrypted
-    archive secret lives only in this in-process dictionary and the child's
-    process environment — never in logs, output, or files.
+    WECOM_TENANT_ID routes every child to that tenant's DB-stored
+    credentials. Archive credentials and private-key material stay in the
+    tenant-scoped authority; this environment never propagates a global
+    CorpID, archive secret, or private-key selector.
     """
     env = os.environ.copy()
+    for legacy_name in (
+        "WECOM_CORP_ID",
+        "WECOM_ARCHIVE_SECRET",
+        "WECOM_PRIVATE_KEY_PATH",
+        "WECOM_PUBLIC_KEY_VERSION",
+    ):
+        env.pop(legacy_name, None)
     env["WECOM_TENANT_ID"] = credentials.tenant_id
-    env["WECOM_CORP_ID"] = credentials.corp_id
-    env["WECOM_ARCHIVE_SECRET"] = credentials.archive_secret
-    if credentials.publickey_version is not None:
-        env["WECOM_PUBLIC_KEY_VERSION"] = str(credentials.publickey_version)
     return env
 
 
@@ -418,9 +399,9 @@ def main() -> None:
     error_class = "unexpected_failure"
     exit_code = 1
 
-    # None = legacy env chain (no-arg media wake-up); () = no media wake-up;
-    # (tenant_id, ...) = one per-tenant wake-up per successful tenant.
-    media_tenant_ids: tuple[str, ...] | None = None
+    # () = no media wake-up; (tenant_id, ...) = one per-tenant wake-up per
+    # successful tenant.
+    media_tenant_ids: tuple[str, ...] = ()
 
     try:
         lock_path = os.environ.get("WORKER_LOCK_PATH", _DEFAULT_LOCK_PATH).strip()
@@ -434,11 +415,6 @@ def main() -> None:
             if tenant_id:
                 _run_single_tenant_chain(tenant_id)
                 media_tenant_ids = (tenant_id,)
-            elif os.environ.get("WECOM_CORP_ID", "").strip():
-                # Legacy single-corp chain unchanged.
-                _run_script(_SYNC_SCRIPT, "sync_wecom_archive_once.py")
-                _run_script(_DECRYPT_SCRIPT, "decrypt_wecom_messages_once.py")
-                _run_best_effort_reachability_automation()
             else:
                 media_tenant_ids = tuple(_run_all_tenants_chain())
             completed = True
@@ -450,7 +426,7 @@ def main() -> None:
         # The archive lock is intentionally released before this request. The
         # bounded signal is consumed by a separate systemd event service,
         # whose existing generic media worker owns its own shared media lock.
-        if completed and media_tenant_ids is not None:
+        if completed:
             for media_tenant_id in media_tenant_ids:
                 media_dispatch = _request_media_worker_after_archive(media_tenant_id)
                 print(
@@ -458,13 +434,6 @@ def main() -> None:
                     f"media_trigger={media_dispatch.value}",
                     flush=True,
                 )
-        elif completed:
-            media_dispatch = _request_media_worker_after_archive()
-            print(
-                f"[INFO] archive_worker media_trigger_source=archive-complete "
-                f"media_trigger={media_dispatch.value}",
-                flush=True,
-            )
 
         result = "completed"
         error_class = "none"

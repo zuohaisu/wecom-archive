@@ -58,7 +58,7 @@ Both the archive worker and media download worker use `fcntl.flock` on lock file
 
 ### Environment Variables
 
-- `WECOM_OAUTH_SECRET` is different from `WECOM_ARCHIVE_SECRET`. They serve different purposes.
+- `WECOM_OAUTH_SECRET` is global OAuth configuration; archive credentials are encrypted tenant-scoped configuration and are not read from `WECOM_ARCHIVE_SECRET`.
 - `ADMIN_DOMAIN` must be the domain only (no protocol, no port, no path).
 - `MEDIA_STORAGE_PROVIDER=local` is the new RND-185 selector. `STORAGE_BACKEND=local` is the backward-compatible alias.
 

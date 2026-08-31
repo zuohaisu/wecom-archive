@@ -1,10 +1,9 @@
 """RND-387 multi-tenant callback resolution and dispatch contracts.
 
-The archive callback authenticates against the env-scoped single-corp
-candidate first (zero regression), then per-tenant stored callback
-credentials resolved by the plaintext outer ToUserName, then any remaining
-active configs as a defensive fallback.  The decrypted envelope's receiver
-id is the authoritative corp match.
+The archive callback authenticates only against per-tenant stored callback
+credentials, ordered by the plaintext outer ToUserName and then remaining
+active configs as a defensive fallback. The decrypted envelope's receiver id
+is the authoritative corp match.
 """
 
 from __future__ import annotations
@@ -147,7 +146,7 @@ def _config_row(db, tenant_id: str, corp_id: str, token: str) -> None:
     db.commit()
 
 
-def test_candidates_env_first_then_corp_matched_then_defensive(
+def test_candidates_ignore_ambient_legacy_callback_settings(
     worker_db, monkeypatch, field_encryption_key
 ) -> None:
     insert_tenant(worker_db, _TENANT_A)
@@ -161,13 +160,10 @@ def test_candidates_env_first_then_corp_matched_then_defensive(
 
     resolution = callback_candidates(worker_db, _CORP_B)
 
-    assert [c.tenant_id for c in resolution.candidates] == [None, _TENANT_B, _TENANT_A]
-    assert resolution.candidates[0].token == "env-token"
-    assert resolution.candidates[0].corp_id == "corp-env"
-    assert resolution.candidates[1] == CallbackCredentialCandidate(
+    assert [c.tenant_id for c in resolution.candidates] == [_TENANT_B, _TENANT_A]
+    assert resolution.candidates[0] == CallbackCredentialCandidate(
         token=_TOKEN_B, aes_key=_KEY, corp_id=_CORP_B, tenant_id=_TENANT_B
     )
-    assert resolution.env_configuration_error is False
 
 
 def test_candidates_no_env_uses_stored_rows_ordered_by_corp_match(
@@ -181,7 +177,6 @@ def test_candidates_no_env_uses_stored_rows_ordered_by_corp_match(
     resolution = callback_candidates(worker_db, _CORP_B)
 
     assert [c.tenant_id for c in resolution.candidates] == [_TENANT_B, _TENANT_A]
-    assert resolution.env_configuration_error is False
 
 
 def test_candidates_inactive_config_is_never_a_candidate(
@@ -213,16 +208,14 @@ def test_candidates_unreadable_credentials_are_skipped_not_fatal(
     resolution = callback_candidates(worker_db, _CORP_A)
 
     assert [c.tenant_id for c in resolution.candidates] == [_TENANT_B]
-    assert resolution.env_configuration_error is False
 
 
 def test_candidates_db_none_degrades_to_env_only(monkeypatch) -> None:
     resolution = callback_candidates(None, None)
     assert resolution.candidates == ()
-    assert resolution.env_configuration_error is False
 
 
-def test_candidates_partial_env_raises_configuration_error_signal(
+def test_candidates_partial_ambient_callback_settings_are_ignored(
     worker_db, monkeypatch, field_encryption_key
 ) -> None:
     insert_tenant(worker_db, _TENANT_B)
@@ -234,7 +227,6 @@ def test_candidates_partial_env_raises_configuration_error_signal(
     resolution = callback_candidates(worker_db, _CORP_B)
 
     assert [c.tenant_id for c in resolution.candidates] == [_TENANT_B]
-    assert resolution.env_configuration_error is True
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +255,6 @@ def callback_client(
     _config_row(db, _TENANT_B, _CORP_B, _TOKEN_B)
     db.close()
     monkeypatch.setattr(wecom_events, "get_engine", lambda: engine)
-    monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: None)
     dispatches: list[tuple[str, str | None]] = []
     monkeypatch.setattr(
         wecom_events,
@@ -370,17 +361,14 @@ def test_post_no_candidate_matches_returns_403_and_never_dispatches(callback_cli
     assert dispatches == []
 
 
-def test_post_env_candidate_still_wins_with_zero_regression(
+def test_post_ambient_callback_pair_cannot_select_a_legacy_tenant(
     callback_client, monkeypatch
 ) -> None:
-    """The env-scoped single-corp deployment stays candidate #1 even when
-    stored per-tenant rows exist."""
+    """Ambient callback settings cannot replace tenant-scoped authority."""
     client, dispatches = callback_client
     monkeypatch.setenv("WECOM_CALLBACK_TOKEN", "env-token")
     monkeypatch.setenv("WECOM_CALLBACK_ENCODING_AES_KEY", _AES_KEY)
     monkeypatch.setenv("WECOM_CORP_ID", "corp-env")
-    monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: "tenant-env")
-
     message = _event_xml("corp-env")
     payload = _encrypt(_envelope(message, b"corp-env"))
     body = f"<xml><Encrypt><![CDATA[{payload}]]></Encrypt></xml>".encode()
@@ -396,9 +384,9 @@ def test_post_env_candidate_still_wins_with_zero_regression(
         follow_redirects=False,
     )
 
-    assert response.status_code == 200
-    assert response.content == b"ok"
-    assert dispatches == [("callback", "tenant-env")]
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Invalid signature"}
+    assert dispatches == []
 
 
 def test_post_malformed_outer_xml_stays_400_and_never_dispatches(callback_client) -> None:

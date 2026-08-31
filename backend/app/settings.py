@@ -97,16 +97,6 @@ def get_wecom_third_party_settings() -> WecomThirdPartySettings:
     return WecomThirdPartySettings()
 
 
-class WecomCallbackSettings(BaseSettings):
-    wecom_callback_token: str = ""
-    wecom_callback_encoding_aes_key: str = ""
-    wecom_corp_id: str = ""
-
-
-def get_wecom_callback_settings() -> WecomCallbackSettings:
-    return WecomCallbackSettings()
-
-
 class MediaStorageSettings(BaseSettings):
     # No default (None) mirrors os.environ.get("MEDIA_STORAGE_PROVIDER") /
     # os.environ.get("STORAGE_BACKEND") being called with no second

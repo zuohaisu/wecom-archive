@@ -134,5 +134,5 @@ permanent code、CorpID、UserID 或完整回调 URL。
 `/admin/provisioning`、`/admin/provisioning/settings` 与 `/api/provisioning/status`；归档、
 同步、导出、邀请和普通后台均失败关闭。运维完成会话存档凭证、回调与连通性验证后，
 再由平台启用租户；激活后的 archive dispatch 使用该租户的显式 tenant-scoped
-worker path。现有单 `WECOM_CORP_ID` worker 属于 transitional runtime，且不由本
-runbook 改动。
+worker path。GH-93 已退休单 `WECOM_CORP_ID` archive worker；该全局 OAuth 配置
+不再是 archive runtime selector，也不由本 runbook 改动。

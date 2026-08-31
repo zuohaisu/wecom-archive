@@ -76,10 +76,20 @@ def _envelope(message: bytes = b"verify-ok", corp_id: bytes = _CORP_ID.encode())
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("WECOM_CALLBACK_TOKEN", _TOKEN)
-    monkeypatch.setenv("WECOM_CALLBACK_ENCODING_AES_KEY", _AES_KEY)
-    monkeypatch.setenv("WECOM_CORP_ID", _CORP_ID)
-    monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: "tenant-sentinel")
+    monkeypatch.setattr(
+        wecom_events,
+        "_resolve_callback_candidates",
+        lambda _outer_corp_id: wecom_events.CallbackResolution(
+            candidates=(
+                wecom_events.CallbackCredentialCandidate(
+                    token=_TOKEN,
+                    aes_key=_KEY,
+                    corp_id=_CORP_ID,
+                    tenant_id="tenant-sentinel",
+                ),
+            )
+        ),
+    )
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
@@ -180,25 +190,21 @@ def test_get_missing_parameters_still_returns_422_without_redirect(client: TestC
     assert response.history == []
 
 
-@pytest.mark.parametrize(
-    "name,value",
-    [
-        ("WECOM_CALLBACK_TOKEN", ""),
-        ("WECOM_CALLBACK_ENCODING_AES_KEY", ""),
-        ("WECOM_CALLBACK_ENCODING_AES_KEY", "not-a-valid-encoding-aes-key"),
-    ],
-)
-def test_server_callback_configuration_errors_remain_safe_500(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, name: str, value: str, caplog: pytest.LogCaptureFixture
+def test_callback_without_a_tenant_candidate_fails_closed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO, logger=wecom_events.__name__)
-    monkeypatch.setenv(name, value)
+    monkeypatch.setattr(
+        wecom_events,
+        "_resolve_callback_candidates",
+        lambda _outer_corp_id: wecom_events.CallbackResolution(),
+    )
     response = _get(client, _encrypt(_envelope()))
 
-    assert response.status_code == 500
-    assert response.json() == {"detail": "Callback configuration error"}
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Invalid signature"}
     log_text = "\n".join(record.getMessage() for record in caplog.records)
-    assert "configuration_error" in log_text
+    assert "invalid_signature" in log_text
     assert _TOKEN not in log_text
     assert _AES_KEY not in log_text
 
@@ -235,7 +241,6 @@ def test_post_valid_signature_acknowledges_and_dispatches_only_archive_worker(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     worker_dispatches: list[object] = []
-    monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: "tenant-sentinel")
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
@@ -486,11 +491,15 @@ def test_dispatch_failure_does_not_leak_request_data(
     _assert_no_sentinels([record.getMessage() for record in caplog.records])
 
 
-def test_post_does_not_dispatch_without_an_active_callback_tenant(
+def test_post_does_not_dispatch_without_a_tenant_callback_candidate(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     worker_dispatches: list[object] = []
-    monkeypatch.setattr(wecom_events, "_active_tenant_for_corp", lambda _corp_id: None)
+    monkeypatch.setattr(
+        wecom_events,
+        "_resolve_callback_candidates",
+        lambda _outer_corp_id: wecom_events.CallbackResolution(),
+    )
     monkeypatch.setattr(
         wecom_events,
         "dispatch_archive_worker",
@@ -498,6 +507,6 @@ def test_post_does_not_dispatch_without_an_active_callback_tenant(
     )
     response = _post_encrypted(client, _event_xml())
 
-    assert response.status_code == 503
-    assert response.json() == {"detail": "Callback worker unavailable"}
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Invalid signature"}
     assert worker_dispatches == []

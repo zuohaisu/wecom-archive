@@ -14,7 +14,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
-from app.db.models import TenantWecomConfig
 from app.db.session import get_engine
 from app.services.archive_worker_trigger import (
     ArchiveWorkerDispatch,
@@ -43,7 +42,6 @@ router = APIRouter()
 
 _REJECTION_REASONS = frozenset(
     {
-        "configuration_error",
         "corp_id_mismatch",
         "invalid_callback_payload",
         "invalid_signature",
@@ -92,29 +90,13 @@ def _parse_external_contact_change_event(message: bytes) -> str | None:
     return external_userid
 
 
-def _active_tenant_for_corp(corp_id: str) -> str | None:
-    """Resolve callback configuration to an active tenant without exposing DB errors."""
-    if not corp_id:
-        return None
-    try:
-        with Session(get_engine()) as db:
-            row = (
-                db.query(TenantWecomConfig)
-                .filter(TenantWecomConfig.corp_id == corp_id, TenantWecomConfig.is_active.is_(True))
-                .first()
-            )
-            return row.tenant_id if row is not None else None
-    except Exception:  # noqa: BLE001 -- callback must not expose tenant lookup detail
-        return None
-
-
 def _resolve_callback_candidates(outer_corp_id: str | None) -> CallbackResolution:
-    """Ordered env-first candidates; DB resolution must never break the env path."""
+    """Resolve stored tenant candidates; database failure fails closed."""
     try:
         with Session(get_engine()) as db:
             return callback_candidates(db, outer_corp_id)
-    except Exception:  # noqa: BLE001 -- fail closed to the env candidate only
-        return callback_candidates(None, outer_corp_id)
+    except Exception:  # noqa: BLE001 -- callback must not expose database detail
+        return CallbackResolution()
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +115,7 @@ def _authenticate_callback(
 
     A candidate authenticates when its token verifies the signature, its AES
     key decrypts the envelope, and the plaintext receiver id matches its
-    corp_id (or it configures no corp_id — the legacy env behavior).  Returns
+    stored corp_id. Returns
     ``(candidate, message, decrypted_corp_id)``; when no candidate matches,
     the failure maps to the fixed safe status codes and never leaks request
     or configuration data.
@@ -160,9 +142,6 @@ def _authenticate_callback(
     if payload_invalid:
         _log_rejected("invalid_callback_payload")
         raise HTTPException(status_code=400, detail="Invalid callback request")
-    if resolution.env_configuration_error:
-        _log_rejected("configuration_error")
-        raise HTTPException(status_code=500, detail="Callback configuration error")
     if signature_matched:
         _log_rejected("corp_id_mismatch")
         raise HTTPException(status_code=403, detail="Corp ID mismatch")
@@ -248,12 +227,12 @@ async def wecom_callback_post(
     # The callback must resolve to one active tenant before the shared worker
     # may run.  The resolved id stays in-process and is never put in
     # responses, logs, or child-process arguments.
-    tenant_id = candidate.tenant_id or _active_tenant_for_corp(decrypted_corp_id)
+    tenant_id = candidate.tenant_id
     if tenant_id is None:
         logger.error("wecom_callback archive_worker=unavailable")
         raise HTTPException(status_code=503, detail="Callback worker unavailable")
 
-    matched_corp_id = candidate.corp_id or decrypted_corp_id
+    matched_corp_id = candidate.corp_id
     if external_userid:
         refresh_dispatch = dispatch_external_contact_refresh(
             tenant_id, matched_corp_id, external_userid

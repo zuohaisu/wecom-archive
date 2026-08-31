@@ -197,12 +197,8 @@ def _gate_subscription(
 
 
 def _callback_resolvable(config: TenantWecomConfig | None) -> bool:
-    """Per-tenant stored callback credentials, or the legacy env pair."""
-    if config is not None and config.has_callback_credentials:
-        return True
-    token = os.environ.get("WECOM_CALLBACK_TOKEN", "").strip()
-    aes_key = os.environ.get("WECOM_CALLBACK_ENCODING_AES_KEY", "").strip()
-    return bool(token and aes_key)
+    """Only a complete per-tenant stored callback credential pair is valid."""
+    return config is not None and config.has_callback_credentials
 
 
 def _gate_runtime(

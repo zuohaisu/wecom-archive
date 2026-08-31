@@ -1,14 +1,10 @@
 """
 CLI-equivalence tests for scripts/decrypt_wecom_messages_once.py (RND-222).
 
-Confirms the thin shell (env parsing, tenant resolution, SDK lifecycle,
-print/exit-code contract) still behaves exactly as documented after the
-core loop moved to app.services.decrypt_worker.run_decrypt_once() —
-same [INFO]/[FAIL]/[PASS] output lines, same exit codes — plus the one
-declared, in-scope behavior change (RND-222 §2.3): a missing/inactive
-TenantWecomConfig for WECOM_CORP_ID now fails the run (fail-fast), where
-previously decrypt had no tenant check at all and would scan every
-tenant's pending/failed rows.
+Confirms the thin shell resolves its selected tenant's encrypted
+TenantWecomConfig before SDK lifecycle and keeps its documented
+[INFO]/[FAIL]/[PASS] output lines and exit codes. A missing or unreadable
+selected tenant fails closed even when ambient legacy archive variables exist.
 
 Run (from backend/):
     pytest tests/test_decrypt_wecom_messages_once_cli.py -v
@@ -19,6 +15,8 @@ from __future__ import annotations
 import sys
 
 import pytest
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
 
 from app.services import decrypt_worker as decrypt_worker_module
 from app.services.decrypt_isolation import IsolatedDecryptResult
@@ -31,7 +29,6 @@ from tests.fakes import (
     insert_tenant_wecom_config,
     rsa_encrypt_key_b64,
     worker_engine,  # noqa: F401 -- pytest fixture, must be imported to be discovered
-    write_private_key_pem,
 )
 
 
@@ -63,16 +60,17 @@ def _install_fake_decrypt_isolated(monkeypatch, fake: FakeWecomSdk) -> None:
     monkeypatch.setattr(decrypt_worker_module, "decrypt_message_isolated", _fake_decrypt_isolated)
 
 
-def _set_required_env(monkeypatch, tmp_path, private_key) -> None:
-    key_path = tmp_path / "private_key.pem"
-    write_private_key_pem(private_key, key_path)
+_FIELD_KEY = Fernet.generate_key().decode("ascii")
 
+
+def _set_required_env(monkeypatch, _tmp_path, _private_key) -> None:
     monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
     monkeypatch.setenv("WECOM_SDK_LIB_PATH", "/fake/lib.so")
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
-    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "secret")
-    monkeypatch.setenv("WECOM_PRIVATE_KEY_PATH", str(key_path))
-    monkeypatch.setenv("WECOM_PUBLIC_KEY_VERSION", "1")
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", _FIELD_KEY)
+    monkeypatch.setenv("WECOM_TENANT_ID", _TENANT_A)
+    # Ambient legacy values must not select credentials for this shell.
+    monkeypatch.setenv("WECOM_CORP_ID", "ambient-oauth-corp")
+    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "ambient-legacy-secret")
 
 
 def test_main_decrypts_pending_row_and_prints_expected_summary(
@@ -88,7 +86,17 @@ def test_main_decrypts_pending_row_and_prints_expected_summary(
 
     with Session(engine) as db:
         insert_tenant(db, _TENANT_A)
-        insert_tenant_wecom_config(db, _TENANT_A, "corp1")
+        config = insert_tenant_wecom_config(db, _TENANT_A, "corp1")
+        config.set_credentials(
+            "secret",
+            priv.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ).decode("ascii"),
+        )
+        config.publickey_version = 1
+        db.commit()
         insert_archive_message(
             db,
             tenant_id=_TENANT_A,
@@ -172,7 +180,7 @@ def test_main_fails_fast_when_no_active_tenant_config(
     assert exc.value.code == 1
 
     out = capsys.readouterr().out
-    assert "[FAIL] No active tenant found for this corp" in out
+    assert "decrypt_worker error_class=tenant_config_unavailable" in out
 
 
 def test_decrypt_worker_symbols_remain_importable_from_the_script() -> None:

@@ -2,7 +2,7 @@
 """
 One-shot real WeCom archive sync worker.
 
-Loads environment, resolves the active tenant for WECOM_CORP_ID,
+Loads environment, resolves the active tenant selected by WECOM_TENANT_ID,
 initialises the WeCom Finance SDK, then delegates the actual GetChatData
 call and record persistence to
 app.services.sync_worker.run_sync_once() (RND-222) — this script is now
@@ -20,12 +20,9 @@ Required environment variables:
     DATABASE_URL          PostgreSQL connection string
     WECOM_SDK_LIB_PATH    Absolute path to libWeWorkFinanceSdk_C.so
 
-    Either the per-tenant mode:
     WECOM_TENANT_ID       Resolves the active tenant config row and uses its
                           stored CorpID / archive secret (FIELD_ENCRYPTION_KEY
-                          must be set), or the legacy single-corp mode:
-    WECOM_CORP_ID         WeCom corporation ID
-    WECOM_ARCHIVE_SECRET  WeCom conversation archive secret
+                          must be set).
 
 Optional environment variables:
     WECOM_CHAT_LIMIT      Max records to fetch per call (default: 500)
@@ -145,26 +142,20 @@ def main() -> None:
     # --- 2. Resolve credentials and tenant (before SDK init) ---
     # Fail fast: exit non-zero if no active tenant/tenant config exists, so no
     # archive write can ever happen with a wrong or missing tenant_id.
-    tenant_id_env = os.environ.get("WECOM_TENANT_ID", "").strip()
-    if tenant_id_env:
-        with Session(engine) as session:
-            try:
-                credentials = resolve_tenant_archive_credentials(session, tenant_id_env)
-            except TenantCredentialError as exc:
-                print(
-                    f"[FAIL] sync_worker error_class={exc.error_class} "
-                    "Tenant archive credentials are unavailable",
-                    flush=True,
-                )
-                sys.exit(1)
-            corp_id = credentials.corp_id
-            secret = credentials.archive_secret
-            tenant_id = credentials.tenant_id
-    else:
-        corp_id = _require_env("WECOM_CORP_ID")
-        secret = _require_env("WECOM_ARCHIVE_SECRET")
-        with Session(engine) as session:
-            tenant_id: str = _require_tenant_id(session, corp_id)
+    tenant_id_env = _require_env("WECOM_TENANT_ID")
+    with Session(engine) as session:
+        try:
+            credentials = resolve_tenant_archive_credentials(session, tenant_id_env)
+        except TenantCredentialError as exc:
+            print(
+                f"[FAIL] sync_worker error_class={exc.error_class} "
+                "Tenant archive credentials are unavailable",
+                flush=True,
+            )
+            sys.exit(1)
+        corp_id = credentials.corp_id
+        secret = credentials.archive_secret
+        tenant_id = credentials.tenant_id
 
     # --- 3. Initialise WeCom SDK ---
     try:

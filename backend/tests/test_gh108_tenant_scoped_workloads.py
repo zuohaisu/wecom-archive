@@ -171,7 +171,7 @@ def test_refresh_queue_never_selects_another_tenants_tasks(monkeypatch) -> None:
         assert [task.tenant_id for task in session.query(ExternalContactRefreshTask).all()] == ["tenant-b"]
 
 
-def test_versioned_archive_unit_unsets_only_legacy_archive_selectors() -> None:
+def test_versioned_archive_unit_needs_no_legacy_selector_wrapper() -> None:
     from pathlib import Path
 
     unit = (
@@ -179,5 +179,6 @@ def test_versioned_archive_unit_unsets_only_legacy_archive_selectors() -> None:
         / "deploy/systemd/wecom-archive-worker.service"
     ).read_text(encoding="utf-8")
 
-    assert "-u WECOM_CORP_ID -u WECOM_ARCHIVE_SECRET" in unit
+    assert "WECOM_CORP_ID" not in unit
+    assert "WECOM_ARCHIVE_SECRET" not in unit
     assert "WECOM_THIRD_PARTY" not in unit

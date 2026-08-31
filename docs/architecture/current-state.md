@@ -56,9 +56,9 @@ module” or reuse credentials across them.
 | --- | --- | --- |
 | Third-party provider authorization | `WECOM_THIRD_PARTY_*`; newest encrypted `WecomSuiteTicketState`; trusted proofs/claims/bindings | `/api/auth/wecom/third-party/install` and `/api/auth/wecom/third-party/callback`; `wecom_org_authorization.py` |
 | Provider instruction callback | independent instruction Token/AES key; `WecomSuiteTicketState` | `/api/wecom/third-party/instructions`; `wecom_provider_instructions.py` |
-| Archive callback | active per-tenant callback credentials in `TenantWecomConfig`; transitional env candidate described below | `/api/wecom/archive/events`; `wecom_events.py` and `tenant_callback_resolution.py` |
+| Archive callback | active per-tenant callback credentials in `TenantWecomConfig` | `/api/wecom/archive/events`; `wecom_events.py` and `tenant_callback_resolution.py` |
 | Tenant archive configuration | encrypted `TenantWecomConfig` fields and trusted `ThirdPartyOrganizationBinding` | provisioning config routes; `tenant_config_service.py` |
-| Archive runtime credentials | encrypted tenant config resolved by `tenant_credentials.py` | explicit-tenant/all-tenants worker paths; legacy archive environment path is transitional |
+| Archive runtime credentials | encrypted tenant config resolved by `tenant_credentials.py` | explicit-tenant and all-active-tenants worker paths only; the legacy archive environment path is retired by GH-93 |
 | External-contact reconciliation identity | active `TenantWecomConfig` resolved by `tenant_credentials.py`; provider API settings remain separate | daily reconciliation and durable refresh workers run one tenant at a time; a tenant never derives identity from global `WECOM_CORP_ID` |
 
 The provider instruction callback has an intentional asymmetric receiver
@@ -83,8 +83,7 @@ orchestrator and owns the cross-process archive lock.
 | Selector state | Mode | Credential source | Failure behavior |
 | --- | --- | --- | --- |
 | `WECOM_TENANT_ID` set | Explicit tenant | encrypted, active `TenantWecomConfig` | Hard-fails that tenant chain when credentials are unavailable. Used for callback, manual, and activation dispatch. |
-| no tenant selector; `WECOM_CORP_ID` set | Legacy single-corp | environment `WECOM_CORP_ID` / `WECOM_ARCHIVE_SECRET` plus config lookup | Compatibility path. It is `TRANSITIONAL`, not a removal candidate in #92. |
-| neither selector set | All-active-tenants loop | each active tenant's encrypted config | Runs tenants independently; a bad tenant does not abort a successful tenant. |
+| `WECOM_TENANT_ID` unset | All-active-tenants loop | each active tenant's encrypted config | Runs tenants independently; a bad tenant does not abort a successful tenant. Ambient legacy archive variables do not select a tenant or credential. |
 
 The worker runs sync then decrypt. `sync_states` owns the tenant-and-CorpID
 cursor; `archive_messages` owns persisted archive envelopes and normalized
@@ -94,14 +93,17 @@ media-worker entry point.
 
 A validated archive callback resolves one active tenant and dispatches an
 explicit-tenant worker without waiting for completion. The archive timer is
-reconciliation, not a second authority. The repository-managed archive unit
-unsets the legacy selector pair before entering this mode; the temporary #77
-operator drop-in remains a production-transition safeguard until Ops verifies
-the deployed unit. After successful sync/decrypt, the worker may wake the
-generic media worker; media has its own lock and durable retry/capacity state.
+reconciliation, not a second authority. GH-93 retires the legacy single-corp
+selector, credential, callback, and private-key fallbacks: the managed unit
+needs no `env -u` wrapper because the worker itself cannot read them. The
+#77 closure and #108 post-merge production verification established that the
+shared legacy pair is configuration-present only, with no active archive,
+media, or reconciliation dependency; GH-93 deployment still requires its own
+post-deploy Ops verification. After successful sync/decrypt, the worker may
+wake the generic media worker; media has its own lock and durable retry/capacity state.
 Its normal timer/event path discovers every active tenant and initializes one
 SDK session from that tenant's own encrypted archive credentials, never from
-ambient `WECOM_CORP_ID` / `WECOM_ARCHIVE_SECRET`. External-contact daily and
+ambient global WeCom configuration. External-contact daily and
 refresh workers use the same tenant discovery and isolate a tenant failure
 before continuing. The daily job processes a bounded, daily-rotated tenant
 slice (`EXTERNAL_CONTACT_RECONCILE_TENANT_LIMIT`) without changing its 04:15
@@ -174,16 +176,17 @@ supply current instructions.
 | `SUPERSEDED` | The previous `docs/ARCHITECTURE.md` described an internal/admin-only, single-default-tenant MVP with unrestricted employee login. It is replaced by this map and the architecture index. |
 | `SUPERSEDED` | “Future SaaS”, plaintext tenant-secret, active Linear-workflow, and open-source/self-host-first wording in older explanatory material are not current implementation direction. Historical records retain provenance only. |
 | `SUPERSEDED` | ADR-0001's proposed `conversations` / `conversation_members` / dual-write implementation was never adopted by the current code. It is explicitly marked historical rather than a live architecture plan. |
-| `TRANSITIONAL` | Legacy single-corp archive credentials and callback/key fallbacks remain for compatibility. GitHub #77 is active evidence that removal could interrupt archive continuity. See the debt register. |
+| `RETIRED` | GH-93 removes legacy single-corp archive credentials, callback candidates, and private-key fallbacks from the current runtime. #77 closure and #108 post-merge verification are the retirement evidence; GH-93 still needs post-deploy Ops verification. See the debt register. |
 | `TRANSITIONAL` | `Tenant.is_active` remains a compatibility projection beside `lifecycle_status`; its eventual removal needs a separate lifecycle dependency audit. See GitHub #94. |
 | `UNKNOWN` | Which versioned units, environment selectors, callbacks, payment providers, or self-service gates are active in production. Requires read-only Ops evidence; do not infer from source control. |
-| `UNKNOWN` | Whether every production tenant has readable tenant-scoped archive credentials and no longer uses a legacy timer fallback. GitHub #77 owns the first read-only diagnosis. |
+| `CURRENT` | #77 closure and #108 post-merge production verification prove readable tenant-scoped credentials and no active legacy selector dependency for archive, media, external-contact reconciliation, callback, reachability, and authenticated manual archive paths. The shared pair remains configuration-present only. |
 
 ## Follow-up boundaries
 
-- [GitHub #93](https://github.com/zuohaisu/wecom-archive-365/issues/93) is the
-  evidence-gated removal path for legacy single-corp archive runtime. It is
-  blocked by the production diagnosis/migration evidence in [GitHub #77](https://github.com/zuohaisu/wecom-archive-365/issues/77).
+- [GitHub #93](https://github.com/zuohaisu/wecom-archive-365/issues/93) delivers
+  the approved repository retirement of the legacy single-corp archive runtime
+  after the #77/#108 evidence chain. Its deployment requires the ticket's
+  independent post-deploy Ops verification.
 - [GitHub #94](https://github.com/zuohaisu/wecom-archive-365/issues/94) is the
   separate dependency audit for retiring `Tenant.is_active` as a compatibility
   projection.

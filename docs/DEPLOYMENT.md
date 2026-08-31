@@ -123,7 +123,7 @@ Minimum local app bring-up:
 Additional variables are required for:
 
 - WeCom OAuth: `ADMIN_DOMAIN`
-- Sync/decrypt/media scripts: `WECOM_SDK_LIB_PATH`, `WECOM_ARCHIVE_SECRET`, `WECOM_PRIVATE_KEY_PATH`, `WECOM_PUBLIC_KEY_VERSION`
+- Archive sync/decrypt/callback: `WECOM_SDK_LIB_PATH` plus complete encrypted tenant-scoped archive, callback, and key configuration in `TenantWecomConfig` / tenant `KeyVersion`; no global archive secret or private-key environment variable is supported.
 - Media serving/download, local-backed rows only: `STORAGE_LOCAL_PATH`
 - Media serving/download, Qiniu-backed rows only (optional — see below): `QINIU_ACCESS_KEY`, `QINIU_SECRET_KEY`, `QINIU_BUCKET`, `QINIU_DOMAIN` (full `https://` URL), `QINIU_REGION` (optional)
 - WeChat Pay annual purchase/refund (optional until production approval): set `WECHAT_PAY_ENABLED=true` plus `WECHAT_PAY_APP_ID`, `WECHAT_PAY_MCH_ID`, `WECHAT_PAY_MERCHANT_SERIAL_NO`, `WECHAT_PAY_MERCHANT_PRIVATE_KEY`, `WECHAT_PAY_API_V3_KEY`, `WECHAT_PAY_PUBLIC_KEY_ID`, `WECHAT_PAY_PUBLIC_KEY`, and the exact public HTTPS `WECHAT_PAY_NOTIFY_URL` and `WECHAT_PAY_REFUND_NOTIFY_URL`. The app fails startup when enabled configuration is incomplete or malformed.
@@ -214,14 +214,15 @@ controlled deployment, step 10 updates the existing same-named unit files,
 performs one `daemon-reload` only when a file changed, and re-arms only
 `wecom-archive-worker.timer`; it never enables the oneshot service directly or
 creates a second timer. The versioned timer preserves the existing five-minute
-cadence (`OnCalendar=*:0/5`). The versioned service invokes the worker through
-`env -u WECOM_CORP_ID -u WECOM_ARCHIVE_SECRET`, so its normal timer process
-enters all-active-tenants mode even while the shared EnvironmentFile retains
-the pair for transition compatibility. Do not use a manual `cp`/`enable`
-workflow for this pair; production deployment, reload, enable/restart, and
-verification remain separately approved operations. Do not remove the #77
-operator drop-in until Ops has verified the deployed effective unit, archive
-cycles, callback, media, and external-contact reconciliation.
+cadence (`OnCalendar=*:0/5`). GH-93 retires the archive worker's legacy
+single-corp selector and credential branches, so the normal timer enters
+all-active-tenants mode without an `env -u` wrapper even if a shared
+EnvironmentFile still contains values for legitimate non-archive use. Do not
+use a manual `cp`/`enable` workflow for this pair; production deployment,
+reload, enable/restart, and verification remain separately approved operations.
+The temporary #77 operator drop-in is already absent; post-deploy Ops must
+verify the effective unit, archive cycles, callback, media, and external-contact
+reconciliation for GH-93.
 
 External-contact refresh (`.service`/`.path`/`.timer`) and daily
 reconciliation (`.service`/`.timer`) — the daily job that also drives

@@ -999,8 +999,8 @@ class TenantWecomConfig(Base):
     # RND-311 (B2-1): encrypted PEM private key; nullable for existing rows.
     private_key_encrypted = Column(Text, nullable=True)
     # RND-386 (T1): per-tenant session-archive callback credentials, Fernet
-    # ciphertext at rest. Nullable — the legacy single-corp deployment keeps
-    # using env-scoped WECOM_CALLBACK_TOKEN/AESKey.
+    # ciphertext at rest. Nullable for pre-provisioning rows; active callback
+    # dispatch requires a complete stored pair.
     callback_token_encrypted = Column(Text, nullable=True)
     callback_encoding_aes_key_encrypted = Column(Text, nullable=True)
     publickey_version = Column(Integer, nullable=True)

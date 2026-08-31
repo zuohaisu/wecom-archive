@@ -333,8 +333,6 @@ def test_archive_callback_credentials_cannot_configure_instruction_callback(
     client, factory = instruction_client
     monkeypatch.delenv("WECOM_THIRD_PARTY_INSTRUCTION_TOKEN")
     monkeypatch.delenv("WECOM_THIRD_PARTY_INSTRUCTION_ENCODING_AES_KEY")
-    monkeypatch.setenv("WECOM_CALLBACK_TOKEN", _TOKEN)
-    monkeypatch.setenv("WECOM_CALLBACK_ENCODING_AES_KEY", _AES_KEY)
 
     response = _post(client)
     assert response.status_code == 503

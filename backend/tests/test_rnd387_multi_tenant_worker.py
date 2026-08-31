@@ -1,11 +1,11 @@
 """RND-387 per-tenant archive worker contracts.
 
-Loop mode runs the sync+decrypt chain once per active tenant with a merged
+Loop mode runs the sync+decrypt chain once per active tenant with a
 per-tenant child environment; one tenant's failure never aborts the others
-and the media wake-up stays per-tenant.  WECOM_TENANT_ID hard-fails for one
-explicit tenant; WECOM_CORP_ID keeps the legacy chain byte-identical.
-The decrypt shell falls back to the stored per-tenant RSA key when no key
-provider can serve one.
+and the media wake-up stays per-tenant. WECOM_TENANT_ID hard-fails for one
+explicit tenant; any ambient legacy pair is ignored. The decrypt shell falls
+back to the selected tenant's stored RSA key when no key provider can serve
+one.
 """
 
 from __future__ import annotations
@@ -74,6 +74,7 @@ def _install_loop_fixtures(monkeypatch, tmp_path, engine):
     monkeypatch.setenv("FIELD_ENCRYPTION_KEY", _FIELD_KEY)
     monkeypatch.delenv("WECOM_TENANT_ID", raising=False)
     monkeypatch.delenv("WECOM_CORP_ID", raising=False)
+    monkeypatch.delenv("WECOM_ARCHIVE_SECRET", raising=False)
     monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
     worker = _worker_module()
     monkeypatch.setattr(worker, "_tenant_engine", lambda: engine)
@@ -123,12 +124,13 @@ def test_loop_runs_each_tenant_with_merged_credentials_env(
     ]
     env_a = script_calls[0][1]
     assert env_a["WECOM_TENANT_ID"] == _TENANT_A
-    assert env_a["WECOM_CORP_ID"] == "corp-a"
-    assert env_a["WECOM_ARCHIVE_SECRET"] == _SECRET
-    assert env_a["WECOM_PUBLIC_KEY_VERSION"] == "3"
+    assert "WECOM_CORP_ID" not in env_a
+    assert "WECOM_ARCHIVE_SECRET" not in env_a
+    assert "WECOM_PUBLIC_KEY_VERSION" not in env_a
     env_b = script_calls[2][1]
     assert env_b["WECOM_TENANT_ID"] == _TENANT_B
-    assert env_b["WECOM_ARCHIVE_SECRET"] == _SECRET_B
+    assert "WECOM_CORP_ID" not in env_b
+    assert "WECOM_ARCHIVE_SECRET" not in env_b
     # Reachability runs once per tenant with that tenant's env.
     assert [e["WECOM_TENANT_ID"] for e in reachability_envs] == [_TENANT_A, _TENANT_B]
     assert media_tenants == [_TENANT_A, _TENANT_B]
@@ -277,6 +279,8 @@ def test_single_tenant_chain_hard_fails_when_config_missing(
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
     monkeypatch.setenv("FIELD_ENCRYPTION_KEY", _FIELD_KEY)
     monkeypatch.setenv("WECOM_TENANT_ID", "tenant-unknown")
+    monkeypatch.setenv("WECOM_CORP_ID", "legacy-corp")
+    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "legacy-secret")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
     monkeypatch.setattr(worker, "_tenant_engine", lambda: worker_engine)
 
@@ -311,41 +315,72 @@ def test_single_tenant_chain_hard_fails_on_legacy_credentials(
     assert "error_class=tenant_credentials_legacy_format" in out
 
 
-def test_legacy_env_chain_unchanged(
+def test_ambient_legacy_pair_still_enters_all_tenants_mode(
     monkeypatch, tmp_path, worker_engine, capsys, field_encryption_key
 ) -> None:
     with Session(worker_engine) as db:
         insert_tenant(db, _TENANT_A)
-        _encrypted_config(db, _TENANT_A, "corp1", _SECRET)
+        insert_tenant(db, _TENANT_B)
+        _encrypted_config(db, _TENANT_A, "corp-a", _SECRET)
+        _encrypted_config(db, _TENANT_B, "corp-b", _SECRET_B)
+
+    worker, script_calls, _reachability_envs, media_tenants = _install_loop_fixtures(
+        monkeypatch, tmp_path, worker_engine
+    )
+    monkeypatch.setenv("WECOM_CORP_ID", "legacy-corp")
+    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "legacy-secret")
+
+    with pytest.raises(SystemExit) as result:
+        worker.main()
+
+    assert result.value.code == 0
+    assert [env["WECOM_TENANT_ID"] for label, env, _tag in script_calls if label.startswith("sync")] == [
+        _TENANT_A,
+        _TENANT_B,
+    ]
+    assert all("WECOM_CORP_ID" not in env for _label, env, _tag in script_calls)
+    assert all("WECOM_ARCHIVE_SECRET" not in env for _label, env, _tag in script_calls)
+    assert media_tenants == [_TENANT_A, _TENANT_B]
+
+
+def test_explicit_tenant_uses_only_selected_tenant_credentials(
+    monkeypatch, tmp_path, worker_engine, field_encryption_key
+) -> None:
+    with Session(worker_engine) as db:
+        insert_tenant(db, _TENANT_A)
+        insert_tenant(db, _TENANT_B)
+        _encrypted_config(db, _TENANT_A, "corp-a", _SECRET)
+        _encrypted_config(db, _TENANT_B, "corp-b", _SECRET_B)
 
     worker = _worker_module()
     monkeypatch.setenv("WORKER_LOCK_PATH", str(tmp_path / "archive.lock"))
-    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", _FIELD_KEY)
-    monkeypatch.setenv("WECOM_CORP_ID", "corp1")
-    monkeypatch.delenv("WECOM_TENANT_ID", raising=False)
     monkeypatch.setenv("DATABASE_URL", "sqlite:///unused")
-    calls: list[str] = []
-    monkeypatch.setattr(worker, "_run_script", lambda _path, label: calls.append(label))
-    reachability_calls: list[object] = []
+    monkeypatch.setenv("WECOM_TENANT_ID", _TENANT_B)
+    monkeypatch.setenv("WECOM_CORP_ID", "legacy-corp")
+    monkeypatch.setenv("WECOM_ARCHIVE_SECRET", "legacy-secret")
+    monkeypatch.setattr(worker, "_tenant_engine", lambda: worker_engine)
+    child_envs: list[dict] = []
     monkeypatch.setattr(
         worker,
-        "_run_best_effort_reachability_automation",
-        lambda: reachability_calls.append("diagnostic"),
+        "_run_script_env",
+        lambda _path, _label, env, _tag: child_envs.append(env) or True,
     )
-    media_calls: list[object] = []
+    monkeypatch.setattr(worker, "_run_best_effort_reachability_automation", lambda _env: None)
+    media_tenants: list[str] = []
     monkeypatch.setattr(
         worker,
         "_request_media_worker_after_archive",
-        lambda: media_calls.append("media") or worker.MediaWorkerDispatch.ACCEPTED,
+        lambda tenant_id: media_tenants.append(tenant_id) or worker.MediaWorkerDispatch.ACCEPTED,
     )
 
     with pytest.raises(SystemExit) as result:
         worker.main()
 
     assert result.value.code == 0
-    assert calls == ["sync_wecom_archive_once.py", "decrypt_wecom_messages_once.py"]
-    assert reachability_calls == ["diagnostic"]
-    assert media_calls == ["media"]
+    assert len(child_envs) == 2
+    assert all(env["WECOM_TENANT_ID"] == _TENANT_B for env in child_envs)
+    assert all("WECOM_ARCHIVE_SECRET" not in env for env in child_envs)
+    assert media_tenants == [_TENANT_B]
 
 
 # ---------------------------------------------------------------------------

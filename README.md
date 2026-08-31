@@ -206,8 +206,9 @@ the value you change, then restart the web service and any affected workers.
    [Local console](#local-console). From `backend/`, run
    `python scripts/bootstrap_default_tenant.py` after providing its required WeCom
    values in the loaded environment as described in [`.env.example`](.env.example).
-   For a real archive sync, also configure the WeCom SDK and
-   `WECOM_ARCHIVE_SECRET`; the worker requires both.
+   For a real archive sync, configure the WeCom SDK and complete encrypted
+   tenant-scoped archive credentials; the worker does not read a global
+   `WECOM_ARCHIVE_SECRET`.
 2. With the service running, open
    `http://127.0.0.1:8035/admin/settings/init` (replace the host and port for
    your deployment). This public first-run page is available only until setup
