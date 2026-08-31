@@ -1,91 +1,170 @@
-"""GH-107: httpx/httpcore must never emit access_token/corpsecret-bearing
-request URLs at INFO level (the reconcile entrypoint's own
-``logging.basicConfig(level=logging.INFO)`` previously let ~11.7k/24h of
-those lines reach journald verbatim)."""
+"""GH-107/GH-139 regression coverage for centralized HTTP log redaction."""
 
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from io import StringIO
+from typing import Iterator
 
+import httpx
 import pytest
 
-from app.log_safety import RedactSecretQueryParamsFilter, configure_secret_safe_logging
+from app.log_safety import (
+    RedactSecretQueryParamsFilter,
+    configure_secret_safe_logging,
+)
+
+_SENTINEL = "GH139_SENTINEL_SECRET_DO_NOT_PERSIST"
 
 
-@pytest.fixture(autouse=True)
-def _reset_module_state(monkeypatch):
-    import app.log_safety as log_safety
+@contextmanager
+def _capture_logger(logger_name: str) -> Iterator[StringIO]:
+    """Capture one logger's formatted sink output without root propagation."""
+    logger = logging.getLogger(logger_name)
+    old_level = logger.level
+    old_propagate = logger.propagate
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    try:
+        yield stream
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
+        logger.propagate = old_propagate
 
-    monkeypatch.setattr(log_safety, "_configured", False)
-    for name in ("httpx", "httpcore"):
-        logger = logging.getLogger(name)
-        logger.setLevel(logging.NOTSET)
-        for f in list(logger.filters):
-            logger.removeFilter(f)
-    yield
-    for name in ("httpx", "httpcore"):
-        logger = logging.getLogger(name)
-        logger.setLevel(logging.NOTSET)
-        for f in list(logger.filters):
-            logger.removeFilter(f)
+
+def test_configure_is_idempotent_and_preserves_httpx_info_observability() -> None:
+    logger = logging.getLogger("httpx")
+    old_level = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        configure_secret_safe_logging()
+        factory = logging.getLogRecordFactory()
+        configure_secret_safe_logging()
+
+        assert logging.getLogRecordFactory() is factory
+        assert logger.isEnabledFor(logging.INFO)
+    finally:
+        logger.setLevel(old_level)
 
 
-def test_configure_suppresses_httpx_and_httpcore_info_logs() -> None:
-    # Simulates a process that raised root/httpx logging to INFO, as
-    # external_contact_sync.main()'s logging.basicConfig(level=logging.INFO)
-    # used to do before this fix.
-    logging.getLogger("httpx").setLevel(logging.INFO)
-    logging.getLogger("httpcore").setLevel(logging.INFO)
-    assert logging.getLogger("httpx").isEnabledFor(logging.INFO)
+@pytest.mark.parametrize("logger_name", ("httpx", "httpcore"))
+def test_third_party_http_logger_redacts_delayed_url_args_at_the_sink(
+    logger_name: str,
+) -> None:
+    configure_secret_safe_logging()
+    url = httpx.URL(
+        f"https://qyapi.weixin.qq.com/cgi-bin/externalcontact/list?access_token={_SENTINEL}"
+    )
 
+    with _capture_logger(logger_name) as stream:
+        logging.getLogger(logger_name).info(
+            'HTTP Request: %s %s "%s %s %s"',
+            "GET",
+            url,
+            "HTTP/1.1",
+            200,
+            "OK",
+        )
+
+    persisted = stream.getvalue()
+    assert _SENTINEL not in persisted
+    assert "access_token=[REDACTED]" in persisted
+    assert "GET" in persisted
+    assert "qyapi.weixin.qq.com/cgi-bin/externalcontact/list" in persisted
+    assert "200" in persisted
+
+
+def test_application_logger_remains_redacted() -> None:
     configure_secret_safe_logging()
 
-    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
-    assert not logging.getLogger("httpcore").isEnabledFor(logging.INFO)
-    assert logging.getLogger("httpx").isEnabledFor(logging.WARNING)
+    with _capture_logger("app.wecom_contacts") as stream:
+        logging.getLogger("app.wecom_contacts").info(
+            "outbound request url=%s",
+            f"https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token={_SENTINEL}",
+        )
+
+    persisted = stream.getvalue()
+    assert _SENTINEL not in persisted
+    assert "access_token=[REDACTED]" in persisted
+    assert "cgi-bin/user/get" in persisted
 
 
-def test_configure_is_idempotent_across_repeated_calls() -> None:
+def test_multiple_query_parameters_preserve_safe_diagnostics() -> None:
     configure_secret_safe_logging()
+    url = (
+        "https://qyapi.weixin.qq.com/cgi-bin/externalcontact/list?foo=bar&"
+        f"access_token={_SENTINEL}&x=1"
+    )
+
+    with _capture_logger("httpx") as stream:
+        logging.getLogger("httpx").info("HTTP Request: GET %s \"HTTP/1.1 200 OK\"", url)
+
+    persisted = stream.getvalue()
+    assert _SENTINEL not in persisted
+    assert "foo=bar" in persisted
+    assert "x=1" in persisted
+    assert "access_token=[REDACTED]" in persisted
+
+
+def test_realistic_encoded_httpx_url_form_is_redacted_case_insensitively() -> None:
+    configure_secret_safe_logging()
+    url = httpx.URL(
+        "https://qyapi.weixin.qq.com/cgi-bin/externalcontact/get?foo=bar&"
+        f"AcCeSs_ToKeN={_SENTINEL}%2Fencoded&x=1"
+    )
+
+    with _capture_logger("httpx") as stream:
+        logging.getLogger("httpx").info("HTTP Request: GET %s \"HTTP/1.1 200 OK\"", url)
+
+    persisted = stream.getvalue()
+    assert _SENTINEL not in persisted
+    assert "AcCeSs_ToKeN=[REDACTED]" in persisted
+    assert "foo=bar" in persisted
+    assert "x=1" in persisted
+
+
+def test_url_bearing_exception_is_redacted_before_formatter_output() -> None:
     configure_secret_safe_logging()
 
-    assert len(logging.getLogger("httpx").filters) == 1
+    with _capture_logger("httpx") as stream:
+        try:
+            raise RuntimeError(
+                f"request failed for https://qyapi.weixin.qq.com/cgi-bin/user/get?access_token={_SENTINEL}"
+            )
+        except RuntimeError:
+            logging.getLogger("httpx").exception("outbound request failed")
+
+    persisted = stream.getvalue()
+    assert _SENTINEL not in persisted
+    assert "access_token=[REDACTED]" in persisted
+    assert "RuntimeError" in persisted
 
 
 @pytest.mark.parametrize(
-    "raw",
+    "raw, secret",
     [
-        "HTTP Request: GET https://qyapi.weixin.qq.com/cgi-bin/externalcontact/list"
-        "?access_token=SECRETVALUE123&userid=abc \"HTTP/1.1 200 OK\"",
-        "HTTP Request: GET https://qyapi.weixin.qq.com/cgi-bin/gettoken"
-        "?corpid=ww123&corpsecret=SUPERSECRET \"HTTP/1.1 200 OK\"",
-        "HTTP Request: GET https://qyapi.weixin.qq.com/cgi-bin/service/get_suite_token"
-        "?suite_access_token=abcxyz \"HTTP/1.1 200 OK\"",
+        ("https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpsecret=CORPSECRET_SENTINEL", "CORPSECRET_SENTINEL"),
+        ("https://qyapi.weixin.qq.com/cgi-bin/service/get_auth_info?suite_access_token=SUITE_SENTINEL", "SUITE_SENTINEL"),
+        ("https://media-origin.crowntime.cn/object?e=123&token=QINIU_SENTINEL", "QINIU_SENTINEL"),
     ],
 )
-def test_redact_filter_scrubs_known_secret_query_params(raw: str) -> None:
+def test_handler_filter_reuses_the_same_query_secret_primitive(raw: str, secret: str) -> None:
     record = logging.LogRecord(
-        name="httpx", level=logging.INFO, pathname=__file__, lineno=1,
-        msg=raw, args=(), exc_info=None,
+        name="third_party",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="outbound request %s",
+        args=(raw,),
+        exc_info=None,
     )
 
-    kept = RedactSecretQueryParamsFilter().filter(record)
-
-    assert kept is True
-    rendered = record.getMessage()
-    assert "SECRETVALUE123" not in rendered
-    assert "SUPERSECRET" not in rendered
-    assert "abcxyz" not in rendered
-    assert "[REDACTED]" in rendered
-
-
-def test_redact_filter_leaves_ordinary_messages_untouched() -> None:
-    record = logging.LogRecord(
-        name="httpx", level=logging.INFO, pathname=__file__, lineno=1,
-        msg="external_contact_reconcile status=completed total=42",
-        args=(), exc_info=None,
-    )
-
-    RedactSecretQueryParamsFilter().filter(record)
-
-    assert record.getMessage() == "external_contact_reconcile status=completed total=42"
+    assert RedactSecretQueryParamsFilter().filter(record) is True
+    assert secret not in record.getMessage()
+    assert "[REDACTED]" in record.getMessage()
