@@ -24,50 +24,87 @@ query-string parameter rather than a header — so every reconcile run wrote
 those secrets to journald verbatim (~11.7k lines/24h observed).
 
 **Fix:** [`backend/app/log_safety.py`](../../backend/app/log_safety.py)
-provides `configure_secret_safe_logging()`, which:
+installs a process-wide `LogRecord` factory from `app.__init__`, before any
+application entrypoint creates an outbound HTTP client. The factory composes
+with any existing factory and scrubs query credentials from the final message,
+deferred `%s`/mapping arguments, stack info, and URL-bearing exception text
+before a logger propagates to a handler or a formatter writes to a sink.
 
-- sets the `httpx` and `httpcore` loggers to `WARNING` (their INFO request
-  lines are never emitted, regardless of the root logger's level);
-- attaches a redacting filter to those two loggers as defense-in-depth, so
-  that if either is ever deliberately raised back to INFO/DEBUG for local
-  debugging, `access_token=`/`corpsecret=`/`suite_access_token=`/
-  `provider_access_token=` values are scrubbed to `[REDACTED]` instead of
-  printed;
-- is idempotent and safe to call from multiple modules regardless of
-  import order.
+It covers application, `httpx`, `httpcore`, and other normal Python logger
+records without changing their levels. The investigated outbound URL keys are
+WeCom `access_token`, `corpsecret`, and `suite_access_token`, plus Qiniu's
+short-lived signed-download `token`; key matching is case-insensitive. A
+handler-compatible filter reuses the same primitive where an embedding process
+needs an explicit handler filter.
 
-It is called from every process that talks to WeCom/payment/AI provider
-APIs over httpx:
-
-- `app/main.py` (the web process — previously relied on a side effect of
-  importing `app.services.wecom_org_authorization`, which happened to run
-  first; now explicit);
-- `app/services/wecom_org_authorization.py` (unchanged behavior, now
-  delegates to the shared helper instead of its own duplicate
-  `setLevel` calls);
-- `app/services/external_contact_sync.py:main()` (the actual leak site).
+The helper remains explicitly called at `app/main.py`,
+`app/services/wecom_org_authorization.py`, and
+`app/services/external_contact_sync.py:main()` as an idempotent guard for
+embedded/import-order-customized processes.
 
 **What still gets logged (operator diagnosability):** `main()` keeps its
 existing structured summary line
 (`external_contact_reconcile status=completed tenant_count=... total=...
 inserted=... failed=...`) and per-tenant failure warnings
 (`external_contact_reconcile tenant=%s result=failed
-error_class=tenant_processing_failed`) — these carry outcome counts and a
-tenant tag, never a token or raw contact/message payload. Per-request
-httpx lines were the only thing suppressed.
+error_class=tenant_processing_failed`). Per-request HTTP diagnostics also
+remain available with method, host, path, protocol/status, and non-sensitive
+query parameters; only credential values appear as `[REDACTED]`.
 
-**Reviewed for the same integration surface (no equivalent leak found):**
-`app/wecom_contacts.py`, `app/auth.py` (`get_wecom_token`),
-`app/routers/auth.py`, `app/services/wecom_org_authorization.py`,
-`app/services/wechat_pay.py`, `app/services/alipay.py`,
-`app/services/avatar_sync.py`, `app/services/branding.py`,
-`app/services/ai/llm_provider.py` all call httpx with a secret in `params`
-or none at all, and every exception handler in this surface already logs
-only `type(exc).__name__` or a fixed message — never `str(exc)` — so an
-httpx exception's own string form (which, like its request log line,
-includes the full URL) cannot reach a log line either.
+**GH-139 exposure-surface audit:**
+
+| Path | HTTP client | Credential transport | URL-log exposure | Central boundary |
+| --- | --- | --- | --- | --- |
+| External-contact reconcile/refresh, display-name and group-chat sync (`app/wecom_contacts.py`) | httpx | `access_token` query parameter | Yes | Redacted |
+| WeCom token mint and OAuth user lookup (`app/auth.py`, `app/routers/auth.py`) | httpx | `corpsecret` and `access_token` query parameters | Yes | Redacted |
+| Third-party organization authorization | httpx | `suite_access_token` query parameter | Yes | Redacted |
+| Qiniu internal signed reads | httpx | signed `token` query parameter | Yes | Redacted |
+| Avatar fetch | httpx | no configured credential query; a provider-signed `token` URL is still covered | Possible | Redacted |
+| WeChat Pay, Alipay, DeepSeek | httpx | Authorization header or request body, not a credential query | No URL credential identified | Headers/bodies are not emitted by normal httpx request summaries; existing exception paths log a class/fixed message |
+| Branding DNS-over-HTTPS | httpx | none | No | Not applicable |
+| WeCom archive/media SDK | C SDK | SDK arguments, not a Python HTTP URL | No | Not applicable |
+| Self-service activation E2E helper | requests | no credential query; not a production systemd entrypoint | No identified production path | Not applicable |
+
+No `aiohttp`, `urllib`, or `urllib3` application call site was found. The
+application-side exception handlers in this surface continue to log only
+`type(exc).__name__` or a fixed message; the centralized boundary also handles
+URL-bearing exception text before a handler can format it.
 
 Tests: [`backend/tests/test_gh107_log_safety.py`](../../backend/tests/test_gh107_log_safety.py).
+
+### GH-139 historical-exposure disposition
+
+A read-only, value-free production audit before the GH-139 rollout found the
+following retained matches. It emitted counts and dates only, never matching
+log text or credential values:
+
+- `wecom-external-contact-reconcile.service` journal records: 124,664 retained
+  query-secret matches (2026-08-18 through 2026-08-27 UTC).
+- rsyslog-managed `/var/log/messages-*`: 222,467 retained query-secret matches
+  from 2026-08-05 and 2026-08-18 through 2026-08-28 local log dates.
+- The affected producer was the external-contact reconciliation path. The
+  journal uses `SystemMaxUse=500M` and `MaxRetentionSec=14day`; rsyslog is
+  active and uses the system's weekly, four-rotation policy for its local
+  messages files. No active journal-upload/log-shipper service or active
+  rsyslog forwarding action was found. The versioned application backup script
+  backs up database/media artifacts, not host logs; cloud/host snapshots remain
+  an Ops confirmation item.
+
+**Rotation decision: ROTATION REQUIRED.** The pre-GH-107 request URLs exposed
+short-lived access tokens and the long-lived WeCom `corpsecret` values used by
+the external-contact and OAuth token-mint paths. A WeCom owner must rotate the
+corresponding configured app secrets, update the protected production runtime
+configuration through the approved secret channel, and restart/deploy without
+putting either old or new value in a command, ticket, PR, or log. The agent
+must not perform that console/configuration action.
+
+**Log-handling decision:** after rotation, an authorized Ops owner must choose
+between early removal of the identified rotated rsyslog files plus affected
+journal archives, or retention until their configured expiry. Selective
+redaction is not possible for existing journal/syslog records; early removal
+also removes unrelated operational evidence, so it requires explicit approval
+and a post-action count-only rescan. Any cloud snapshot or external-log copy
+must be handled under its owning retention/deletion process.
 
 ## Scope B — host-local alert delivery
 
