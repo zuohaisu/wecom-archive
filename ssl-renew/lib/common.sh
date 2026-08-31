@@ -58,6 +58,55 @@ filter_secrets() {
 		-e 's/(Authorization[[:space:]]*:[[:space:]]*QBox[[:space:]]+)[A-Za-z0-9_:-]+/\1[REDACTED]/g'
 }
 
+# ── Canonical failure reporting ─────────────────────────────────────────
+# warn/die deliberately only report. The caller chooses alert delivery:
+# qiniu-ssl-renew-wildcard.service relies on systemd OnFailure= so a hard
+# failure creates exactly one alert, while warn-only paths remain non-fatal.
+# DOMAIN is used by renew.sh; the wildcard flow supplies its fixed domain via
+# SSL_RENEW_ALERT_DOMAIN rather than reading DOMAIN from its EnvironmentFile.
+_ssl_renew_safe_message() {
+	local message
+
+	# Do not emit an unfiltered message if the filtering runtime itself is
+	# unavailable. The marker is fixed, contains no secret, and still leaves
+	# the structured stage/domain fields for operator diagnosis.
+	if ! command -v sed >/dev/null 2>&1; then
+		printf '%s' 'secret-filter-unavailable'
+		return 0
+	fi
+
+	if ! message=$(printf '%s' "$*" | filter_secrets); then
+		printf '%s' 'secret-filter-failed'
+		return 0
+	fi
+	printf '%s' "$message"
+}
+
+_ssl_renew_report() {
+	local level="$1"
+	shift
+	local stage="${CURRENT_STAGE:-unknown}"
+	local domain="${SSL_RENEW_ALERT_DOMAIN:-${DOMAIN:-unknown}}"
+	local safe_domain safe_message
+	safe_domain=$(_ssl_renew_safe_message "$domain")
+	safe_message=$(_ssl_renew_safe_message "$*")
+
+	# stderr is the canonical stream for warning/error diagnostics. Systemd
+	# captures both streams into the same renewal log, while callers and tests
+	# can reliably distinguish diagnostics from normal progress output.
+	printf '[%s] [%s] stage=%s domain=%s message=%s\n' \
+		"$(_ts)" "$level" "$stage" "$safe_domain" "$safe_message" >&2
+}
+
+warn() {
+	_ssl_renew_report WARN "$@"
+}
+
+die() {
+	_ssl_renew_report ERROR "$@"
+	exit "$EXIT_GENERIC_FAILURE"
+}
+
 # ── Domain validation ────────────────────────────────────────────────────
 # Conservative RFC-1123-ish hostname check: labels of alnum/hyphen, 1-63
 # chars, no leading/trailing hyphen, at least one dot, total <= 253 chars.
