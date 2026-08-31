@@ -120,6 +120,10 @@ SELECT 'third_party_organization_bindings', count(*)
 5. 全程检查应用和反向代理日志，确认不包含 code、state、ticket、token、permanent code、
    CorpID 或 UserID。
 
+真实外部客户进入测试应用的受控流程（名额治理、准入、知情、onboarding、
+offboarding 与正式应用迁移）按 [受控测试企业试点运维手册](wecom-controlled-pilot.md)
+执行；本小节只覆盖非生产端到端技术验收。
+
 当前开发者登记应用实测前的上线门禁：使用非生产测试企业完成一次安装、确认授权模式为
 管理员授权、确认两个回调的地址与权限，再允许开启入口。现有康冠生产企业无需作为
 “第二家企业”重复创建；如仅验证同一 CorpID，系统应走安全冲突分支而不是新建租户。
