@@ -211,15 +211,19 @@ Do not proceed past a non-zero exit from any of the above.
 
 ```bash
 sudo -n -u wecomarchive sudo -n /usr/bin/systemctl restart wecom-archive-365.service
-sudo -n -u wecomarchive sudo -n /usr/bin/systemctl is-active wecom-archive-365.service
+sudo -n -u wecomarchive sudo -n /usr/bin/systemctl status wecom-archive-365.service
 sudo -n -u wecomarchive sudo -n /usr/bin/systemctl daemon-reload
 sudo -n -u wecomarchive sudo -n /usr/bin/systemctl enable --now wecom-archive-worker.timer
 sudo -n -u wecomarchive sudo -n /usr/bin/mkdir -p /var/www/deploy-sudoers-probe
 sudo -n -u wecomarchive sudo -n /usr/bin/systemctl reload nginx
 ```
 
-Each must exit `0` with no password prompt. Clean up any probe artifacts
-(e.g. `/var/www/deploy-sudoers-probe`) afterward.
+Each must exit `0` with no password prompt. `systemctl status` is the
+positive sudo verification because it is the authorized service-inspection
+capability. `deploy_server.sh` deliberately runs `systemctl is-active`
+without sudo: ordinary users can query active state, so it must not be used
+to imply a broader sudo grant. Clean up any probe artifacts (e.g.
+`/var/www/deploy-sudoers-probe`) afterward.
 
 ### 4. Negative tests (removed/never-granted capability is actually rejected)
 
