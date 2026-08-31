@@ -2,6 +2,10 @@
 Description=Qiniu Wildcard SSL Certificate Renewal — *.crowntime.cn (one shot)
 After=network-online.target
 Wants=network-online.target
+# GH-123: canonical hard-failure alerting. renew-wildcard.sh emits warnings
+# but exits 0 for its approved warn-only stages, so only a hard service
+# failure reaches this shared OnFailure pipeline.
+OnFailure=wecom-job-failure-alert@%n.service
 
 [Service]
 Type=oneshot
@@ -18,8 +22,8 @@ ExecStart=/srv/apps/wecom-archive-365/current/ssl-renew/renew-wildcard.sh
 # as qiniu-ssl-renew@.service's per-domain template.
 TimeoutStartSec=600
 
-# GH-104 Follow-up B: this unit is captured as-is from the already-proven
-# production copy (41/41 successful runs as of this capture). It
+# Apart from GH-123's explicit OnFailure hook, this unit retains the
+# production-proven privilege envelope (41/41 successful runs at capture). It
 # deliberately does NOT set NoNewPrivileges=, ProtectSystem=, or
 # CapabilityBoundingSet= — those hardening directives are not present on
 # the production unit this was captured from. Do not add them here; open

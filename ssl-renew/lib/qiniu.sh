@@ -26,7 +26,7 @@
 # (which expects e.g. a certID string) keeps working for planning/logging.
 #
 # Requires lib/common.sh to already be sourced (log, filter_secrets,
-# is_dry_run, die/warn provided by the caller).
+# is_dry_run, and canonical warn/die reporting).
 #=============================================================================
 
 # shellcheck disable=SC2317  # reachable when sourced a second time

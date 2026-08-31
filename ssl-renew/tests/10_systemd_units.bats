@@ -99,12 +99,19 @@ EOF
     [ "$value" -ge 300 ]
 }
 
-@test "qiniu-ssl-renew-wildcard.service does NOT add hardening beyond the captured production unit" {
+@test "qiniu-ssl-renew-wildcard.service retains its captured privilege envelope" {
     # GH-104 Follow-up B is explicit: do not add NoNewPrivileges=,
     # ProtectSystem=, or CapabilityBoundingSet= -- the production unit
     # this was captured from does not have them. Adding them here would
     # silently diverge repo/server equivalence.
     ! grep -qE '^(NoNewPrivileges|ProtectSystem|CapabilityBoundingSet)=' "$WILDCARD_SERVICE"
+}
+
+@test "qiniu-ssl-renew-wildcard.service uses the canonical alert hook for hard failures" {
+    grep -q '^OnFailure=wecom-job-failure-alert@%n.service$' "$WILDCARD_SERVICE"
+    # The shared target is a static helper installed through MANAGED_UNITS;
+    # it is invoked only by systemd when this oneshot service fails.
+    grep -q '^wecom-job-failure-alert@.service$' "$SSL_RENEW_ROOT/../deploy/systemd/MANAGED_UNITS"
 }
 
 @test "qiniu-ssl-renew-wildcard.timer locks the captured production cadence" {

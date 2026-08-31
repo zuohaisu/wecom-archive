@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -uo pipefail
 SCRIPT_DIR="/srv/apps/wecom-archive-365/current/ssl-renew"
-source "$SCRIPT_DIR/lib/common.sh"
-source "$SCRIPT_DIR/lib/qiniu.sh"
+if ! source "$SCRIPT_DIR/lib/common.sh" 2>/dev/null; then
+    printf '[ERROR] [bootstrap] stage=bootstrap domain=crowntime.cn message=unable-to-load-lib-common.sh\n' >&2
+    exit 1
+fi
+CURRENT_STAGE="bootstrap"
+if ! source "$SCRIPT_DIR/lib/qiniu.sh" 2>/dev/null; then
+    die "unable to load required helper: lib/qiniu.sh"
+fi
 
 WILDCARD_DOMAIN="crowntime.cn"
 WILDCARD_DIR="${CERT_DIR:-$HOME/.acme.sh/$WILDCARD_DOMAIN}"
@@ -15,8 +21,18 @@ CDN_DOMAIN="media.crowntime.cn"
 ORIGIN_DOMAIN="media-origin.crowntime.cn"
 ACME_SH="${ACME_SH:-$HOME/.acme.sh/acme.sh}"
 DNS_PROVIDER="${DNS_PROVIDER:-dns_dp}"
+# The wildcard flow's domain is a script constant, not the EnvironmentFile's
+# convention-only DOMAIN value. common.sh uses this only for safe diagnostics.
+export SSL_RENEW_ALERT_DOMAIN="$WILDCARD_DOMAIN"
 
 log "===== Wildcard SSL renewal started ====="
+
+CURRENT_STAGE="runtime_dependency"
+# acme.sh output is untrusted command output and must be filtered before it
+# reaches the journal. Refuse to run it if filtering is not available.
+if ! command -v sed >/dev/null 2>&1; then
+    die "required secret filtering runtime dependency is unavailable"
+fi
 
 CURRENT_STAGE="acme_renew"
 log "[INFO] Running acme.sh --renew for $WILDCARD_DOMAIN (*.crowntime.cn)"
@@ -30,8 +46,14 @@ else die "acme.sh --renew failed (exit=$acme_exit)"
 fi
 
 CURRENT_STAGE="local_fingerprint"
-[ -f "$WILDCARD_DIR/fullchain.cer" ] || die "fullchain.cer not found"
-local_fp=$(sha256sum "$WILDCARD_DIR/fullchain.cer" | awk '{print $1}')
+[ -f "$WILDCARD_DIR/fullchain.cer" ] || die "fullchain.cer not found: $WILDCARD_DIR/fullchain.cer"
+if ! command -v sha256sum >/dev/null 2>&1 || ! command -v awk >/dev/null 2>&1; then
+    die "required fingerprint runtime dependency is unavailable"
+fi
+if ! local_fp=$(sha256sum "$WILDCARD_DIR/fullchain.cer" | awk '{print $1}'); then
+    die "failed to calculate local certificate fingerprint"
+fi
+[ -n "$local_fp" ] || die "local certificate fingerprint is empty"
 log "[INFO] local_fp=$local_fp"
 
 deployed_fp="" && [ -f "$FP_FILE" ] && deployed_fp=$(cat "$FP_FILE")
@@ -41,6 +63,11 @@ if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
 fi
 
 CURRENT_STAGE="qiniu_upload"
+if ! command -v "$QINIU_HELPER_PYTHON" >/dev/null 2>&1 \
+   || [ ! -f "$QINIU_HELPER_SCRIPT" ] \
+   || ! command -v jq >/dev/null 2>&1; then
+    die "required Qiniu helper runtime dependency is unavailable"
+fi
 upload_output=$(deploy_to_qiniu "$WILDCARD_DOMAIN" "$WILDCARD_DIR" 2>&1) && upload_status=$? || upload_status=$?
 if [ "$upload_status" -ne 0 ]; then die "$upload_output"; fi
 certID="$upload_output"

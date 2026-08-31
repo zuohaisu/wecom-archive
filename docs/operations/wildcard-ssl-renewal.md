@@ -1,19 +1,16 @@
 # Wildcard SSL Renewal (`*.crowntime.cn`)
 
-**GH-104 Follow-up B / GH-126.** This captures the production wildcard TLS
-renewal implementation that was already running successfully (41/41 observed
-runs in the 30 days before capture) but had never been committed to this
-repository. GH-126 verified the live 2026-08-03 script after secret-safety
-review and restored its runtime behavior after the earlier capture drifted.
-The repository adds exactly two `shellcheck` suppression comments for
-production's intentionally unused assignments; they have no shell behavior,
-and removing only those comments yields the verified live SHA-256. The same
-source is deliberately excluded from `shfmt` only; its parity test is the
-stronger guard against any unreviewed reformat or behavior drift. It was
-introduced by the 2026-08-03 RND-261 domain-cutover
-([docs/ops/rnd-261-domain-cutover-runbook.md](../ops/rnd-261-domain-cutover-runbook.md))
-as a hand-authored script that stayed server-only until now. This document
-describes what production actually does; it is not a design proposal.
+**GH-104 Follow-up B / GH-126 baseline; GH-123 hardening.** The production
+wildcard TLS renewal implementation was captured after 41/41 observed
+successful runs in the 30 days before capture. GH-123 deliberately changes
+only its previously-unimplemented failure reporting and alerting behavior;
+the production-proven successful path and its wildcard/domain topology remain
+unchanged. The original flow was introduced by the 2026-08-03 RND-261
+domain-cutover ([docs/ops/rnd-261-domain-cutover-runbook.md](../ops/rnd-261-domain-cutover-runbook.md)).
+
+This document distinguishes the captured successful flow from GH-123's
+explicit failure policy. It is not a proposal to redesign certificate
+issuance, Qiniu bindings, nginx topology, or locking.
 
 Do not confuse this with `deploy/systemd/qiniu-ssl-renew@.service` (the
 per-domain **Qiniu Kodo CDN custom-domain** certificate template — a
@@ -53,9 +50,7 @@ EnvironmentFile for naming-convention consistency with every other
      (e.g. a first-ever run, or the `.deployed_fp` record is missing or
      stale), the deploy steps below still run even though acme.sh itself
      didn't renew anything this cycle.
-   - anything else — see "Known production defect" below: this is
-     supposed to be a hard failure, but the mechanism that enforces it is
-     broken.
+   - anything else — hard failure with a structured diagnostic and exit `1`.
 2. **Local fingerprint check.** `sha256sum` of the current `fullchain.cer`,
    compared against the last recorded deployed fingerprint. If they
    match, the certificate is already fully deployed — exit success
@@ -64,13 +59,12 @@ EnvironmentFile for naming-convention consistency with every other
 3. **Qiniu upload + bind**: one upload produces a single certID for the
    wildcard certificate, via the same `qiniu_helper.py`/official Qiniu SDK
    path `renew.sh` uses — no second signing implementation.
-   - Bind to `media.crowntime.cn` (CDN) — *intended* to be a hard failure.
-   - Bind to `media-origin.crowntime.cn` (origin) — *intended* to be a
-     non-fatal warning; the CDN domain is what end users hit. See "Known
-     production defect" below for why this intent is not actually what
-     happens today.
-4. **Record the Qiniu deployment before nginx handling.** After both binds
-   succeed, the script writes `.deployed_fp` and clears its TLS markers.
+   - Bind to `media.crowntime.cn` (CDN) — hard failure if it fails.
+   - Bind to `media-origin.crowntime.cn` (origin) — non-fatal warning if it
+     fails; the CDN domain is what end users hit.
+4. **Record the Qiniu deployment before nginx handling.** After the required
+   CDN bind succeeds and the origin bind has either succeeded or warned, the
+   script writes `.deployed_fp` and clears its TLS markers.
    This ordering is production truth: a later nginx failure can therefore
    leave the fingerprint recorded.
 5. **nginx deployment — only if all three already exist**: the nginx
@@ -80,52 +74,38 @@ EnvironmentFile for naming-convention consistency with every other
    `fullchain.cer` → `fullchain.pem` and the private key → `privkey.pem`,
    attempts mode `640` (best effort), then runs `sudo -n
    /usr/bin/systemctl reload nginx`. The reload's exact command shape is
-   absolute and non-interactive (`-n`). See "Known production defect" below.
+   absolute and non-interactive (`-n`). See the GH-123 failure policy below.
 
-## Known production defect: `warn`/`die` are called but never defined
+## GH-123 failure policy and alerting
 
-**This is real, already-in-production behavior — not introduced by
-capturing it.** Every failure path in `renew-wildcard.sh` calls `warn
-"..."` or `die "..."`, exactly like `renew.sh` does — but unlike
-`renew.sh`, which defines its own local `warn()`/`die()` functions after
-sourcing `lib/common.sh`, this script defines neither. `lib/common.sh` and
-`lib/qiniu.sh` (the only two files it sources) do not provide them either.
+`lib/common.sh` now provides the canonical `warn()` and `die()` functions
+used by the wildcard flow. Both emit one structured, secret-filtered stderr
+line containing the level, stage, domain, and message. `warn()` returns zero;
+`die()` exits deterministically with `EXIT_GENERIC_FAILURE` (`1`). Neither
+calls `notify.sh` directly.
 
-Consequence, verified empirically against the real script: an undefined
-bash function is "command not found" (exit 127). Because `set -e` is back
-in effect for the entire script body once the initial `acme.sh` call's own
-`set +e`/`set -e` bracket closes, that 127 is **not** swallowed — it
-**immediately halts the script at that exact line**. In practice this
-means, for every failure path below, the *intended* message is never
-printed (it was only ever an argument to a command that never ran), and
-**nothing after that line executes**:
+The wildcard systemd unit uses the existing canonical
+`OnFailure=wecom-job-failure-alert@%n.service` mechanism. Therefore a hard
+failure sends one alert through the existing `notify.sh` transport, while a
+warning-only path exits successfully and cannot trigger that systemd alert.
+The alert payload contains only the failed unit name; detailed diagnostics
+remain in the renewal journal and have already passed secret filtering.
 
-| Failure | Intended behavior | Actual behavior today |
-|---|---|---|
-| `acme.sh --renew` exits neither 0 nor 2 | Hard failure with a clear message | Halts at exit 127 with a bare "command not found"; no clear message |
-| Qiniu upload fails | Hard failure | Halts at exit 127; `.deployed_fp` never written |
-| CDN bind fails | Hard failure | Halts at exit 127; same as above |
-| **Origin bind fails** | **Non-fatal warning, continue to nginx deploy** | **Halts at exit 127 — nginx never receives the certificate even though the CDN bind already succeeded**, and `.deployed_fp` is never written |
-| nginx dir/files missing | Non-fatal warning, skip nginx step | Halts at exit 127 instead of skipping gracefully, **after** `.deployed_fp` is written |
-| `sudo -n systemctl reload nginx` fails | Non-fatal warning (cert already on disk) | Halts at exit 127 after certificate copies and `.deployed_fp` are written |
+| Failure point | Policy | Final exit / alert | Retry and operator response |
+|---|---|---|---|
+| `acme.sh --renew` exits other than 0 or 2 | Hard fail | `1`; one systemd failure alert | Retry on the next daily timer after inspecting the journal, acme.sh/DNS provider credentials, DNS reachability, and ACME state. Do not force issuance to test. |
+| `fullchain.cer` is absent | Hard fail | `1`; one systemd failure alert | Retry after correcting acme certificate state, path, ownership, disk space, or the underlying ACME failure. |
+| Qiniu upload fails | Hard fail | `1`; one systemd failure alert | No fingerprint is written, so the next timer retries after Qiniu credentials, permissions, SDK/runtime, or reachability is repaired. |
+| CDN bind fails | Hard fail | `1`; one systemd failure alert | No fingerprint is written, so the next timer retries after Qiniu HTTPS-domain configuration or binding permissions are fixed. |
+| Origin bind fails | Warn and continue | final `0`; no systemd failure alert | No automatic retry once the fingerprint is written. Correct the Qiniu origin configuration and bind/verify the certificate through an approved operator procedure. |
+| nginx certificate copy fails, or its destination/source precondition is missing | Warn and continue | final `0`; no systemd failure alert | No automatic retry once the fingerprint is written. Correct destination existence/ownership/permissions/disk space, then copy the current certificate pair and reload nginx through the approved procedure. |
+| nginx reload fails, including missing/non-authorized `sudo` | Warn and continue | final `0`; no systemd failure alert | No automatic retry once the fingerprint is written. Check the narrow sudoers grant and nginx configuration, run the approved reload, then verify the served certificate. |
+| Mandatory bootstrap, secret-filtering, fingerprint, or Qiniu-helper runtime dependency fails | Hard fail | `1`; one systemd failure alert | Restore the tracked helper, executable, interpreter/package, or required utility and let the next timer retry. Dependencies reached only by the approved nginx copy/reload warning stages retain those stages' warning policy. |
 
-The net effect: what was designed as a resilient pipeline with two
-deliberately-non-fatal steps (origin bind, nginx reload) currently behaves
-as a fully hard-fail pipeline that stops on the very first problem,
-without ever explaining why, and — worse — an origin-bind hiccup can
-prevent a CDN-bind-successful certificate from ever reaching nginx.
-**41/41 observed production runs never hit any of these paths (every run
-so far genuinely succeeded end-to-end), which is exactly why this has
-never surfaced.**
-
-**This ticket intentionally does not fix it.** GH-104 Follow-up B is a
-reproducibility capture, not SSL hardening (see the task's own core
-principle: capture first, harden separately). A follow-up issue is
-recommended: **"Harden wildcard SSL renewal failure paths and alerting"**
-— define local `warn()`/`die()` (or source a shared implementation),
-decide whether `origin bind failure` and `nginx reload failure` should
-really be non-fatal (and if so, make that true), and add real alerting
-via `notify.sh` if desired. None of that is in scope here.
+The 41/41 captured production runs exercised only the successful path. The
+policy above intentionally fixes the old undefined-function exit-127 defect
+without changing ACME `0`/`2`, fingerprint-no-op, Qiniu/CDN hard-failure, or
+origin/nginx warning semantics.
 
 ## Environment / configuration
 
@@ -137,9 +117,10 @@ the environment. `DOMAIN`, `CDN_DOMAIN`, and `ORIGIN_DOMAIN` may be present
 in the file for convention/record-keeping but are **not read by the
 script** — see "Renewal mechanism" above. Optional, with code defaults:
 `CERT_DIR`, `ACME_SH`, `DNS_PROVIDER`, `NGINX_CERT_DIR`,
-`QINIU_HELPER_PYTHON`, `VERIFY_HTTPS_SKIP_CHAIN`, `ALERT_WEBHOOK_URL`
-(the last two are not currently wired into this script's own control
-flow — see the script source). The systemd unit also sets
+`QINIU_HELPER_PYTHON`, `VERIFY_HTTPS_SKIP_CHAIN`, `ALERT_WEBHOOK_URL`.
+`ALERT_WEBHOOK_URL` in this EnvironmentFile is not read for wildcard
+failure delivery: the canonical `OnFailure` alert unit reads the existing
+server-side `backend/.env` setting instead. The systemd unit also sets
 `Environment=HOME=/home/wecomarchive` directly (not via the EnvironmentFile)
 since acme.sh's own default cert directory depends on `$HOME`, which
 systemd services don't otherwise inherit.
@@ -187,10 +168,8 @@ its 2026-10-19 expiry.
 never acquires an `flock` on it. 41/41 production runs have never
 overlapped (a single daily timer, `RandomizedDelaySec`, `Type=oneshot`).
 Adding real locking is a legitimate future hardening candidate, but is
-explicitly **not** this ticket's scope. Recommended as part of the same
-"Harden wildcard SSL renewal failure paths and alerting" follow-up issue
-as the `warn`/`die` defect above — do not add it here as a separate,
-undiscussed change.
+explicitly **not** GH-123's scope. Do not add it as an incidental change to
+failure-path or alerting work.
 
 ## Manual verification (read-only; never forces a renewal)
 
@@ -213,80 +192,22 @@ echo | openssl s_client -connect crowntime.cn:443 -servername crowntime.cn 2>/de
 
 Do **not** run `renew-wildcard.sh` by hand against production to "test" it
 — acme.sh's own not-due check makes an ad hoc manual run harmless most
-days, but there is no reason to invoke it outside its timer for this PR's
-acceptance; historical evidence (41/41) plus repo/server file-content
-equivalence is sufficient (see the Rollout Plan).
+days, but failure-policy verification belongs to the fully mocked test suite,
+not a production invocation.
 
-## One-time server-only → tracked adoption (GH-126)
+## Historical server-only → tracked adoption (GH-126)
 
-This is a **human-approved production operation**, not a deployment-script
-cleanup. It is necessary exactly once because the live script pre-dated the
-tracked repository path. Do it only after the intended commit is on `main`
-and CD has safely stopped at the ownership collision; never use `git clean`,
-`git reset --hard`, a forced checkout, or a broad untracked-file cleanup.
-
-1. Confirm the service is inactive and arrange a maintenance window in which
-   its timer cannot start. The active script must never be moved while it is
-   executing.
-2. In the production checkout, verify that the current untracked path and the
-   target `origin/main` blob have the same canonical SHA-256. The target has
-   exactly two lint-only comments matching the shown prefix; remove only those
-   comments for the comparison. Abort on any mismatch or unexpected comment
-   count; a non-equivalent active renewal script must not be replaced.
-
-   ```bash
-   cd /srv/apps/wecom-archive-365/current
-   path=ssl-renew/renew-wildcard.sh
-   lint_comment='^# shellcheck disable=SC2034 # production parity:'
-   target_lint_count=$(git show "origin/main:$path" | grep -c "$lint_comment")
-   test "$target_lint_count" = 2 || {
-     echo "unexpected wildcard-script lint annotation count" >&2
-     exit 1
-   }
-   target_sha=$(git show "origin/main:$path" | sed "/$lint_comment/d" | sha256sum | awk '{print $1}')
-   live_sha=$(sha256sum "$path" | awk '{print $1}')
-   test "$target_sha" = "$live_sha" || {
-     echo "refusing non-equivalent wildcard-script transition" >&2
-     exit 1
-   }
-   ```
-
-3. Preserve the verified file outside the checkout, then move **only** that
-   path out of the checkout. Do not touch unrelated untracked diagnostic
-   files. The target backup must not already exist, and its post-move hash
-   must still match the verified live hash.
-
-   ```bash
-   systemctl is-active --quiet qiniu-ssl-renew-wildcard.service && {
-     echo "renewal service is active; aborting transition" >&2
-     exit 1
-   }
-   backup_dir=/srv/apps/wecom-archive-365/shared/deploy_state/ownership-transition-backups
-   backup="$backup_dir/renew-wildcard.sh.$live_sha"
-   install -d -m 0750 "$backup_dir"
-   test ! -e "$backup" || {
-     echo "refusing to overwrite existing wildcard-script backup" >&2
-     exit 1
-   }
-   mv -- "$path" "$backup"
-   test "$(sha256sum "$backup" | awk '{print $1}')" = "$live_sha" || {
-     echo "backup hash mismatch; aborting before CD retry" >&2
-     exit 1
-   }
-   ```
-
-4. Retry the standard CD workflow. Its normal checkout installs the already
-   canonical-hash-verified tracked blob; it must not be replaced manually.
-5. Verify the timer/service state and certificate serving afterwards. Keep the
-   external backup until a later approved retention decision.
+The one-time ownership transition was a completed GH-126 operation. It is
+not part of GH-123 and must not be repeated as part of a failure-path rollout.
+This hardening deploy updates the already tracked script and unit through the
+normal reviewed CD path only.
 
 ## Rollback
 
 If the repo-managed copy behaves unexpectedly after a deploy:
 
-1. Restore the previously-extracted, production-proven unit files and
-   script (kept in this PR's commit history — `git revert` the capture
-   commit, or `git checkout` the prior commit's copies).
+1. Revert the focused GH-123 commit through the normal reviewed rollback
+   path, restoring the prior tracked script and unit files.
 2. `sudo systemctl daemon-reload` and restart the timer only if necessary.
 3. Do **not** revoke the current certificate, delete acme.sh's state
    directory (`~/.acme.sh/crowntime.cn/`), or force a new issuance —

@@ -2,9 +2,9 @@ SHELL := /bin/bash
 
 SSL_DIR := ssl-renew
 SSL_SCRIPTS := $(SSL_DIR)/renew.sh $(SSL_DIR)/renew-wildcard.sh $(SSL_DIR)/notify.sh $(SSL_DIR)/verify_https.sh $(SSL_DIR)/install.sh
-# GH-126: renew-wildcard.sh is a production-parity capture whose original
-# whitespace is SHA-guarded in ssl-renew/tests/12_renew_wildcard.bats. Keep
-# shellcheck on it, but do not reformat its verified source bytes.
+# The wildcard script retains its hand-authored production-derived layout.
+# Keep shellcheck on it, but leave broad formatting changes outside focused
+# renewal hardening work.
 SSL_SHFMT_SCRIPTS := $(filter-out $(SSL_DIR)/renew-wildcard.sh,$(SSL_SCRIPTS))
 SSL_LIB := $(SSL_DIR)/lib/common.sh $(SSL_DIR)/lib/qiniu.sh
 SSL_TEST_HELPERS := $(SSL_DIR)/tests/systemd_static_check.sh $(SSL_DIR)/tests/test_helper/mock_curl.sh
