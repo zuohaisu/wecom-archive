@@ -19,6 +19,7 @@ Versioned in this repository:
 | Deploy script | `scripts/deploy_server.sh` | Pull latest code, install deps, run+verify Alembic migration, restart app service, gate on readiness, auto-rollback on failure (see §7) |
 | Revision verification | `backend/scripts/verify_alembic_head.py` | Non-interactive DB-revision-vs-repo-head check used by the deploy script and independently testable |
 | Deploy integration tests | `scripts/tests/deploy_server.bats` | Mocked end-to-end coverage of the deploy script's ordering and rollback behavior |
+| Deploy sudoers capability model (GH-133) | [operations/deploy-sudoers.md](operations/deploy-sudoers.md) | Capability matrix, ffmpeg host-prerequisite decision, systemd wildcard scoping decision, and the production sudoers migration runbook — the source of truth for what root capability the deploy user needs and why |
 | Scheduled-workload manifest (GH-104) | `deploy/systemd/WORKLOAD_MANIFEST` | The one authoritative classification (required/deferred/manual-oneshot/deprecated/static-helper/template/out-of-scope) for every unit below; `MANAGED_UNITS` is a mechanical view of it — see [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md) |
 | Scheduled-workload assertion (GH-104) | `scripts/assert_scheduled_workloads.sh` (+ `scripts/tests/assert_scheduled_workloads.bats`) | Repo-mode: manifest/MANAGED_UNITS/ExecStart consistency (CI-safe). `--server` mode: real installed/enabled/active state — run on the host post-deploy |
 | Worker unit | `deploy/systemd/wecom-archive-worker.service` | One-shot sync + decrypt |
@@ -202,7 +203,9 @@ below, added for RND-371 avatar sync) sat in the repo but was never
 actually installed on the host, because CD only ever restarted the main
 app service; installing a new systemd unit had always been this separate,
 easy-to-forget manual step. It needs a one-time sudoers grant (see the
-"Server (sudo) Prerequisites" comment at the top of `deploy_server.sh`) —
+"Server (sudo) Prerequisites" comment at the top of `deploy_server.sh`,
+and [operations/deploy-sudoers.md](operations/deploy-sudoers.md) for why
+that grant is a `wecom-*` wildcard rather than a per-unit exact list) —
 without it, step 10 logs a WARN per unit and the deploy still succeeds, it
 just does not self-heal the missing unit. Only add a unit to
 `MANAGED_UNITS` when you want it kept in sync and enabled automatically on

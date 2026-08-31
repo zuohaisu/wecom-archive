@@ -18,15 +18,21 @@
 #   DEPLOY_PORT       SSH port (typically 22)
 #
 # ── Server (sudo) Prerequisites ────────────────────────────────────────────
+#   GH-133: this script never invokes a package manager (no `dnf`, no
+#   `apt-get`) and the runtime user does NOT need package-manager sudo of
+#   any kind. ffmpeg is a HOST PREREQUISITE (see step 2 / _check_ffmpeg
+#   below and docs/operations/deploy-sudoers.md) — deployment only checks
+#   for it and fails fast with an actionable message if it is missing; an
+#   operator/root installs it out of band (`sudo dnf install -y ffmpeg` on
+#   the real Alibaba Cloud Linux 3 production host).
+#
 #   The runtime user (e.g. wecomarchive) must be able to run
 #       sudo systemctl restart wecom-archive-365.service
-#       sudo apt-get update -qq
-#       sudo apt-get install -y ffmpeg
 #   without a password prompt.  Add a sudoers drop-in file:
 #
 #       /etc/sudoers.d/wecomarchive
 #       ─────────────────────────────
-#       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service, /usr/bin/apt-get
+#       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service
 #
 #   Step 10 (sync deploy/systemd/MANAGED_UNITS) additionally needs, but
 #   degrades gracefully with a WARN (never fails the deploy) if these are
@@ -39,6 +45,12 @@
 #         /usr/bin/systemctl enable --now wecom-*.timer, \
 #         /usr/bin/systemctl enable --now wecom-*.path
 #
+#   The `wecom-*.timer`/`wecom-*.path` grant above is a deliberately kept
+#   wildcard, not a per-unit exact list — see
+#   docs/operations/deploy-sudoers.md "systemd wildcard decision" for why,
+#   and for the boundary it does NOT cross (it cannot match `nginx.service`,
+#   `sshd.service`, any `qiniu-*` unit, or any other non-`wecom-*` name).
+#
 #   GH-104 Follow-up B: MANAGED_UNITS also lists qiniu-ssl-renew-wildcard.*
 #   (not wecom-*). This script's own sync logic has no prefix restriction,
 #   but the `enable --now` grant above is a literal `wecom-*` glob and does
@@ -47,14 +59,19 @@
 #       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now qiniu-ssl-renew-wildcard.timer
 #   Until that grant exists, this one unit degrades to the same WARN every
 #   other missing-sudoers unit gets — it does not block or roll back the
-#   rest of this step.
+#   rest of this step. #129 already added and production-verified this
+#   exact grant — GH-133 does not touch it.
 #
 #   VERIFIED-ON-PRODUCTION CAVEAT (as of 2026-08-02, re-verified 2026-08-02):
 #   /etc/sudoers.d/wecom-archive-365 grants ONLY systemctl restart/status.
 #   /etc/sudoers.d/wecomarchive (created 2026-07-28) additionally grants
-#   `/usr/bin/mkdir -p /var/www/*`, `/usr/bin/cp <src> <dst>` (EXACTLY two
-#   arguments — no flags, and both sides must match the two-glob shape),
-#   `/usr/bin/dnf`, and `/usr/bin/apt-get`.
+#   `/usr/bin/mkdir -p /var/www/*` and `/usr/bin/cp <src> <dst>` (EXACTLY
+#   two arguments — no flags, and both sides must match the two-glob
+#   shape). It also grants bare `/usr/bin/dnf` and `/usr/bin/apt-get` —
+#   GH-133 found neither is used by any deploy/bootstrap logic in this
+#   repository (apt-get isn't even installed on this dnf-based host) and
+#   its production migration runbook (docs/operations/deploy-sudoers.md)
+#   has Ops remove both.
 #
 #   The cp grant looks broader than it is: `sudo cp -a src/. dst/` does NOT
 #   match it (three arguments including -a, and `dst/` is a single segment
@@ -68,8 +85,12 @@
 #   session).
 #
 # ── First-Time Server Setup ────────────────────────────────────────────────
-#   1. Install git, python3, python3-venv, pip, curl, and ffmpeg
-#      (`sudo apt-get install -y ffmpeg`).
+#   1. Install git, python3, python3-venv, pip, curl, and ffmpeg as root/
+#      operator, using the host's real package manager (production is
+#      Alibaba Cloud Linux 3 / dnf: `sudo dnf install -y ffmpeg`; adjust for
+#      your actual distro). This is a one-time HOST bootstrap step, not a
+#      deploy-user sudo grant — see step 2 in "Behavior" below and
+#      docs/operations/deploy-sudoers.md.
 #   2. Create the runtime user (if not exists):
 #          sudo adduser wecomarchive --disabled-password --gecos ""
 #   3. Clone the repository:
@@ -197,7 +218,6 @@ CURL_BIN="${CURL_BIN:-curl}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 FLOCK_BIN="${FLOCK_BIN:-flock}"
 MV_BIN="${MV_BIN:-mv}"
-APT_GET_BIN="${APT_GET_BIN:-apt-get}"
 FFMPEG_BIN="${FFMPEG_BIN:-ffmpeg}"
 
 # Step 10 (sync deploy/systemd/MANAGED_UNITS) target directory — overridable
@@ -374,17 +394,26 @@ _install_deps() {
     "$PYTHON_BIN" -m pip install -r requirements.txt --quiet
 }
 
-_ensure_ffmpeg() {
+# _check_ffmpeg — ffmpeg is a HOST PREREQUISITE (GH-133), not something this
+# deploy installs. It is only ever invoked at runtime by
+# backend/app/voice_transcode.py, which already treats a missing/failing
+# ffmpeg as a soft per-message degradation (returns None; the original
+# media archival is unaffected) — so ffmpeg is not required for the
+# service itself to start or be healthy. But letting a deploy silently
+# succeed onto a host missing it would defer that discovery to a user's
+# first voice-message playback, long after this deploy reported success.
+# So deployment fails fast here instead, with a message an operator can
+# act on directly, rather than installing it: doing so would need root
+# package-manager access for the deploy user, which is exactly the
+# bare-`dnf`/bare-`apt-get` privilege GH-133 removes (see
+# docs/operations/deploy-sudoers.md). Bootstrapping/repairing ffmpeg on
+# the host is a root/operator action (see "First-Time Server Setup"
+# above), independent of this deploy user's own privileges.
+_check_ffmpeg() {
     if command -v "$FFMPEG_BIN" >/dev/null 2>&1; then
         return 0
     fi
-    echo "  → ffmpeg is missing; installing it …"
-    if [ -n "$SUDO_BIN" ]; then
-        "$SUDO_BIN" "$APT_GET_BIN" update -qq && "$SUDO_BIN" "$APT_GET_BIN" install -y ffmpeg
-    else
-        "$APT_GET_BIN" update -qq && "$APT_GET_BIN" install -y ffmpeg
-    fi
-    command -v "$FFMPEG_BIN" >/dev/null 2>&1
+    return 1
 }
 
 # _publish_static_dir <src_dir> <dst_dir> — mirror <src_dir>'s contents
@@ -753,10 +782,13 @@ echo ""
 
 cd backend
 
-# ── 2. Ensure media-transcoding runtime ────────────────────────────────────
-echo "[2/10] Ensuring ffmpeg is available …"
-if ! _ensure_ffmpeg; then
-    echo "ERROR: ffmpeg installation failed." >&2
+# ── 2. Check media-transcoding host prerequisite (GH-133) ──────────────────
+echo "[2/10] Checking ffmpeg host prerequisite …"
+if ! _check_ffmpeg; then
+    echo "ERROR: ffmpeg is required on the production host but is not installed." >&2
+    echo "  Install it using the host bootstrap/runbook (see docs/operations/deploy-sudoers.md" >&2
+    echo "  and the 'First-Time Server Setup' comment at the top of this script), then rerun" >&2
+    echo "  deployment. This deploy user does not have package-manager sudo, by design." >&2
     _restore_worktree_only
     exit 1
 fi
