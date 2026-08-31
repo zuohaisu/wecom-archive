@@ -45,6 +45,8 @@ class PaymentQueryResult:
     provider: str
     provider_order_ref: str
     state: str
+    # ``not_required`` is reserved for a provider-validated deterministic
+    # no-payment result (currently WeChat Pay ORDER_NOT_EXIST).
     status: str
     success: TrustedPaymentEvent | None
 

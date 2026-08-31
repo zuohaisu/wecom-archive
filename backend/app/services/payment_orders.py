@@ -600,7 +600,9 @@ def query_and_reconcile_order(
     if (
         result.provider != provider.code
         or result.provider_order_ref != provider_order_ref
-        or result.status not in {"succeeded", "pending", "closed", "failed"}
+        or result.status
+        not in {"succeeded", "pending", "closed", "failed", "not_required"}
+        or (result.status == "not_required" and result.state != "ORDER_NOT_EXIST")
     ):
         raise PaymentOrderConflictError("payment query result mismatch")
     if result.success is not None:
@@ -630,6 +632,29 @@ def query_and_reconcile_order(
         return apply_trusted_payment(session_factory, provider, result.success)
     if result.status == "succeeded":
         raise PaymentOrderConflictError("successful payment query has no trusted event")
+
+    if result.status == "not_required":
+        with session_factory() as db:
+            order = db.scalar(
+                select(PaymentOrder)
+                .where(
+                    PaymentOrder.id == order_id,
+                    PaymentOrder.tenant_id == tenant_id,
+                )
+                .with_for_update()
+            )
+            if order is None:
+                raise PaymentOrderNotFoundError("payment order does not exist")
+            if order.status in {"paid_activation_pending", "succeeded"}:
+                raise PaymentReconciliationMismatchError(
+                    "channel no-order state conflicts with a locally paid order"
+                )
+            # A provider-signed ORDER_NOT_EXIST result proves no remote
+            # payment exists. Preserve the local failed/closed history rather
+            # than inventing a payment or rewriting the original failure.
+            order.provider_state = result.state
+            db.commit()
+            return _summary(db, order)
 
     should_close = False
     with session_factory() as db:

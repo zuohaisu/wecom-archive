@@ -11,6 +11,7 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -58,6 +59,20 @@ class WechatPayNotConfiguredError(WechatPayConfigurationError):
 
 class WechatPayProtocolError(WechatPayError):
     pass
+
+
+class WechatPayProviderResponseError(WechatPayProtocolError):
+    """A signed non-2xx response with only its safe semantic code retained."""
+
+    def __init__(self, status_code: int, provider_code: str | None) -> None:
+        detail = (
+            f"WeChat Pay request returned HTTP {status_code} ({provider_code})"
+            if provider_code is not None
+            else f"WeChat Pay request returned HTTP {status_code}"
+        )
+        super().__init__(detail)
+        self.status_code = status_code
+        self.provider_code = provider_code
 
 
 class WechatPayVerificationError(WechatPayProtocolError):
@@ -272,6 +287,21 @@ def _json_object(raw: bytes) -> dict[str, Any]:
     return value
 
 
+_SAFE_PROVIDER_ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
+def _provider_error_code(raw: bytes) -> str | None:
+    """Retain only a bounded machine code from an already-verified response."""
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    code = value.get("code")
+    return code if isinstance(code, str) and _SAFE_PROVIDER_ERROR_CODE.fullmatch(code) else None
+
+
 class WechatPayProvider:
     code = WECHAT_PAY_PROVIDER
 
@@ -410,8 +440,8 @@ class WechatPayProvider:
         if raw:
             self._verify_headers(response.headers, raw)
         if response.status_code < 200 or response.status_code >= 300:
-            raise WechatPayProtocolError(
-                f"WeChat Pay request returned HTTP {response.status_code}"
+            raise WechatPayProviderResponseError(
+                response.status_code, _provider_error_code(raw)
             )
         return raw
 
@@ -542,7 +572,18 @@ class WechatPayProvider:
         safe_ref = quote(provider_order_ref, safe="")
         query = urlencode({"mchid": self.merchant_id})
         canonical_url = f"/v3/pay/transactions/out-trade-no/{safe_ref}?{query}"
-        raw = self._request("GET", canonical_url)
+        try:
+            raw = self._request("GET", canonical_url)
+        except WechatPayProviderResponseError as error:
+            if error.status_code == 404 and error.provider_code == "ORDER_NOT_EXIST":
+                return PaymentQueryResult(
+                    provider=self.code,
+                    provider_order_ref=provider_order_ref,
+                    state="ORDER_NOT_EXIST",
+                    status="not_required",
+                    success=None,
+                )
+            raise
         data = _json_object(raw)
         if data.get("out_trade_no") != provider_order_ref:
             raise WechatPayVerificationError("query order reference mismatch")

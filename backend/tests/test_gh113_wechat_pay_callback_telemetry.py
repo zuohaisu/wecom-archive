@@ -24,6 +24,7 @@ from app.routers import billing
 from app.services.wechat_pay import (
     WechatPayConfig,
     WechatPayProvider,
+    WechatPayProtocolError,
     WechatPaySignatureFailureClass,
     WechatPaySignatureVerificationError,
 )
@@ -146,7 +147,7 @@ def callback_client(provider: WechatPayProvider):
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[billing.get_wechat_payment_provider] = lambda: provider
-    return TestClient(app), factory
+    return TestClient(app), factory, provider
 
 
 @pytest.mark.parametrize(
@@ -170,7 +171,7 @@ def test_rejected_callback_is_safe_and_emits_structured_telemetry(
     serial_match: bool,
     sign_test: bool,
 ) -> None:
-    client, factory = callback_client
+    client, factory, _provider = callback_client
     raw_body = b"SUPER_SECRET_BODY_VALUE"
 
     def unexpected_payment_mutation(*args, **kwargs):
@@ -209,7 +210,7 @@ def test_rejected_callback_is_safe_and_emits_structured_telemetry(
 def test_rejection_telemetry_never_logs_callback_or_provider_secrets(
     callback_client, caplog
 ) -> None:
-    client, _factory = callback_client
+    client, _factory, _provider = callback_client
     raw_body = b"SUPER_SECRET_BODY_VALUE"
     caplog.set_level(logging.WARNING, logger=billing.logger.name)
 
@@ -228,3 +229,41 @@ def test_rejection_telemetry_never_logs_callback_or_provider_secrets(
         "SUPER_SECRET_PRIVATE_KEY_VALUE",
     ):
         assert secret not in telemetry
+
+
+def test_malformed_callback_logs_a_sanitized_failure_class_without_payment_mutation(
+    callback_client, monkeypatch, caplog
+) -> None:
+    client, factory, provider = callback_client
+    raw_body = b"SUPER_SECRET_MALFORMED_CALLBACK_BODY"
+
+    def malformed_notification(_headers, _raw_body):
+        raise WechatPayProtocolError("SUPER_SECRET_PROVIDER_PROTOCOL_DETAIL")
+
+    def unexpected_payment_mutation(*args, **kwargs):
+        raise AssertionError("rejected callback must not apply a payment")
+
+    monkeypatch.setattr(provider, "verify_and_parse_notification", malformed_notification)
+    monkeypatch.setattr(billing, "apply_trusted_payment", unexpected_payment_mutation)
+    caplog.set_level(logging.WARNING, logger=billing.logger.name)
+
+    response = client.post(ROUTE, content=raw_body, headers=_headers("mismatch"))
+
+    assert response.status_code == 400
+    assert response.json() == {"code": "FAIL", "message": "invalid notification"}
+    with factory() as db:
+        assert db.scalars(select(PaymentRecoveryFinding)).all() == []
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == billing.logger.name
+        and "event=wechat_pay_callback_protocol_rejected" in record.getMessage()
+    ]
+    assert len(messages) == 1
+    message = messages[0]
+    assert "failure_class=MALFORMED_REQUEST" in message
+    assert f"route={ROUTE}" in message
+    assert f"body_length={len(raw_body)}" in message
+    assert f"body_sha256={hashlib.sha256(raw_body).hexdigest()}" in message
+    assert "SUPER_SECRET_MALFORMED_CALLBACK_BODY" not in message
+    assert "SUPER_SECRET_PROVIDER_PROTOCOL_DETAIL" not in message

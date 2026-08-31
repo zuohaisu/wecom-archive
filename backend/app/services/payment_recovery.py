@@ -8,6 +8,7 @@ payment fact still flows through ``query_and_reconcile_order`` and ultimately
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -58,6 +59,30 @@ _FINDINGS = frozenset(
     }
 )
 _SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
+_SAFE_RESOLUTION_REASON_CODE = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
+_CALLBACK_SIGNATURE_RESOLUTION_CLASSIFICATIONS = frozenset(
+    {"HISTORICAL_VERIFICATION_READINESS_PROBING", "UNKNOWN"}
+)
+_CALLBACK_SIGNATURE_FAILURE_CLASSES = frozenset(
+    {
+        "MISSING_SIGNATURE_HEADERS",
+        "UNKNOWN_PUBLIC_KEY_ID",
+        "INVALID_TIMESTAMP",
+        "STALE_TIMESTAMP",
+        "INVALID_SIGNATURE_ENCODING",
+        "SIGNATURE_MISMATCH",
+        "SIGNTEST",
+        "UNKNOWN",
+    }
+)
+
+
+class PaymentRecoveryFindingNotFoundError(LookupError):
+    pass
+
+
+class PaymentRecoveryFindingResolutionError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -209,6 +234,66 @@ def record_callback_failure(
         db.commit()
 
 
+def resolve_historical_callback_signature_finding(
+    db: Session,
+    finding_id: str,
+    *,
+    classification: str,
+    failure_class: str,
+    reason_code: str,
+    platform_admin_id: str,
+    at: datetime | None = None,
+) -> PaymentRecoveryFinding:
+    """Resolve one order-less historical signature finding with safe evidence.
+
+    This is intentionally limited to the legacy global signature findings.
+    It never creates a payment fact or changes an order, subscription, or
+    entitlement.  A repeated resolution returns the preserved original
+    decision without overwriting it.
+    """
+    normalized_reason = reason_code.strip().lower()
+    if (
+        classification not in _CALLBACK_SIGNATURE_RESOLUTION_CLASSIFICATIONS
+        or failure_class not in _CALLBACK_SIGNATURE_FAILURE_CLASSES
+        or not _SAFE_RESOLUTION_REASON_CODE.fullmatch(normalized_reason)
+    ):
+        raise PaymentRecoveryFindingResolutionError("invalid finding resolution")
+    finding = db.scalar(
+        select(PaymentRecoveryFinding)
+        .where(PaymentRecoveryFinding.id == finding_id)
+        .with_for_update()
+    )
+    if finding is None:
+        raise PaymentRecoveryFindingNotFoundError("payment recovery finding does not exist")
+    if (
+        finding.kind != FINDING_CALLBACK_SIGNATURE_FAILURE
+        or finding.tenant_id is not None
+        or finding.payment_order_id is not None
+    ):
+        raise PaymentRecoveryFindingResolutionError("finding is not eligible for resolution")
+    if finding.status == "resolved":
+        if (
+            finding.resolution_classification is None
+            or finding.resolution_failure_class is None
+            or finding.resolution_reason_code is None
+            or finding.resolved_by_platform_admin_id is None
+            or finding.resolved_at is None
+        ):
+            raise PaymentRecoveryFindingResolutionError(
+                "finding lacks an auditable resolution"
+            )
+        return finding
+
+    finding.status = "resolved"
+    finding.resolved_at = _utc(at or datetime.now(timezone.utc))
+    finding.resolution_classification = classification
+    finding.resolution_failure_class = failure_class
+    finding.resolution_reason_code = normalized_reason
+    finding.resolved_by_platform_admin_id = platform_admin_id
+    db.flush()
+    return finding
+
+
 def _recovery_candidate_condition(at: datetime):
     return and_(
         PaymentOrder.provider == WECHAT_PAY_PROVIDER,
@@ -278,6 +363,12 @@ def _claim_reconciliation_candidates(
             .where(
                 PaymentOrder.provider == WECHAT_PAY_PROVIDER,
                 PaymentOrder.recovery_state != "manual_recovery",
+                # A signed ORDER_NOT_EXIST is a deterministic no-payment
+                # result, not a channel state that needs another daily query.
+                or_(
+                    PaymentOrder.provider_state.is_(None),
+                    PaymentOrder.provider_state != "ORDER_NOT_EXIST",
+                ),
                 or_(in_prior_day, historical_unreconciled),
                 or_(
                     PaymentOrder.last_reconciled_at.is_(None),

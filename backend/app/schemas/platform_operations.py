@@ -104,6 +104,38 @@ class PaymentRecoveryFindingOut(BaseModel):
     last_detected_at: datetime
 
 
+class PaymentRecoveryFindingResolutionIn(BaseModel):
+    classification: Literal[
+        "HISTORICAL_VERIFICATION_READINESS_PROBING", "UNKNOWN"
+    ]
+    failure_class: Literal[
+        "MISSING_SIGNATURE_HEADERS",
+        "UNKNOWN_PUBLIC_KEY_ID",
+        "INVALID_TIMESTAMP",
+        "STALE_TIMESTAMP",
+        "INVALID_SIGNATURE_ENCODING",
+        "SIGNATURE_MISMATCH",
+        "SIGNTEST",
+        "UNKNOWN",
+    ]
+    reason_code: str = Field(min_length=1, max_length=64)
+
+
+class PaymentRecoveryFindingResolutionOut(BaseModel):
+    finding_id: str
+    kind: str
+    status: Literal["resolved"]
+    occurrence_count: int
+    created_at: datetime
+    first_detected_at: datetime
+    last_detected_at: datetime
+    resolved_at: datetime
+    classification: str
+    failure_class: str
+    reason_code: str
+    resolved_by_platform_admin_id: str
+
+
 class PlatformOperationsDashboardOut(BaseModel):
     tenant_counts: TenantLifecycleCountsOut
     account_counts: AccountCountsOut
