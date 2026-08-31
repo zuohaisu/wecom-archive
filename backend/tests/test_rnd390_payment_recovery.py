@@ -36,7 +36,11 @@ from app.services.payment_recovery import (
     run_payment_reconciliation_once,
     run_payment_recovery_once,
 )
-from app.services.wechat_pay import WECHAT_PAY_PROVIDER
+from app.services.wechat_pay import (
+    WECHAT_PAY_PROVIDER,
+    WechatPayProtocolError,
+    WechatPayProviderResponseError,
+)
 
 NOW = datetime(2028, 1, 30, 8, 0, tzinfo=timezone.utc)
 PLAN_ID = "rnd390-plan"
@@ -55,6 +59,7 @@ class FakeProvider:
     def __init__(self) -> None:
         self.query_result: PaymentQueryResult | None = None
         self.query_error: Exception | None = None
+        self.query_calls = 0
         self.closed: list[str] = []
 
     def create_payment(self, request):
@@ -68,6 +73,7 @@ class FakeProvider:
         raise NotImplementedError
 
     def query_payment(self, provider_order_ref: str) -> PaymentQueryResult:
+        self.query_calls += 1
         if self.query_error is not None:
             raise self.query_error
         assert self.query_result is not None
@@ -140,6 +146,18 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
+def _create_failed_order(factory, provider: FakeProvider, *, at: datetime, key: str):
+    created = _create_order(factory, provider, at=at, key=key)
+    with factory() as db:
+        order = db.get(PaymentOrder, created.order_id)
+        assert order is not None
+        order.status = "failed"
+        order.failure_code = "provider_create_failed"
+        order.checkout_url = None
+        db.commit()
+    return created
+
+
 def test_recovery_retries_verified_pending_order_with_bounded_backoff(factory) -> None:
     provider = FakeProvider()
     created = _create_order(factory, provider, at=NOW, key="rnd390-pending-key")
@@ -163,6 +181,101 @@ def test_recovery_retries_verified_pending_order_with_bounded_backoff(factory) -
         assert _utc(order.last_query_at) == checked_at
         assert _utc(order.next_query_at) == checked_at + timedelta(minutes=5)
         assert db.scalars(select(PaymentRecoveryFinding)).all() == []
+
+
+def test_valid_order_not_exist_converges_failed_create_without_retry_or_payment_mutation(factory) -> None:
+    provider = FakeProvider()
+    created = _create_failed_order(
+        factory, provider, at=NOW, key="gh111-order-not-exist"
+    )
+    with factory() as db:
+        order = db.get(PaymentOrder, created.order_id)
+        assert order is not None
+        order.query_attempt_count = 4
+        db.add(
+            PaymentRecoveryFinding(
+                id="gh111-existing-query-finding",
+                provider=WECHAT_PAY_PROVIDER,
+                tenant_id="tenant-a",
+                payment_order_id=order.id,
+                kind=FINDING_QUERY_FAILED,
+                severity="warning",
+                status="open",
+                dedupe_key="1" * 64,
+                occurrence_count=1,
+                first_detected_at=NOW,
+                last_detected_at=NOW,
+            )
+        )
+        db.commit()
+    provider.query_result = PaymentQueryResult(
+        provider=WECHAT_PAY_PROVIDER,
+        provider_order_ref="placeholder",
+        state="ORDER_NOT_EXIST",
+        status="not_required",
+        success=None,
+    )
+
+    summary = run_payment_recovery_once(factory, provider, at=NOW + timedelta(minutes=2))
+    again = run_payment_recovery_once(factory, provider, at=NOW + timedelta(days=1))
+    reconciliation = run_payment_reconciliation_once(
+        factory, provider, at=NOW + timedelta(days=1)
+    )
+
+    assert (summary.claimed, summary.recovered, summary.manual_recovery, summary.failed) == (1, 1, 0, 0)
+    assert again.claimed == reconciliation.claimed == 0
+    assert provider.query_calls == 1
+    with factory() as db:
+        order = db.get(PaymentOrder, created.order_id)
+        finding = db.get(PaymentRecoveryFinding, "gh111-existing-query-finding")
+        assert order is not None and finding is not None
+        assert order.status == "failed"
+        assert order.failure_code == "provider_create_failed"
+        assert order.provider_state == "ORDER_NOT_EXIST"
+        assert order.recovery_state == "not_required"
+        assert order.recovery_reason_code is None
+        assert order.query_attempt_count == 4
+        assert order.next_query_at is None
+        assert finding.status == "resolved"
+        assert db.query(PaymentEvent).count() == 0
+        assert db.query(Subscription).count() == 0
+        assert db.query(PlanEntitlement).count() == 0
+        assert db.query(SubscriptionTermGrant).count() == 0
+
+
+@pytest.mark.parametrize(
+    "query_error",
+    [
+        WechatPayProviderResponseError(404, None),
+        WechatPayProviderResponseError(404, "UNEXPECTED_PROVIDER_CODE"),
+        WechatPayProviderResponseError(500, "SYSTEM_ERROR"),
+        WechatPayProtocolError("WeChat Pay request failed"),
+    ],
+)
+def test_unknown_or_transient_provider_query_errors_remain_retryable(factory, query_error) -> None:
+    provider = FakeProvider()
+    created = _create_failed_order(
+        factory, provider, at=NOW, key=f"gh111-retry-case-{query_error.status_code if isinstance(query_error, WechatPayProviderResponseError) else 'transport'}"
+    )
+    provider.query_error = query_error
+
+    summary = run_payment_recovery_once(factory, provider, at=NOW + timedelta(minutes=2))
+
+    assert (summary.claimed, summary.recovered, summary.manual_recovery, summary.failed) == (1, 0, 0, 1)
+    with factory() as db:
+        order = db.get(PaymentOrder, created.order_id)
+        finding = db.scalar(
+            select(PaymentRecoveryFinding).where(
+                PaymentRecoveryFinding.payment_order_id == created.order_id
+            )
+        )
+        assert order is not None and finding is not None
+        assert order.recovery_state == "automatic"
+        assert order.query_attempt_count == 1
+        assert _utc(order.next_query_at) == NOW + timedelta(minutes=7)
+        assert finding.kind == FINDING_QUERY_FAILED
+        assert finding.status == "open"
+        assert finding.severity == "warning"
 
 
 def test_recovery_exhaustion_stops_automatic_queries_and_records_sanitized_finding(factory) -> None:
@@ -196,7 +309,17 @@ def test_recovery_exhaustion_stops_automatic_queries_and_records_sanitized_findi
         assert finding.occurrence_count == 1
 
 
-def test_daily_reconciliation_marks_terminal_channel_check_without_reopening_checkout(factory) -> None:
+@pytest.mark.parametrize(
+    ("provider_state", "provider_status", "expected_status"),
+    [
+        ("CLOSED", "closed", "closed"),
+        ("REVOKED", "closed", "closed"),
+        ("PAYERROR", "failed", "failed"),
+    ],
+)
+def test_daily_reconciliation_marks_terminal_channel_check_without_reopening_checkout(
+    factory, provider_state: str, provider_status: str, expected_status: str
+) -> None:
     provider = FakeProvider()
     created = _create_order(
         factory,
@@ -207,8 +330,8 @@ def test_daily_reconciliation_marks_terminal_channel_check_without_reopening_che
     provider.query_result = PaymentQueryResult(
         provider=WECHAT_PAY_PROVIDER,
         provider_order_ref="placeholder",
-        state="CLOSED",
-        status="closed",
+        state=provider_state,
+        status=provider_status,
         success=None,
     )
 
@@ -218,10 +341,52 @@ def test_daily_reconciliation_marks_terminal_channel_check_without_reopening_che
     with factory() as db:
         order = db.get(PaymentOrder, created.order_id)
         assert order is not None
-        assert order.status == "closed"
+        assert order.status == expected_status
         assert order.recovery_state == "not_required"
         assert _utc(order.last_reconciled_at) == NOW
         assert order.checkout_url is None
+
+
+def test_reconciliation_does_not_resolve_an_unrelated_orderless_signature_finding(factory) -> None:
+    provider = FakeProvider()
+    _create_order(
+        factory,
+        provider,
+        at=NOW - timedelta(days=2),
+        key="gh111-reconciliation-order",
+    )
+    provider.query_result = PaymentQueryResult(
+        provider=WECHAT_PAY_PROVIDER,
+        provider_order_ref="placeholder",
+        state="CLOSED",
+        status="closed",
+        success=None,
+    )
+    with factory() as db:
+        db.add(
+            PaymentRecoveryFinding(
+                id="gh111-orderless-signature-finding",
+                provider=WECHAT_PAY_PROVIDER,
+                tenant_id=None,
+                payment_order_id=None,
+                kind=FINDING_CALLBACK_SIGNATURE_FAILURE,
+                severity="critical",
+                status="open",
+                dedupe_key="2" * 64,
+                occurrence_count=1,
+                first_detected_at=NOW,
+                last_detected_at=NOW,
+            )
+        )
+        db.commit()
+
+    run_payment_reconciliation_once(factory, provider, at=NOW)
+
+    with factory() as db:
+        finding = db.get(PaymentRecoveryFinding, "gh111-orderless-signature-finding")
+        assert finding is not None
+        assert finding.status == "open"
+        assert finding.resolved_at is None
 
 
 def test_untrusted_callback_signature_failures_do_not_create_recovery_findings(factory) -> None:

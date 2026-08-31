@@ -17,6 +17,8 @@ from app.services.wechat_pay import (
     WechatPayConfigurationError,
     WechatPayNotConfiguredError,
     WechatPayProvider,
+    WechatPayProviderResponseError,
+    WechatPayProtocolError,
     WechatPayVerificationError,
     load_wechat_pay_config,
 )
@@ -154,6 +156,83 @@ def test_native_create_query_and_close_use_signed_api_v3_requests(key_material) 
     assert create_payload["notify_url"].endswith("/api/payments/wechat/notify")
     assert seen[1][1].endswith(f"?mchid={MCH_ID}")
     assert seen[2][2] == {"mchid": MCH_ID}
+
+
+def test_query_normalizes_only_a_signed_order_not_exist_response(key_material) -> None:
+    _, wechat_private = key_material
+    secret_marker = "provider-response-must-not-leak"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        body = json.dumps(
+            {"code": "ORDER_NOT_EXIST", "message": secret_marker},
+            separators=(",", ":"),
+        ).encode()
+        return httpx.Response(
+            404,
+            content=body,
+            headers=_signed_headers(wechat_private, body),
+        )
+
+    provider = WechatPayProvider(
+        _config(key_material),
+        transport=httpx.MockTransport(handler),
+        now=lambda: NOW,
+    )
+
+    result = provider.query_payment("W-rnd380-order")
+
+    assert result.state == "ORDER_NOT_EXIST"
+    assert result.status == "not_required"
+    assert result.success is None
+    assert secret_marker not in repr(result)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "body", "expected_code"),
+    [
+        (404, b'{"code":"ORDER_NOT_EXIST"', None),
+        (404, b'{"code":"UNEXPECTED_PROVIDER_CODE"}', "UNEXPECTED_PROVIDER_CODE"),
+        (500, b'{"code":"ORDER_NOT_EXIST"}', "ORDER_NOT_EXIST"),
+    ],
+)
+def test_query_does_not_terminalize_malformed_or_non_404_provider_errors(
+    key_material, status_code: int, body: bytes, expected_code: str | None
+) -> None:
+    _, wechat_private = key_material
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status_code,
+            content=body,
+            headers=_signed_headers(wechat_private, body),
+        )
+
+    provider = WechatPayProvider(
+        _config(key_material),
+        transport=httpx.MockTransport(handler),
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(WechatPayProviderResponseError) as raised:
+        provider.query_payment("W-rnd380-order")
+
+    assert raised.value.status_code == status_code
+    assert raised.value.provider_code == expected_code
+    assert body.decode(errors="replace") not in str(raised.value)
+
+
+def test_query_transport_failure_remains_protocol_uncertainty(key_material) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("provider timeout")
+
+    provider = WechatPayProvider(
+        _config(key_material),
+        transport=httpx.MockTransport(handler),
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(WechatPayProtocolError, match="request failed"):
+        provider.query_payment("W-rnd380-order")
 
 
 def _notification(

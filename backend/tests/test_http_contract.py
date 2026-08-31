@@ -381,6 +381,7 @@ def test_router_count() -> None:
     from app.main import app
 
     route_count = len([r for r in app.routes if hasattr(r, "methods")])
+    # GH-111 adds one PlatformAdmin-only payment-finding resolution route.
     # RND-405 adds one controlled platform payment-recovery route.
     # RND-386 adds three provisioning config-wizard routes.
     # RND-388 adds one self-service activation route.
@@ -405,7 +406,7 @@ def test_router_count() -> None:
     # RND-415 adds three platform account HTML shells and four guarded/public
     # account APIs: list, invite, invitation acceptance, and self password
     # rotation. GH-122 removes the customer cancel-intent API.
-    assert route_count == 211
+    assert route_count == 212
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -545,6 +546,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/branding/domains",
             "/api/platform/branding/domain-metrics",
             "/api/platform/operations/dashboard",
+            "/api/platform/operations/payment-findings/{finding_id}/resolve",
             "/api/platform/operations/product-analytics/overview",
             "/api/platform/operations/product-analytics/tenants",
             "/api/platform/operations/product-analytics/tenants/{tenant_id}",
@@ -1052,6 +1054,12 @@ def test_route_snapshot_with_real_model_names() -> None:
             "/api/platform/operations/dashboard",
             frozenset({"GET"}),
             "PlatformOperationsDashboardOut",
+            "None",
+        ),
+        (
+            "/api/platform/operations/payment-findings/{finding_id}/resolve",
+            frozenset({"POST"}),
+            "PaymentRecoveryFindingResolutionOut",
             "None",
         ),
         (

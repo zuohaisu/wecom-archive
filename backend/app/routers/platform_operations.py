@@ -20,6 +20,8 @@ from app.schemas.platform_operations import (
     ManualFinancialTransactionOut,
     ManualSubscriptionOut,
     ManualSubscriptionUpdateIn,
+    PaymentRecoveryFindingResolutionIn,
+    PaymentRecoveryFindingResolutionOut,
     PlatformOperationsDashboardOut,
     TenantOperationsDetailOut,
     TenantOperationsListOut,
@@ -43,7 +45,12 @@ from app.services.alipay import (
     get_alipay_provider,
 )
 from app.services.payment_provider import PaymentProvider
-from app.services.payment_recovery import finalize_manual_payment_query
+from app.services.payment_recovery import (
+    PaymentRecoveryFindingNotFoundError,
+    PaymentRecoveryFindingResolutionError,
+    finalize_manual_payment_query,
+    resolve_historical_callback_signature_finding,
+)
 from app.services.wechat_pay import (
     WECHAT_PAY_PROVIDER,
     WechatPayConfigurationError,
@@ -127,6 +134,14 @@ def _provider_for_operations_order(
 
 def _factory(db: Session):
     return sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return (
+        value.replace(tzinfo=timezone.utc)
+        if value.tzinfo is None or value.utcoffset() is None
+        else value.astimezone(timezone.utc)
+    )
 
 
 def _not_found(error: platform_operations.PlatformOperationsNotFoundError) -> HTTPException:
@@ -363,6 +378,47 @@ def query_operations_payment(
         raise HTTPException(status_code=503, detail="payment_activation_pending") from error
     except (AlipayProtocolError, WechatPayProtocolError) as error:
         raise HTTPException(status_code=502, detail="payment_provider_failed") from error
+
+
+@router.post(
+    "/api/platform/operations/payment-findings/{finding_id}/resolve",
+    response_model=PaymentRecoveryFindingResolutionOut,
+)
+def resolve_operations_payment_finding(
+    finding_id: str,
+    payload: PaymentRecoveryFindingResolutionIn,
+    platform_admin: PlatformAdmin = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
+) -> PaymentRecoveryFindingResolutionOut:
+    """Resolve a reviewed global callback finding without touching payment state."""
+    try:
+        finding = resolve_historical_callback_signature_finding(
+            db,
+            finding_id,
+            classification=payload.classification,
+            failure_class=payload.failure_class,
+            reason_code=payload.reason_code,
+            platform_admin_id=platform_admin.id,
+        )
+    except PaymentRecoveryFindingNotFoundError as error:
+        raise HTTPException(status_code=404, detail="payment_finding_not_found") from error
+    except PaymentRecoveryFindingResolutionError as error:
+        raise HTTPException(status_code=422, detail="invalid_payment_finding_resolution") from error
+    db.commit()
+    return PaymentRecoveryFindingResolutionOut(
+        finding_id=finding.id,
+        kind=finding.kind,
+        status="resolved",
+        occurrence_count=finding.occurrence_count,
+        created_at=_as_utc(finding.created_at),
+        first_detected_at=_as_utc(finding.first_detected_at),
+        last_detected_at=_as_utc(finding.last_detected_at),
+        resolved_at=_as_utc(finding.resolved_at),
+        classification=finding.resolution_classification,
+        failure_class=finding.resolution_failure_class,
+        reason_code=finding.resolution_reason_code,
+        resolved_by_platform_admin_id=finding.resolved_by_platform_admin_id,
+    )
 
 
 @router.put(

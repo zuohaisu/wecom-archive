@@ -619,6 +619,19 @@ class PaymentRecoveryFinding(Base):
             name="ck_payment_recovery_findings_status",
         ),
         CheckConstraint(
+            "resolution_classification IS NULL OR resolution_classification IN "
+            "('HISTORICAL_VERIFICATION_READINESS_PROBING', 'UNKNOWN')",
+            name="ck_payment_recovery_findings_resolution_classification",
+        ),
+        CheckConstraint(
+            "resolution_failure_class IS NULL OR resolution_failure_class IN "
+            "('MISSING_SIGNATURE_HEADERS', 'UNKNOWN_PUBLIC_KEY_ID', "
+            "'INVALID_TIMESTAMP', 'STALE_TIMESTAMP', "
+            "'INVALID_SIGNATURE_ENCODING', 'SIGNATURE_MISMATCH', "
+            "'SIGNTEST', 'UNKNOWN')",
+            name="ck_payment_recovery_findings_resolution_failure_class",
+        ),
+        CheckConstraint(
             "occurrence_count >= 1",
             name="ck_payment_recovery_findings_occurrence_count",
         ),
@@ -648,6 +661,12 @@ class PaymentRecoveryFinding(Base):
     first_detected_at = Column(DateTime(timezone=True), nullable=False)
     last_detected_at = Column(DateTime(timezone=True), nullable=False)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_classification = Column(String(64), nullable=True)
+    resolution_failure_class = Column(String(64), nullable=True)
+    resolution_reason_code = Column(String(64), nullable=True)
+    resolved_by_platform_admin_id = Column(
+        String(36), ForeignKey("platform_admins.id"), nullable=True
+    )
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

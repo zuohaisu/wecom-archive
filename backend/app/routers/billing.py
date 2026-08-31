@@ -76,6 +76,7 @@ from app.services.wechat_pay import (
     WechatPayDecryptError,
     WechatPayProtocolError,
     WechatPaySignatureVerificationError,
+    WechatPayVerificationError,
     get_wechat_pay_provider,
     wechat_pay_is_enabled,
 )
@@ -105,6 +106,20 @@ def _log_wechat_pay_callback_verification_rejected(
         metadata.header_signature_present,
         metadata.serial_match,
         metadata.sign_test,
+        len(raw_body),
+        hashlib.sha256(raw_body).hexdigest(),
+    )
+
+
+def _log_wechat_pay_callback_protocol_rejected(
+    failure_class: str, raw_body: bytes
+) -> None:
+    """Log a non-signature callback rejection without retaining its inputs."""
+    logger.warning(
+        "event=wechat_pay_callback_protocol_rejected "
+        "failure_class=%s route=/api/payments/wechat/notify "
+        "body_length=%d body_sha256=%s",
+        failure_class,
         len(raw_body),
         hashlib.sha256(raw_body).hexdigest(),
     )
@@ -522,6 +537,7 @@ async def wechat_payment_notification(
             content={"code": "FAIL", "message": "invalid notification"},
         )
     except WechatPayDecryptError:
+        _log_wechat_pay_callback_protocol_rejected("DECRYPT_FAILED", raw_body)
         try:
             record_callback_failure(_factory(db), kind=FINDING_CALLBACK_DECRYPT_FAILURE)
         except Exception:  # noqa: BLE001 - callback must still fail closed
@@ -530,7 +546,22 @@ async def wechat_payment_notification(
             status_code=400,
             content={"code": "FAIL", "message": "invalid notification"},
         )
-    except (PaymentOrderNotFoundError, PaymentOrderConflictError, WechatPayProtocolError):
+    except WechatPayVerificationError:
+        _log_wechat_pay_callback_protocol_rejected("IDENTITY_MISMATCH", raw_body)
+        return JSONResponse(
+            status_code=400,
+            content={"code": "FAIL", "message": "invalid notification"},
+        )
+    except WechatPayProtocolError:
+        _log_wechat_pay_callback_protocol_rejected("MALFORMED_REQUEST", raw_body)
+        return JSONResponse(
+            status_code=400,
+            content={"code": "FAIL", "message": "invalid notification"},
+        )
+    except (PaymentOrderNotFoundError, PaymentOrderConflictError):
+        _log_wechat_pay_callback_protocol_rejected(
+            "UNMATCHED_TRUSTED_CALLBACK", raw_body
+        )
         return JSONResponse(
             status_code=400,
             content={"code": "FAIL", "message": "invalid notification"},

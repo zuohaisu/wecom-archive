@@ -33,6 +33,7 @@ from app.db.models import (
     PaymentEvent,
     PaymentOrder,
     PaymentRecoveryFinding,
+    PlanEntitlement,
     PlatformAdmin,
     RefundEvent,
     RefundOrder,
@@ -101,6 +102,7 @@ def _tables():
         AdminUser.__table__,
         Contact.__table__,
         BillingPlan.__table__,
+        PlanEntitlement.__table__,
         Subscription.__table__,
         SubscriptionActivation.__table__,
         SubscriptionHistory.__table__,
@@ -162,6 +164,12 @@ def operations_client() -> Generator[tuple[TestClient, sessionmaker], None, None
                     billing_period_months=12,
                     storage_quota_bytes=100,
                     is_active=True,
+                ),
+                PlanEntitlement(
+                    id="operations-entitlement",
+                    plan_id="operations-plan",
+                    capability="unlimited_seats",
+                    is_enabled=True,
                 ),
                 Subscription(
                     id="subscription-active",
@@ -604,6 +612,110 @@ def test_rnd405_platform_payment_recovery_is_scoped_audited_and_idempotent(
         assert len(controls) == 1
         assert controls[0].detail["operation"] == "payment.query"
         assert "platform-payment-query-rnd405" not in str(controls[0].detail)
+
+
+@pytest.mark.parametrize(
+    "classification",
+    ["HISTORICAL_VERIFICATION_READINESS_PROBING", "UNKNOWN"],
+)
+def test_gh111_callback_finding_resolution_is_platform_only_auditable_and_idempotent(
+    operations_client: tuple[TestClient, sessionmaker], classification: str
+) -> None:
+    client, factory = operations_client
+    finding_id = "gh111-historical-signature-finding"
+    with factory() as db:
+        db.add(
+            PaymentRecoveryFinding(
+                id=finding_id,
+                provider="wechat_pay",
+                tenant_id=None,
+                payment_order_id=None,
+                kind="payment_callback_signature_failure",
+                severity="critical",
+                status="open",
+                dedupe_key="e" * 64,
+                occurrence_count=6,
+                first_detected_at=NOW - timedelta(days=2),
+                last_detected_at=NOW - timedelta(days=1),
+                created_at=NOW - timedelta(days=2),
+            )
+        )
+        db.commit()
+        order_before = [
+            (row.id, row.status, row.provider_state, row.recovery_state)
+            for row in db.query(PaymentOrder).order_by(PaymentOrder.id)
+        ]
+        event_count_before = db.query(PaymentEvent).count()
+        subscriptions_before = [
+            (row.id, row.status, row.ends_at, row.revision)
+            for row in db.query(Subscription).order_by(Subscription.id)
+        ]
+        entitlements_before = [
+            (row.id, row.plan_id, row.capability, row.is_enabled)
+            for row in db.query(PlanEntitlement).order_by(PlanEntitlement.id)
+        ]
+
+    dashboard = client.get("/api/platform/operations/dashboard", headers=_basic())
+    assert dashboard.status_code == 200
+    assert next(
+        item
+        for item in dashboard.json()["recent_payment_findings"]
+        if item["finding_id"] == finding_id
+    )["status"] == "open"
+    path = f"/api/platform/operations/payment-findings/{finding_id}/resolve"
+    payload = {
+        "classification": classification,
+        "failure_class": "UNKNOWN",
+        "reason_code": "historical_investigation_complete",
+    }
+
+    assert client.post(path, json=payload).status_code == 401
+    resolved = client.post(path, headers=_basic(), json=payload)
+    repeated = client.post(path, headers=_basic(), json=payload)
+
+    assert resolved.status_code == repeated.status_code == 200
+    assert repeated.json() == resolved.json()
+    assert resolved.json() == {
+        "finding_id": finding_id,
+        "kind": "payment_callback_signature_failure",
+        "status": "resolved",
+        "occurrence_count": 6,
+        "created_at": (NOW - timedelta(days=2)).isoformat().replace("+00:00", "Z"),
+        "first_detected_at": (NOW - timedelta(days=2)).isoformat().replace("+00:00", "Z"),
+        "last_detected_at": (NOW - timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+        "resolved_at": resolved.json()["resolved_at"],
+        "classification": classification,
+        "failure_class": "UNKNOWN",
+        "reason_code": "historical_investigation_complete",
+        "resolved_by_platform_admin_id": "platform-operator",
+    }
+    with factory() as db:
+        finding = db.get(PaymentRecoveryFinding, finding_id)
+        assert finding is not None
+        assert db.query(PaymentRecoveryFinding).count() == 1
+        assert finding.status == "resolved"
+        assert finding.occurrence_count == 6
+        assert finding.created_at.replace(tzinfo=timezone.utc) == NOW - timedelta(days=2)
+        assert finding.first_detected_at.replace(tzinfo=timezone.utc) == NOW - timedelta(days=2)
+        assert finding.last_detected_at.replace(tzinfo=timezone.utc) == NOW - timedelta(days=1)
+        assert finding.resolution_classification == classification
+        assert finding.resolution_failure_class == "UNKNOWN"
+        assert finding.resolution_reason_code == "historical_investigation_complete"
+        assert finding.resolved_by_platform_admin_id == "platform-operator"
+        assert finding.resolved_at is not None
+        assert order_before == [
+            (row.id, row.status, row.provider_state, row.recovery_state)
+            for row in db.query(PaymentOrder).order_by(PaymentOrder.id)
+        ]
+        assert db.query(PaymentEvent).count() == event_count_before
+        assert subscriptions_before == [
+            (row.id, row.status, row.ends_at, row.revision)
+            for row in db.query(Subscription).order_by(Subscription.id)
+        ]
+        assert entitlements_before == [
+            (row.id, row.plan_id, row.capability, row.is_enabled)
+            for row in db.query(PlanEntitlement).order_by(PlanEntitlement.id)
+        ]
 
 
 def test_operations_html_is_not_a_tenant_admin_surface(
