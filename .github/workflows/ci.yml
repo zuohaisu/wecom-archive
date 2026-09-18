@@ -1,6 +1,6 @@
 name: CI
 
-# Pull-request and merge-queue quality gate.
+# Pull-request, merge-queue, and direct-push quality gate.
 #
 # This is the only workflow that runs the repository's full CI suite. The
 # maintainer must treat this check as a mandatory merge gate; deploy.yml is
@@ -11,6 +11,18 @@ name: CI
 # branch protection, a skipped run never reports a status and a docs-only
 # pull request would sit blocked forever. Running the suite on every pull
 # request costs a few CI minutes and removes that failure mode.
+#
+# The push trigger below is the safety net for the one hole branch
+# protection cannot currently close: this repository's plan cannot enforce
+# "no direct pushes to main" (see deploy.yml's header), so a direct push
+# would otherwise reach deploy.yml with zero test coverage behind it.
+# Every push to main therefore runs this workflow too, EXCEPT pushes that
+# GitHub itself produced by merging a pull request — classify-push detects
+# those via the commit-to-PR association API (/commits/{sha}/pulls, which
+# reports the PR for merge-commit, squash, and rebase merges alike) and
+# skips the duplicate run, because the pull_request event already ran this
+# same suite against that change. A locally-created merge commit pushed to
+# main has no such association and is correctly treated as a direct push.
 
 on:
   pull_request:
@@ -21,17 +33,66 @@ on:
   merge_group:
     types:
       - checks_requested
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 # A new push to the same pull request supersedes the previous run. Merge-group
-# refs are unique, so queued candidates do not cancel one another.
+# refs are unique, so queued candidates do not cancel one another. Consecutive
+# pushes to main share github.ref and likewise supersede one another.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Runs on every event above, so the test job's condition never has to
+  # reason about a skipped dependency. For push events it answers exactly
+  # one question: did GitHub produce this push by merging a pull request?
+  # Any API failure resolves to merged_via_pr=false — the suite fails OPEN,
+  # meaning an unknown push gets tested, never waved through.
+  classify-push:
+    name: Classify push (direct vs PR merge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      merged_via_pr: ${{ steps.classify.outputs.merged_via_pr }}
+    steps:
+      - name: Check whether this push is a PR merge
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PUSHED_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "push" ]; then
+            echo "merged_via_pr=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Only a PR that actually merged counts. A commit whose only
+          # association is a closed-without-merging PR (merged_at null)
+          # reached main some other way, so it is still a direct push here.
+          # gh api writes error JSON to stdout on failure, so stderr is
+          # silenced and the fallback must yield an EMPTY variable — a
+          # bogus non-empty value would make the numeric comparison below
+          # error out; empty cleanly resolves to "not a PR merge".
+          associated_prs="$(gh api "repos/$REPOSITORY/commits/$PUSHED_SHA/pulls" --jq '[.[] | select(.merged_at != null)] | length' 2>/dev/null || true)"
+          # Sanitize: on any API error gh may still print an error body to
+          # stdout, so anything that is not a bare count resolves to 0 and
+          # the suite runs (fail OPEN — an unknown push gets tested).
+          case "$associated_prs" in ''|*[!0-9]*) associated_prs=0 ;; esac
+          if [ "$associated_prs" -gt 0 ]; then
+            echo "merged_via_pr=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merged_via_pr=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Test Suite
+    needs: classify-push
+    if: needs.classify-push.outputs.merged_via_pr != 'true'
     uses: ./.github/workflows/test.yml
