@@ -81,10 +81,16 @@ def db():
     return factory
 
 
-def _rollup(db, *, tenant_id="tenant-a", days_ago, used):
+def _rollup(db, *, tenant_id="tenant-a", days_ago, used, anchor=None):
     db.add(TenantStorageDaily(
         tenant_id=tenant_id,
-        usage_date=(NOW.date() - timedelta(days=days_ago)),
+        # Service-level tests pass at=NOW to storage_trend, so their window
+        # is anchored to the same frozen NOW. The HTTP endpoint under test
+        # anchors its window to the REAL current UTC date (the router does
+        # not accept `at`), so that test must seed relative to the real
+        # date via `anchor=` — frozen seeds age out of the sliding window
+        # as the calendar drifts and silently shrink measured_points.
+        usage_date=((anchor or NOW.date()) - timedelta(days=days_ago)),
         used_bytes=used,
     ))
 
@@ -181,10 +187,14 @@ def test_capacity_trend_endpoint_is_tenant_scoped(client, db) -> None:
     app.dependency_overrides[get_billing_viewer] = lambda: context
     app.dependency_overrides[get_db] = _db_gen
     try:
+        # GH-151: the endpoint anchors its window to the real UTC today, so
+        # seed with the same anchor; frozen-NOW seeds aged out of the window
+        # after 2026-09-13 and dropped measured_points to 2 (< 3).
+        endpoint_today = datetime.now(timezone.utc).date()
         with db() as session:
-            _rollup(session, days_ago=20, used=GIB)
-            _rollup(session, days_ago=10, used=2 * GIB)
-            _rollup(session, days_ago=0, used=3 * GIB)
+            _rollup(session, days_ago=20, used=GIB, anchor=endpoint_today)
+            _rollup(session, days_ago=10, used=2 * GIB, anchor=endpoint_today)
+            _rollup(session, days_ago=0, used=3 * GIB, anchor=endpoint_today)
             session.add(MediaFile(
                 id=1, sdkfileid="sdk-1", archive_message_id=1, tenant_id="tenant-a",
                 file_type="image", download_status="downloaded", file_size=3 * GIB,
