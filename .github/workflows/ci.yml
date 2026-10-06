@@ -76,15 +76,45 @@ jobs:
           # Only a PR that actually merged counts. A commit whose only
           # association is a closed-without-merging PR (merged_at null)
           # reached main some other way, so it is still a direct push here.
-          # gh api writes error JSON to stdout on failure, so stderr is
-          # silenced and the fallback must yield an EMPTY variable — a
-          # bogus non-empty value would make the numeric comparison below
-          # error out; empty cleanly resolves to "not a PR merge".
-          associated_prs="$(gh api "repos/$REPOSITORY/commits/$PUSHED_SHA/pulls" --jq '[.[] | select(.merged_at != null)] | length' 2>/dev/null || true)"
-          # Sanitize: on any API error gh may still print an error body to
-          # stdout, so anything that is not a bare count resolves to 0 and
-          # the suite runs (fail OPEN — an unknown push gets tested).
-          case "$associated_prs" in ''|*[!0-9]*) associated_prs=0 ;; esac
+          #
+          # GH-164: the commit-to-PR association index is EVENTUALLY
+          # CONSISTENT — for a merge push it is routinely empty for tens of
+          # seconds after the merge lands. This job starts ~13s after the
+          # push, so the original single lookup missed every real button
+          # merge, resolved to "direct push", and the fail-open fallback
+          # re-ran the full ~6-7 minute suite after EVERY merge — exactly
+          # the duplicate this job exists to skip. Retry with backoff
+          # instead (6 attempts, 10s apart, ~50s worst case — still far
+          # cheaper than one redundant suite run). The last attempt still
+          # resolves to "not a PR merge": fail-open is preserved, an
+          # unknown push gets tested, never waved through.
+          associated_prs=0
+          attempt=0
+          max_attempts=6
+          err_file="$(mktemp)"
+          trap 'rm -f "$err_file"' EXIT
+          until [ "$attempt" -ge "$max_attempts" ]; do
+            attempt=$((attempt + 1))
+            # gh api writes the response/error body to stdout and error
+            # details to stderr (e.g. "gh: Not Found (HTTP 404)"). Capture
+            # both in ONE call: stdout feeds the count, stderr lands in the
+            # job log so the CAUSE is visible instead of masked.
+            count="$(gh api "repos/$REPOSITORY/commits/$PUSHED_SHA/pulls" --jq '[.[] | select(.merged_at != null)] | length' 2>"$err_file" || true)"
+            api_err="$(head -n1 "$err_file" 2>/dev/null || true)"
+            # Sanitize: anything that is not a bare count resolves to 0 and
+            # the retry/fail-open path handles it.
+            case "$count" in ''|*[!0-9]*) count=0 ;; esac
+            if [ "$count" -gt 0 ]; then
+              associated_prs="$count"
+              break
+            fi
+            if [ -n "$api_err" ]; then
+              echo "association lookup attempt $attempt/$max_attempts failed: $api_err" >&2
+            elif [ "$attempt" -lt "$max_attempts" ]; then
+              echo "association index not populated yet (attempt $attempt/$max_attempts, count=0) — retrying in 10s" >&2
+            fi
+            [ "$attempt" -lt "$max_attempts" ] && sleep 10
+          done
           if [ "$associated_prs" -gt 0 ]; then
             echo "merged_via_pr=true" >> "$GITHUB_OUTPUT"
           else
