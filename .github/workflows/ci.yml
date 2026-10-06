@@ -57,6 +57,14 @@ jobs:
     name: Classify push (direct vs PR merge)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # GH-164: /commits/{sha}/pulls returns 403 "Resource not accessible by
+    # integration" for a token limited to contents:read — every attempt in
+    # run 37516963656 failed with exactly that, so the dedup never had a
+    # chance. Least-privilege job-level grant (job permissions override the
+    # workflow defaults, so both keys are stated here).
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       merged_via_pr: ${{ steps.classify.outputs.merged_via_pr }}
     steps:
