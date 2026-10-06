@@ -340,10 +340,11 @@ def test_purge_api_requires_confirmation_and_is_role_gated(client, db) -> None:
 def test_recycle_bin_filters_and_metrics(client, db) -> None:
     from app.main import app
 
+    deleted_at = datetime.now(timezone.utc)
     with db() as session:
         _add_message(session, msgid="m1", message_id=1)
         _add_message(session, msgid="m2", message_id=2)
-        soft_delete_messages(session, tenant_id="tenant-a", actor_id="admin-a", msgids=["m1", "m2"], at=NOW)
+        soft_delete_messages(session, tenant_id="tenant-a", actor_id="admin-a", msgids=["m1", "m2"], at=deleted_at)
         session.commit()
 
     _authed(app, db)
