@@ -343,7 +343,17 @@ def test_recycle_bin_filters_and_metrics(client, db) -> None:
     with db() as session:
         _add_message(session, msgid="m1", message_id=1)
         _add_message(session, msgid="m2", message_id=2)
-        soft_delete_messages(session, tenant_id="tenant-a", actor_id="admin-a", msgids=["m1", "m2"], at=NOW)
+        # The metrics endpoint evaluates purge eligibility against real
+        # wall-clock time, so seed the deletion relative to UTC now: the
+        # messages stay inside the 30-day recycle-bin window instead of
+        # aging into "pending purge" once the fixed seed date passes.
+        soft_delete_messages(
+            session,
+            tenant_id="tenant-a",
+            actor_id="admin-a",
+            msgids=["m1", "m2"],
+            at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
         session.commit()
 
     _authed(app, db)
