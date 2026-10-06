@@ -132,7 +132,7 @@ review item. Do not alter an order directly in SQL and do not create a test
 payment merely to exercise the timer.
 
 Before enabling the notification timer, verify the existing production
-`ADMIN_DOMAIN`, SMTP transport, active owner/operations recipients, and
+`ADMIN_DOMAIN`, transactional email transport (see `transactional-email.md`), active owner/operations recipients, and
 migration head through their normal controlled checks. Missing transport or a
 recipient is intentionally retried and reported as a fixed failure code, never
 reported as sent.

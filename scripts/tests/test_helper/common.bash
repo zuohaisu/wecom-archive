@@ -36,8 +36,11 @@ EOF
 
 	# Fake backend/.env — DATABASE_URL includes a fake password so tests
 	# can assert it never appears in captured script output (redaction).
+	# ADMIN_DOMAIN mirrors production: the deploy loads it as literal data
+	# to build the internal readiness probe's Host header (GH-161).
 	cat >"$DEPLOY_DIR/backend/.env" <<'EOF'
 DATABASE_URL=postgresql://mockuser:supersecretpassword@localhost:5432/mockdb
+ADMIN_DOMAIN=admin.example.com
 EOF
 
 	# ── Mock command bin dir ─────────────────────────────────────────

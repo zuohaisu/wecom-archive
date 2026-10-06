@@ -280,9 +280,10 @@ Export generation and seven-day cleanup (RND-360; GH-104: listed in
 `MANAGED_UNITS`, no manual `cp`/`enable` step needed):
 
 Before this unit is deployed/updated, apply Alembic migrations through `0050`, set a
-public HTTPS `ADMIN_DOMAIN`, and configure real SMTP delivery (`SMTP_HOST` and
-`SMTP_FROM`; plus credentials where the relay requires them). Export requests
-are rejected when either the requesting Owner email or SMTP transport is not
+public HTTPS `ADMIN_DOMAIN`, and configure transactional email (`EMAIL_PROVIDER=resend`,
+`RESEND_API_KEY`, and a verified `EMAIL_FROM` under `mail.crowntime.cn`; see
+`docs/operations/transactional-email.md` for controlled cutover and rollback).
+Export requests are rejected when either the requesting Owner email or email transport is not
 configured. `EXPORT_JOB_BATCH_SIZE` defaults to `1` and is capped at `5`; keep
 it at `1` on the supported 2C2G host. Full-media ZIP jobs require the Qiniu
 provider and a bucket region supported by Qiniu `qhash`: the worker verifies
@@ -315,7 +316,7 @@ create checkout, but still require valid WeChat credentials even when new
 checkout is disabled. Automatic Alipay recovery/reconciliation is not yet
 implemented and must not be inferred from these units. Apply the migration
 head before enabling the notification executor; notification delivery also
-requires a public HTTPS `ADMIN_DOMAIN`, SMTP transport, and a valid recipient.
+requires a public HTTPS `ADMIN_DOMAIN`, configured transactional email, and a valid recipient.
 
 The canonical state machines, bounded retries/leases/idempotency guarantees,
 production aggregate assessment, successful-run evidence, and disable/rollback

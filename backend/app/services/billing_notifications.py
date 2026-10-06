@@ -29,8 +29,8 @@ from app.db.models import (
     Subscription,
     Tenant,
 )
-from app.email import send_billing_notification_email
-from app.settings import get_email_settings, get_wecom_oauth_settings
+from app.email import email_delivery_ready, send_billing_notification_email
+from app.settings import get_wecom_oauth_settings
 
 
 MAX_DELIVERY_ATTEMPTS = 5
@@ -473,8 +473,7 @@ def _failure_code_for_delivery(
     if link is None:
         return "action_link_unavailable", recipient, None
     if delivery is None:
-        settings = get_email_settings()
-        if not settings.smtp_host or not settings.smtp_from:
+        if not email_delivery_ready():
             return "transport_unconfigured", recipient, link
     return None, recipient, link
 
@@ -582,6 +581,9 @@ def deliver_due_billing_notifications(
                             _utc(intent.effective_at),
                             link,
                             locale,
+                            **({} if delivery is not None else {
+                                "operation_id": f"billing-intent/{intent.id}",
+                            }),
                         )
                     )
                 except Exception:  # noqa: BLE001 - persist only a fixed code

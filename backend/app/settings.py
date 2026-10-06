@@ -55,6 +55,11 @@ def get_auth_settings() -> AuthSettings:
 
 
 class EmailSettings(BaseSettings):
+    email_provider: str = "resend"
+    resend_api_key: str = Field(default="", repr=False)
+    email_from: str = "康冠时代会话存档 <notifications@mail.crowntime.cn>"
+    email_reply_to: str = ""
+    app_env: str = "development"
     smtp_host: str = ""
     smtp_port: str = ""
     smtp_user: str = ""

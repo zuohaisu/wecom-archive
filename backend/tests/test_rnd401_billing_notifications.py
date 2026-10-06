@@ -260,8 +260,8 @@ def test_missing_transport_is_observable_and_retry_can_later_succeed(
         lambda: SimpleNamespace(admin_domain="billing.example.test"),
     )
     monkeypatch.setattr(
-        "app.services.billing_notifications.get_email_settings",
-        lambda: SimpleNamespace(smtp_host="", smtp_from=""),
+        "app.services.billing_notifications.email_delivery_ready",
+        lambda: False,
     )
     with factory() as db:
         db.add(_subscription("tenant-a", ends_at=NOW + timedelta(days=30)))

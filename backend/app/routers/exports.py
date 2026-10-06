@@ -25,7 +25,7 @@ from app.media_storage import (
     get_media_storage_provider_for_backend,
 )
 from app.schemas.export import ExportFormat, ExportSelection
-from app.settings import get_email_settings
+from app.email import email_delivery_ready
 from app.services.export_jobs import (
     create_media_export_job,
     export_job_view,
@@ -160,8 +160,7 @@ def _masked_email(value: str | None) -> str | None:
 
 
 def _notification_delivery_ready(user: AdminUser) -> bool:
-    settings = get_email_settings()
-    return bool(_owner_email(user) and settings.smtp_host and settings.smtp_from)
+    return bool(_owner_email(user) and email_delivery_ready())
 
 
 @router.get("/quota")
