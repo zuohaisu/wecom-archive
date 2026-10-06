@@ -1,81 +1,206 @@
-"""Password-reset email delivery (RND-278 / F0-3).
+"""Canonical transactional email boundary (GH-148).
 
-Uses only the standard library. With no SMTP host or sender configured, the
-console transport records that a reset email was generated without exposing a
-token in application logs.
+Resend is the default; SMTP is an explicitly selected rollback transport.
+Provider acceptance is not proof of inbox delivery. Missing configuration and
+unknown outcomes never count as success. Templates remain provider-neutral.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import smtplib
 import ssl
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from uuid import UUID
 
-from app.settings import get_email_settings
+import httpx
+
+from app.settings import EmailSettings, get_email_settings
 
 logger = logging.getLogger(__name__)
+_HTTP_TIMEOUT_SECONDS = 10.0
+_SENDING = ContextVar("transactional_email_sending", default=False)
+
+
+class _DeliveryLogFilter(logging.Filter):
+    """Suppress third-party wire diagnostics only in the active send context."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not _SENDING.get()
+
+
+_WIRE_LOG_FILTER = _DeliveryLogFilter()
+
+
+def _suppress_wire_logs() -> None:
+    # Ancestor logger filters do not apply to children. Cover httpcore's
+    # lazily-created wire loggers as well as any already-created descendants.
+    names = {
+        "httpx", "httpcore", "httpcore.connection", "httpcore.connection_pool",
+        "httpcore.http11", "httpcore.http2", "httpcore.proxy", "httpcore.socks",
+    }
+    names.update(
+        name for name in logging.Logger.manager.loggerDict
+        if name.startswith(("httpx.", "httpcore."))
+    )
+    for name in names:
+        logging.getLogger(name).addFilter(_WIRE_LOG_FILTER)
+
+
+def _valid_mailbox(value: str, *, sending_domain: bool = False) -> bool:
+    if not value or "\r" in value or "\n" in value:
+        return False
+    try:
+        message = EmailMessage()
+        message["From"] = value
+        header = message["From"]
+        if header.defects or len(header.addresses) != 1:
+            return False
+        address = header.addresses[0]
+        return bool(
+            address.username and "." in address.domain
+            and (not sending_domain or address.domain.lower() == "mail.crowntime.cn")
+        )
+    except (ValueError, IndexError):
+        return False
+
+
+def _configuration_ready(settings: EmailSettings) -> bool:
+    if settings.email_provider == "resend":
+        return bool(
+            settings.resend_api_key.strip()
+            and not any(c.isspace() for c in settings.resend_api_key)
+            and _valid_mailbox(settings.email_from, sending_domain=True)
+            and (not settings.email_reply_to or _valid_mailbox(settings.email_reply_to))
+        )
+    if settings.email_provider == "smtp":
+        try:
+            port = int(settings.smtp_port or "465")
+        except ValueError:
+            return False
+        return bool(
+            settings.smtp_host and 1 <= port <= 65535
+            and _valid_mailbox(settings.smtp_from)
+            and settings.smtp_user and settings.smtp_password
+            and (not settings.email_reply_to or _valid_mailbox(settings.email_reply_to))
+        )
+    return False
+
+
+def email_delivery_ready() -> bool:
+    """Local configuration readiness, not remote domain verification."""
+    try:
+        return _configuration_ready(get_email_settings())
+    except Exception:  # noqa: BLE001 - never expose settings validation input
+        return False
+
+
+def _send_transactional_email(to_email: str, subject: str, body: str) -> bool:
+    """One bounded attempt, no automatic retry or fallback to another provider.
+
+    A hash of the exact payload is stable across retries/processes and contains
+    no plaintext recipient/token. Resend only retains it for 24 hours; callers
+    must retain their durable sent state and bounded retry budgets.
+    """
+    try:
+        settings = get_email_settings()
+        if not _configuration_ready(settings):
+            logger.warning("transactional email outcome=configuration_incomplete")
+            return False
+        if not _valid_mailbox(to_email):
+            logger.warning("transactional email outcome=invalid_recipient")
+            return False
+        if settings.app_env.lower() != "production":
+            subject = f"[NON-PRODUCTION] {subject}"
+        if settings.email_provider == "smtp":
+            message = EmailMessage()
+            message["From"] = settings.smtp_from
+            message["To"] = to_email
+            message["Subject"] = subject
+            if settings.email_reply_to:
+                message["Reply-To"] = settings.email_reply_to
+            message.set_content(body)
+            with smtplib.SMTP_SSL(
+                settings.smtp_host, int(settings.smtp_port or "465"),
+                context=ssl.create_default_context(), timeout=_HTTP_TIMEOUT_SECONDS,
+            ) as smtp:
+                smtp.login(settings.smtp_user, settings.smtp_password)
+                refused = smtp.send_message(message)
+            if refused:
+                logger.warning("transactional email provider=smtp outcome=rejected")
+                return False
+            logger.info("transactional email provider=smtp outcome=accepted")
+            return True
+        payload = {
+            "from": settings.email_from,
+            "to": [to_email],
+            "subject": subject,
+            "text": body,
+        }
+        if settings.email_reply_to:
+            payload["reply_to"] = settings.email_reply_to
+        fingerprint = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        _suppress_wire_logs()
+        token = _SENDING.set(True)
+        try:
+            # Disable ambient proxies and redirects; credentials only go to the
+            # fixed HTTPS endpoint. HTTPX has no transport retries by default.
+            with httpx.Client(timeout=_HTTP_TIMEOUT_SECONDS, trust_env=False) as client:
+                response = client.post(
+                    "https://api.resend.com/emails",
+                    headers={
+                        "Authorization": f"Bearer {settings.resend_api_key}",
+                        "Idempotency-Key": f"transactional/{fingerprint}",
+                    },
+                    json=payload,
+                )
+        finally:
+            _SENDING.reset(token)
+        if response.status_code != 200:
+            logger.warning(
+                "transactional email provider=resend outcome=rejected status=%d",
+                response.status_code,
+            )
+            return False
+        result = response.json()
+        if not isinstance(result, dict) or not isinstance(result.get("id"), str):
+            logger.warning("transactional email provider=resend outcome=invalid_response")
+            return False
+        provider_id = str(UUID(result["id"]))
+        logger.info(
+            "transactional email provider=resend outcome=accepted provider_id=%s",
+            provider_id,
+        )
+        return True
+    except httpx.TimeoutException:
+        logger.warning("transactional email provider=resend outcome=timeout_unknown")
+    except httpx.RequestError:
+        logger.warning("transactional email provider=resend outcome=network_unknown")
+    except Exception:  # noqa: BLE001 - no exception strings, bodies or traceback secrets
+        logger.warning("transactional email outcome=failed_or_unknown")
+    return False
 
 
 def send_password_reset_email(
     to_email: str, reset_link: str, locale: str = "zh-CN"
 ) -> bool:
-    """Deliver a reset email, or use the deterministic no-SMTP transport.
-
-    The console fallback intentionally does not log ``reset_link``: reset
-    tokens are secrets and must remain limited to the email/browser URL.
-    """
-    settings = get_email_settings()
+    """Deliver a reset email without logging its secret link or recipient."""
     subject, body = _render_reset_email(reset_link, locale)
-    if not settings.smtp_host or not settings.smtp_from:
-        logger.warning("[email-console] password reset email generated for %s", to_email)
-        return True
-
-    message = EmailMessage()
-    message["From"] = settings.smtp_from
-    message["To"] = to_email
-    message["Subject"] = subject
-    message.set_content(body)
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(
-            settings.smtp_host, int(settings.smtp_port or 465), context=context
-        ) as smtp:
-            smtp.login(settings.smtp_user, settings.smtp_password)
-            smtp.send_message(message)
-        return True
-    except Exception:  # noqa: BLE001 - delivery failure must not enumerate accounts
-        logger.exception("send_password_reset_email failed for %s", to_email)
-        return False
+    return _send_transactional_email(to_email, subject, body)
 
 
 def send_invite_email(
     to_email: str, accept_link: str, locale: str = "zh-CN"
 ) -> bool:
     """Deliver an invitation email without logging its secret acceptance link."""
-    settings = get_email_settings()
     subject, body = _render_invite_email(accept_link, locale)
-    if not settings.smtp_host or not settings.smtp_from:
-        logger.warning("[email-console] invitation email generated for %s", to_email)
-        return True
-
-    message = EmailMessage()
-    message["From"] = settings.smtp_from
-    message["To"] = to_email
-    message["Subject"] = subject
-    message.set_content(body)
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(
-            settings.smtp_host, int(settings.smtp_port or 465), context=context
-        ) as smtp:
-            smtp.login(settings.smtp_user, settings.smtp_password)
-            smtp.send_message(message)
-        return True
-    except Exception:  # noqa: BLE001 - delivery failure must not expose invitation state
-        logger.exception("send_invite_email failed for %s", to_email)
-        return False
+    return _send_transactional_email(to_email, subject, body)
 
 
 def send_export_ready_email(
@@ -89,31 +214,8 @@ def send_export_ready_email(
     The URL points to the authenticated export page rather than acting as a
     bearer credential.  It is never written to logs on either transport.
     """
-    settings = get_email_settings()
     subject, body = _render_export_ready_email(export_link, expires_at, locale)
-    if not settings.smtp_host or not settings.smtp_from:
-        # Unlike password-reset development previews, an export notice is
-        # the only promised delivery path for a seven-day artifact.  Never
-        # mark it sent when no transport actually exists.
-        logger.warning("export ready email transport is not configured")
-        return False
-
-    message = EmailMessage()
-    message["From"] = settings.smtp_from
-    message["To"] = to_email
-    message["Subject"] = subject
-    message.set_content(body)
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(
-            settings.smtp_host, int(settings.smtp_port or 465), context=context
-        ) as smtp:
-            smtp.login(settings.smtp_user, settings.smtp_password)
-            smtp.send_message(message)
-        return True
-    except Exception:  # noqa: BLE001 - never expose the private export link
-        logger.exception("send_export_ready_email failed")
-        return False
+    return _send_transactional_email(to_email, subject, body)
 
 
 def send_billing_notification_email(
@@ -124,29 +226,10 @@ def send_billing_notification_email(
     locale: str = "zh-CN",
 ) -> bool:
     """Deliver a fixed billing-state notice without provider/payment details."""
-    settings = get_email_settings()
-    if not settings.smtp_host or not settings.smtp_from:
-        logger.warning("billing notification email transport is not configured")
-        return False
     subject, body = _render_billing_notification_email(
         kind, effective_at, action_link, locale
     )
-    message = EmailMessage()
-    message["From"] = settings.smtp_from
-    message["To"] = to_email
-    message["Subject"] = subject
-    message.set_content(body)
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(
-            settings.smtp_host, int(settings.smtp_port or 465), context=context
-        ) as smtp:
-            smtp.login(settings.smtp_user, settings.smtp_password)
-            smtp.send_message(message)
-        return True
-    except Exception:  # noqa: BLE001 - never log recipient or billing identifiers
-        logger.exception("send_billing_notification_email failed")
-        return False
+    return _send_transactional_email(to_email, subject, body)
 
 
 def _render_invite_email(accept_link: str, locale: str) -> tuple[str, str]:

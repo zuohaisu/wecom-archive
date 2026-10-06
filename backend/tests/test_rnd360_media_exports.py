@@ -158,6 +158,8 @@ def test_export_api_is_owner_only_and_quota_is_server_derived(
         assert client.get("/api/admin/exports/quota").status_code == 403
 
     monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("EMAIL_PROVIDER", "resend")
+    monkeypatch.setenv("RESEND_API_KEY", "synthetic-export-test-key")
     monkeypatch.setenv("SMTP_FROM", "archive@example.com")
     owner = SimpleNamespace(id="owner-a", role="owner", email="owner@example.com")
     app.dependency_overrides[get_current_user] = lambda: (owner, "tenant-a")
