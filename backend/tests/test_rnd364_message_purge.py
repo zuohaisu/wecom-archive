@@ -337,9 +337,23 @@ def test_purge_api_requires_confirmation_and_is_role_gated(client, db) -> None:
         app.dependency_overrides.clear()
 
 
-def test_recycle_bin_filters_and_metrics(client, db) -> None:
+def _freeze_deletion_clock(monkeypatch, at: datetime) -> None:
+    from app.services import message_deletion
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return at.astimezone(tz) if tz is not None else at.replace(tzinfo=None)
+
+    monkeypatch.setattr(message_deletion, "datetime", FixedDatetime)
+
+
+def test_recycle_bin_filters_and_metrics(client, db, monkeypatch) -> None:
     from app.main import app
 
+    # GH-155: the HTTP metrics path reads the service clock. Keep the
+    # original pre-expiry expectation independent of the execution date.
+    _freeze_deletion_clock(monkeypatch, NOW)
     with db() as session:
         _add_message(session, msgid="m1", message_id=1)
         _add_message(session, msgid="m2", message_id=2)
@@ -357,6 +371,40 @@ def test_recycle_bin_filters_and_metrics(client, db) -> None:
         assert metrics.status_code == 200
         assert metrics.json()["pending_purge_count"] == 0
         assert metrics.json()["storage_retry_pending"] == 0
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    "offset,expected_count,expected_age",
+    [
+        (timedelta(microseconds=-1), 0, None),
+        (timedelta(0), 1, 0.0),
+        (timedelta(days=1), 1, 1.0),
+    ],
+    ids=["before-expiry", "at-expiry", "after-expiry"],
+)
+def test_recycle_bin_metrics_http_expiry_boundary(
+    client, db, monkeypatch, offset, expected_count, expected_age
+) -> None:
+    from app.main import app
+
+    with db() as session:
+        message = _add_message(session)
+        # Another tenant's expired message must not affect these metrics.
+        _add_message(session, tenant_id="tenant-b", msgid="other", message_id=2)
+        soft_delete_messages(session, tenant_id="tenant-a", actor_id="admin-a", msgids=["m1"], at=NOW)
+        soft_delete_messages(session, tenant_id="tenant-b", actor_id=None, msgids=["other"], at=NOW - timedelta(days=365))
+        session.commit()
+        expiry = message.purge_after.replace(tzinfo=timezone.utc)
+
+    _freeze_deletion_clock(monkeypatch, expiry + offset)
+    _authed(app, db)
+    try:
+        response = client.get("/api/admin/messages/recycle-bin/metrics")
+        assert response.status_code == 200
+        assert response.json()["pending_purge_count"] == expected_count
+        assert response.json()["oldest_pending_age_days"] == expected_age
     finally:
         app.dependency_overrides.clear()
 

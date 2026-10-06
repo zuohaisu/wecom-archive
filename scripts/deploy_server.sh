@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy_server.sh — Safe push-to-deploy for wecom-archive-365
+# deploy_server.sh — Safe push-to-deploy for wecom-archive
 #
 # Run this script on the production ECS server to pull the latest code
 # from GitHub main, install dependencies, run Alembic migrations, verify
@@ -95,7 +95,7 @@
 #          sudo adduser wecomarchive --disabled-password --gecos ""
 #   3. Clone the repository:
 #          sudo mkdir -p /srv/apps
-#          sudo git clone git@github.com:zuohaisu/wecom-archive-365.git /srv/apps/wecom-archive-365/current
+#          sudo git clone git@github.com:zuohaisu/wecom-archive.git /srv/apps/wecom-archive-365/current
 #          sudo chown -R wecomarchive:wecomarchive /srv/apps/wecom-archive-365
 #   4. Create the Python virtual environment:
 #          sudo -u wecomarchive bash -c '

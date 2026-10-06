@@ -61,9 +61,9 @@ fi
 SANITIZERS=(
 	's|qwhhcd\.crowntime\.cn|archive.example.com|g'
 	's|archive\.crowntime\.cn|archive.example.com|g'
-	's|zuohaisu/wecom-archive-365|your-org/crowntime-wecom-archive|g'
+	's|zuohaisu/wecom-archive|your-org/wecom-archive|g'
 	's|zuohaisu|your-org|g'
-	's|/srv/apps/wecom-archive-365|/srv/apps/crowntime-wecom-archive|g'
+	's|/srv/apps/wecom-archive-365|/srv/apps/wecom-archive|g'
 )
 
 # Patterns that must not survive into the snapshot. A hit here is a bug in

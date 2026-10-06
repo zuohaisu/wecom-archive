@@ -146,7 +146,7 @@ Follow these steps to install and configure WeCom Archive 365:
 ### Step 1: Clone the Repository
 ```bash
 git clone <repository-url>
-cd wecom-archive-365
+cd wecom-archive
 ```
 
 ### Step 2: Install Python Dependencies

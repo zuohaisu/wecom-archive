@@ -105,8 +105,8 @@ sudo yum install -y python3 python3-pip python3-virtualenv \
 ### Step 1: Clone Repository and Install Dependencies
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/wecom-archive-365.git
-cd wecom-archive-365
+git clone https://github.com/your-org/wecom-archive.git
+cd wecom-archive
 
 # Create virtual environment
 python3 -m venv venv

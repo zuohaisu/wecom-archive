@@ -1,6 +1,6 @@
 # SSL 证书自动续期 — 架构设计 (修订版 6)
 
-> 项目: wecom-archive-365
+> 项目: wecom-archive
 > 域名: media.example.com
 > 版本: v6 — RND-189 第三轮开发修复 (Qiniu 签名 + Secret 运行时安全)
 > 状态: **Development complete — Developer acceptance pending**
