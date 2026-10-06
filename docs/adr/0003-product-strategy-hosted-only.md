@@ -280,6 +280,15 @@ RND-239（2026-08-04 批准）已确定并**已对外发布**：
 中文 **康冠时代企业微信会话存档**，英文 **Crowntime WeCom Archive**，联系邮箱 `hs@crowntime.cn`。
 Haisu 2026-08-07 确认闭源项目下仓库名 `wecom-archive-365` 暂不修改。
 
+**2026-09-30 决策补记（2026-10-06 记录）：** Haisu 决定将 GitHub 仓库名改为
+`wecom-archive`，取代上述「暂不修改」决定及初始的 `crowntime-wecom-archive` 建议，
+执行与验收见 [GH-155](https://github.com/zuohaisu/wecom-archive/issues/155)。
+新名称最简短且直接对应产品功能，从开源及被 fork 的视角不携带无必要的品牌前缀。
+此决定仅更新仓库名和公开导出占位路径；Crowntime 厂商署名、`crowntime.cn` 裸域名、
+服务器真实路径、systemd 单元名和支付渠道 User-Agent 均保持不变。
+仓库改名及生产/非生产 clone 的 remote 更新仍须按该 issue 的 runbook 独立执行，
+本备注不代表这些操作已经完成。
+
 商标底稿中的「左正」不再是本产品的候选名，转为独立的商标储备。
 
 **仍然存在的风险（未关闭）**：康冠时代商标第 17528858 号**有效期至 2026-11-13**
@@ -297,4 +306,4 @@ Haisu 2026-08-07 确认闭源项目下仓库名 `wecom-archive-365` 暂不修改
 
 ---
 
-_Last updated: 2026-08-07_
+_Last updated: 2026-10-06_

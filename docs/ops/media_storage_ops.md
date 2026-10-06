@@ -1,4 +1,4 @@
-# wecom-archive-365 生产运维文档 — 媒体存储
+# wecom-archive 生产运维文档 — 媒体存储
 
 ## 媒体存储架构
 

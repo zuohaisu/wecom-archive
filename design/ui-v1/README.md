@@ -1,6 +1,6 @@
 # Crowntime WeCom Archive — Design System & UI v1
 
-The **shipped UI baseline** for Crowntime WeCom Archive (康冠时代 企业微信会话存档), synced from the `wecom-archive-365` repo, plus the design system extracted from it and the v1 page set built on top.
+The **shipped UI baseline** for Crowntime WeCom Archive (康冠时代 企业微信会话存档), synced from the `wecom-archive` repo, plus the design system extracted from it and the v1 page set built on top.
 
 **Start at `index.html`** — the delivery index linking every token sheet, spec card, and page.
 

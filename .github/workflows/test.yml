@@ -109,6 +109,18 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-dev.txt
           python -m ruff --version
 
+      - name: "[GATE] Private snapshot exporter regression tests"
+        run: |
+          if [ -f AGENTS.md ] || [ -f scripts/public_allowlist.txt ] || \
+             [ -f scripts/export_public_snapshot.sh ] || [ -d scripts/private_tests ]; then
+            test -f scripts/public_allowlist.txt
+            test -f scripts/export_public_snapshot.sh
+            test -f scripts/private_tests/test_public_snapshot_rename.py
+            python -m pytest scripts/private_tests/test_public_snapshot_rename.py -q
+          else
+            echo "Public snapshot: private exporter tooling is not included."
+          fi
+
       - name: Configure Git identity
         run: |
           git config user.name "CI"
