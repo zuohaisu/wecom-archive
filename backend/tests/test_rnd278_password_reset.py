@@ -97,13 +97,15 @@ def test_reset_endpoint_hashes_password_and_never_returns_token() -> None:
     assert b"secret-token" not in response.body
 
 
-def test_console_email_transport_does_not_log_reset_link(caplog) -> None:
+def test_unconfigured_email_fails_closed_without_logging_reset_link(caplog) -> None:
     from app.email import send_password_reset_email
+    from app.settings import EmailSettings
 
     caplog.set_level(logging.WARNING, logger="app.email")
-    with patch("app.email.get_email_settings", return_value=MagicMock(smtp_host="", smtp_from="")):
-        assert send_password_reset_email("person@example.com", "https://example.test/?token=secret")
-    assert "person@example.com" in caplog.text
+    with patch("app.email.get_email_settings", return_value=EmailSettings(resend_api_key="")):
+        assert not send_password_reset_email("person@example.com", "https://example.test/?token=secret")
+    assert "configuration_incomplete" in caplog.text
+    assert "person@example.com" not in caplog.text
     assert "secret" not in caplog.text
 
 
