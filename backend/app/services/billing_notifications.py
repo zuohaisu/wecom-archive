@@ -581,6 +581,9 @@ def deliver_due_billing_notifications(
                             _utc(intent.effective_at),
                             link,
                             locale,
+                            **({} if delivery is not None else {
+                                "operation_id": f"billing-intent/{intent.id}",
+                            }),
                         )
                     )
                 except Exception:  # noqa: BLE001 - persist only a fixed code

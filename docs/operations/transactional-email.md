@@ -66,11 +66,16 @@ record `transport_unconfigured` when the local check fails.
 - HTTPX/httpcore wire loggers are filtered in the active send context only;
   unrelated HTTP traffic retains its diagnostics. Do not add request tracing
   middleware that dumps authorization or message bodies.
-- A SHA-256 hash of the exact normalized request payload forms the idempotency
-  key, stable across process restarts/retries. It contains no plaintext token or
-  recipient; do not print it unnecessarily. Different action tokens produce
-  different keys. Identical intentional resend payloads can be deduplicated
-  during Resend's 24-hour window; new distinct events must have distinct payloads.
+- A SHA-256 hash of the operation identity and normalized payload forms the
+  idempotency key without exposing plaintext identity, token or recipient.
+  Billing uses the durable intent ID, stable across worker retries/restarts;
+  different intents get different keys even with identical message bodies.
+  Each explicit invitation send creates a fresh operation ID while preserving
+  the pending user's token. Technical invitation retries must explicitly reuse
+  that operation ID; the current invitation path has no automatic retry or
+  durable retry queue. Reset/export messages retain payload-derived identity
+  (their action token/export expiry distinguishes the operation). Do not print
+  keys unnecessarily. Payload/config changes can change a retry's key.
 - A timeout means **unknown acceptance**, not definitely unsent. Existing billing
   and export state/retry budgets remain the source of truth. Resend idempotency
   expires after 24 hours; a delayed retry beyond that window can duplicate an

@@ -15,7 +15,7 @@ import ssl
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from email.message import EmailMessage
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -99,12 +99,16 @@ def email_delivery_ready() -> bool:
         return False
 
 
-def _send_transactional_email(to_email: str, subject: str, body: str) -> bool:
+def _send_transactional_email(
+    to_email: str, subject: str, body: str, *, operation_id: str | None = None,
+) -> bool:
     """One bounded attempt, no automatic retry or fallback to another provider.
 
-    A hash of the exact payload is stable across retries/processes and contains
-    no plaintext recipient/token. Resend only retains it for 24 hours; callers
-    must retain their durable sent state and bounded retry budgets.
+    Hash the operation identity with the payload, never exposing either in the
+    key. Callers with repeatable/distinct events must supply an operation ID:
+    reuse it for technical retries, replace it for intentional resends. The
+    payload-only fallback is for reset/export messages whose token/expiry
+    already identifies the operation. Resend retains keys for only 24 hours.
     """
     try:
         settings = get_email_settings()
@@ -144,7 +148,10 @@ def _send_transactional_email(to_email: str, subject: str, body: str) -> bool:
         if settings.email_reply_to:
             payload["reply_to"] = settings.email_reply_to
         fingerprint = hashlib.sha256(
-            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            json.dumps(
+                [operation_id, payload] if operation_id is not None else payload,
+                sort_keys=True, ensure_ascii=False,
+            ).encode("utf-8")
         ).hexdigest()
         _suppress_wire_logs()
         token = _SENDING.set(True)
@@ -196,11 +203,19 @@ def send_password_reset_email(
 
 
 def send_invite_email(
-    to_email: str, accept_link: str, locale: str = "zh-CN"
+    to_email: str, accept_link: str, locale: str = "zh-CN",
+    *, operation_id: str | None = None,
 ) -> bool:
-    """Deliver an invitation email without logging its secret acceptance link."""
+    """Each explicit invitation is a new send, even when its token is reused.
+
+    A technical retry must supply the same operation_id as its original send.
+    There are no automatic retries here or in the invitation route.
+    """
     subject, body = _render_invite_email(accept_link, locale)
-    return _send_transactional_email(to_email, subject, body)
+    return _send_transactional_email(
+        to_email, subject, body,
+        operation_id=operation_id if operation_id is not None else f"invite/{uuid4()}",
+    )
 
 
 def send_export_ready_email(
@@ -224,12 +239,15 @@ def send_billing_notification_email(
     effective_at: datetime,
     action_link: str,
     locale: str = "zh-CN",
+    *, operation_id: str,
 ) -> bool:
-    """Deliver a fixed billing-state notice without provider/payment details."""
+    """Deliver one durable billing intent; retries reuse its operation ID."""
     subject, body = _render_billing_notification_email(
         kind, effective_at, action_link, locale
     )
-    return _send_transactional_email(to_email, subject, body)
+    return _send_transactional_email(
+        to_email, subject, body, operation_id=operation_id,
+    )
 
 
 def _render_invite_email(accept_link: str, locale: str) -> tuple[str, str]:

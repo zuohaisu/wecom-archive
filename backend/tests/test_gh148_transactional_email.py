@@ -69,6 +69,7 @@ def test_every_producer_uses_resend_and_approved_identity(configured, monkeypatc
         "export": lambda: email.send_export_ready_email(RECIPIENT, LINK, WHEN),
         "billing": lambda: email.send_billing_notification_email(
             RECIPIENT, "subscription_expiry_30d", WHEN, LINK,
+            operation_id="billing-intent/synthetic",
         ),
     }[kind]
     assert send() is True
