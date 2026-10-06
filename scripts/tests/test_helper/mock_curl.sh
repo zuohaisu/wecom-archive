@@ -22,6 +22,12 @@
 #                  gate that passes, then a LATER unrelated call fails --
 #                  e.g. RND-227 QA-03's "extra print curl after the
 #                  retry loop already succeeded")
+#     always_421   prints HTTP status 421 (as real curl's -w '%{http_code}'
+#                  would) and exits 22 -- models GH-161's production Host
+#                  rejection reaching the probe
+#     always_503   prints HTTP status 503 and exits 22 -- models a genuine
+#                  readiness failure so tests can pin that it is reported
+#                  as "not ready yet", never as a probe/config error
 #   MOCK_CURL_LOG               if set, the full argv is appended here
 #=============================================================================
 
@@ -55,6 +61,14 @@ always_ok)
 	;;
 always_fail)
 	exit 22 # curl -f exit code for an HTTP error response
+	;;
+always_421)
+	printf '421' # what real curl -w '%{http_code}' writes on an HTTP error
+	exit 22
+	;;
+always_503)
+	printf '503'
+	exit 22
 	;;
 ok_after:*)
 	threshold="${mode#ok_after:}"

@@ -266,6 +266,93 @@ line_of() {
 }
 
 # ---------------------------------------------------------------------
+# GH-161 — internal readiness probe presents the configured platform Host
+# ---------------------------------------------------------------------
+# Since APP_ENV=production (GH-148 cutover), BrandingHostMiddleware
+# accepts only configured platform hosts and rejects a default
+# "Host: 127.0.0.1:<port>" with 421 BEFORE the health handler runs —
+# which auto-rolled back every CD deploy. The fix: both internal gates
+# (forward + post-rollback) present ADMIN_DOMAIN (loaded as literal data
+# from backend/.env) as an explicit Host header, through ONE shared
+# construction (_wait_for_internal_health), and a 421 is reported as its
+# own probe/config error instead of generic "not ready yet".
+
+@test "GH-161: every internal probe carries the configured ADMIN_DOMAIN as its Host header; the public gate never does" {
+	run run_deploy
+	[ "$status" -eq 0 ]
+
+	# Forward gate: a healthy deploy passes on attempt 1 — exactly one
+	# internal probe, and it carries the configured Host header. (The
+	# retry-loop count itself is pinned by the HEALTH_RETRIES test above.)
+	internal_with_host=$(grep -c 'curl .*-H Host: admin\.example\.com .*internal-health' "$CMD_LOG")
+	[ "$internal_with_host" -eq 1 ]
+	internal_total=$(grep -c "internal-health" "$CMD_LOG")
+	[ "$internal_total" -eq "$internal_with_host" ]
+
+	# Public gate goes through Nginx with the real hostname — a Host
+	# override there would only risk confusing the TLS/SNI story.
+	public_lines=$(grep -c "curl .*public-health" "$CMD_LOG")
+	[ "$public_lines" -eq 1 ]
+	run grep "curl .*-H Host: .*public-health" "$CMD_LOG"
+	[ "$status" -ne 0 ]
+}
+
+@test "GH-161: forward and rollback gates construct the identical probe (one shared construction)" {
+	# Forward gate exhausts its 3 attempts, rollback succeeds on its 1st —
+	# 4 internal calls total, and EVERY one must carry the same Host header.
+	export MOCK_CURL_INTERNAL_MODE="ok_after:4"
+	run run_deploy
+	[ "$status" -ne 0 ]
+	assert_output_contains "ROLLBACK RESULT: SUCCEEDED"
+
+	internal_total=$(grep -c "internal-health" "$CMD_LOG")
+	[ "$internal_total" -eq 4 ]
+	internal_with_host=$(grep -c 'curl .*-H Host: admin\.example\.com .*internal-health' "$CMD_LOG")
+	[ "$internal_with_host" -eq "$internal_total" ]
+}
+
+@test "GH-161: a 421 Host rejection is reported as a probe/config error — never as 'not ready yet' — and still fails the deploy" {
+	export MOCK_CURL_INTERNAL_MODE=always_421
+	run run_deploy
+	[ "$status" -ne 0 ]
+
+	# The rejection must be diagnosable from the deploy log alone...
+	assert_output_contains "REJECTED (HTTP 421 Misdirected Request"
+	# ...and must NOT read as a warm-up wait, because waiting cannot fix it.
+	assert_output_not_contains "not ready yet"
+
+	# The rollback gate uses the SAME probe, so it is rejected the same
+	# way and reported as a manual-intervention failure, not a hang.
+	assert_output_contains "ROLLBACK RESULT: FAILED"
+}
+
+@test "GH-161: a genuine HTTP 503 readiness failure still reads as not-ready and triggers rollback" {
+	export MOCK_CURL_INTERNAL_MODE=always_503
+	run run_deploy
+	[ "$status" -ne 0 ]
+	assert_output_contains "not ready yet"
+	assert_output_not_contains "421"
+	assert_output_contains "Rolling back"
+	assert_output_contains "ROLLBACK RESULT: FAILED"
+}
+
+@test "GH-161: without a configured ADMIN_DOMAIN the internal probe keeps the legacy header-less form" {
+	printf 'DATABASE_URL=postgresql://mockuser:supersecretpassword@localhost:5432/mockdb\n' >"$DEPLOY_DIR/backend/.env"
+	run run_deploy
+	[ "$status" -eq 0 ]
+	run grep "curl .*-H Host:" "$CMD_LOG"
+	[ "$status" -ne 0 ] # no Host override anywhere
+}
+
+@test "GH-161: ADMIN_DOMAIN in scheme://host form yields the bare hostname in the probe Host header" {
+	printf 'DATABASE_URL=postgresql://mockuser:supersecretpassword@localhost:5432/mockdb\nADMIN_DOMAIN=https://Admin.Example.COM\n' >"$DEPLOY_DIR/backend/.env"
+	run run_deploy
+	[ "$status" -eq 0 ]
+	internal_with_host=$(grep -c 'curl .*-H Host: admin\.example\.com .*internal-health' "$CMD_LOG")
+	[ "$internal_with_host" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------
 # Independent QA regression tests (RND-227 QA round 1)
 # ---------------------------------------------------------------------
 

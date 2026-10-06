@@ -232,6 +232,12 @@ SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 # the P0-D note below on why a public-only failure does not trigger a
 # code rollback.
 INTERNAL_HEALTH="${INTERNAL_HEALTH:-http://127.0.0.1:8035/health/ready}"
+# GH-161: hostname the internal readiness probes (forward AND post-rollback
+# — see _wait_for_internal_health) present as their explicit Host header.
+# Derived from ADMIN_DOMAIN once backend/.env is loaded; defaulted empty
+# here so the probe helpers stay total even before that point, and
+# overridable so the bats suite can pin the construction directly.
+INTERNAL_PROBE_HOST="${INTERNAL_PROBE_HOST:-}"
 # ARCHIVE_DOMAIN — the public hostname this deployment serves the archive
 # app on. Set the real value via backend/.env (loaded as data below) or
 # the calling shell's environment; PUBLIC_HEALTH can also be set directly
@@ -314,7 +320,9 @@ _redact() {
 # backend/.env is application configuration, not a trusted shell script. In
 # particular, a pasted multi-line PEM must never become a command during CD.
 # The application still owns all other settings through its service manager;
-# this deploy path needs only the database URL and public/static destinations.
+# this deploy path needs only the database URL, the platform hostname
+# (ADMIN_DOMAIN — the Host the internal readiness probe must present in
+# production, GH-161) and public/static destinations.
 # Malformed non-assignment lines are ignored with their line numbers only so
 # neither secrets nor raw configuration values enter the deploy log.
 _load_deploy_environment() {
@@ -353,6 +361,10 @@ _load_deploy_environment() {
                     ARCHIVE_DOMAIN)
                         ARCHIVE_DOMAIN="$value"
                         export ARCHIVE_DOMAIN
+                        ;;
+                    ADMIN_DOMAIN)
+                        ADMIN_DOMAIN="$value"
+                        export ADMIN_DOMAIN
                         ;;
                     PUBLIC_HEALTH)
                         PUBLIC_HEALTH="$value"
@@ -602,26 +614,80 @@ _record_known_good() {
     return 0
 }
 
-# _wait_for_health <label> <url> <retries> <interval-seconds>
+# _config_hostname <value> — reduce an ADMIN_DOMAIN-style configuration
+# value to the bare hostname, as literal data only. Accepts the two forms
+# the application accepts for this setting ("admin.example.com" and
+# "https://admin.example.com", optionally with a port), lowercased.
+# Deliberately no smarter than that: a value this cannot cleanly reduce
+# is passed through, the app's Host validation then rejects the probe
+# with a loud 421 at the gate (see _wait_for_health) rather than this
+# script silently second-guessing the configuration.
+_config_hostname() {
+    local raw="$1"
+    raw="${raw#*://}"   # scheme, if present
+    raw="${raw%%\?*}"   # query, if any
+    raw="${raw%%#*}"    # fragment, if any
+    raw="${raw%%/*}"    # path, if any
+    raw="${raw%%:*}"    # port, if any
+    printf '%s' "$raw" | tr '[:upper:]' '[:lower:]'
+}
+
+# _wait_for_health <label> <url> <retries> <interval-seconds> [extra-curl-args…]
 # Prints one line per attempt (status only — never response body on
 # failure) and returns 0 the first time the endpoint responds 2xx,
 # non-zero once every attempt is exhausted. A single flaky attempt
 # (nginx/DNS/TLS/service warm-up) must never fail the whole deploy.
+#
+# GH-161: a 421 response is reported as its own probe/config error, not
+# as "not ready yet" — production Host validation (BrandingHostMiddleware)
+# rejects the request before the health handler ever runs, so waiting
+# cannot resolve it and the misconfiguration must be diagnosable from
+# the deploy log alone.
 _wait_for_health() {
-    local label="$1" url="$2" retries="$3" interval="$4" attempt
+    local label="$1" url="$2" retries="$3" interval="$4" attempt status
+    shift 4
     echo "  → $label: $url (up to $retries attempts, ${interval}s apart)"
     for attempt in $(seq 1 "$retries"); do
-        if "$CURL_BIN" -fsS --max-time "$HEALTH_CURL_TIMEOUT_SECONDS" "$url" >/dev/null 2>&1; then
+        # %{http_code} is still written when -f aborts on an HTTP error
+        # (000 on connection failure), so every failure carries a status.
+        if status="$("$CURL_BIN" -fsS -o /dev/null -w '%{http_code}' --max-time "$HEALTH_CURL_TIMEOUT_SECONDS" "$@" "$url" 2>/dev/null)"; then
             echo "    attempt $attempt/$retries — OK"
             return 0
         fi
-        echo "    attempt $attempt/$retries — not ready yet"
+        if [ "$status" = "421" ]; then
+            echo "    attempt $attempt/$retries — REJECTED (HTTP 421 Misdirected Request: the probe's Host was not accepted — probe/configuration error, waiting will not fix it; check ADMIN_DOMAIN and the internal probe Host)" >&2
+        else
+            echo "    attempt $attempt/$retries — not ready yet"
+        fi
         if [ "$attempt" -lt "$retries" ]; then
             sleep "$interval"
         fi
     done
     echo "    all $retries attempts failed" >&2
     return 1
+}
+
+# _wait_for_internal_health <label> — the ONE construction of the internal
+# readiness probe (GH-161). Both gates that target INTERNAL_HEALTH — the
+# forward gate and the post-rollback gate in _rollback_and_restart_old —
+# call this so their probes can never diverge. The probe keeps connecting
+# to the loopback INTERNAL_HEALTH URL (no public DNS/TLS dependency), but
+# since APP_ENV=production (GH-148 cutover) BrandingHostMiddleware accepts
+# only configured platform hosts and rejects a default
+# "Host: 127.0.0.1:<port>" with 421 before the health handler runs. The
+# configured platform hostname is therefore presented as an explicit Host
+# header — loaded as literal data from backend/.env (ADMIN_DOMAIN, the
+# same value the application itself validates Hosts against; the file is
+# never executed, see _load_deploy_environment). Empty INTERNAL_PROBE_HOST
+# (unset/unparseable) keeps the legacy header-less probe: fine where the
+# app runs with development Host leniency, and a loud 421 at the gate
+# where it does not.
+_wait_for_internal_health() {
+    local host_args=()
+    if [ -n "$INTERNAL_PROBE_HOST" ]; then
+        host_args=(-H "Host: $INTERNAL_PROBE_HOST")
+    fi
+    _wait_for_health "$1" "$INTERNAL_HEALTH" "$HEALTH_RETRIES" "$HEALTH_RETRY_INTERVAL_SECONDS" ${host_args[@]+"${host_args[@]}"}
 }
 
 # Pre-restart failure (pull/install/compile/migration/revision-verify):
@@ -677,7 +743,7 @@ _rollback_and_restart_old() {
         return 0
     fi
 
-    if ! _wait_for_health "Rollback readiness" "$INTERNAL_HEALTH" "$HEALTH_RETRIES" "$HEALTH_RETRY_INTERVAL_SECONDS"; then
+    if ! _wait_for_internal_health "Rollback readiness"; then
         echo "ROLLBACK RESULT: FAILED — $rollback_target restarted but did not become healthy. Manual intervention required immediately." >&2
         return 0
     fi
@@ -837,6 +903,10 @@ if [ -f "$DEPLOY_ENV_FILE" ]; then
     # section) because it depends on ARCHIVE_DOMAIN which may be set in .env.
     # Default it now that deployment values have been loaded.
     PUBLIC_HEALTH="${PUBLIC_HEALTH:-https://${ARCHIVE_DOMAIN}/health}"
+    # GH-161: hostname the internal readiness probe presents as its Host
+    # header (see _wait_for_internal_health). Derived from the ADMIN_DOMAIN
+    # loaded above, as literal data only — the file is never executed.
+    INTERNAL_PROBE_HOST="${INTERNAL_PROBE_HOST:-$(_config_hostname "${ADMIN_DOMAIN:-}")}"
 else
     echo "ERROR: deployment configuration file not found — required to supply DATABASE_URL for Alembic." >&2
     _restore_worktree_only
@@ -888,7 +958,7 @@ fi
 
 # ── 7. Readiness health gate (P0-C / P0-D) ──────────────────────────────────
 echo "[8/10] Readiness health gate …"
-if ! _wait_for_health "Internal" "$INTERNAL_HEALTH" "$HEALTH_RETRIES" "$HEALTH_RETRY_INTERVAL_SECONDS"; then
+if ! _wait_for_internal_health "Internal"; then
     echo "ERROR: Internal readiness check failed after $HEALTH_RETRIES attempts." >&2
     _rollback_and_restart_old "internal readiness gate failed"
     exit 1
