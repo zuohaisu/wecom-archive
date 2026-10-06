@@ -31,7 +31,7 @@ def configured(monkeypatch):
         resend_api_key=API_KEY, email_provider="resend", app_env="production",
         smtp_host="smtp.qq.com", smtp_user="synthetic@qq.com",
         smtp_from="synthetic@qq.com", smtp_password="synthetic-smtp-secret",
-        email_reply_to="", email_from="康冠时代企业微信会话存档 <notifications@mail.crowntime.cn>",
+        email_reply_to="", email_from="康冠时代会话存档 <notifications@mail.crowntime.cn>",
     )
     monkeypatch.setattr(email, "get_email_settings", lambda: settings)
     smtp = MagicMock(side_effect=AssertionError("normal path must not use SMTP"))
@@ -79,6 +79,7 @@ def test_every_producer_uses_resend_and_approved_identity(configured, monkeypatc
     assert str(request.url) == "https://api.resend.com/emails"
     assert request.headers["Authorization"] == f"Bearer {API_KEY}"
     assert payload["from"] == configured[0].email_from
+    assert payload["from"] == "康冠时代会话存档 <notifications@mail.crowntime.cn>"
     assert "qq.com" not in payload["from"]
     assert payload["to"] == [RECIPIENT]
     assert "reply_to" not in payload
@@ -238,6 +239,16 @@ def test_smtp_requires_explicit_selection_and_is_bounded(configured, monkeypatch
         assert str(message["From"]) == "synthetic@qq.com"
         assert str(message["Reply-To"]) == "support@example.test"
     assert "synthetic-smtp-secret" not in caplog.text
+
+
+def test_owner_approved_sender_default_and_environment_override(monkeypatch):
+    approved = "康冠时代会话存档 <notifications@mail.crowntime.cn>"
+    monkeypatch.delenv("EMAIL_FROM", raising=False)
+    settings = EmailSettings(_env_file=None, resend_api_key=API_KEY)
+    assert settings.email_from == approved
+    assert email._configuration_ready(settings)
+    monkeypatch.setenv("EMAIL_FROM", approved)
+    assert EmailSettings(_env_file=None, resend_api_key=API_KEY).email_from == approved
 
 
 def test_credentials_use_environment_and_are_not_in_settings_repr(monkeypatch):

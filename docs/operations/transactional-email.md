@@ -36,7 +36,7 @@ put a real key in an issue, command argument, screenshot, shell history or PR.
 |---|---|
 | `EMAIL_PROVIDER` | `resend` by default; `smtp` only during explicit rollback. Unknown values fail closed. |
 | `RESEND_API_KEY` | Secret, required for Resend; use a sending-only key scoped to the verified domain where supported. |
-| `EMAIL_FROM` | Default `康冠时代企业微信会话存档 <notifications@mail.crowntime.cn>`; single mailbox under exactly `mail.crowntime.cn` required on Resend path. |
+| `EMAIL_FROM` | Owner-approved default `康冠时代会话存档 <notifications@mail.crowntime.cn>`; single mailbox under exactly `mail.crowntime.cn` required on Resend path. |
 | `EMAIL_REPLY_TO` | Empty by default; omit Reply-To. Only set to an explicitly approved monitored address. Sending-domain verification does not make notifications a monitored human inbox. |
 | `APP_ENV` | `production` on production. Other values prepend `[NON-PRODUCTION]` to the subject. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Retained only for explicit rollback. Complete authenticated implicit TLS configuration required; port defaults to 465. |
@@ -116,7 +116,8 @@ root-domain mail records. There is no generic destructive rollback command.
 ## Controlled rollout — do not run without separate authorization
 
 1. Pass offline checks and review the final diff. Prepare keys securely, complete
-   sending-domain verification and approve the exact sender/Reply-To policy.
+   sending-domain verification and approve the Reply-To policy. The sender
+   display name is already Owner-approved: `康冠时代会话存档`.
 2. The existing nonproduction deployment policy prohibits SMTP and production
    credentials. **Do not bypass or modify that deployment policy here.** Arrange
    an Owner-approved isolated test process/environment with a sending-only key,
@@ -179,7 +180,8 @@ Official references reviewed 2026-10-06:
 ## Evidence checklist (pending unless explicitly recorded)
 
 - [ ] Resend domain verified and DNS mutation table/rollback approved.
-- [ ] Sender display name and Reply-To policy approved.
+- [x] Sender display name approved. Owner-approved sender display name: 康冠时代会话存档
+- [ ] Reply-To policy approved.
 - [ ] Owner-controlled isolated nonproduction send arrived with aligned headers.
 - [ ] Production cutover authorized and applied through approved deployment.
 - [ ] Controlled production send arrived; normal QQ sender absent after cutover.
