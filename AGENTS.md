@@ -174,6 +174,17 @@ git status --short  # confirm only intentional files changed
 
 `make verify` validates the whole delivery branch; in a multi-ticket worktree it re-checks earlier approved commits too. Confirm the branch is not `main`; use `git status`/`git diff`/`git log origin/main..HEAD` to separate this ticket's diff from earlier commits. If two tickets' uncommitted changes are mixed, or the branch carries a commit outside authorized scope, stop and report — do not deliver them as one ticket.
 
+#### Docs-only fast path
+
+When a delivery branch's entire diff — `git diff --name-only origin/main...HEAD` — contains only `.md` documentation files, the executed code is identical to a state whose required CI is already green (for a docs-only diff that is current `origin/main`, and usually the branch's latest head run too). In that case the local requirement drops from full `make verify` to:
+
+```bash
+git diff --check    # whitespace damage and stray conflict markers
+git status --short  # confirm only intentional files changed
+```
+
+and full validation is delegated to required CI, which runs the complete suite on every PR regardless of changed paths. This fast path relaxes only the local suite run — never the branch/PR workflow, ticket claiming, scope boundaries, secrets protection, or the CI gate itself. As soon as the diff gains any non-`.md` path, or the branch's CI baseline is red or unknown, the full local `make verify` requirement applies again.
+
 Run the additional service-backed, migration, frontend, or security checks the change calls for; they run again in CI, so passing locally just avoids a wasted round trip. Do not commit a failing check until fixed or Haisu accepts the risk.
 
 ### Test integrity
