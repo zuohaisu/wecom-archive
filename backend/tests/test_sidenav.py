@@ -119,3 +119,23 @@ def test_template_uses_sidenav_token_and_i18n_has_audit_and_page_anchors() -> No
     assert source.count('"nav.auditLog":') == 3
     for ticket in ("RND-327", "RND-328", "RND-329", "RND-330"):
         assert source.count(f"/* {ticket} ") == 3
+
+
+def test_data_group_navigation_order_is_media_exports_messages_cleanup_recycle() -> None:
+    """The 数据 group renders top-to-bottom as Haisu ordered it:
+    媒体与附件 → 数据导出 → 消息记录 → 消息清理 → 回收站."""
+    data_group = next(group for group in NAV if group["group_key"] == "nav.group.data")
+    assert [item["id"] for item in data_group["items"]] == [
+        "media",
+        "exports",
+        "messages",
+        "cleanup",
+        "recycle-bin",
+    ]
+
+    html = render_sidenav("dashboard", {item["path"] for group in NAV for item in group["items"]})
+    data_section = html.split('data-i18n="nav.group.data"', 1)[1]
+    positions = [data_section.index(f'href="{path}"') for path in (
+        "/admin/media", "/admin/exports", "/admin/messages", "/admin/cleanup", "/admin/recycle-bin",
+    )]
+    assert positions == sorted(positions)
