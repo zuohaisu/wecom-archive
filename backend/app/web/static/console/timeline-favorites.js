@@ -275,11 +275,13 @@ function loadTimelineFavoriteStatuses(messages,convId,requestGen){
             if(!Object.prototype.hasOwnProperty.call(versions,item.object_id)||favoriteStateVersions[item.object_id]!==versions[item.object_id])return;
             if(item.result==='not_found'){
               favoriteStates[item.object_id]={result:'not_found',isFavorited:null};
+              if(timelineFavoritesOnly&&typeof timelineFavoriteRevision==='number')timelineFavoriteRevision+=1;
               delete favoriteSelection[item.object_id];
               removed.push(item.object_id);
             }else if(item.result==='found'&&typeof item.is_favorited==='boolean'){
               favoriteStates[item.object_id]={result:'found',isFavorited:item.is_favorited};
               if(timelineFavoritesOnly&&!item.is_favorited){
+                if(typeof timelineFavoriteRevision==='number')timelineFavoriteRevision+=1;
                 delete favoriteSelection[item.object_id];
                 noLongerFavorited.push(item.object_id);
               }
@@ -449,6 +451,8 @@ function runTimelineFavoriteAction(action,ids){
     return refreshMissingTimelineFavoriteStatuses().then(function(){return summary;});
   }).catch(function(){
     favoriteBusy=false;
+    if(timelineConvId===requestConvId&&timelineRequestGen===requestGen&&timelineFavoritesOnly&&
+      typeof timelineFavoriteRevision==='number')timelineFavoriteRevision+=1;
     if(timelineConvId!==requestConvId||timelineRequestGen!==requestGen){
       updateTimelineFavoriteControls();
       return refreshMissingTimelineFavoriteStatuses().then(function(){return false;});

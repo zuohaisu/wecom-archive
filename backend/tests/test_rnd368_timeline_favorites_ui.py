@@ -332,6 +332,74 @@ eval(%(favorites)s); eval(%(merge)s); eval(%(refresh_timeline)s); eval(%(refresh
 
 
 @pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_failed_favorite_write_invalidates_stale_favorites_only_refresh() -> None:
+    functions = {
+        "favorites": json.dumps(_FAVORITES_JS.read_text(encoding="utf-8")),
+        "refresh_timeline": json.dumps(_extract_function(_REFRESH_JS, "refreshTimelineIfSelected")),
+        "refresh_data": json.dumps(_extract_function(_REFRESH_JS, "refreshData")),
+        "refresh_for_version": json.dumps(_extract_function(_REFRESH_JS, "refreshForSyncVersion")),
+        "merge": json.dumps(_extract_function(_TIMELINE_JS, "mergeMessagesByMsgid")),
+    }
+    harness = r"""
+var body = {scrollTop: 0};
+var document = {getElementById: function (id) { return id === 'timeline-body' ? body : null; }, querySelector: function () { return null; }};
+var I18N = {t: function (key) { return key; }};
+var timelineConvId = 'conversation-E', timelineRequestGen = 8, timelineMsgs = [{msgid: 'message-E', msgtime: 20}];
+var timelineFavoritesOnly = true, timelineMode = 'staff', timelineEntityId = 'staff-1', timelineConvType = 'group';
+var timelineLoadingOlder = false, timelineFavoriteRevision = 0, favoriteSelection = {};
+var favoriteStates = {'message-E': {result: 'found', isFavorited: true}}, favoriteStateVersions = {};
+var favoriteUserCanWrite = true, favoriteBusy = false, favoriteMode = false;
+var favoriteStatusFailed = false, favoriteStatusRetrying = false, deleteMode = false;
+var selectedMsgId = null, lastRenderedTimelineSignature = null, refreshInFlight = false, selEntityId = null;
+var timelineReads = 0, statusCalls = 0, resolveOldRefresh;
+function handleUnauth() { return false; }
+function timelineEntityQueryParams() { return '&mode=staff&staff_id=staff-1&conversation_type=group&favorited_only=true'; }
+function isNearBottom() { return false; }
+function timelineSignature(messages) { return JSON.stringify((messages || []).map(function (message) { return message.msgid; })); }
+function applyTimelineRefresh() {}
+function renderTimeline() {}
+function finishRefresh() { refreshInFlight = false; }
+function refreshEntityList() { return Promise.resolve(); }
+function refreshConversationList() { return Promise.resolve(); }
+function response(data) { return Promise.resolve({ok: true, json: function () { return Promise.resolve(data); }}); }
+function fetch(url, options) {
+  if (url.indexOf('/api/conversations/conversation-E/messages?') === 0) {
+    timelineReads += 1;
+    if (timelineReads === 1) return new Promise(function (resolve) { resolveOldRefresh = function (data) { resolve({ok: true, json: function () { return Promise.resolve(data); }}); }; });
+    return response({messages: []});
+  }
+  if (url === '/api/favorites/batch') return Promise.reject(new Error('write response lost'));
+  if (url === '/api/favorites/status') {
+    statusCalls += 1;
+    if (statusCalls === 1) {
+      return response({items: [{object_type: 'message', object_id: 'message-E', result: 'found', is_favorited: false}]});
+    }
+    return Promise.reject(new Error('status retry unavailable'));
+  }
+  throw new Error('unexpected request: ' + url);
+}
+global.document = document; global.I18N = I18N; global.fetch = fetch;
+eval(%(favorites)s); eval(%(merge)s); eval(%(refresh_timeline)s); eval(%(refresh_data)s); eval(%(refresh_for_version)s);
+(async function () {
+  refreshForSyncVersion();
+  for (var i = 0; i < 20 && !resolveOldRefresh; i++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (!resolveOldRefresh) throw new Error('fixture did not start the stale refresh');
+  await runTimelineFavoriteAction('unfavorite', ['message-E']);
+  if (timelineMsgs.length || favoriteStates['message-E'].isFavorited !== false) throw new Error('fixture did not reconcile the lost write as unfavorited');
+  resolveOldRefresh({messages: [{msgid: 'message-E', msgtime: 20}]});
+  for (var j = 0; j < 50 && (timelineReads < 2 || refreshInFlight); j++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  for (var k = 0; k < 5; k++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (timelineReads !== 2 || statusCalls !== 1) throw new Error('stale response was not discarded in favor of one authoritative list read');
+  if (timelineMsgs.length) throw new Error('late favorites-only refresh reinserted the cancelled row after status retry failure');
+  console.log('lost-write=invalidated stale-refresh status-retry=failure row=absent');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+""" % functions
+    result = run_node(harness)
+    assert result.returncode == 0, "node harness failed: %s" % result.stderr
+    assert result.stdout.strip() == "lost-write=invalidated stale-refresh status-retry=failure row=absent"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
 def test_search_location_history_page_clears_favorite_selection_at_fetch_boundary() -> None:
     functions = {
         "favorites": json.dumps(_FAVORITES_JS.read_text(encoding="utf-8")),
