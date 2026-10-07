@@ -149,10 +149,14 @@ it from Tencent, place it outside version control (the ignored
 
 ## License
 
-Proprietary and confidential — see [LICENSE](LICENSE). All rights reserved by
-深圳康冠时代科技有限公司. Third-party components, including Tencent's WeCom SDK
-and the open-source dependencies in the requirements files, remain subject to
-their own terms.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+
+This project is licensed under the GNU Affero General Public License, version
+3.0 (AGPL-3.0); see [LICENSE](LICENSE) for the full license text and
+[NOTICE](NOTICE) for project attribution and trademark information. The
+project's own core and cloud code use the same license. Third-party components
+remain subject to their own terms; Tencent's proprietary WeCom SDK is not
+included or redistributed by this project.
 
 ## Development
 

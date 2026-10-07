@@ -1,0 +1,38 @@
+# NOTICE
+
+Copyright (c) 2026 深圳康冠时代科技有限公司 (Shenzhen Crowntime Technology Co., Ltd.)
+
+## Project and attribution
+
+`wecom-archive` is the name of this open-source software project, published by
+深圳康冠时代科技有限公司 (Shenzhen Crowntime Technology Co., Ltd.). The project
+software is licensed under the GNU Affero General Public License, version 3.0
+(AGPL-3.0); see [LICENSE](LICENSE).
+
+The official self-hosted distribution should display a reasonable source
+attribution, for example, `Powered by 康冠时代`. Please retain reasonable source
+attribution in legal notices or credits, consistent with AGPL-3.0 section 7(b).
+This attribution identifies the project's source; it does not imply that a
+third-party fork, service, or deployment is an official product or is hosted,
+approved, or endorsed by the company.
+
+## Trademarks
+
+“康冠时代” and “Crowntime”, including their logos and brand identifiers, are
+trademarks or trade names of 深圳康冠时代科技有限公司. The project name
+`wecom-archive` identifies this software project and is not a grant to represent
+a third-party product or service as official. Use distinct names and branding
+where needed to avoid confusion about origin, official hosting, or endorsement.
+
+This notice does not change or restrict the rights granted by AGPL-3.0. It does
+not prohibit commercial use, redistribution, hosting, or forks that comply with
+the license, and it does not require a fork to present itself under the official
+product brand. No additional license restrictions are imposed by this notice.
+
+## Third-party marks and components
+
+“WeCom” and “企业微信” are Tencent marks. This project is independent and is not
+affiliated with or endorsed by Tencent. Third-party components remain subject
+to their respective terms. Tencent's proprietary WeCom SDK is not included or
+redistributed by this notice; obtain and use it only under Tencent's applicable
+terms.
