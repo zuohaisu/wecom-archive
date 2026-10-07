@@ -137,14 +137,19 @@
     return p;
   }
 
+  function isFavoriteActionBusy() {
+    return typeof favorites !== "undefined" && favorites.getSnapshot().busy;
+  }
+
   function updatePageSummary(hasMore) {
     document.getElementById("media-count").textContent = text("media.results", { n: state.total });
     var more = document.getElementById("media-more");
     more.classList.toggle("hidden", !hasMore);
-    more.disabled = state.loading;
+    more.disabled = state.loading || isFavoriteActionBusy() || state.offset >= state.total;
   }
 
   function load(append) {
+    if (state.loading || (append && (state.offset >= state.total || isFavoriteActionBusy()))) return Promise.resolve();
     var requestId = ++state.requestId;
     state.loading = true;
     setStatus(append ? t("media.loadingMore") : "", false);
@@ -179,6 +184,9 @@
   }
 
   function reset() {
+    state.requestId += 1;
+    state.loading = false;
+    document.getElementById("media-grid").setAttribute("aria-busy", "false");
     favorites.clearSelection();
     state.items = [];
     state.offset = 0;
@@ -212,10 +220,11 @@
     document.getElementById("media-selection-count").textContent = text("media.selectedCount", { n: snapshot.selectedCount });
     var allButton = document.getElementById("media-select-all");
     allButton.textContent = t(snapshot.allSelected ? "media.clearSelection" : "media.selectAllLoaded");
-    allButton.disabled = snapshot.loadedCount === 0 || snapshot.busy;
-    document.getElementById("media-clear-selection").disabled = snapshot.selectedCount === 0 || snapshot.busy;
-    document.getElementById("media-favorite-selected").disabled = !snapshot.canApply;
-    document.getElementById("media-unfavorite-selected").disabled = !snapshot.canApply;
+    allButton.disabled = snapshot.loadedCount === 0 || snapshot.busy || state.loading;
+    document.getElementById("media-clear-selection").disabled = snapshot.selectedCount === 0 || snapshot.busy || state.loading;
+    document.getElementById("media-favorite-selected").disabled = !snapshot.canApply || state.loading;
+    document.getElementById("media-unfavorite-selected").disabled = !snapshot.canApply || state.loading;
+    document.getElementById("media-more").disabled = state.loading || snapshot.busy || state.offset >= state.total;
     var hint = document.getElementById("media-selection-hint");
     if (!snapshot.canManage) hint.textContent = t("media.favoritePermissionDenied");
     else if (!snapshot.statusReady) hint.textContent = t("media.favoriteStatusLoading");
@@ -224,7 +233,7 @@
       var id = checkbox.getAttribute("data-media-select");
       var status = favorites.getStatus(id);
       checkbox.checked = favorites.isSelected(id);
-      checkbox.disabled = snapshot.busy || !!(status && status.result === "not_found");
+      checkbox.disabled = snapshot.busy || state.loading || !!(status && status.result === "not_found");
       var cardElement = checkbox.closest("[data-media-id]");
       if (cardElement) cardElement.classList.toggle("is-selected", checkbox.checked);
     });
@@ -280,16 +289,25 @@
     updatePageSummary(state.offset < state.total);
     window.scrollTo(window.scrollX || 0, scrollY);
 
+    var requestId = ++state.requestId;
+    var grid = document.getElementById("media-grid");
     var remaining = removed;
     var statusRefreshed = false;
+    state.loading = true;
+    grid.setAttribute("aria-busy", "true");
+    setStatus(t("media.loadingMore"), false);
+    updatePageSummary(state.offset < state.total);
+    updateSelectionUi();
+
     function refreshFavoriteStatuses() {
-      if (statusRefreshed) return Promise.resolve();
+      if (statusRefreshed || requestId !== state.requestId) return Promise.resolve();
       statusRefreshed = true;
       return favorites.setItems(state.items).catch(function () {
-        setStatus(t("media.favoriteStatusFailed"), true);
+        if (requestId === state.requestId) setStatus(t("media.favoriteStatusFailed"), true);
       });
     }
     function fillGap() {
+      if (requestId !== state.requestId) return Promise.resolve();
       if (remaining <= 0 || state.offset >= state.total) {
         updatePageSummary(state.offset < state.total);
         return refreshFavoriteStatuses();
@@ -302,6 +320,7 @@
           return response.json();
         })
         .then(function (data) {
+          if (requestId !== state.requestId) return;
           var received = data.items || [];
           if (received.length) {
             state.items = state.items.concat(received);
@@ -313,13 +332,19 @@
           }
           state.total = data.total;
           return received.length === limit && remaining > 0 ? fillGap() : refreshFavoriteStatuses();
-        })
-        .catch(function () {
-          setStatus(t("media.loadFailed"), true);
-          updatePageSummary(state.offset < state.total);
         });
     }
-    return fillGap();
+    return fillGap().catch(function () {
+      if (requestId !== state.requestId) return;
+      setStatus(t("media.loadFailed"), true);
+      updatePageSummary(state.offset < state.total);
+    }).finally(function () {
+      if (requestId !== state.requestId) return;
+      state.loading = false;
+      grid.setAttribute("aria-busy", "false");
+      updatePageSummary(state.offset < state.total);
+      updateSelectionUi();
+    });
   }
 
   function performFavoriteAction(action) {

@@ -119,6 +119,55 @@
       });
     }
 
+    function reconcileVisibleTargetStatuses(targets) {
+      var targetIds = Object.create(null);
+      targets.forEach(function (item) { targetIds[String(item.id)] = true; });
+      var visibleItems = items.filter(function (item) { return !!targetIds[String(item.id)]; });
+      if (!visibleItems.length) return Promise.resolve();
+
+      var currentRevision = revision;
+      var batches = chunks(visibleItems, BATCH_LIMIT);
+      return batches.reduce(function (promise, batch) {
+        return promise.then(function () {
+          return request("/api/favorites/status", {
+            method: "POST",
+            body: JSON.stringify({
+              items: batch.map(function (item) {
+                return {
+                  object_type: "media",
+                  object_id: String(item.id),
+                  source_page: "media",
+                };
+              }),
+            }),
+          }).then(function (data) {
+            if (!data || !Array.isArray(data.items)) throw new Error("invalid_favorite_status");
+            if (currentRevision !== revision) return;
+            data.items.forEach(function (item) {
+              if (item.object_type !== "media" || typeof item.object_id !== "string") return;
+              statuses[item.object_id] = {
+                result: item.result,
+                isFavorited: typeof item.is_favorited === "boolean" ? item.is_favorited : null,
+              };
+              if (item.result === "not_found") delete selected[item.object_id];
+            });
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        if (currentRevision !== revision) return;
+        statusReady = items.every(function (item) {
+          var status = statuses[String(item.id)];
+          return status && (status.result === "not_found" || typeof status.isFavorited === "boolean");
+        });
+        notify();
+      }).catch(function () {
+        if (currentRevision === revision) {
+          statusReady = false;
+          notify();
+        }
+      });
+    }
+
     function toggleSelected(id, checked) {
       if (busy) return;
       var key = String(id);
@@ -211,10 +260,15 @@
       return batches.reduce(function (promise, batch) {
         return promise.then(function () { return postBatch(batch); });
       }, Promise.resolve()).then(function () {
-        if (currentRevision === revision) selected = Object.create(null);
-        busy = false;
-        notify();
-        return summary;
+        var reconciled = currentRevision === revision
+          ? Promise.resolve()
+          : reconcileVisibleTargetStatuses(targets);
+        return reconciled.then(function () {
+          if (currentRevision === revision) selected = Object.create(null);
+          busy = false;
+          notify();
+          return summary;
+        });
       }).catch(function (error) {
         busy = false;
         notify();

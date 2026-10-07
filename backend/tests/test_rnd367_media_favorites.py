@@ -96,3 +96,42 @@ def test_loaded_results_are_chunked_at_api_limit_and_partial_failure_is_retryabl
 """
     )
     assert output.strip() == "status=100+1 batch=100+1 partial=retryable"
+
+
+def test_successful_write_reconciles_visible_status_after_items_change() -> None:
+    output = _run(
+        """
+(async function () {
+  var serverFavorited = false;
+  var resolveBatch;
+  var statusCalls = 0;
+  var favorites = MediaFavorites.create({request: function (url, options) {
+    var body = JSON.parse(options.body);
+    if (url === '/api/favorites/status') {
+      statusCalls += 1;
+      return Promise.resolve({items: body.items.map(function (item) {
+        return {object_type: 'media', object_id: item.object_id, result: 'found', is_favorited: item.object_id === '1' && serverFavorited};
+      })});
+    }
+    return new Promise(function (resolve) { resolveBatch = resolve; });
+  }});
+  await favorites.setItems([{id: 1}]);
+  favorites.setRole('owner');
+  favorites.selectAllLoaded();
+  var action = favorites.apply('favorite');
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  await favorites.setItems([{id: 1}, {id: 2}]);
+  if (favorites.getStatus(1).isFavorited !== false) throw new Error('fixture did not capture the pre-write status');
+  serverFavorited = true;
+  resolveBatch({requested: 1, unique: 1, applied: 1, unchanged: 0, not_found: 0, items: [
+    {object_type: 'media', object_id: '1', result: 'favorited'}
+  ]});
+  await action;
+  if (favorites.getStatus(1).isFavorited !== true) throw new Error('successful write left the visible item stale');
+  if (favorites.getStatus(2).isFavorited !== false) throw new Error('new item status was not preserved during reconciliation');
+  if (statusCalls !== 3) throw new Error('stale revision did not trigger one post-write status query');
+  console.log('revision-change=visible-status-reconciled');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "revision-change=visible-status-reconciled"
