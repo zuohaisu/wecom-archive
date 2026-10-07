@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.db.models import (
+    ArchiveFavorite,
     ArchiveMessage,
     ArchiveMessageRecipient,
     MediaFile,
@@ -138,6 +139,9 @@ def validate_filter(raw: dict[str, Any]) -> CleanupFilter:
     has_media = raw.get("has_media")
     if has_media is not None and not isinstance(has_media, bool):
         raise CleanupError("invalid_filter:has_media")
+    include_favorited = raw.get("include_favorited", False)
+    if not isinstance(include_favorited, bool):
+        raise CleanupError("invalid_filter:include_favorited")
 
     roomid = raw.get("roomid")
     staff_id = raw.get("staff_id")
@@ -158,7 +162,7 @@ def validate_filter(raw: dict[str, Any]) -> CleanupFilter:
         has_media=has_media,
         media_min_bytes=_int("media_min_bytes"),
         media_max_bytes=_int("media_max_bytes"),
-        include_favorited=bool(raw.get("include_favorited", False)),
+        include_favorited=include_favorited,
     )
 
 
@@ -214,6 +218,25 @@ def _participant_predicate(tenant_id: str, userid: str):
     )
 
 
+def _message_has_favorite(tenant_id: str):
+    """Match a live message favorite or any live favorite on its media."""
+    message_favorite = exists().where(
+        ArchiveFavorite.tenant_id == tenant_id,
+        ArchiveFavorite.object_type == "message",
+        ArchiveFavorite.archive_message_id == ArchiveMessage.id,
+        ArchiveFavorite.canceled_at.is_(None),
+    )
+    media_favorite = exists().where(
+        ArchiveFavorite.tenant_id == tenant_id,
+        ArchiveFavorite.object_type == "media",
+        ArchiveFavorite.canceled_at.is_(None),
+        ArchiveFavorite.media_file_id == MediaFile.id,
+        MediaFile.tenant_id == tenant_id,
+        MediaFile.archive_message_id == ArchiveMessage.id,
+    )
+    return or_(message_favorite, media_favorite)
+
+
 def build_message_query(db: Session, tenant_id: str, f: CleanupFilter, *, now: datetime) -> Select:
     """Build the tenant-scoped candidate query. Always excludes rows already
     soft-deleted, so reruns/restarts are idempotent."""
@@ -238,6 +261,12 @@ def build_message_query(db: Session, tenant_id: str, f: CleanupFilter, *, now: d
         conditions.append(ArchiveMessage.msgtime <= date_to)
     if f.msgtypes:
         conditions.append(ArchiveMessage.msgtype.in_(f.msgtypes))
+
+    has_favorite = _message_has_favorite(tenant_id)
+    if not f.include_favorited:
+        # This default is a cleanup filter, not a deletion lock. Explicitly
+        # opting in still permits soft deletion of a favorited message.
+        conditions.append(~has_favorite)
 
     if f.has_media is not None or f.media_min_bytes is not None or f.media_max_bytes is not None:
         media_filter = [
@@ -370,9 +399,7 @@ def preview_cleanup(
             if other:
                 shared_bytes += int(row.bytes)
 
-    # Favorites (RND-365) are not implemented yet; the filter field is
-    # accepted but the count is always zero until that epic lands.
-    favorited_count = 0
+    favorited_count = _count_rows(db, query.where(_message_has_favorite(tenant_id)))
     locked_count = 0
     tenant_locked = db.scalar(select(Tenant.deletion_locked).where(Tenant.id == tenant_id))
     if tenant_locked:

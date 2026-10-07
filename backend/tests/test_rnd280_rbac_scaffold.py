@@ -78,7 +78,12 @@ def test_require_role_is_attached_only_to_authorized_admin_routes() -> None:
     routers_dir = Path(__file__).parents[1] / "app" / "routers"
     for router_file in routers_dir.rglob("*.py"):
         source = router_file.read_text()
-        if router_file.name in {"audit.py", "avatars.py", "external_contacts.py", "media_library.py", "settings.py"}:
+        if router_file.name == "favorites.py":
+            assert source.count("Depends(require_role())") == 2
+            assert source.count(
+                'require_role("owner", "admin", "compliance", "legal")'
+            ) == 3
+        elif router_file.name in {"audit.py", "avatars.py", "external_contacts.py", "media_library.py", "settings.py"}:
             assert "Depends(require_role())" in source
         elif router_file.name in {"retention.py", "onboarding.py"}:
             assert "Depends(require_role())" in source

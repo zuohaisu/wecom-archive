@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from app.db.base import Base
 from app.db.models import (
     AdminUser,
+    ArchiveFavorite,
     ArchiveMessage,
     ArchiveMessageRecipient,
     AuditLog,
@@ -29,6 +30,7 @@ from app.db.models import (
 )
 from app.services.message_cleanup import (
     CleanupConfirmationRequired,
+    CleanupError,
     CleanupPreviewStale,
     CONFIRMATION_PHRASE,
     create_cleanup_task,
@@ -65,6 +67,7 @@ def db():
                 ArchiveMessage.__table__,
                 ArchiveMessageRecipient.__table__,
                 MediaFile.__table__,
+                ArchiveFavorite.__table__,
                 MessageCleanupPreview.__table__,
                 MessageCleanupTask.__table__,
                 AuditLog.__table__,
@@ -111,6 +114,8 @@ def test_filter_validation_whitelist() -> None:
         validate_filter({"msgtypes": ["bogus_type"]})
     with pytest.raises(Exception):
         validate_filter({"roomid": {"evil": 1}})
+    with pytest.raises(CleanupError, match="include_favorited"):
+        validate_filter({"include_favorited": "false"})
 
 
 def test_preview_counts_and_capacity_estimates(db) -> None:
@@ -130,6 +135,69 @@ def test_preview_counts_and_capacity_estimates(db) -> None:
         assert preview.shared_media_bytes == 0
         assert preview.earliest_msgtime == 1000
         assert preview.latest_msgtime == 2_000_000
+
+
+def test_cleanup_favorite_default_filter_and_explicit_delete_opt_in(db) -> None:
+    with db() as session:
+        _msg(session, mid=1, msgid="favorited-message")
+        _msg(session, mid=2, msgid="favorited-media-message", msgtype="image")
+        _msg(session, mid=3, msgid="ordinary-message")
+        _media(session, media_id=1, message_id=2)
+        session.flush()
+        session.add_all(
+            [
+                ArchiveFavorite(
+                    id="favorite-message",
+                    tenant_id="tenant-a",
+                    object_type="message",
+                    archive_message_id=1,
+                    favorited_by_admin_user_id="admin-a",
+                ),
+                ArchiveFavorite(
+                    id="favorite-media",
+                    tenant_id="tenant-a",
+                    object_type="media",
+                    media_file_id=1,
+                    favorited_by_admin_user_id="admin-a",
+                ),
+            ]
+        )
+        session.commit()
+
+        default_filter = validate_filter({})
+        default_preview = preview_cleanup(session, "tenant-a", default_filter, now=NOW)
+        assert default_preview.matched == 1
+        assert default_preview.favorited_count == 0
+
+        include_filter = validate_filter({"include_favorited": True})
+        include_preview = preview_cleanup(session, "tenant-a", include_filter, now=NOW)
+        assert include_preview.matched == 3
+        assert include_preview.favorited_count == 2
+        store_cleanup_preview(
+            session, tenant_id="tenant-a", preview=include_preview,
+            f=include_filter, now=NOW,
+        )
+        task = create_cleanup_task(
+            session,
+            tenant_id="tenant-a",
+            actor_id="admin-a",
+            raw_filter={"include_favorited": True},
+            preview_version=include_preview.preview_version,
+            confirmation=CONFIRMATION_PHRASE,
+            now=NOW,
+        )
+        session.commit()
+        process_cleanup_task_once(session, session.get(MessageCleanupTask, task.id), now=NOW)
+        session.commit()
+        assert session.query(ArchiveMessage).filter(
+            ArchiveMessage.tenant_id == "tenant-a",
+            ArchiveMessage.deleted_at.is_not(None),
+        ).count() == 3
+        # Cleanup moves content to the recycle bin; it does not remove or
+        # invalidate the favorite relation.
+        assert session.query(ArchiveFavorite).filter(
+            ArchiveFavorite.canceled_at.is_(None)
+        ).count() == 2
 
 
 def test_older_than_and_media_size_filters(db) -> None:

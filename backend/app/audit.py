@@ -100,6 +100,8 @@ class AuditAction:
     MESSAGES_CLEANUP_TASK_CREATED = "messages.cleanup_task_created"
     MESSAGES_CLEANUP_TASK_CANCELED = "messages.cleanup_task_canceled"
     MESSAGES_CLEANUP_COMPLETED = "messages.cleanup_completed"
+    FAVORITE_ADDED = "favorite.added"
+    FAVORITE_REMOVED = "favorite.removed"
 
 
 class AuditObjectType:
@@ -120,6 +122,7 @@ class AuditObjectType:
     PLATFORM_OPERATOR = "platform_operator"
     PLATFORM_OPERATOR_INVITATION = "platform_operator_invitation"
     ARCHIVE_MESSAGE = "archive_message"
+    FAVORITE = "archive_favorite"
 
 
 # The catalogue is intentionally application-level: category is computed for
@@ -229,6 +232,8 @@ ACTION_CATALOG: dict[str, tuple[str, str]] = {
     AuditAction.MESSAGES_CLEANUP_TASK_CREATED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
     AuditAction.MESSAGES_CLEANUP_TASK_CANCELED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
     AuditAction.MESSAGES_CLEANUP_COMPLETED: (AuditCategory.DATA_ACCESS, AuditObjectType.ARCHIVE_MESSAGE),
+    AuditAction.FAVORITE_ADDED: (AuditCategory.DATA_ACCESS, AuditObjectType.FAVORITE),
+    AuditAction.FAVORITE_REMOVED: (AuditCategory.DATA_ACCESS, AuditObjectType.FAVORITE),
 }
 AUDIT_CATEGORIES = frozenset(
     {
