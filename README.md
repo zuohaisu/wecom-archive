@@ -1,4 +1,4 @@
-# Crowntime WeCom Archive
+# wecom-archive
 
 A complete archive and review console for WeCom conversation data — not an
 SDK wrapper. It retrieves archive records through the WeCom Conversation
@@ -6,19 +6,21 @@ Archive API, decrypts and stores them, and gives authorized administrators a
 full web-based review console with search, media access, export approval, and
 audit logging.
 
-Crowntime WeCom Archive is a proprietary product of 深圳康冠时代科技有限公司
-(Crowntime), **operated as a hosted service**. It is not open source, and no
-self-hosting or on-premises license is offered. This repository is private and
-its contents are confidential.
+## 项目定位 / Project positioning
 
-> **This README is internal documentation.** The setup instructions below are
-> for developing and operating the service ourselves, not a customer-facing
-> installation guide. For the product strategy behind that, see
-> [ADR-0003](docs/adr/0003-product-strategy-hosted-only.md) and the
-> [first-10-customers roadmap](deliverables/roadmap-first-10-customers-2026-08-07.md).
+**中文：** `wecom-archive` 是由康冠时代（深圳康冠时代科技有限公司，Crowntime）
+发布的开源企业微信会话存档项目。基于 AGPL-3.0 的自部署版本完整可用，不依赖康冠时代
+官方云服务；康冠时代官方云版提供托管与运维便利。自部署版与云版使用同一代码库，云版代码
+不会从本仓库中排除。
 
-> This is an independent project. “WeCom” and “企业微信” are trademarks of
-> Tencent and are used here only to describe compatibility. This software is
+**English:** `wecom-archive` is an open-source WeCom conversation-archive project
+published by Crowntime (康冠时代), Shenzhen Crowntime Technology Co., Ltd. Its
+AGPL-3.0 self-hosted edition is complete and usable without depending on the
+official cloud service. The official Crowntime cloud edition offers managed
+hosting and operational convenience. Both editions use this unified codebase;
+cloud-specific source is not withheld from this repository.
+
+> “WeCom” and “企业微信” are Tencent trademarks. This independent project is
 > not affiliated with or endorsed by Tencent.
 
 ## Features

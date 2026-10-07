@@ -35,11 +35,14 @@ def export(snapshot_repo, content):
     return result, (output / "README.md").read_text()
 
 
-def test_renamed_repository_has_an_explicit_mapping():
-    assert (
-        "'s|zuohaisu/wecom-archive|your-org/wecom-archive|g'"
-        in EXPORTER.read_text()
-    )
+def test_renamed_repository_has_explicit_mapping_and_leak_gate():
+    exporter = EXPORTER.read_text()
+    assert "'s|zuohaisu/wecom-archive-365|your-org/wecom-archive|g'" in exporter
+    assert "'s|zuohaisu/wecom-archive|your-org/wecom-archive|g'" in exporter
+    assert "'s|wecom-archive-365|wecom-archive|g'" in exporter
+    assert "name '*wecom-archive-365*' -print" in exporter
+    gate_patterns = exporter.split("declare -a GATE_PATTERNS=(", 1)[1].split(")", 1)[0]
+    assert "'wecom-archive-365'" in gate_patterns
 
 
 def test_export_uses_unbranded_placeholders_and_preserves_vendor(snapshot_repo):
@@ -48,18 +51,88 @@ def test_export_uses_unbranded_placeholders_and_preserves_vendor(snapshot_repo):
         "git@github.com:zuohaisu/wecom-archive.git\n"
         "/srv/apps/wecom-archive-365/current\n"
         "/srv/apps/wecom-archive-365-nonprod/current\n"
+        "wecom-archive-365.service\n"
         "archive.crowntime.cn qwhhcd.crowntime.cn\n"
         "Crowntime WeCom Archive https://crowntime.cn\n",
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Leak gate passed" in result.stdout
+    assert "wecom-archive-365" not in content
+    assert "zuohaisu" not in content
     assert content == (
         "git@github.com:your-org/wecom-archive.git\n"
         "/srv/apps/wecom-archive/current\n"
         "/srv/apps/wecom-archive-nonprod/current\n"
+        "wecom-archive.service\n"
         "archive.crowntime.cn archive.example.com\n"
         "Crowntime WeCom Archive https://crowntime.cn\n"
     )
+
+
+def test_export_normalizes_legacy_repository_names_in_snapshot_paths(snapshot_repo):
+    repo, output = snapshot_repo
+    old_file = repo / "deploy" / "systemd" / "wecom-archive-365-nonprod.service"
+    old_file.parent.mkdir(parents=True)
+    old_file.write_text("Description=wecom-archive-365 non-production service\n")
+    (repo / "scripts" / "public_allowlist.txt").write_text("deploy/systemd\n")
+    subprocess.run(["git", "add", str(old_file)], cwd=repo, check=True)
+
+    result = subprocess.run(
+        ["bash", str(repo / "scripts" / EXPORTER.name), str(output)],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+
+    renamed_file = output / "deploy" / "systemd" / "wecom-archive-nonprod.service"
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert renamed_file.is_file()
+    assert not (output / "deploy" / "systemd" / old_file.name).exists()
+    assert "wecom-archive-365" not in renamed_file.read_text()
+    assert not any("wecom-archive-365" in path.name for path in output.rglob("*"))
+
+
+def test_export_fails_closed_if_legacy_repository_name_remains_in_path(snapshot_repo):
+    repo, output = snapshot_repo
+    old_file = repo / "deploy" / "systemd" / "wecom-archive-365-nonprod.service"
+    old_file.parent.mkdir(parents=True)
+    old_file.write_text("Description=generic service\n")
+    (repo / "scripts" / "public_allowlist.txt").write_text("deploy/systemd\n")
+    subprocess.run(["git", "add", str(old_file)], cwd=repo, check=True)
+
+    exporter = repo / "scripts" / EXPORTER.name
+    script = exporter.read_text()
+    path_rule = '\t\tsnapshot_path="${file//wecom-archive-365/wecom-archive}"\n'
+    assert path_rule in script
+    exporter.write_text(script.replace(path_rule, '\t\tsnapshot_path="${file}"\n'))
+
+    result = subprocess.run(
+        ["bash", str(exporter), str(output)],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "LEAK GATE FAILED — legacy repository name in snapshot path:" in result.stdout
+    assert "Snapshot ready:" not in result.stdout
+    assert (output / "deploy" / "systemd" / old_file.name).is_file()
+
+
+def test_export_fails_closed_if_old_repository_name_is_not_sanitized(snapshot_repo):
+    repo, _ = snapshot_repo
+    exporter = repo / "scripts" / EXPORTER.name
+    script = exporter.read_text()
+    sanitizer_rule = "\t's|wecom-archive-365|wecom-archive|g'\n"
+    assert sanitizer_rule in script
+    exporter.write_text(script.replace(sanitizer_rule, ""))
+
+    result, content = export(snapshot_repo, "wecom-archive-365.service\n")
+
+    assert result.returncode != 0
+    assert "LEAK GATE FAILED — pattern: wecom-archive-365" in result.stdout
+    assert "Snapshot ready:" not in result.stdout
+    assert content == "wecom-archive-365.service\n"
 
 
 def test_export_preserves_company_subdomains_and_mail_domain(snapshot_repo):

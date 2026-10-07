@@ -39,7 +39,7 @@ if [[ ! -f "${ALLOWLIST}" ]]; then
 	exit 1
 fi
 
-# Sanitizer rules are exact-value rewrites, applied in order. The known
+# Sanitizer rules are targeted rewrites, applied in order. The known
 # environment-specific admin hostname below is narrowly sanitized in this
 # review snapshot. This is not a confidentiality claim about crowntime.cn or
 # a suffix rule: public product endpoints and other subdomains are not leaks
@@ -59,9 +59,11 @@ fi
 #             context. Never infer a leak from the suffix alone.
 SANITIZERS=(
 	's|qwhhcd\.crowntime\.cn|archive.example.com|g'
+	's|zuohaisu/wecom-archive-365|your-org/wecom-archive|g'
 	's|zuohaisu/wecom-archive|your-org/wecom-archive|g'
 	's|zuohaisu|your-org|g'
 	's|/srv/apps/wecom-archive-365|/srv/apps/wecom-archive|g'
+	's|wecom-archive-365|wecom-archive|g'
 )
 
 # Patterns that must not survive into the snapshot. A hit here is a bug in
@@ -71,6 +73,7 @@ SANITIZERS=(
 declare -a GATE_PATTERNS=(
 	'qwhhcd\.crowntime\.cn'
 	'/srv/apps/wecom-archive-365'
+	'wecom-archive-365'
 	'zuohaisu'
 	'linear\.app'
 	'甄宇航'
@@ -90,6 +93,7 @@ mkdir -p "${OUT_DIR}"
 
 # ── Stage 1: copy ───────────────────────────────────────────────────
 copied=0
+normalized_paths=0
 while IFS= read -r entry; do
 	entry="${entry%%#*}"
 	entry="$(echo "${entry}" | xargs || true)"
@@ -97,9 +101,18 @@ while IFS= read -r entry; do
 
 	matched=0
 	while IFS= read -r -d '' file; do
-		mkdir -p "${OUT_DIR}/$(dirname "${file}")"
-		cp "${file}" "${OUT_DIR}/${file}"
+		snapshot_path="${file//wecom-archive-365/wecom-archive}"
+		destination="${OUT_DIR}/${snapshot_path}"
+		if [[ -e "${destination}" ]]; then
+			echo "error: snapshot path collision after repository-name normalization: ${snapshot_path}" >&2
+			exit 1
+		fi
+		mkdir -p "$(dirname "${destination}")"
+		cp "${file}" "${destination}"
 		copied=$((copied + 1))
+		if [[ "${snapshot_path}" != "${file}" ]]; then
+			normalized_paths=$((normalized_paths + 1))
+		fi
 		matched=$((matched + 1))
 	done < <(git ls-files -z -- "${entry}")
 
@@ -109,6 +122,9 @@ while IFS= read -r entry; do
 done <"${ALLOWLIST}"
 
 echo "==> Copied ${copied} files"
+if [[ ${normalized_paths} -gt 0 ]]; then
+	echo "==> Normalized ${normalized_paths} legacy repository-name path(s)"
+fi
 
 # ── Stage 2: sanitize ───────────────────────────────────────────────
 # perl rather than sed: GNU and BSD sed disagree on in-place editing, and
@@ -132,6 +148,12 @@ echo "==> Sanitized ${sanitized} files"
 # ── Stage 3: leak gate ──────────────────────────────────────────────
 echo "==> Running leak gate"
 violations=0
+if old_paths="$(find "${OUT_DIR}" -name '*wecom-archive-365*' -print)" && [[ -n "${old_paths}" ]]; then
+	echo ""
+	echo "    LEAK GATE FAILED — legacy repository name in snapshot path:"
+	echo "${old_paths}" | sed "s|${OUT_DIR}/|      |" | head -20
+	violations=$((violations + 1))
+fi
 for pattern in "${GATE_PATTERNS[@]}"; do
 	if hits="$(grep -rIn --binary-files=without-match -E "${pattern}" "${OUT_DIR}" 2>/dev/null)"; then
 		echo ""
