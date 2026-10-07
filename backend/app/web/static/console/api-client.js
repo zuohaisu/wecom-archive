@@ -17,7 +17,12 @@ function loadCurrentUser(){
     // RND-297: server preferences take precedence; I18N/theme localStorage
     // remains the fallback until an authenticated preference is available.
     if(d.locale&&typeof I18N!=='undefined')I18N.setLocale(d.locale);
-    if(d.theme)document.documentElement.setAttribute('data-theme',d.theme);
+    // GH-101 theme precedence: an explicit local choice (settings page)
+    // wins; the server's ui_theme applies only when it is non-default;
+    // with neither, theme.js's prefers-color-scheme follow stands.
+    var localTheme=null;try{localTheme=localStorage.getItem('wecom_admin_theme');}catch(e){}
+    if(localTheme){document.documentElement.setAttribute('data-theme',localTheme);}
+    else if(d.theme&&d.theme!=='light'){document.documentElement.setAttribute('data-theme',d.theme);}
     if(typeof applyLocale==='function')applyLocale();
     var el=document.getElementById('current-user');
     if(el)el.textContent=d.display_name||d.wecom_user_id||'';

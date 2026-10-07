@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -65,6 +65,20 @@ __SIDENAV__
         <p data-i18n="settings.securityActivity.description">查看重要的账号和安全活动记录。</p>
       </div>
       <div class="set-ctl"><a class="btn" href="/admin/audit-logs" data-i18n="settings.securityActivity.open">查看安全与活动</a><p class="field-help" data-i18n="settings.securityActivity.readOnly">仅可查看，无法在此修改活动记录。</p></div>
+    </div>
+    <div class="set-row">
+      <div class="set-label">
+        <h3>外观</h3>
+        <p>选择控制台配色；跟随系统时随操作系统的深色模式自动切换，仅影响当前浏览器。</p>
+      </div>
+      <div class="set-ctl">
+        <div id="theme-picker" class="segmented" role="radiogroup" aria-label="配色主题">
+          <button type="button" class="theme-option" data-theme-choice="light">浅色</button>
+          <button type="button" class="theme-option" data-theme-choice="dark">深色</button>
+          <button type="button" class="theme-option" data-theme-choice="system">跟随系统</button>
+        </div>
+        <p id="theme-picker-help" class="field-help" role="status" aria-live="polite"></p>
+      </div>
     </div>
     <div class="set-row">
       <div class="set-label">
@@ -229,6 +243,17 @@ __SIDENAV__
   });
   I18N.onChange(langMenu);
   langMenu();
+}());
+</script>
+<script>
+(function(){
+  var picker=document.getElementById('theme-picker');
+  if(!picker)return;
+  function current(){try{var v=localStorage.getItem('wecom_admin_theme');return v==='light'||v==='dark'?v:'system';}catch(e){return 'system';}}
+  function paint(){var c=current();picker.querySelectorAll('.theme-option').forEach(function(b){var on=b.getAttribute('data-theme-choice')===c;b.classList.toggle('active',on);b.setAttribute('aria-pressed',String(on));});var help=document.getElementById('theme-picker-help');if(!help)return;if(c==='system'){var dark=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;help.textContent='当前：跟随系统（'+(dark?'深色':'浅色')+'）';}else{help.textContent='当前：'+(c==='dark'?'深色':'浅色');}}
+  picker.addEventListener('click',function(event){var b=event.target.closest('.theme-option');if(!b)return;var v=b.getAttribute('data-theme-choice');try{if(v==='system')localStorage.removeItem('wecom_admin_theme');else localStorage.setItem('wecom_admin_theme',v);}catch(e){}if(window.ThemeControl)window.ThemeControl.apply();paint();});
+  if(window.I18N&&window.I18N.onChange)window.I18N.onChange(paint);
+  paint();
 }());
 </script>
 </body>
