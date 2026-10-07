@@ -95,7 +95,6 @@ def activation_client(
         id="tenant-rnd388",
         name="测试企业",
         slug="rnd-388",
-        is_active=False,
         lifecycle_status="provisioning",
     )
     binding = ThirdPartyOrganizationBinding(
@@ -258,7 +257,6 @@ def test_all_gates_pass_activates_promotes_and_grants_trial(
 
     tenant = db.get(Tenant, "tenant-rnd388")
     assert tenant.lifecycle_status == "active"
-    assert tenant.is_active is True
     assert tenant.onboarding_completed_at is not None
     assert db.query(AdminSession).one().session_scope == "admin"
 
@@ -619,13 +617,14 @@ def test_client_cannot_influence_activation_target_or_lifecycle(
     assert activated[0].lifecycle_status == "active"
 
 
-def test_platform_override_activates_without_gates(
+def test_legacy_platform_boolean_does_not_bypass_activation_gates(
     activation_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.auth import hash_password
 
     client, db = activation_client
-    # No config, no runtime env, no working token — gates would all fail.
+    # No config, no runtime env, no working token — the legacy adapter must
+    # leave the tenant in provisioning when activation gates fail.
     platform_email = "platform-rnd388@example.test"
     db.add(
         PlatformAdmin(
@@ -645,19 +644,18 @@ def test_platform_override_activates_without_gates(
         headers={"Authorization": f"Basic {basic}"},
     )
     assert response.status_code == 200
-    assert response.json()["tenant_is_active"] is True
+    assert response.json()["tenant_is_active"] is False
 
     tenant = db.get(Tenant, "tenant-rnd388")
-    assert tenant.lifecycle_status == "active"
-    assert db.query(AdminSession).one().session_scope == "admin"
-    audit = (
+    assert tenant.lifecycle_status == "provisioning"
+    assert db.query(AdminSession).one().session_scope == "provisioning"
+    assert (
         db.query(AuditLog)
         .filter(AuditLog.action == "platform.tenant_activated")
-        .one()
+        .count()
+        == 0
     )
-    assert audit.detail["actor"] == "platform"
-    assert audit.detail["gate_results"] == {}
-    assert db.query(TenantActivationCheck).count() == 0
+    assert db.query(TenantActivationCheck).one().state == "blocked"
 
 
 def test_config_save_auto_triggers_activation_worker(

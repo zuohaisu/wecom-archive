@@ -48,6 +48,7 @@ from app.services.usageservice import (
     sum_storage,
     sync_health,
 )
+from app.services.billing_lifecycle import BillingLifecycleError, suspend_tenant_service
 from app.services.tenant_activation import activate_tenant
 
 router = APIRouter()
@@ -138,7 +139,7 @@ def list_tenants(
                 tenant_slug=t.slug,
                 corp_id=c.corp_id if c is not None else None,
                 agent_id=c.agent_id if c is not None else None,
-                tenant_is_active=t.is_active,
+                tenant_is_active=t.lifecycle_status == "active",
                 config_is_active=c.is_active if c is not None else False,
                 created_at=t.created_at,
             )
@@ -158,11 +159,11 @@ def update_tenant_status(
     admin_user=Depends(require_platform_admin),
     db: Session = Depends(get_db),
 ) -> TenantStatusUpdateOut:
-    """Activate or deactivate a tenant (platform admin only).
+    """Adapt the legacy boolean input to lifecycle-authoritative commands.
 
-    - **404**: Target tenant does not exist.
-    - **401**: Missing or invalid platform admin credentials.
-    - Writes an audit log only for a real state transition.
+    False suspends an active tenant; true uses gated activation only for a
+    provisioning tenant. Frozen/suspended tenants require their dedicated
+    billing or Platform Operations flow. Any response boolean is derived.
     """
     # Find the target tenant
     tenant = (
@@ -174,47 +175,40 @@ def update_tenant_status(
             detail=f"Tenant with id '{tenant_id}' not found",
         )
 
-    old_status = tenant.is_active
-    old_lifecycle_status = tenant.lifecycle_status
     new_status = payload.is_active
-    if old_status != new_status:
-        if new_status and old_lifecycle_status == "provisioning":
-            # RND-388: the provisioning→active transition now delegates to the
-            # shared promotion routine (identical session promotion + audit).
-            # The platform console stays authoritative — gates are not
-            # required here.  activate_tenant commits internally.
-            activate_tenant(db, tenant_id, actor="platform", require_gates=False)
-            db.refresh(tenant)
-        else:
-            tenant.is_active = new_status
-            tenant.lifecycle_status = "active" if new_status else "suspended"
-            audit_detail = {
-                "platform_admin_id": admin_user.id,
-                "previous_is_active": old_status,
-                "is_active": new_status,
-            }
-            write_audit(
+    if new_status and tenant.lifecycle_status == "provisioning":
+        # Keep the legacy input as an adapter to the authoritative activation
+        # routine; it must never update a persisted boolean directly.
+        activate_tenant(db, tenant_id, actor="platform", require_gates=True)
+        db.refresh(tenant)
+    elif new_status and tenant.lifecycle_status in {"frozen", "suspended"}:
+        # Billing freezes require billing restoration; manual suspensions
+        # require the controlled Platform Operations resume flow.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="tenant_lifecycle_transition_required",
+        )
+    elif not new_status and tenant.lifecycle_status == "active":
+        try:
+            suspend_tenant_service(
                 db,
-                tenant_id=tenant_id,
-                action=(
-                    AuditAction.PLATFORM_TENANT_DEACTIVATED
-                    if not new_status else AuditAction.PLATFORM_TENANT_ACTIVATED
-                ),
-                object_type=AuditObjectType.TENANT,
-                # PlatformAdmin is tenant-less and cannot satisfy this FK.
-                admin_user_id=None,
-                object_id=tenant_id,
-                detail=audit_detail,
+                tenant_id,
+                platform_admin_id=admin_user.id,
+                reason_code="legacy_api_deactivation",
             )
-            # Persist the state transition and its audit row together.
-            db.commit()
-            db.refresh(tenant)
+        except BillingLifecycleError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="tenant_lifecycle_transition_rejected",
+            ) from error
+        db.commit()
+        db.refresh(tenant)
 
     return TenantStatusUpdateOut(
         tenant_id=tenant.id,
         tenant_name=tenant.name,
         tenant_slug=tenant.slug,
-        tenant_is_active=tenant.is_active,
+        tenant_is_active=tenant.lifecycle_status == "active",
         updated_at=tenant.updated_at,
     )
 
@@ -232,7 +226,7 @@ def list_managed_branding_domains(
         db.query(TenantBranding)
         .join(Tenant, Tenant.id == TenantBranding.tenant_id)
         .filter(
-            Tenant.is_active.is_(True),
+            Tenant.lifecycle_status == "active",
             TenantBranding.custom_domain.isnot(None),
             TenantBranding.domain_state.in_(("verified", "active")),
         )
@@ -266,7 +260,10 @@ def managed_branding_domain_metrics(
     rows = (
         db.query(TenantBranding)
         .join(Tenant, Tenant.id == TenantBranding.tenant_id)
-        .filter(Tenant.is_active.is_(True), TenantBranding.custom_domain.isnot(None))
+        .filter(
+            Tenant.lifecycle_status == "active",
+            TenantBranding.custom_domain.isnot(None),
+        )
         .all()
     )
     normalized_expiries = {

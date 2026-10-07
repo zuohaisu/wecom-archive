@@ -448,7 +448,6 @@ def promote_tenant(
         )
     )
     tenant.lifecycle_status = "active"
-    tenant.is_active = True
     tenant.lifecycle_revision += 1
     tenant.onboarding_completed_at = datetime.now(timezone.utc)
     tenant.frozen_at = None

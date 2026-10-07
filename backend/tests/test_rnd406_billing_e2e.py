@@ -282,14 +282,13 @@ def _seed_platform_admin(db):
     )
 
 
-def _seed_tenant(db, tenant_id, *, lifecycle_status="provisioning", is_active=False):
+def _seed_tenant(db, tenant_id, *, lifecycle_status="provisioning"):
     db.add(
         Tenant(
             id=tenant_id,
             name=tenant_id,
             slug=tenant_id,
             lifecycle_status=lifecycle_status,
-            is_active=is_active,
         )
     )
 
@@ -524,7 +523,7 @@ def test_scenario1_new_customer_purchase_activates_and_restores_service(monkeypa
     factory = _new_factory()
     with factory() as db:
         _seed_plan(db)
-        _seed_tenant(db, "tenant-new", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-new", lifecycle_status="active")
         _seed_owner(db, "tenant-new", owner_id="owner-new", session_id="session-new")
         db.commit()
 
@@ -558,7 +557,6 @@ def test_scenario1_new_customer_purchase_activates_and_restores_service(monkeypa
     tenant = _tenant(factory, "tenant-new")
     assert subscription.status == "active"
     assert tenant.lifecycle_status == "active"
-    assert tenant.is_active is True
 
     after_capacity = owner.get("/api/billing/capacity").json()
     after_overview = owner.get("/api/billing/subscription").json()
@@ -580,7 +578,7 @@ def test_scenario2_renewal_while_active_extends_current_ends_at(monkeypatch) -> 
     ends_at = datetime(2026, 6, 1, 8, 0, tzinfo=timezone.utc)
     with factory() as db:
         _seed_plan(db)
-        _seed_tenant(db, "tenant-active", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-active", lifecycle_status="active")
         _seed_owner(db, "tenant-active", owner_id="owner-active", session_id="session-active")
         _seed_subscription(
             db,
@@ -623,7 +621,7 @@ def test_scenario3_renewal_after_expired_restarts_from_payment_time(monkeypatch)
         _seed_plan(db)
         # A tenant that already lapsed into frozen (RND-402) can still pay to
         # unfreeze; its stored subscription status is authoritatively "expired".
-        _seed_tenant(db, "tenant-expired", lifecycle_status="frozen", is_active=False)
+        _seed_tenant(db, "tenant-expired", lifecycle_status="frozen")
         _seed_owner(db, "tenant-expired", owner_id="owner-expired", session_id="session-expired")
         _seed_subscription(
             db,
@@ -674,7 +672,7 @@ def test_scenario4_refund_accepted_not_success_does_not_roll_back(monkeypatch) -
     with factory() as db:
         _seed_plan(db)
         _seed_platform_admin(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="provisioning", is_active=False)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="provisioning")
         _seed_owner(
             db,
             "tenant-alpha",
@@ -726,7 +724,7 @@ def test_scenario5_refund_success_revokes_only_that_payments_term(monkeypatch) -
     with factory() as db:
         _seed_plan(db)
         _seed_platform_admin(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="provisioning", is_active=False)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="provisioning")
         _seed_owner(
             db,
             "tenant-alpha",
@@ -793,7 +791,7 @@ def test_scenario6_refund_success_after_later_renewal_goes_to_manual_recovery(mo
     with factory() as db:
         _seed_plan(db)
         _seed_platform_admin(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="active")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         db.commit()
 
@@ -865,7 +863,7 @@ def test_scenario7_expiry_enters_seven_day_grace_and_keeps_archiving(monkeypatch
     ends_at = NOW - timedelta(days=2)
     with factory() as db:
         _seed_plan(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="active")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         _seed_subscription(
             db,
@@ -911,7 +909,7 @@ def test_scenario8_grace_end_freezes_and_restricts_service(monkeypatch) -> None:
     ends_at = NOW - timedelta(days=10)
     with factory() as db:
         _seed_plan(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="active")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         _seed_subscription(
             db,
@@ -953,7 +951,7 @@ def test_scenario9a_frozen_tenant_renews_and_restores(monkeypatch) -> None:
     ends_at = NOW - timedelta(days=10)
     with factory() as db:
         _seed_plan(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="frozen", is_active=False)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="frozen")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         _seed_subscription(
             db,
@@ -980,7 +978,6 @@ def test_scenario9a_frozen_tenant_renews_and_restores(monkeypatch) -> None:
 
     tenant = _tenant(factory, "tenant-alpha")
     assert tenant.lifecycle_status == "active"
-    assert tenant.is_active is True
 
 
 def test_scenario9b_manual_suspension_is_never_cleared_by_payment(monkeypatch) -> None:
@@ -988,7 +985,7 @@ def test_scenario9b_manual_suspension_is_never_cleared_by_payment(monkeypatch) -
     with factory() as db:
         _seed_plan(db)
         _seed_platform_admin(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="active")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         _seed_subscription(
             db,
@@ -1048,7 +1045,7 @@ def test_scenario10_historical_cancel_intent_does_not_end_early_or_refund(monkey
     ends_at = NOW + timedelta(days=200)
     with factory() as db:
         _seed_plan(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="active")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         _seed_subscription(
             db,
@@ -1088,11 +1085,11 @@ def test_scenario11_idempotent_replay_across_query_notify_and_batch(monkeypatch)
     with factory() as db:
         _seed_plan(db)
         _seed_platform_admin(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="active")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         # A second, already-due tenant exclusively for the lifecycle-batch
         # idempotent-replay check below.
-        _seed_tenant(db, "tenant-batch", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-batch", lifecycle_status="active")
         _seed_subscription(
             db,
             "tenant-batch",
@@ -1199,7 +1196,7 @@ def test_scenario12_owner_and_superadmin_views_agree(monkeypatch) -> None:
     with factory() as db:
         _seed_plan(db)
         _seed_platform_admin(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="active")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         _seed_subscription(
             db,
@@ -1271,7 +1268,7 @@ def test_scenario13_two_tenants_do_not_cross_contaminate(monkeypatch) -> None:
     with factory() as db:
         _seed_plan(db)
         _seed_platform_admin(db)
-        _seed_tenant(db, "tenant-alpha", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-alpha", lifecycle_status="active")
         _seed_owner(db, "tenant-alpha", owner_id="owner-alpha", session_id="session-alpha")
         _seed_subscription(
             db,
@@ -1281,7 +1278,7 @@ def test_scenario13_two_tenants_do_not_cross_contaminate(monkeypatch) -> None:
             ends_at=frozen_ends_at,
             grace_ends_at=frozen_ends_at + timedelta(days=7),
         )
-        _seed_tenant(db, "tenant-beta", lifecycle_status="active", is_active=True)
+        _seed_tenant(db, "tenant-beta", lifecycle_status="active")
         _seed_owner(db, "tenant-beta", owner_id="owner-beta", session_id="session-beta")
         _seed_subscription(
             db,

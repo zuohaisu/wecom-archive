@@ -163,7 +163,7 @@ def test_cancel_before_confirmation_consumes_claim_without_provisioning(monkeypa
 def test_existing_corp_is_safe_conflict_without_claim(monkeypatch):
     client, factory, provider = _setup(monkeypatch)
     with factory() as db:
-        db.add(Tenant(id="existing", name="Existing", slug="existing", is_active=True))
+        db.add(Tenant(id="existing", name="Existing", slug="existing"))
         config = TenantWecomConfig(
             id="config",
             tenant_id="existing",

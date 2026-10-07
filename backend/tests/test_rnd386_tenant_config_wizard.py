@@ -74,7 +74,6 @@ def wizard_client(
         id="tenant-rnd386",
         name="测试企业",
         slug="rnd-386",
-        is_active=False,
         lifecycle_status="provisioning",
     )
     binding = ThirdPartyOrganizationBinding(

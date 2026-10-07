@@ -77,6 +77,8 @@ def test_catalogue_classifies_every_required_action_and_unknown_history_as_syste
 def test_platform_audits_survive_a_new_session_with_admin_user_foreign_key() -> None:
     """No identity-map false positive: close the writer Session before reading."""
     from app.auth import require_platform_tenant_scope
+    from fastapi import HTTPException
+
     from app.db.models import PlatformAdmin
     from app.routers.platform import update_tenant_status
     from app.schemas.tenant_provision import TenantStatusUpdateIn
@@ -89,6 +91,7 @@ def test_platform_audits_survive_a_new_session_with_admin_user_foreign_key() -> 
 
     Tenant.__table__.create(engine)
     AdminUser.__table__.create(engine)
+    PlatformAdmin.__table__.create(engine)
     # Production-shape FK is intentional: a PlatformAdmin id is invalid here.
     with engine.begin() as connection:
         connection.execute(text("""
@@ -100,10 +103,10 @@ def test_platform_audits_survive_a_new_session_with_admin_user_foreign_key() -> 
             )
         """))
 
-    tenant = Tenant(id="tenant-rnd335", name="RND-335", slug="rnd335", is_active=True)
+    tenant = Tenant(id="tenant-rnd335", name="RND-335", slug="rnd335")
     platform_admin = PlatformAdmin(id="platform-rnd335", email="platform@example.test", password_hash="x")
     with Session(engine) as db:
-        db.add(tenant)
+        db.add_all([tenant, platform_admin])
         db.commit()
         require_platform_tenant_scope(tenant_id=tenant.id, platform_admin=platform_admin, db=db)
         update_tenant_status(
@@ -113,24 +116,25 @@ def test_platform_audits_survive_a_new_session_with_admin_user_foreign_key() -> 
         update_tenant_status(
             tenant.id, TenantStatusUpdateIn(is_active=False), platform_admin, db
         )
-        update_tenant_status(
-            tenant.id, TenantStatusUpdateIn(is_active=True), platform_admin, db
-        )
+        with pytest.raises(HTTPException) as error:
+            update_tenant_status(
+                tenant.id, TenantStatusUpdateIn(is_active=True), platform_admin, db
+            )
+        assert error.value.status_code == 409
 
     with Session(engine) as fresh_db:
         rows = fresh_db.query(AuditLog).filter(AuditLog.tenant_id == tenant.id).all()
         assert {row.action for row in rows} == {
             AuditAction.PLATFORM_TENANT_ACCESSED,
-            AuditAction.PLATFORM_TENANT_DEACTIVATED,
-            AuditAction.PLATFORM_TENANT_ACTIVATED,
+            AuditAction.PLATFORM_TENANT_SUSPENDED,
         }
         assert all(row.admin_user_id is None for row in rows)
-        assert all(row.detail == {"platform_admin_id": platform_admin.id} or
-                   row.detail in (
-                       {"platform_admin_id": platform_admin.id, "previous_is_active": True, "is_active": False},
-                       {"platform_admin_id": platform_admin.id, "previous_is_active": False, "is_active": True},
-                   ) for row in rows)
-        assert fresh_db.get(Tenant, tenant.id).is_active is True
+        suspension = next(
+            row for row in rows if row.action == AuditAction.PLATFORM_TENANT_SUSPENDED
+        )
+        assert suspension.detail["platform_admin_id"] == "platform-rnd335"
+        assert suspension.detail["reason_code"] == "legacy_api_deactivation"
+        assert fresh_db.get(Tenant, tenant.id).lifecycle_status == "suspended"
     engine.dispose()
 
 
@@ -186,13 +190,13 @@ def test_audit_api_category_and_system_filters_are_tenant_scoped() -> None:
         """))
     db = Session(engine)
     now = datetime.now(timezone.utc)
-    tenant = Tenant(id="tenant-filter", name="Filter", slug="filter", is_active=True)
+    tenant = Tenant(id="tenant-filter", name="Filter", slug="filter")
     actor = AdminUser(id="actor-filter", tenant_id=tenant.id, wecom_user_id="actor", role="admin", status="active")
     session = AdminSession(
         id="session-filter", tenant_id=tenant.id, admin_user_id=actor.id,
         wecom_user_id=actor.wecom_user_id, expires_at=now + timedelta(hours=1), is_revoked=False,
     )
-    other = Tenant(id="tenant-other", name="Other", slug="other", is_active=True)
+    other = Tenant(id="tenant-other", name="Other", slug="other")
     db.add_all([tenant, actor, session, other])
     db.add_all([
         AuditLog(id="security", tenant_id=tenant.id, admin_user_id=actor.id,
@@ -301,7 +305,7 @@ def test_persisted_human_actions_are_exactly_once_and_minimized(monkeypatch) -> 
     invalidate()
 
     with Session(engine) as db:
-        tenant = Tenant(id=tenant_id, name="Human", slug="default", is_active=True)
+        tenant = Tenant(id=tenant_id, name="Human", slug="default")
         actor = AdminUser(
             id=actor_id, tenant_id=tenant_id, wecom_user_id="actor", email="actor@example.test",
             role="admin", status="active", password_hash=hash_password("actor-old-password"),
@@ -359,7 +363,7 @@ def test_persisted_human_actions_are_exactly_once_and_minimized(monkeypatch) -> 
                 RetentionConfigUpdate(retention_days=365, lock=False), (actor, tenant_id), db
             )
         assert getattr(locked.value, "status_code", None) == 423
-        other = Tenant(id="tenant-human-other", name="Other", slug="other", is_active=True)
+        other = Tenant(id="tenant-human-other", name="Other", slug="other")
         db.add(other)
         db.commit()
         other_target = AdminUser(
@@ -438,7 +442,7 @@ def test_persisted_password_login_failure_is_minimized_and_missing_tenant_writes
     monkeypatch.setenv("ADMIN_USERNAME", "bootstrap")
     monkeypatch.setenv("ADMIN_PASSWORD_HASH", hash_password("bootstrap-password"))
     with Session(engine) as db:
-        db.add(Tenant(id="tenant-login", name="Login", slug="default", is_active=True))
+        db.add(Tenant(id="tenant-login", name="Login", slug="default"))
         db.commit()
         assert password_login(_PasswordLoginBody(username="bootstrap", password="bootstrap-password"), db).status_code == 200
         with pytest.raises(HTTPException) as known_wrong:
@@ -479,7 +483,7 @@ def test_wecom_login_persists_a_minimal_login_audit(monkeypatch) -> None:
 
     engine = _persistent_audit_engine()
     with Session(engine) as db:
-        tenant = Tenant(id="tenant-wecom", name="WeCom", slug="wecom", is_active=True)
+        tenant = Tenant(id="tenant-wecom", name="WeCom", slug="wecom")
         db.add(tenant)
         db.commit()
         db.add(TenantWecomConfig(
@@ -676,7 +680,12 @@ def test_new_detail_shapes_are_allowlisted_and_free_of_sensitive_fields() -> Non
         {"changed_keys": ["smtp_host", "smtp_port"]},
         {"old": {"retention_days": 30, "is_locked": False},
          "new": {"retention_days": 365, "is_locked": True}},
-        {"platform_admin_id": "platform-rnd335", "previous_is_active": True, "is_active": False},
+        {
+            "platform_admin_id": "platform-rnd335",
+            "reason_code": "legacy_api_deactivation",
+            "previous_status": "active",
+            "lifecycle_revision": 2,
+        },
         {"publickey_ver": 7, "scanned": 1, "failed": 0},
         {"locked_count": 1, "cutoff": datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat()},
     ):

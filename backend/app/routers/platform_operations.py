@@ -316,7 +316,7 @@ def update_operations_tenant_service(
     return TenantServiceStatusOut(
         tenant_id=tenant.id,
         lifecycle_status=tenant.lifecycle_status,
-        is_active=tenant.is_active,
+        is_active=tenant.lifecycle_status == "active",
         updated_at=tenant.updated_at,
     )
 

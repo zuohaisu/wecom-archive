@@ -45,7 +45,7 @@ def db() -> Session:
     )
     session = Session(engine)
     for tenant_id, slug in (("tenant-a", "default"), ("tenant-b", "tenant-b")):
-        session.add(Tenant(id=tenant_id, slug=slug, name=tenant_id, is_active=True))
+        session.add(Tenant(id=tenant_id, slug=slug, name=tenant_id))
     session.commit()
     yield session
     session.close()

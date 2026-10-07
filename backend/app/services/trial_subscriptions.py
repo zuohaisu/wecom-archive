@@ -89,9 +89,7 @@ def grant_self_service_trial(db: Session, command: TrialGrantCommand) -> TrialGr
     tenant = db.scalar(select(Tenant).where(Tenant.id == tenant_id).with_for_update())
     if tenant is None:
         raise TrialNotEligibleError("tenant does not exist")
-    if tenant.lifecycle_status not in {"provisioning", "active"} or (
-        tenant.lifecycle_status == "active" and not tenant.is_active
-    ):
+    if tenant.lifecycle_status not in {"provisioning", "active"}:
         raise TrialNotEligibleError("tenant is not eligible for a trial")
 
     binding_exists = db.scalar(

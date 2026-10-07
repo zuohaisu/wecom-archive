@@ -34,7 +34,7 @@ import app.services.listing_service as svc
 
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
-    id TEXT PRIMARY KEY, name TEXT, slug TEXT, is_active INTEGER,
+    id TEXT PRIMARY KEY, name TEXT, slug TEXT,
     deletion_locked INTEGER NOT NULL DEFAULT 0,
     created_at TEXT, updated_at TEXT
 );

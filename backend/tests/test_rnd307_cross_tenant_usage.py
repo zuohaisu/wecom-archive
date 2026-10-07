@@ -18,7 +18,7 @@ from app.db.session import get_db
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT 1, deletion_locked INTEGER NOT NULL DEFAULT 0, lifecycle_status TEXT NOT NULL DEFAULT 'active',
+    deletion_locked INTEGER NOT NULL DEFAULT 0, lifecycle_status TEXT NOT NULL DEFAULT 'active',
     lifecycle_revision INTEGER NOT NULL DEFAULT 1, frozen_at DATETIME,
     suspended_at DATETIME, suspension_reason TEXT,
     suspended_by_platform_admin_id TEXT, suspension_previous_status TEXT,
@@ -132,9 +132,14 @@ def _message(tenant_id: str, msgid: str, content_text: str) -> ArchiveMessage:
 
 
 def _seed_distinct_tenant_usage(db: Session) -> None:
-    tenant_a = Tenant(id="tenant-a", name="Tenant A", slug="tenant-a", is_active=True)
+    tenant_a = Tenant(id="tenant-a", name="Tenant A", slug="tenant-a")
     # Inactive tenants retain historical usage and must be present as well.
-    tenant_b = Tenant(id="tenant-b", name="Tenant B", slug="tenant-b", is_active=False)
+    tenant_b = Tenant(
+        id="tenant-b",
+        name="Tenant B",
+        slug="tenant-b",
+        lifecycle_status="suspended",
+    )
     messages = [
         _message("tenant-a", "a-message-1", "tenant-a-private-message-body"),
         _message("tenant-b", "b-message-1", "tenant-b-private-message-body"),

@@ -123,7 +123,6 @@ def test_atomic_provisioning_creates_exact_minimum_and_never_activates(monkeypat
         tenant = db.query(Tenant).one()
         assert tenant.name == "官方企业名称"
         assert tenant.lifecycle_status == "provisioning"
-        assert tenant.is_active is False
         assert "ww-provisioning-private" not in tenant.slug
         binding = db.query(ThirdPartyOrganizationBinding).one()
         assert binding.tenant_id == tenant.id
@@ -193,7 +192,7 @@ def test_provisioning_session_can_only_reach_waiting_and_settings_surface(monkey
     assert client.get("/dashboard", follow_redirects=False).status_code == 302
 
 
-def test_platform_can_list_and_activate_tenant_without_archive_config(monkeypatch):
+def test_platform_lists_tenant_but_legacy_boolean_cannot_bypass_activation_gates(monkeypatch):
     from app.auth import hash_password
 
     client, factory, provider = _setup(monkeypatch)
@@ -240,25 +239,19 @@ def test_platform_can_list_and_activate_tenant_without_archive_config(monkeypatc
         headers=headers,
     )
     assert activated.status_code == 200
-    assert activated.json()["tenant_is_active"] is True
+    assert activated.json()["tenant_is_active"] is False
 
     with factory() as db:
         tenant = db.get(Tenant, tenant_id)
         session = db.query(AdminSession).one()
-        activation_audit = (
+        assert tenant.lifecycle_status == "provisioning"
+        assert session.session_scope == "provisioning"
+        assert (
             db.query(AuditLog)
             .filter(AuditLog.action == "platform.tenant_activated")
-            .one()
+            .count()
+            == 0
         )
-        assert tenant.lifecycle_status == "active"
-        assert session.session_scope == "admin"
-        assert activation_audit.detail["promoted_provisioning_sessions"] == 1
-
-    assert client.get("/api/auth/me").json()["authenticated"] is True
-    assert client.get("/dashboard", follow_redirects=False).status_code == 200
-    login = client.get("/admin/login", follow_redirects=False)
-    assert login.status_code == 302
-    assert login.headers["location"] == "/dashboard"
 
 
 def test_any_failure_rolls_back_tenant_owner_session_binding_and_audit(monkeypatch):

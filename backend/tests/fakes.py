@@ -241,7 +241,7 @@ def install_fake_sdk(monkeypatch: pytest.MonkeyPatch, fake: FakeWecomSdk, module
 
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
-    id TEXT PRIMARY KEY, name TEXT, slug TEXT, is_active INTEGER,
+    id TEXT PRIMARY KEY, name TEXT, slug TEXT,
     lifecycle_status TEXT NOT NULL DEFAULT 'active',
     lifecycle_revision INTEGER NOT NULL DEFAULT 1,
     frozen_at DATETIME,
@@ -494,7 +494,7 @@ def worker_engine():
 def insert_tenant(db: Session, tenant_id: str = _TENANT_A) -> None:
     db.execute(
         text(
-            "INSERT INTO tenants (id, name, slug, is_active) VALUES (:id, :id, :id, 1)"
+            "INSERT INTO tenants (id, name, slug) VALUES (:id, :id, :id)"
         ),
         {"id": tenant_id},
     )

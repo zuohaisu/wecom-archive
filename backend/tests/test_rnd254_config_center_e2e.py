@@ -51,7 +51,7 @@ def fresh_deployment(
     )
     factory = sessionmaker(bind=engine)
     seed_db = factory()
-    seed_db.add(Tenant(id="tenant-default", name="Default", slug="default", is_active=True))
+    seed_db.add(Tenant(id="tenant-default", name="Default", slug="default"))
     seed_db.commit()
     seed_db.close()
 

@@ -108,8 +108,9 @@ def _step_upsert_tenant(session: Session) -> None:
     session.execute(
         text(
             """
-            INSERT INTO tenants (id, name, slug, is_active, created_at, updated_at)
-            VALUES (:id, :name, :slug, true, NOW(), NOW())
+            INSERT INTO tenants
+                (id, name, slug, lifecycle_status, created_at, updated_at)
+            VALUES (:id, :name, :slug, 'active', NOW(), NOW())
             ON CONFLICT (id) DO NOTHING
             """
         ),

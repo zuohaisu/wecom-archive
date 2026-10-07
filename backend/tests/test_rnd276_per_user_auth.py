@@ -52,7 +52,7 @@ def password_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def default_tenant(db: Session) -> Tenant:
     tenant = (
         db.query(Tenant)
-        .filter(Tenant.slug == "default", Tenant.is_active.is_(True))
+        .filter(Tenant.slug == "default", Tenant.lifecycle_status == "active")
         .first()
     )
     if tenant is None:

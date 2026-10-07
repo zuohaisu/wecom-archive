@@ -19,6 +19,8 @@ class TenantProvisionIn(BaseModel):
 
 
 class TenantProvisionOut(BaseModel):
+    """Provisioning response; ``is_active`` describes config enablement."""
+
     tenant_id: str
     tenant_name: str
     tenant_slug: str
@@ -37,7 +39,7 @@ class TenantConnectivityCheckOut(BaseModel):
 
 
 class TenantListItemOut(BaseModel):
-    """Read-only tenant list item for platform console (zero key leakage)."""
+    """Read-only platform view; tenant activity is derived from lifecycle."""
 
     tenant_id: str
     tenant_name: str
@@ -84,13 +86,13 @@ class TenantUsageListOut(BaseModel):
 
 
 class TenantStatusUpdateIn(BaseModel):
-    """Request body for PATCH /tenants/{tenant_id}."""
+    """Legacy PATCH input, adapted to authoritative lifecycle transitions."""
 
     is_active: bool
 
 
 class TenantStatusUpdateOut(BaseModel):
-    """Response after updating tenant status."""
+    """Compatibility response; tenant activity is derived from lifecycle."""
 
     tenant_id: str
     tenant_name: str

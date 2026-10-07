@@ -68,7 +68,6 @@ def factory():
                     id="tenant-ready",
                     name="Ready organization",
                     slug="tenant-ready",
-                    is_active=False,
                     lifecycle_status="provisioning",
                 ),
                 Tenant(
