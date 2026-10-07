@@ -10,7 +10,8 @@ hosted multi-tenant SaaS tenant, identity, billing, and service-lifecycle model.
 
 Related issues: RND-75 (initial schema), RND-111 (tenant foundation), RND-156
 (multi-tenant), RND-184 (corp ID uniqueness), RND-376 (billing authority),
-RND-400 (subscription and Tenant service lifecycle).
+RND-400 (subscription and Tenant service lifecycle), GH-94 (`Tenant.is_active`
+retirement).
 
 ---
 
@@ -63,8 +64,7 @@ row; that bootstrap convention does not limit the current model to one tenant.
 | `id` | varchar(36) PK | UUID string |
 | `name` | varchar(255) | Display name (e.g. "Acme Corp") |
 | `slug` | varchar(128) | URL-safe identifier; unique |
-| `is_active` | boolean | Legacy compatibility projection; true only for service `active` |
-| `lifecycle_status` | varchar(16) | `provisioning` / `active` / `frozen` / `suspended` |
+| `lifecycle_status` | varchar(16) | `provisioning` / `active` / `frozen` / `suspended`; sole tenant service-state authority |
 | `lifecycle_revision` | integer | Monotonic service-state revision |
 | `frozen_at` | timestamptz nullable | First time the current billing freeze began |
 | suspension fields | nullable timestamp/reason/actor/previous status | Current manual suspension override; immutable Audit retains cleared history |
@@ -72,6 +72,12 @@ row; that bootstrap convention does not limit the current model to one tenant.
 | `updated_at` | timestamptz | auto-updated on write |
 
 Indexes: unique on `slug`.
+
+GH-94 migration 0075 removes the persisted `is_active` compatibility column
+only after verifying that every legacy value matches lifecycle state. A retained
+API boolean is derived from `lifecycle_status == 'active'`; it is never stored or
+used as authority. Downgrade reconstructs the column from lifecycle state
+without changing that state. See the [retirement record](architecture/tenant-is-active-compatibility-assessment.md).
 
 ---
 
@@ -88,7 +94,7 @@ only its SHA-256 digest is retained until ownership verification completes.
 | `custom_domain` | Nullable, globally unique canonical hostname. Only one primary host is supported. |
 | Verification | State and timestamps plus `verification_token_hash`; no raw token, private key or DNS provider response. |
 | Certificate | Coarse `not_requested` / `pending` / `issued` / `failed` / `expired` lifecycle, expiry/check timestamps and fixed failure code only. |
-| `domain_enabled` | Tenant administrator's explicit enable flag. Routing additionally requires verified state, issued/unexpired TLS, tenant active and current `custom_domain` entitlement. |
+| `domain_enabled` | Tenant administrator's explicit enable flag. Routing additionally requires `lifecycle_status='active'`, verified state, issued/unexpired TLS, and current `custom_domain` entitlement. |
 
 The row remains after a plan downgrade/expiry so that a later eligible
 subscription can recover configuration. Read-time entitlement checks stop the
@@ -199,7 +205,7 @@ fail closed.
 The lifecycle service is the only time policy: reads use its effective-state
 calculation so a delayed persistence job cannot extend access past
 `grace_ends_at`, while the row-locked reconcile persists `grace` / `expired`,
-updates the independent Tenant service projection and appends Audit. A paid
+updates the authoritative Tenant lifecycle state and appends Audit. A paid
 renewal clears `cancel_at_period_end` and can restore `frozen`, but it never
 restores a manually `suspended` Tenant.
 

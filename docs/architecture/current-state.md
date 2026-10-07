@@ -38,7 +38,7 @@ enabled, or carrying traffic is therefore `UNKNOWN — requires production/exter
 
 | Concept | Authority | Boundary |
 | --- | --- | --- |
-| Tenant | `Tenant` row in `backend/app/db/models.py` | Company/organization isolation root. `lifecycle_status` is the tenant-service projection. `is_active` is a retained compatibility projection, not an independent lifecycle authority. |
+| Tenant | `Tenant` row in `backend/app/db/models.py` | Company/organization isolation root. `lifecycle_status` is the sole tenant-service state authority; the persisted `is_active` field was retired by GH-94 migration 0075. Retained API booleans are derived. |
 | Tenant user and roles | `AdminUser` plus `AdminLoginIdentity` | Tenant-scoped user roles are `owner`, `admin`, `compliance`, `legal`, and `readonlyaudit`. Login identity binding, not a legacy `wecom_user_id` lookup, is the authorization authority. |
 | Owner | `AdminUser.role == "owner"` in the tenant | The first Owner is created from a trusted third-party administrator authorization. Owners can use the restricted provisioning surface and the permitted billing surface; they are not PlatformAdmins. |
 | Tenant session | `AdminSession.tenant_id` and `session_scope` | Tenant APIs derive tenant scope from the authenticated session, never a caller-supplied tenant parameter. `provisioning` sessions are restricted to the provisioning routes. |
@@ -177,7 +177,7 @@ supply current instructions.
 | `SUPERSEDED` | “Future SaaS”, plaintext tenant-secret, active Linear-workflow, and open-source/self-host-first wording in older explanatory material are not current implementation direction. Historical records retain provenance only. |
 | `SUPERSEDED` | ADR-0001's proposed `conversations` / `conversation_members` / dual-write implementation was never adopted by the current code. It is explicitly marked historical rather than a live architecture plan. |
 | `RETIRED` | GH-93 removes legacy single-corp archive credentials, callback candidates, and private-key fallbacks from the current runtime. #77 closure and #108 post-merge verification are the retirement evidence; GH-93 still needs post-deploy Ops verification. See the debt register. |
-| `TRANSITIONAL` | `Tenant.is_active` remains a compatibility projection beside `lifecycle_status`; its eventual removal needs a separate lifecycle dependency audit. See GitHub #94. |
+| `RETIRED` | GH-94 removes persisted `Tenant.is_active` from the ORM and live runtime, adds lifecycle-derived compatibility behavior, and adds migration 0075 with fail-closed mismatch checking and a derived downgrade. The production migration remains unexecuted pending human authorization. See the [retirement record](tenant-is-active-compatibility-assessment.md). |
 | `UNKNOWN` | Which versioned units, environment selectors, callbacks, payment providers, or self-service gates are active in production. Requires read-only Ops evidence; do not infer from source control. |
 | `CURRENT` | #77 closure and #108 post-merge production verification prove readable tenant-scoped credentials and no active legacy selector dependency for archive, media, external-contact reconciliation, callback, reachability, and authenticated manual archive paths. The shared pair remains configuration-present only. |
 
@@ -187,8 +187,9 @@ supply current instructions.
   the approved repository retirement of the legacy single-corp archive runtime
   after the #77/#108 evidence chain. Its deployment requires the ticket's
   independent post-deploy Ops verification.
-- [GitHub #94](https://github.com/zuohaisu/wecom-archive-365/issues/94) is the
-  separate dependency audit for retiring `Tenant.is_active` as a compatibility
-  projection.
+- [GitHub #94](https://github.com/zuohaisu/wecom-archive-365/issues/94)
+  delivers the repository retirement of persisted `Tenant.is_active` in one
+  implementation change. Production migration/deployment remains a separate
+  human-authorized cutover; see the retirement record and debt register.
 - #92 changes documentation and classification only. It does not authorize a
   production change, a credential operation, or a runtime-path deletion.

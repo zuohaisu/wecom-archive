@@ -56,7 +56,7 @@ def bootstrap_client(monkeypatch: pytest.MonkeyPatch) -> Generator[tuple[TestCli
     )
     factory = sessionmaker(bind=engine)
     db = factory()
-    db.add(Tenant(id="tenant-default", name="Default", slug="default", is_active=True))
+    db.add(Tenant(id="tenant-default", name="Default", slug="default"))
     db.commit()
 
     def override_db() -> Generator[Session, None, None]:

@@ -105,8 +105,8 @@ def _seed_tenants_and_messages(conn, spec: "list[str]") -> "dict[str, int]":
     of tenants is handled via ON CONFLICT DO NOTHING."""
     conn.execute(
         text(
-            "INSERT INTO tenants (id, name, slug, is_active) VALUES "
-            "('tenant-a','A','tenant-a',true), ('tenant-b','B','tenant-b',true) "
+            "INSERT INTO tenants (id, name, slug) VALUES "
+            "('tenant-a','A','tenant-a'), ('tenant-b','B','tenant-b') "
             "ON CONFLICT (id) DO NOTHING"
         )
     )

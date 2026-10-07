@@ -14,6 +14,7 @@ from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Te
 from app.message_type_registry import MessageCategory, MESSAGE_TYPE_DEFINITIONS
 from app.schemas.dashboard import ActivityItem, DashboardOut, DayBucket
 from app.services.analytics_service import hourly_distribution, storage_composition, type_composition
+from app.services.entitlements import get_subscription_summary
 from app.services.usageservice import (
     count_archived_members,
     count_reviewable_messages,
@@ -221,6 +222,23 @@ def _optional_insights(
     return values, errors
 
 
+def _annual_plan_expires_at(db: Session, tenant_id: str) -> str | None:
+    """Return the current subscription's expiry when its plan bills annually.
+
+    A self-deployed instance has no subscription row at all, and a non-annual
+    plan is out of scope for the card, so both stay None and the UI hides the
+    card. A billing-layer failure must not take the whole overview down, so
+    any database error also resolves to None (fail closed: no card shown).
+    """
+    try:
+        summary = get_subscription_summary(db, tenant_id)
+    except SQLAlchemyError:
+        return None
+    if summary is None or summary.billing_period_months < 12:
+        return None
+    return summary.ends_at.isoformat()
+
+
 def build_dashboard(
     db: Session, tenant_id: str, range_days: int, *, can_manage_settings: bool = False
 ) -> DashboardOut:
@@ -260,4 +278,5 @@ def build_dashboard(
         storage_composition=insights["storage_composition"],
         hourly_distribution=insights["hourly_distribution"],
         insight_errors=insight_errors,
+        annual_plan_expires_at=_annual_plan_expires_at(db, tenant_id),
     )

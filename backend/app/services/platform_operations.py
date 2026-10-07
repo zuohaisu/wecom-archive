@@ -410,7 +410,7 @@ def _tenant_item(snapshot: TenantSnapshot) -> dict:
         "tenant_name": snapshot.tenant.name,
         "tenant_slug": snapshot.tenant.slug,
         "lifecycle_status": snapshot.tenant.lifecycle_status,
-        "is_active": bool(snapshot.tenant.is_active),
+        "is_active": snapshot.tenant.lifecycle_status == "active",
         "created_at": snapshot.tenant.created_at,
         "subscription_plan_code": snapshot.plan.code if snapshot.plan else None,
         "subscription_plan_name": snapshot.plan.display_name if snapshot.plan else None,

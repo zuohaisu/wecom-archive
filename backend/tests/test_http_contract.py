@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 _SCHEMA_SQL = """
 CREATE TABLE tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
-    slug TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1,
+    slug TEXT NOT NULL DEFAULT '',
     lifecycle_status TEXT NOT NULL DEFAULT 'active',
     lifecycle_revision INTEGER NOT NULL DEFAULT 1,
     frozen_at DATETIME,
@@ -307,7 +307,7 @@ def authed_html_client():
 
 def _seed_tenant_a(db: Session) -> None:
     db.execute(
-        text("INSERT INTO tenants (id,name,slug,is_active) VALUES (:i,:n,:s,1)"),
+        text("INSERT INTO tenants (id,name,slug) VALUES (:i,:n,:s)"),
         {"i": "tenant-a", "n": "Tenant A", "s": "tenant-a"},
     )
 

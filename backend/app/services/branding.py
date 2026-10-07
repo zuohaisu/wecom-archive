@@ -533,7 +533,10 @@ def active_tenant_for_custom_host(db: Session, hostname: str) -> str | None:
     row = db.execute(
         select(TenantBranding, Tenant)
         .join(Tenant, Tenant.id == TenantBranding.tenant_id)
-        .where(TenantBranding.custom_domain == normalized, Tenant.is_active.is_(True))
+        .where(
+            TenantBranding.custom_domain == normalized,
+            Tenant.lifecycle_status == "active",
+        )
     ).one_or_none()
     if row is None:
         return None

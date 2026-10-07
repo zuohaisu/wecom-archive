@@ -224,7 +224,12 @@ def test_tenants_auth_invalid_session(client: TestClient):
 
 def test_tenants_different_active_status(client: TestClient, platform_admin_user, db_session):
     """Verify tenant_is_active and config_is_active are tracked independently."""
-    tenant = Tenant(id=str(uuid4()), name="Mixed Status", slug="mixed-status", is_active=False)
+    tenant = Tenant(
+        id=str(uuid4()),
+        name="Mixed Status",
+        slug="mixed-status",
+        lifecycle_status="frozen",
+    )
     config = TenantWecomConfig(
         id=str(uuid4()),
         tenant_id=tenant.id,

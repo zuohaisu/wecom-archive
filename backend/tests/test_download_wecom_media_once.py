@@ -561,7 +561,7 @@ def _make_sqlite_engine(tmp_path, name):
             text(
                 """
                 CREATE TABLE tenants (
-                    id TEXT PRIMARY KEY, name TEXT, slug TEXT, is_active INTEGER,
+                    id TEXT PRIMARY KEY, name TEXT, slug TEXT,
                     lifecycle_status TEXT NOT NULL DEFAULT 'active',
                     lifecycle_revision INTEGER NOT NULL DEFAULT 1,
                     frozen_at DATETIME, suspended_at DATETIME,
@@ -579,8 +579,8 @@ def _make_sqlite_engine(tmp_path, name):
         # the shared fixture DB carries one active default tenant.
         conn.execute(
             text(
-                "INSERT INTO tenants (id, name, slug, is_active) "
-                "VALUES ('tenant-a', 'Tenant A', 'tenant-a', 1)"
+                "INSERT INTO tenants (id, name, slug) "
+                "VALUES ('tenant-a', 'Tenant A', 'tenant-a')"
             )
         )
         conn.execute(

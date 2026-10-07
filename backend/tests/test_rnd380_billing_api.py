@@ -119,7 +119,6 @@ def _setup(monkeypatch):
                     name="Provisioning",
                     slug="tenant-provisioning",
                     lifecycle_status="provisioning",
-                    is_active=False,
                 ),
                 Tenant(
                     id="tenant-other",

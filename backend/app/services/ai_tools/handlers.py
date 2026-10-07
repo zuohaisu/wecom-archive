@@ -105,7 +105,10 @@ def tenant_service_status_handler(db: Session, context: ToolContext) -> dict:
     tenant = db.execute(select(Tenant).where(Tenant.id == context.tenant_id)).scalar_one_or_none()
     if tenant is None:
         return {"lifecycle_status": "unknown", "is_active": False}
-    return {"lifecycle_status": tenant.lifecycle_status, "is_active": tenant.is_active}
+    return {
+        "lifecycle_status": tenant.lifecycle_status,
+        "is_active": tenant.lifecycle_status == "active",
+    }
 
 
 def config_status_handler(db: Session, context: ToolContext) -> dict:
