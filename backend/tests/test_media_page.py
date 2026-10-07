@@ -31,7 +31,7 @@ _MEDIA_KEYS = (
     "media.selectAllLoaded", "media.clearSelection", "media.favoriteSelected",
     "media.unfavoriteSelected", "media.favoritePermissionDenied",
     "media.favoritePermissionUnavailable", "media.favoriteStatusLoading",
-    "media.favoriteStatusFailed", "media.favoriteActionFailed",
+    "media.favoriteStatusFailed", "media.retryFavoriteStatus", "media.favoriteActionFailed",
     "media.favoritePartial", "media.favoriteResult", "media.favoriteUnavailable",
     "media.favorited", "media.notFavorited", "media.viewFavorites",
     "media.selectItem", "media.loadingMore", "media.favoritesEmpty",
@@ -121,7 +121,7 @@ def test_media_selection_ui_is_accessible_and_consumes_shared_favorite_apis() ->
     for element_id in (
         "media-select-mode", "media-selection-toolbar", "media-select-all",
         "media-clear-selection", "media-favorite-selected", "media-unfavorite-selected",
-        "media-favorited-only", "media-favorites-link",
+        "media-favorited-only", "media-favorites-link", "media-retry-favorite-status",
     ):
         assert 'id="%s"' % element_id in template
     assert 'role="status" aria-live="polite"' in template
@@ -246,6 +246,7 @@ var handlers = Object.create(null), elements = Object.create(null);
 function element(id) {
   if (!elements[id]) {
     var classes = Object.create(null);
+    if (id === 'media-retry-favorite-status') classes.hidden = true;
     elements[id] = {
       id: id, value: id === 'media-sort' ? 'newest' : '', checked: false, disabled: false,
       textContent: '', innerHTML: '', placeholder: '', style: {display: 'none'}, attrs: {},
@@ -272,6 +273,7 @@ var document = {
 var window = globalThis; window.scrollY = 0; window.scrollX = 0; window.scrollTo = function () {};
 var I18N = {t: function (key) { return key === 'media.results' ? '{n} results' : key; }, getLocale: function () { return 'en'; }, availableLocales: function () { return []; }, onChange: function () {}, setLocale: function () {}};
 var mediaRequests = [], batchRequests = [], serverFavorites = Object.create(null);
+var failFavoriteStatusReads = 0, favoriteStatusRequests = 0;
 function response(data, ok) { return Promise.resolve({ok: ok !== false, json: function () { return Promise.resolve(data); }}); }
 function fetch(url, options) {
   options = options || {};
@@ -284,12 +286,14 @@ function fetch(url, options) {
     return promise;
   }
   if (url === '/api/favorites/status') {
+    favoriteStatusRequests += 1;
     var statusBody = JSON.parse(options.body);
+    if (failFavoriteStatusReads > 0) { failFavoriteStatusReads -= 1; return Promise.reject(new Error('synthetic status failure')); }
     return response({items: statusBody.items.map(function (item) { return {object_type: 'media', object_id: item.object_id, result: 'found', is_favorited: !!serverFavorites[item.object_id]}; })});
   }
   if (url === '/api/favorites/batch') {
-    var resolveBatch, batch = {body: JSON.parse(options.body), resolve: function (data) { resolveBatch({ok: true, json: function () { return Promise.resolve(data); }}); }};
-    var promise = new Promise(function (done) { resolveBatch = done; });
+    var resolveBatch, rejectBatch, batch = {body: JSON.parse(options.body), resolve: function (data) { resolveBatch({ok: true, json: function () { return Promise.resolve(data); }}); }, reject: function (error) { rejectBatch(error); }};
+    var promise = new Promise(function (done, reject) { resolveBatch = done; rejectBatch = reject; });
     batchRequests.push(batch);
     return promise;
   }
@@ -314,6 +318,62 @@ function idsInGrid() { var ids = [], re = /data-media-id=\"([^\"]+)\"/g, match; 
     result = run_node(harness)
     assert result.returncode == 0, "node harness failed: %s" % result.stderr
     return result.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_failed_post_write_status_recheck_exposes_retry_without_losing_selection() -> None:
+    output = _run_media_page_race(
+        r"""
+(async function () {
+  await waitFor(function () { return mediaRequests.length === 1; });
+  event('media-select-mode', 'click');
+  mediaRequests[0].resolve({items: [
+    {id: 1, name: 'retry-after-write', file_type: 'image', created_at: '2026-01-01', conversation_id: 'c', msgid: 'm'}
+  ], total: 1, has_more: false});
+  await waitFor(function () { return favoriteStatusRequests === 1 && !element('media-select-all').disabled; });
+  event('media-select-all', 'click');
+  event('media-favorite-selected', 'click');
+  await waitFor(function () { return batchRequests.length === 1; });
+  failFavoriteStatusReads = 1;
+  batchRequests[0].reject(new Error('synthetic lost write response'));
+  await waitFor(function () {
+    return favoriteStatusRequests === 2 && !element('media-retry-favorite-status').classList.contains('hidden') && !element('media-retry-favorite-status').disabled;
+  });
+  if (element('media-selection-hint').textContent !== 'media.favoriteStatusFailed') throw new Error('post-write recheck failure was not surfaced');
+  if (element('media-favorite-status').textContent !== 'media.favoriteActionFailed') throw new Error('original write failure feedback was lost');
+  event('media-retry-favorite-status', 'click');
+  await waitFor(function () { return favoriteStatusRequests === 3 && element('media-retry-favorite-status').classList.contains('hidden'); });
+  if (element('media-favorite-selected').disabled) throw new Error('status retry discarded the selection or left actions disabled');
+  console.log('write-failure=preserved status-recheck-failure=retryable selection=preserved');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "write-failure=preserved status-recheck-failure=retryable selection=preserved"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_failed_favorite_status_read_has_an_accessible_retry_path() -> None:
+    output = _run_media_page_race(
+        r"""
+(async function () {
+  await waitFor(function () { return mediaRequests.length === 1; });
+  event('media-select-mode', 'click');
+  failFavoriteStatusReads = 1;
+  mediaRequests[0].resolve({items: [
+    {id: 1, name: 'retry-me', file_type: 'image', created_at: '2026-01-01', conversation_id: 'c', msgid: 'm'}
+  ], total: 1, has_more: false});
+  await waitFor(function () { return favoriteStatusRequests === 1 && !element('media-retry-favorite-status').classList.contains('hidden'); });
+  if (element('media-selection-hint').textContent !== 'media.favoriteStatusFailed') throw new Error('status failure was reported as loading instead of failed');
+  if (element('media-retry-favorite-status').disabled) throw new Error('status retry stayed disabled after request failure');
+  event('media-retry-favorite-status', 'click');
+  await waitFor(function () { return favoriteStatusRequests === 2 && element('media-retry-favorite-status').classList.contains('hidden'); });
+  event('media-select-all', 'click');
+  if (element('media-favorite-selected').disabled) throw new Error('favorite action remained unavailable after retry');
+  console.log('status-failure=announced retry=available retry-success=actions-enabled');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "status-failure=announced retry=available retry-success=actions-enabled"
 
 
 @pytest.mark.skipif(NODE is None, reason="node not available in this environment")

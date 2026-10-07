@@ -33,6 +33,7 @@
     var statuses = Object.create(null);
     var canManage = false;
     var statusReady = false;
+    var statusFailed = false;
     var busy = false;
     var revision = 0;
     var statusVersions = Object.create(null);
@@ -79,6 +80,8 @@
         allSelected: items.length > 0 && ids.length === items.length,
         canManage: canManage,
         statusReady: statusReady,
+        statusLoading: items.length > 0 && !statusReady && !statusFailed,
+        statusFailed: statusFailed,
         busy: busy,
         canApply: canManage && statusReady && selectable && !busy,
       };
@@ -93,14 +96,15 @@
       notify();
     }
 
-    function setItems(nextItems) {
+    function loadItems(nextItems, preserveSelection) {
       revision += 1;
       var currentRevision = revision;
       items = Array.isArray(nextItems) ? nextItems.slice() : [];
       var versions = captureStatusVersions(items);
-      selected = Object.create(null);
+      if (!preserveSelection) selected = Object.create(null);
       statuses = Object.create(null);
       statusReady = items.length === 0;
+      statusFailed = false;
       notify();
       if (items.length === 0) return Promise.resolve();
 
@@ -139,14 +143,24 @@
           var status = statuses[String(item.id)];
           return status && (status.result === "not_found" || typeof status.isFavorited === "boolean");
         });
+        statusFailed = !statusReady;
         notify();
       }).catch(function (error) {
         if (currentRevision === revision && allStatusVersionsMatch(versions)) {
           statusReady = false;
+          statusFailed = true;
           notify();
         }
         throw error;
       });
+    }
+
+    function setItems(nextItems) {
+      return loadItems(nextItems, false);
+    }
+
+    function refreshStatuses() {
+      return loadItems(items, true);
     }
 
     function reconcileVisibleTargetStatuses(targets) {
@@ -157,6 +171,10 @@
 
       var currentRevision = revision;
       var versions = captureStatusVersions(visibleItems);
+      visibleItems.forEach(function (item) { delete statuses[String(item.id)]; });
+      statusReady = false;
+      statusFailed = false;
+      notify();
       var batches = chunks(visibleItems, BATCH_LIMIT);
       return batches.reduce(function (promise, batch) {
         return promise.then(function () {
@@ -191,10 +209,12 @@
           var status = statuses[String(item.id)];
           return status && (status.result === "not_found" || typeof status.isFavorited === "boolean");
         });
+        statusFailed = !statusReady;
         notify();
       }).catch(function () {
         if (currentRevision === revision && allStatusVersionsMatch(versions)) {
           statusReady = false;
+          statusFailed = true;
           notify();
         }
       });
@@ -308,16 +328,19 @@
           return summary;
         });
       }).catch(function (error) {
-        busy = false;
-        notify();
-        error.favoriteSummary = summary;
-        throw error;
+        return reconcileVisibleTargetStatuses(targets).then(function () {
+          busy = false;
+          notify();
+          error.favoriteSummary = summary;
+          throw error;
+        });
       });
     }
 
     return {
       setRole: setRole,
       setItems: setItems,
+      refreshStatuses: refreshStatuses,
       toggleSelected: toggleSelected,
       selectAllLoaded: selectAllLoaded,
       clearSelection: clearSelection,

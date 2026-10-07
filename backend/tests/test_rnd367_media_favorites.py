@@ -65,15 +65,17 @@ def test_loaded_results_are_chunked_at_api_limit_and_partial_failure_is_retryabl
 (async function () {
   var calls = [];
   var batchAttempt = 0;
+  var favoriteById = Object.create(null);
   var favorites = MediaFavorites.create({request: function (url, options) {
     var body = JSON.parse(options.body);
     calls.push({url: url, body: body});
     if (url === '/api/favorites/status') return Promise.resolve({items: body.items.map(function (item) {
-      return {object_type: 'media', object_id: item.object_id, result: 'found', is_favorited: false};
+      return {object_type: 'media', object_id: item.object_id, result: 'found', is_favorited: !!favoriteById[item.object_id]};
     })});
     batchAttempt += 1;
     if (batchAttempt === 2) return Promise.reject(new Error('synthetic network failure'));
     var result = body.items.map(function (item) {
+      favoriteById[item.object_id] = true;
       return {object_type: 'media', object_id: item.object_id, result: 'favorited'};
     });
     return Promise.resolve({requested: result.length, unique: result.length, applied: result.length, unchanged: 0, not_found: 0, items: result});
@@ -89,7 +91,7 @@ def test_loaded_results_are_chunked_at_api_limit_and_partial_failure_is_retryabl
   if (favorites.getStatus(1).isFavorited !== true || favorites.getStatus(101).isFavorited !== false) throw new Error('partial response state is incorrect');
   var statusCalls = calls.filter(function (call) { return call.url === '/api/favorites/status'; });
   var batchCalls = calls.filter(function (call) { return call.url === '/api/favorites/batch'; });
-  if (statusCalls.length !== 2 || statusCalls[0].body.items.length !== 100 || statusCalls[1].body.items.length !== 1) throw new Error('status request exceeded limit');
+  if (statusCalls.length !== 4 || statusCalls.some(function (call) { return call.body.items.length > 100; })) throw new Error('status reconciliation did not respect the request limit');
   if (batchCalls.length !== 2 || batchCalls[0].body.items.length !== 100 || batchCalls[1].body.items.length !== 1) throw new Error('batch request exceeded limit');
   console.log('status=100+1 batch=100+1 partial=retryable');
 }()).catch(function (error) { console.error(error); process.exitCode = 1; });
@@ -190,3 +192,76 @@ def test_late_same_list_status_read_cannot_overwrite_write_and_reconciliation() 
 """
     )
     assert output.strip() == "same-list-late-read=discarded post-write-status=true"
+
+
+def test_partial_batch_failure_reconciles_current_visible_items_after_stale_read() -> None:
+    output = _run(
+        """
+(async function () {
+  var serverFavorites = Object.create(null);
+  var statusCalls = 0;
+  var batchCalls = 0;
+  var resolveLateListStatus, resolveFirstBatch, rejectSecondBatch;
+  function statusResponse(body, favoriteById) {
+    return {items: body.items.map(function (item) {
+      return {object_type: 'media', object_id: item.object_id, result: 'found', is_favorited: !!favoriteById[item.object_id]};
+    })};
+  }
+  var favorites = MediaFavorites.create({request: function (url, options) {
+    var body = JSON.parse(options.body);
+    if (url === '/api/favorites/status') {
+      statusCalls += 1;
+      if (statusCalls <= 2) return Promise.resolve(statusResponse(body, Object.create(null)));
+      if (statusCalls === 3) return new Promise(function (resolve) {
+        resolveLateListStatus = function () { resolve(statusResponse(body, Object.create(null))); };
+      });
+      if (statusCalls === 4) return Promise.resolve(statusResponse(body, serverFavorites));
+      throw new Error('unexpected status request ' + statusCalls);
+    }
+    batchCalls += 1;
+    if (batchCalls === 1) return new Promise(function (resolve) {
+      resolveFirstBatch = function () {
+        body.items.forEach(function (item) { serverFavorites[item.object_id] = true; });
+        resolve({requested: body.items.length, unique: body.items.length, applied: body.items.length, unchanged: 0, not_found: 0, items: body.items.map(function (item) {
+          return {object_type: 'media', object_id: item.object_id, result: 'favorited'};
+        })});
+      };
+    });
+    if (batchCalls === 2) return new Promise(function (_resolve, reject) { rejectSecondBatch = reject; });
+    throw new Error('unexpected batch request ' + batchCalls);
+  }});
+  await favorites.setItems(Array.from({length: 101}, function (_, index) { return {id: index + 1}; }));
+  favorites.setRole('owner');
+  favorites.selectAllLoaded();
+  var action = favorites.apply('favorite');
+  var replacementLoad;
+  for (var i = 0; i < 20 && !resolveFirstBatch; i++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (!resolveFirstBatch) throw new Error('first write batch did not start');
+  replacementLoad = favorites.setItems(Array.from({length: 24}, function (_, index) { return {id: index + 1}; }));
+  for (var j = 0; j < 20 && !resolveLateListStatus; j++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (!resolveLateListStatus) throw new Error('replacement page status read did not start');
+  resolveFirstBatch();
+  for (var k = 0; k < 20 && !rejectSecondBatch; k++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (!rejectSecondBatch) throw new Error('second write batch did not start');
+  resolveLateListStatus();
+  await replacementLoad;
+  if (favorites.getSnapshot().statusReady) throw new Error('fixture did not invalidate the pre-write page status read');
+  rejectSecondBatch(new Error('synthetic second batch failure'));
+  var actionError;
+  try { await action; } catch (error) { actionError = error; }
+  if (!actionError || actionError.message !== 'synthetic second batch failure') throw new Error('original batch failure was not preserved');
+  if (!actionError.favoriteSummary || actionError.favoriteSummary.applied !== 100) throw new Error('successful first batch summary was lost');
+  var snapshot = favorites.getSnapshot();
+  if (snapshot.loadedCount !== 24 || snapshot.busy || !snapshot.statusReady) throw new Error('visible page status was not restored after partial failure: ' + JSON.stringify(snapshot));
+  for (var id = 1; id <= 24; id++) {
+    var status = favorites.getStatus(id);
+    if (!status || status.isFavorited !== true) throw new Error('visible item ' + id + ' did not reflect the successful batch');
+  }
+  favorites.toggleSelected(1, true);
+  if (!favorites.canApply()) throw new Error('restored visible status did not permit a deliberate retry');
+  if (statusCalls !== 4) throw new Error('partial failure did not perform exactly one current-page recheck');
+  console.log('loaded=24 statusReady=true visible=favorited busy=false partial=100 retry=enabled');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "loaded=24 statusReady=true visible=favorited busy=false partial=100 retry=enabled"

@@ -180,6 +180,7 @@
         state.loading = false;
         document.getElementById("media-grid").setAttribute("aria-busy", "false");
         updatePageSummary(state.offset < state.total);
+        updateSelectionUi();
       });
   }
 
@@ -225,8 +226,12 @@
     document.getElementById("media-favorite-selected").disabled = !snapshot.canApply || state.loading;
     document.getElementById("media-unfavorite-selected").disabled = !snapshot.canApply || state.loading;
     document.getElementById("media-more").disabled = state.loading || snapshot.busy || state.offset >= state.total;
+    var retryStatus = document.getElementById("media-retry-favorite-status");
+    retryStatus.classList.toggle("hidden", !snapshot.statusFailed);
+    retryStatus.disabled = snapshot.busy || state.loading || snapshot.statusLoading;
     var hint = document.getElementById("media-selection-hint");
     if (!snapshot.canManage) hint.textContent = t("media.favoritePermissionDenied");
+    else if (snapshot.statusFailed) hint.textContent = t("media.favoriteStatusFailed");
     else if (!snapshot.statusReady) hint.textContent = t("media.favoriteStatusLoading");
     else hint.textContent = "";
     document.querySelectorAll("[data-media-select]").forEach(function (checkbox) {
@@ -413,6 +418,14 @@
   });
   document.getElementById("media-clear-selection").addEventListener("click", function () {
     favorites.clearSelection();
+  });
+  document.getElementById("media-retry-favorite-status").addEventListener("click", function () {
+    if (state.loading || favorites.getSnapshot().busy) return;
+    favorites.refreshStatuses().then(function () {
+      setStatus("");
+    }).catch(function () {
+      setStatus(t("media.favoriteStatusFailed"), true);
+    });
   });
   document.getElementById("media-favorite-selected").addEventListener("click", function () {
     performFavoriteAction("favorite");
