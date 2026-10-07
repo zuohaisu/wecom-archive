@@ -2,10 +2,13 @@
 
 Haisu split request: the message statistics that used to ride on the
 console-seat table (users.py) belong to the staff directory, displayed
-read-only. Staff identity follows the product's single source of truth
-(``_collect_staff_ids``: ``staff_``-prefixed archive participants plus
-seat-linked ids seen in the archive). Counts mirror the RND-284 rule:
-messages SENT by the staff id — ids and counts only, never payloads.
+read-only. Haisu follow-up: the directory lists EVERY internal staff
+member who appeared in the archive — not only seat-linked accounts or
+``staff_``-prefixed ids. Internal is therefore the complement of the
+authoritative external registry: an archive participant is internal
+staff unless WeCom's external-contact sync registered them in
+``external_contacts``. Counts mirror the RND-284 rule: messages SENT by
+the staff id — ids and counts only, never payloads.
 """
 from __future__ import annotations
 
@@ -13,13 +16,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
-from app.conversation_membership import _collect_staff_ids
-from app.db.models import AdminUser, ArchiveMessage, Contact
+from app.conversation_membership import _collect_archive_participant_ids
+from app.db.models import AdminUser, ArchiveMessage, Contact, ExternalContact
 from app.db.session import get_db
 from app.schemas.staff_directory import StaffDirectoryItem, StaffDirectoryPage
 from app.services.avatar_sync import internal_avatar_presentations
@@ -37,7 +40,15 @@ def list_internal_staff(
 ) -> StaffDirectoryPage:
     """Return the tenant's internal staff with read-only message counts."""
     _, tenant_id = auth
-    staff_ids = _collect_staff_ids(db, tenant_id)
+    participants = _collect_archive_participant_ids(db, tenant_id)
+    registered_external = set(
+        db.scalars(
+            select(ExternalContact.external_userid).where(
+                ExternalContact.tenant_id == tenant_id
+            )
+        ).all()
+    )
+    staff_ids = participants - registered_external
 
     display_rows = (
         db.query(Contact)
