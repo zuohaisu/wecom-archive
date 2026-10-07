@@ -184,6 +184,7 @@ a{color:var(--link-color)}
 /* RND-363: delete-selection checkbox and action bar. */
 .tl-delete-checkbox{display:inline-flex;align-items:center;flex-shrink:0;margin-right:2px}
 .tl-delete-check{width:15px;height:15px;accent-color:#cf1322;cursor:pointer}
+.timeline-header-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0}.timeline-favorites-filter{display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:12px;color:#6b7280;cursor:pointer}.timeline-favorites-filter input{width:16px;height:16px;accent-color:#1677ff}.tl-favorite-select-label{display:none;align-items:center;flex-shrink:0;margin-right:2px}.timeline.favorite-selection-mode .tl-favorite-select-label{display:inline-flex}.tl-favorite-select-check{width:15px;height:15px;accent-color:#1677ff;cursor:pointer}.tl-favorite-toggle{border:0;background:transparent;color:#d49a00;font-size:17px;line-height:1;padding:1px 3px;cursor:pointer}.tl-favorite-toggle:disabled{color:#c7c9ce;cursor:not-allowed}.tl-favorite-toggle:focus-visible,.tl-favorite-select-check:focus-visible,.timeline-favorites-filter input:focus-visible{outline:2px solid #1677ff;outline-offset:2px}.tl-favorite-marker{color:#d49a00;font-size:13px;line-height:1}.timeline.favorite-selection-mode .tl-favorite-toggle{display:none}.tl-row.favorite-selected{background:#f0f6ff}.favorite-selection-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;background:#f4f8ff;border-bottom:1px solid #cfe1fb;padding:8px 18px;font-size:12.5px;color:#0958d9}.favorite-selection-bar[hidden]{display:none}.favorite-selection-count{font-weight:600;white-space:nowrap}.favorite-selection-hint{flex-basis:100%;margin:0;color:#6b7280}.favorite-selection-bar button:focus-visible,.timeline-header-actions button:focus-visible{outline:2px solid #1677ff;outline-offset:2px}.timeline-favorite-feedback{display:flex;align-items:center;gap:12px;min-height:0;padding:0 18px;font-size:12.5px}.timeline-favorite-feedback.has-result{min-height:30px;padding-top:4px;padding-bottom:4px}.timeline-favorite-feedback #timeline-favorite-result{color:#237804}.timeline-favorite-feedback #timeline-favorite-result.favorite-result-error{color:#cf1322}.timeline-favorite-feedback a{font-weight:600}
 .delete-bar{display:flex;align-items:center;gap:10px;flex-shrink:0;background:#fff7f7;border-bottom:1px solid #ffccc7;padding:8px 18px;font-size:12.5px;color:#cf1322}
 .delete-bar[hidden]{display:none}
 .delete-bar-spacer{flex:1}
@@ -374,6 +375,7 @@ a{color:var(--link-color)}
 }
 @media (max-width: 900px){
   .delete-bar{flex-wrap:wrap;padding:8px 12px}
+  .favorite-selection-bar{flex-wrap:wrap;padding:8px 12px}.favorite-selection-bar button{flex:1 1 auto}.favorite-selection-count,.favorite-selection-hint{flex-basis:100%}.timeline-header-bar{padding:0 12px}.timeline-favorites-filter{font-size:11px}
 }
 </style>
 </head>
@@ -398,6 +400,7 @@ __SIDENAV__
       <!-- RND-363: delete-mode toggle; enabled only for Owner/Admin when the
            tenant compliance hold is off and a conversation is selected. -->
       <button type="button" class="btn-toggle" id="btn-delete-mode" onclick="toggleDeleteMode()" data-i18n="console.deleteMode" disabled>选择删除</button>
+      <button type="button" class="btn-toggle" id="btn-favorite-mode" aria-pressed="false" data-i18n="favorites.enterSelection" disabled>选择收藏</button>
       <button class="btn-sync-now" id="btn-sync-now" onclick="syncNow()" data-i18n="sync.now">立即同步</button>
       <button type="button" class="btn-toggle" id="btn-audit-mode" onclick="toggleAuditMode()" data-i18n="console.auditMode">审阅模式</button>
       <button type="button" class="btn-toggle active" id="btn-panel-toggle" onclick="togglePanel()" data-i18n="console.detailPanel">详情面板</button>
@@ -442,8 +445,21 @@ __SIDENAV__
 
     <div class="col col-timeline">
       <div class="timeline-header-bar">
-        <div class="timeline-title" id="timeline-header" data-i18n="console.timelineHeader">消息时间线</div>
+        <div class="timeline-header-actions">
+          <div class="timeline-title" id="timeline-header" data-i18n="console.timelineHeader">消息时间线</div>
+          <label class="timeline-favorites-filter" for="timeline-favorites-only"><input type="checkbox" id="timeline-favorites-only"><span data-i18n="favorites.onlyMessages">仅看已收藏</span></label>
+        </div>
       </div>
+      <div class="favorite-selection-bar" id="favorite-selection-bar" role="toolbar" aria-labelledby="favorite-selected-count" hidden>
+        <span class="favorite-selection-count" id="favorite-selected-count" role="status" aria-live="polite"></span>
+        <button type="button" class="btn-toggle" id="btn-favorite-select-all" data-i18n="favorites.selectAllLoaded">全选已加载</button>
+        <button type="button" class="btn-toggle" id="btn-favorite-clear-selection" data-i18n="favorites.clearSelection">清空选择</button>
+        <button type="button" class="btn-toggle" id="btn-favorite-selected" data-i18n="favorites.favoriteSelected" disabled>收藏所选</button>
+        <button type="button" class="btn-toggle" id="btn-unfavorite-selected" data-i18n="favorites.unfavoriteSelected" disabled>取消收藏</button>
+        <button type="button" class="btn-toggle" id="btn-favorite-exit" data-i18n="favorites.exitSelection">退出选择</button>
+        <p class="favorite-selection-hint" id="favorite-selection-hint" aria-live="polite"></p>
+      </div>
+      <div class="timeline-favorite-feedback"><span id="timeline-favorite-result" role="status" aria-live="polite" hidden></span><a id="timeline-favorite-link" href="/admin/favorites" data-i18n="favorites.viewAll" hidden>查看收藏夹</a><button type="button" class="btn-toggle" id="timeline-favorite-status-retry" data-i18n="favorites.retryStatus" hidden>重试状态</button></div>
       <!-- RND-363: delete-selection action bar (visible only in delete mode). -->
       <div class="delete-bar" id="delete-bar" role="toolbar" aria-label="删除模式" hidden>
         <span class="delete-selected-count" id="delete-selected-count">已选择 0 条</span>
@@ -510,6 +526,7 @@ __SIDENAV__
 <script src="/web/static/console/conversation-list.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/timeline.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/delete-timeline.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/console/timeline-favorites.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/message-renderers.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/media-viewer.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/refresh.js?v=__STATIC_VERSION__"></script>

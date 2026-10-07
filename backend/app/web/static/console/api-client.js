@@ -1,9 +1,11 @@
-var currentTenantId=null,currentUserId=null,authMePromise=null;
+var currentTenantId=null,currentUserId=null,currentUserRole=null,authMePromise=null;
 function loadCurrentUser(){
   authMePromise=fetch('/api/auth/me').then(function(r){return r.json();}).then(function(d){
     if(!d.authenticated){window.location.href='/admin/login';return;}
     currentTenantId=d.tenant_id||null;
     currentUserId=d.id||null;
+    currentUserRole=d.role||null;
+    if(typeof updateTimelineFavoriteRole==='function')updateTimelineFavoriteRole(currentUserRole);
     // RND-402: the server projects the authoritative tenant lifecycle so
     // the console never renders a wall of 403s for a frozen/suspended
     // tenant. A frozen Owner is routed to the billing/renewal surface
@@ -102,6 +104,7 @@ function loadTimeline(convId, convType){
   // conversation's delete selection into the new view.
   if(typeof clearDeleteSelection==='function')clearDeleteSelection();
   if(typeof updateDeleteModeButton==='function')updateDeleteModeButton();
+  if(typeof resetTimelineFavoritesForConversation==='function')resetTimelineFavoritesForConversation();
   // RND-158 Phase 2: capture the entity context for THIS timeline
   // selection now, not read live later -- see the declaration comment on
   // timelineConvType/timelineMode/timelineEntityId above.

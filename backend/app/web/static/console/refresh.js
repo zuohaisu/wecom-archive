@@ -69,6 +69,7 @@ function refreshTimelineIfSelected(){
     var existingIds={};
     timelineMsgs.forEach(function(m){existingIds[m.msgid]=true;});
     var hasNew=data.messages.some(function(m){return!existingIds[m.msgid];});
+    if(typeof loadTimelineFavoriteStatuses==='function')loadTimelineFavoriteStatuses(data.messages,convId,gen);
     var merged=mergeMessagesByMsgid(timelineMsgs,data.messages);
     // RND-206 QA fix: an auto-refresh that produces a byte-identical
     // rendered set (same messages, same content/media/revoke state) must

@@ -119,3 +119,14 @@ var searchDateRange=null,searchAllTypes=false;
 var deleteMode=false;
 var deleteSelection={};
 var deleteStatus=null;
+// RND-368: favorite selection and live status are scoped to the current
+// tenant/conversation and are never persisted in browser storage.
+var favoriteMode=false;
+var favoriteSelection={};
+var favoriteStates={};
+var favoriteStateVersions={};
+var favoriteUserCanWrite=false;
+var favoriteBusy=false;
+var favoriteStatusFailed=false;
+var favoriteStatusRetrying=false;
+var timelineFavoritesOnly=false;

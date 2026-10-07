@@ -50,6 +50,7 @@ _CONSOLE_JS_MODULES = [
     "conversation-list.js",
     "timeline.js",
     "delete-timeline.js",
+    "timeline-favorites.js",
     "message-renderers.js",
     "media-viewer.js",
     "refresh.js",
