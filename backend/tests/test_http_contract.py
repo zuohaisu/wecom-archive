@@ -1726,12 +1726,11 @@ class TestFrontendBaseline:
     def test_top_bar_before_main_layout(self, authed_html_client: TestClient) -> None:
         resp = authed_html_client.get("/admin/conversations", follow_redirects=False)
         html = resp.text
-        tb = html.find("top-bar")
-        ml = max(
-            html.find("conv-list") if "conv-list" in html else -1,
-            html.find("timeline") if "timeline" in html else -1,
-        )
-        assert tb >= 0 and ml >= 0 and tb < ml
+        # Probe real markup elements (GH-100 moved the console's CSS rules
+        # into design-system.css, so CSS-selector probes no longer apply).
+        tb = html.find('class="top-bar"')
+        tl = html.find('class="col col-timeline"')
+        assert tb >= 0 and tl >= 0 and tb < tl
 
 
 # =====================================================================

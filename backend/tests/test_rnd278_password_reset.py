@@ -121,7 +121,7 @@ def test_password_recovery_pages_are_public_ssr_pages(path: str, marker: str) ->
         response = client.get(path)
     assert response.status_code == 200
     assert marker in response.text
-    assert "/web/static/styles.css" in response.text
+    assert "/web/static/design-system.css" in response.text
 
 
 def test_email_settings_use_password_reset_environment_names(monkeypatch) -> None:
