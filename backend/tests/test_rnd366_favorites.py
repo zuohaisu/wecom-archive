@@ -416,6 +416,27 @@ def test_favorite_permissions_fail_closed_and_audit_failure_rolls_back(
         ).count() == 0
 
 
+def test_favorite_batch_uses_canonical_target_lock_order() -> None:
+    import app.services.favorites as favorite_service
+    from app.schemas.favorites import FavoriteObjectIn
+
+    forward = [
+        FavoriteObjectIn(object_type="message", object_id="msg-a2"),
+        FavoriteObjectIn(object_type="message", object_id="msg-a1"),
+    ]
+    reverse = list(reversed(forward))
+    forward_targets, _ = favorite_service._unique_targets(forward)
+    reverse_targets, _ = favorite_service._unique_targets(reverse)
+
+    assert [target.key for target in forward_targets] == [
+        ("message", "msg-a1"),
+        ("message", "msg-a2"),
+    ]
+    assert [target.key for target in reverse_targets] == [
+        target.key for target in forward_targets
+    ]
+
+
 def test_concurrent_first_favorite_unique_conflict_is_idempotent(monkeypatch) -> None:
     import app.services.favorites as favorite_service
 
@@ -459,6 +480,96 @@ def test_concurrent_first_favorite_unique_conflict_is_idempotent(monkeypatch) ->
     )
     assert result == "already_favorited"
     assert db.lookups == 2
+
+
+def test_favorite_conversation_filter_uses_compact_message_projection(
+    api_client, db_factory
+) -> None:
+    client, _identity = api_client
+    with db_factory() as db:
+        messages = [
+            ArchiveMessage(
+                id=1000 + index,
+                msgid=f"large-room-{index}",
+                seq=index,
+                publickey_ver=1,
+                encrypt_random_key="k" * 2048,
+                encrypt_chat_msg="c" * 2048,
+                decrypt_status="success",
+                content_text=f"synthetic large-room message {index}",
+                msgtype="text",
+                sender="staff_1",
+                roomid="large-room",
+                msgtime=10_000 + index,
+                tenant_id="tenant-a",
+            )
+            for index in range(80)
+        ]
+        db.add_all(messages)
+        db.flush()
+        db.add(
+            ArchiveFavorite(
+                id="large-room-favorite",
+                tenant_id="tenant-a",
+                object_type="message",
+                archive_message_id=messages[-1].id,
+                favorited_by_admin_user_id="owner-a",
+            )
+        )
+        db.commit()
+
+    loaded_full_messages = 0
+
+    def _count_archive_message_load(_target, _context):
+        nonlocal loaded_full_messages
+        loaded_full_messages += 1
+
+    event.listen(ArchiveMessage, "load", _count_archive_message_load)
+    try:
+        response = client.get("/api/favorites?conversation_id=large-room&limit=1")
+    finally:
+        event.remove(ArchiveMessage, "load", _count_archive_message_load)
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["object_id"] == "large-room-79"
+    assert loaded_full_messages == 0
+
+
+@pytest.mark.parametrize(
+    ("deleted_msgid", "active_msgid"),
+    [("msg-a4", "msg-a5"), ("msg-a5", "msg-a4")],
+    ids=("deleted-group-side", "deleted-direct-side"),
+)
+def test_favorite_collision_filter_ignores_soft_deleted_side(
+    api_client, db_factory, deleted_msgid, active_msgid
+) -> None:
+    from app.services.message_deletion import soft_delete_messages
+
+    client, _identity = api_client
+    for msgid in ("msg-a4", "msg-a5"):
+        response = client.post(
+            "/api/favorites",
+            json={"object_type": "message", "object_id": msgid},
+        )
+        assert response.status_code == 200
+
+    with db_factory() as db:
+        result = soft_delete_messages(
+            db,
+            tenant_id="tenant-a",
+            actor_id="owner-a",
+            msgids=[deleted_msgid],
+        )
+        db.commit()
+        assert result.deleted == 1
+
+    response = client.get(
+        "/api/favorites?conversation_id=direct__contact_1___staff_1"
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["object_id"] == active_msgid
 
 
 def test_favorite_list_filters_page_stably_and_only_projects_current_content(

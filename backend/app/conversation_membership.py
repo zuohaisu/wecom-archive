@@ -993,48 +993,49 @@ def _resolve_conversation_message_ids(
 # RND-191: compact (id/sender/roomid/msgtime) membership resolution
 #
 # Same "which messages belong to this conversation_id" question as
-# _fetch_conversation_messages above, same branch ordering, but used ONLY by
-# resolve_timeline_page() (app.services.timeline_service) to decide
-# pagination (sort by (msgtime, id), slice to `limit`) WITHOUT materializing
+# _fetch_conversation_messages above, same branch ordering, used by
+# resolve_timeline_page() (app.services.timeline_service) and favorite-list
+# conversation filtering. Both need complete membership without materializing
 # a full ArchiveMessage ORM row (raw_encrypted_payload/decrypted_payload/
-# structured_content JSONB, content_text) for every message in a
-# conversation on every single page request -- for a conversation with
-# thousands of messages that full-row fetch, repeated on every "load older"
-# scroll, was the dominant cost (RND-191 profiling). Only the page actually
-# being rendered (`limit` messages, typically 20) is ever hydrated to a full
-# row -- see _hydrate_timeline_page_messages in timeline_service.py.
+# structured_content JSONB, content_text) for every message in a conversation.
+# The timeline sorts and paginates this projection before hydrating only its
+# page; favorites retain the projected IDs and apply them to the paginated
+# favorite query.
 #
 # Unlike the RND-240 id-only siblings above (used by get_conversation_detail,
 # which never receives mode/entity_id), these mirror
 # _fetch_conversation_messages's FULL signature including the entity-scoped
-# collision-disambiguation branches, since resolve_timeline_page does accept
-# mode/staff_id/contact_id. msgtime is carried alongside id/sender/roomid
-# (a 4-column projection, still far lighter than a full row) because the
-# timeline needs it to sort/paginate before knowing which rows will end up
-# on the page.
+# collision-disambiguation branches. Both callers accept optional entity
+# context. msgtime is carried alongside id/sender/roomid (a 4-column
+# projection) because the timeline needs it to sort/paginate before knowing
+# which rows will end up on the page.
 # ---------------------------------------------------------------------------
 
 
-def _group_room_compact_messages(db: Session, roomid: str, tenant_id: str) -> list:
-    """Compact counterpart to _fetch_group_room_messages: returns
-    SimpleNamespace(id, sender, roomid, msgtime) instead of full
-    ArchiveMessage rows."""
+def _group_room_compact_messages(
+    db: Session, roomid: str, tenant_id: str, *, active_only: bool = False
+) -> list:
+    """Compact counterpart to _fetch_group_room_messages."""
+    query = db.query(
+        ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid, ArchiveMessage.msgtime
+    ).filter(
+        ArchiveMessage.roomid == roomid,
+        ArchiveMessage.tenant_id == tenant_id,
+    )
+    if active_only:
+        query = query.filter(active_message_filter())
     return [
         SimpleNamespace(id=r[0], sender=r[1], roomid=r[2], msgtime=r[3])
-        for r in db.query(
-            ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid, ArchiveMessage.msgtime
-        )
-        .filter(
-            ArchiveMessage.roomid == roomid,
-            ArchiveMessage.tenant_id == tenant_id,
-        )
-        .all()
+        for r in query.all()
     ]
 
 
-def _direct_pair_compact_messages(db: Session, uid_a: str, uid_b: str, tenant_id: str) -> list:
+def _direct_pair_compact_messages(
+    db: Session, uid_a: str, uid_b: str, tenant_id: str, *, active_only: bool = False
+) -> list:
     """Compact counterpart to _fetch_direct_pair_messages."""
     cols = (ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid, ArchiveMessage.msgtime)
+    active_filter = [active_message_filter()] if active_only else []
     rows_a_to_b = (
         db.query(*cols)
         .join(
@@ -1046,6 +1047,7 @@ def _direct_pair_compact_messages(db: Session, uid_a: str, uid_b: str, tenant_id
             ArchiveMessageRecipient.receiver_userid == uid_b,
             or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
             ArchiveMessage.tenant_id == tenant_id,
+            *active_filter,
             ArchiveMessageRecipient.tenant_id == tenant_id,
         )
         .all()
@@ -1061,6 +1063,7 @@ def _direct_pair_compact_messages(db: Session, uid_a: str, uid_b: str, tenant_id
             ArchiveMessageRecipient.receiver_userid == uid_a,
             or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
             ArchiveMessage.tenant_id == tenant_id,
+            *active_filter,
             ArchiveMessageRecipient.tenant_id == tenant_id,
         )
         .all()
@@ -1081,6 +1084,7 @@ def _null_sender_candidate_compact_messages(
     tenant_id: str,
     *,
     require_null_sender: bool = False,
+    active_only: bool = False,
 ) -> list:
     """Compact counterpart to _fetch_null_sender_candidate_messages. Still
     projects sender/roomid (not just id/msgtime), since
@@ -1115,6 +1119,8 @@ def _null_sender_candidate_compact_messages(
             )
         )
 
+    if active_only:
+        filters.append(active_message_filter())
     candidates = (
         db.query(ArchiveMessage.id, ArchiveMessage.sender, ArchiveMessage.roomid, ArchiveMessage.msgtime)
         .outerjoin(
@@ -1159,27 +1165,38 @@ def _fetch_conversation_messages_compact(
     *,
     mode: Optional[str] = None,
     entity_id: Optional[str] = None,
+    active_only: bool = False,
 ) -> list:
-    """Compact counterpart to _fetch_conversation_messages, same branch
-    ordering/control flow (steps 1-6 in that function's docstring),
-    including the entity-scoped collision-disambiguation branches -- used
-    ONLY by resolve_timeline_page(). Returns SimpleNamespace(id, sender,
-    roomid, msgtime) instead of full ArchiveMessage rows."""
+    """Compact counterpart to _fetch_conversation_messages.
+
+    ``active_only`` removes tombstoned rows before direct/group collision
+    resolution. It is opt-in so timeline callers retain their established
+    behavior; favorite-list filtering enables it to match the full resolver.
+    """
     entity_scoped = bool(mode and entity_id)
 
     if conversation_id.startswith("direct__"):
         rest = conversation_id[len("direct__"):]
         parts = rest.split("___", 1)
 
-        group_messages = _group_room_compact_messages(db, conversation_id, tenant_id)
+        group_messages = _group_room_compact_messages(
+            db, conversation_id, tenant_id, active_only=active_only
+        )
 
         direct_messages: list = []
         if len(parts) == 2:
             uid_a, uid_b = parts
-            direct_messages = _direct_pair_compact_messages(db, uid_a, uid_b, tenant_id)
+            direct_messages = _direct_pair_compact_messages(
+                db, uid_a, uid_b, tenant_id, active_only=active_only
+            )
 
             null_sender_extra = _null_sender_candidate_compact_messages(
-                db, conversation_id, [uid_a, uid_b], tenant_id, require_null_sender=True
+                db,
+                conversation_id,
+                [uid_a, uid_b],
+                tenant_id,
+                require_null_sender=True,
+                active_only=active_only,
             )
             if null_sender_extra:
                 seen_direct: set[int] = {m.id for m in direct_messages}
@@ -1227,11 +1244,13 @@ def _fetch_conversation_messages_compact(
 
         if rest:
             orphan_messages = _null_sender_candidate_compact_messages(
-                db, conversation_id, rest, tenant_id
+                db, conversation_id, rest, tenant_id, active_only=active_only
             )
             if orphan_messages:
                 return orphan_messages
 
         raise HTTPException(status_code=400, detail="Malformed direct conversation ID")
 
-    return _group_room_compact_messages(db, conversation_id, tenant_id)
+    return _group_room_compact_messages(
+        db, conversation_id, tenant_id, active_only=active_only
+    )

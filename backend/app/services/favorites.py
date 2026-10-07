@@ -21,7 +21,7 @@ from sqlalchemy.types import Integer, String
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.conversation_membership import (
     _derive_conversation_membership,
-    _fetch_conversation_messages,
+    _fetch_conversation_messages_compact,
     _load_recipients_map,
     _staff_ids_for_participants,
 )
@@ -88,6 +88,10 @@ def _unique_targets(items: list[FavoriteObjectIn]) -> tuple[list[_Target], dict[
         if target.key not in source_by_key:
             targets.append(target)
             source_by_key[target.key] = item.source_page
+    # This is also the transaction's row-lock order. Sorting the deduplicated
+    # identities prevents reversed overlapping batches from acquiring the
+    # same target locks in opposite order.
+    targets.sort(key=lambda target: target.key)
     return targets, source_by_key
 
 
@@ -124,7 +128,11 @@ def _resolve_target(
         )
     )
     if lock:
-        statement = statement.with_for_update()
+        # Lock only the canonical media target. Locking the joined parent
+        # ArchiveMessage as well can create cross-target cycles with message
+        # favorites in a batch; permanent purge must delete this MediaFile
+        # first, so this row lock still stabilizes the target lifecycle.
+        statement = statement.with_for_update(of=MediaFile)
     row = db.execute(statement).one_or_none()
     if row is None:
         return None
@@ -373,8 +381,13 @@ def _target_message_ids_for_conversation(
     entity_id: Optional[str] = None,
 ) -> set[int]:
     try:
-        rows = _fetch_conversation_messages(
-            db, conversation_id, tenant_id, mode=mode, entity_id=entity_id
+        rows = _fetch_conversation_messages_compact(
+            db,
+            conversation_id,
+            tenant_id,
+            mode=mode,
+            entity_id=entity_id,
+            active_only=True,
         )
     except HTTPException as exc:
         raise ValueError("invalid_conversation") from exc
