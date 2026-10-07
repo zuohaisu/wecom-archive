@@ -13,6 +13,7 @@ from app.routers.analytics import router as analytics_router
 from app.routers.admin_contacts_page import router as admin_contacts_page_router
 from app.routers.admin_media_page import router as admin_media_page_router
 from app.routers.admin_recycle_bin_page import router as admin_recycle_bin_page_router
+from app.routers.admin_staff_page import router as admin_staff_page_router
 from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.ai_support import router as ai_support_router
 from app.routers.public_ai_support import router as public_ai_support_router
@@ -48,6 +49,7 @@ from app.routers.retention import router as retention_router
 from app.routers.refunds import router as refunds_router
 from app.routers.search import router as search_router
 from app.routers.settings import settings_router
+from app.routers.staff_directory import router as staff_directory_router
 from app.routers.sync import router as sync_router
 from app.routers.users import users_router
 from app.routers.web import router as web_router
@@ -162,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(sync_router, prefix="/api/admin")
     app.include_router(audit_router, prefix="/api/admin")
     app.include_router(users_router, prefix="/api/admin")
+    app.include_router(staff_directory_router, prefix="/api/admin")
     app.include_router(avatars_router, prefix="/api/admin")
     app.include_router(settings_router, prefix="/api/admin")
     app.include_router(media_library_router, prefix="/api/admin")
@@ -170,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(wecom_org_authorization_router)
     app.include_router(wecom_provider_instructions_router)
     app.include_router(admin_users_page_router)
+    app.include_router(admin_staff_page_router)
     app.include_router(admin_audit_page_router)
     app.include_router(admin_media_page_router)
     app.include_router(admin_recycle_bin_page_router)

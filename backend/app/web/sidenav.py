@@ -12,6 +12,7 @@ NAV = (
         "items": (
             {"id": "dashboard", "key": "nav.dashboard", "path": "/dashboard"},
             {"id": "billing", "key": "nav.billing", "path": "/admin/billing"},
+            {"id": "users", "key": "nav.seats", "path": "/admin/users"},
         ),
     },
     {
@@ -34,7 +35,7 @@ NAV = (
     {
         "group_key": "nav.group.directory",
         "items": (
-            {"id": "users", "key": "nav.staffSeats", "path": "/admin/users"},
+            {"id": "staff", "key": "nav.staffDirectory", "path": "/admin/staff"},
             {"id": "contacts", "key": "nav.externalContacts", "path": "/admin/contacts"},
         ),
     },
