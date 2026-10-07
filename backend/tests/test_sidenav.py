@@ -31,8 +31,9 @@ def test_design_system_is_a_new_copy_of_the_design_source() -> None:
 
 def test_navigation_includes_shared_data_export_page() -> None:
     items = [item for group in NAV for item in group["items"]]
-    assert len(items) == 14
+    assert len(items) == 15
     assert any(item["id"] == "exports" and item["path"] == "/admin/exports" for item in items)
+    assert any(item["id"] == "favorites" and item["path"] == "/admin/favorites" for item in items)
     assert {item["id"] for item in items} == {
         "dashboard",
         "billing",
@@ -42,6 +43,7 @@ def test_navigation_includes_shared_data_export_page() -> None:
         "cleanup",
         "recycle-bin",
         "media",
+        "favorites",
         "exports",
         "users",
         "contacts",

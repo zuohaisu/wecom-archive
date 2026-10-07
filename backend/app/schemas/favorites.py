@@ -93,20 +93,29 @@ class FavoriteItemOut(BaseModel):
     object_type: FavoriteObjectType
     object_id: str
     favorited_by_admin_user_id: Optional[str]
+    favorited_by_name: Optional[str] = None
     favorited_at: datetime
     source_page: Optional[FavoriteSourcePage] = None
     message_time_ms: Optional[int] = None
+    message_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    conversation_name: Optional[str] = None
     conversation_type: Optional[Literal["direct", "group"]] = None
     staff_id: Optional[str] = None
+    staff_name: Optional[str] = None
     contact_id: Optional[str] = None
+    contact_name: Optional[str] = None
+    focus_entity_type: Optional[Literal["staff", "contact"]] = None
+    focus_entity_id: Optional[str] = None
     sender_id: Optional[str] = None
+    sender_name: Optional[str] = None
     message_type: Optional[str] = None
     preview: Optional[str] = None
     media_file_id: Optional[int] = None
     media_type: Optional[str] = None
     media_mime_type: Optional[str] = None
     media_size_bytes: Optional[int] = None
+    media_download_status: Optional[str] = None
 
 
 class FavoritePageOut(BaseModel):

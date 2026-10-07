@@ -21,6 +21,9 @@ from app.db.models import (
     ArchiveMessage,
     ArchiveMessageRecipient,
     AuditLog,
+    Contact,
+    ExternalContact,
+    GroupChatMetadata,
     MediaFile,
     MediaPurgeRetry,
     MessageRevocation,
@@ -63,6 +66,9 @@ def db_factory():
             tables=[
                 Tenant.__table__,
                 AdminUser.__table__,
+                Contact.__table__,
+                ExternalContact.__table__,
+                GroupChatMetadata.__table__,
                 ArchiveMessage.__table__,
                 ArchiveMessageRecipient.__table__,
                 MediaFile.__table__,
@@ -630,3 +636,118 @@ def test_favorite_list_filters_page_stably_and_only_projects_current_content(
     assert client.get(
         "/api/favorites?favorited_since=2026-01-02T00:00:00Z&favorited_until=2026-01-01T00:00:00Z"
     ).status_code == 422
+
+
+def test_rnd369_favorites_filters_details_and_stable_pagination(api_client, db_factory) -> None:
+    client, _identity = api_client
+    with db_factory() as db:
+        db.query(AdminUser).filter_by(id="owner-a").one().name = "Owner Alice"
+        db.query(AdminUser).filter_by(id="owner-b").one().name = "Owner Bob"
+        db.add_all(
+            [
+                Contact(tenant_id="tenant-a", wecom_userid="staff_1", name="Alice"),
+                Contact(tenant_id="tenant-a", wecom_userid="contact_1", name="Legacy Contact"),
+                ExternalContact(
+                    tenant_id="tenant-a",
+                    external_userid="contact_1",
+                    name="Employee Remark",
+                    current_nickname_display="Customer One",
+                ),
+                GroupChatMetadata(
+                    tenant_id="tenant-a", roomid="room-a", display_name="Support Room"
+                ),
+            ]
+        )
+        db.commit()
+
+    for object_type, object_id in (
+        ("message", "msg-a1"),
+        ("message", "msg-a2"),
+        ("media", "1"),
+        ("message", "msg-a5"),
+    ):
+        assert client.post(
+            "/api/favorites",
+            json={"object_type": object_type, "object_id": object_id},
+        ).status_code == 200
+
+    page_one = client.get("/api/favorites?limit=2&offset=0")
+    page_two = client.get("/api/favorites?limit=2&offset=2")
+    assert page_one.status_code == page_two.status_code == 200
+    assert page_one.json()["total"] == 4
+    assert page_one.json()["has_more"] is True
+    assert page_two.json()["has_more"] is False
+    assert not {
+        item["favorite_id"] for item in page_one.json()["items"]
+    } & {item["favorite_id"] for item in page_two.json()["items"]}
+
+    media = client.get("/api/favorites?media_type=image")
+    assert media.status_code == 200
+    assert media.json()["total"] == 1
+    assert media.json()["items"][0]["object_type"] == "media"
+    assert media.json()["items"][0]["media_download_status"] == "downloaded"
+    assert client.get("/api/favorites?media_type=image&object_type=message").status_code == 422
+
+    by_staff = client.get("/api/favorites?staff_filter=staff_1")
+    assert by_staff.status_code == 200
+    assert by_staff.json()["total"] == 4
+    assert client.get("/api/favorites?staff_filter=unknown-contact").json()["total"] == 0
+    by_actor = client.get("/api/favorites?favorited_by_name=Owner%20Alice")
+    assert by_actor.status_code == 200
+    assert by_actor.json()["total"] == 4
+    assert by_actor.json()["items"][0]["favorited_by_name"] == "Owner Alice"
+    assert client.get("/api/favorites?favorited_by_name=Owner%20Bob").json()["total"] == 0
+
+    by_conversation = client.get("/api/favorites?conversation_id=room-a")
+    assert by_conversation.status_code == 200
+    assert by_conversation.json()["total"] == 3
+    assert all(item["conversation_name"] == "Support Room" for item in by_conversation.json()["items"])
+    assert all(item["staff_name"] == "Alice" for item in by_conversation.json()["items"])
+
+    direct = client.get(
+        "/api/favorites?conversation_id=direct__contact_1___staff_1&mode=staff&staff_id=staff_1"
+    )
+    assert direct.status_code == 200
+    assert direct.json()["total"] == 1
+    direct_item = direct.json()["items"][0]
+    assert direct_item["object_id"] == direct_item["message_id"] == "msg-a5"
+    assert direct_item["conversation_name"] == "Alice ↔ Customer One"
+    assert direct_item["contact_name"] == "Customer One"
+    assert direct_item["focus_entity_type"] == "staff"
+    assert direct_item["focus_entity_id"] == "staff_1"
+    for contact_filter in ("Customer One", "contact_1"):
+        by_contact = client.get(
+            "/api/favorites", params={"contact_filter": contact_filter}
+        )
+        assert by_contact.status_code == 200
+        assert [item["object_id"] for item in by_contact.json()["items"]] == ["msg-a5"]
+
+    by_message_time = client.get("/api/favorites?message_since_ms=1500")
+    assert by_message_time.status_code == 200
+    assert {item["object_id"] for item in by_message_time.json()["items"]} == {
+        "msg-a2", "msg-a5"
+    }
+
+
+def test_rnd369_favorites_page_requires_html_session_and_renders_controls(api_client) -> None:
+    from app.auth import require_html_session
+    from app.main import app
+
+    client, _identity = api_client
+    app.dependency_overrides[require_html_session] = lambda: None
+    anonymous = client.get("/admin/favorites", follow_redirects=False)
+    assert anonymous.status_code == 302
+    assert anonymous.headers["location"] == "/admin/login"
+
+    app.dependency_overrides[require_html_session] = lambda: "tenant-a"
+    page = client.get("/admin/favorites")
+    assert page.status_code == 200
+    assert 'id="favorites-filters"' in page.text
+    assert 'id="favorites-filter-staff"' in page.text
+    assert 'id="favorites-filter-favorite-since"' in page.text
+    assert 'id="favorites-unfavorite-selected"' in page.text
+    assert 'id="favorites-export-selected"' in page.text
+    assert 'data-i18n="favoritesPage.removeOnlyNotice"' in page.text
+    assert 'favorites-page.js' in page.text
+    assert 'console/media-viewer.js' in page.text
+    assert "/admin/favorites" in page.text

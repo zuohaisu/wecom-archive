@@ -28,6 +28,7 @@ NAV = (
             {"id": "cleanup", "key": "nav.cleanup", "path": "/admin/cleanup"},
             {"id": "recycle-bin", "key": "nav.recycleBin", "path": "/admin/recycle-bin"},
             {"id": "media", "key": "nav.mediaAttachments", "path": "/admin/media"},
+            {"id": "favorites", "key": "nav.favorites", "path": "/admin/favorites"},
             {"id": "exports", "key": "nav.exports", "path": "/admin/exports"},
         ),
     },

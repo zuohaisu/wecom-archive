@@ -16,7 +16,7 @@ def test_favorited_only_is_conversation_scoped_paginated_and_respects_restore(
     monkeypatch.setattr(
         conversations, "attach_group_chat_display_name", lambda _db, _tenant, _conv, _type, page: page
     )
-    Contact.__table__.create(db_factory.kw["bind"])
+    Contact.__table__.create(db_factory.kw["bind"], checkfirst=True)
     client, _identity = api_client
     with db_factory() as db:
         db.add_all(

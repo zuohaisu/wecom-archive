@@ -156,11 +156,15 @@ def favorite_status(
 @router.get("", response_model=FavoritePageOut)
 def get_favorites(
     object_type: Optional[str] = Query(None, pattern="^(message|media)$"),
+    media_type: Optional[str] = Query(None, pattern="^(image|video|voice|file)$"),
     conversation_id: Optional[str] = Query(None, min_length=1, max_length=128),
+    staff_filter: Optional[str] = Query(None, min_length=1, max_length=64),
+    contact_filter: Optional[str] = Query(None, min_length=1, max_length=128),
     mode: Optional[str] = Query(None, pattern="^(staff|contact)$"),
     staff_id: Optional[str] = Query(None, min_length=1, max_length=64),
     contact_id: Optional[str] = Query(None, min_length=1, max_length=64),
     favorited_by: Optional[str] = Query(None, min_length=1, max_length=36),
+    favorited_by_name: Optional[str] = Query(None, min_length=1, max_length=128),
     favorited_since: Optional[datetime] = Query(None),
     favorited_until: Optional[datetime] = Query(None),
     message_since_ms: Optional[int] = Query(None, ge=0),
@@ -194,11 +198,15 @@ def get_favorites(
             conversation_mode=mode,
             conversation_entity_id=(staff_id if mode == "staff" else contact_id),
             contact_id=contact_id,
+            contact_filter=contact_filter,
             favorited_by=favorited_by,
+            favorited_by_name=favorited_by_name,
             favorited_since=(favorited_since.astimezone(timezone.utc) if favorited_since else None),
             favorited_until=(favorited_until.astimezone(timezone.utc) if favorited_until else None),
             message_since_ms=message_since_ms,
             message_until_ms=message_until_ms,
+            media_type=media_type,
+            staff_filter=staff_filter,
         )
     except ValueError as exc:
         code = str(exc)
@@ -206,6 +214,7 @@ def get_favorites(
             "invalid_conversation",
             "invalid_favorite_time_range",
             "invalid_message_time_range",
+            "invalid_media_type",
         }:
             code = "invalid_favorite_filter"
         raise HTTPException(status_code=422, detail=code) from None
