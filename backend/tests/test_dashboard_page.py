@@ -66,3 +66,16 @@ def test_dashboard_requires_the_existing_html_session() -> None:
 
     assert response.status_code == 302
     assert response.headers["location"] == "/admin/login"
+
+
+def test_dashboard_renders_the_annual_plan_expiry_card_only_when_populated() -> None:
+    """The KPI card must key off the API field, so self-deployed (no
+    subscription) renders stay on the original five-card layout."""
+    source = _DASHBOARD_JS.read_text(encoding="utf-8")
+
+    assert "annual_plan_expires_at" in source
+    assert "'dashboard.planExpiry'" in source
+    assert "if(data.annual_plan_expires_at){" in source
+    assert "grid.classList.add('has-plan')" in source
+    # The card is opt-in data: absent from the API it must not render.
+    assert "metric(grid,t('dashboard.archiveStatus')" in source

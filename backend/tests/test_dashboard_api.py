@@ -13,9 +13,11 @@ from app.db.models import (
     ArchiveMessage,
     ArchiveMessageRecipient,
     AdminUser,
+    BillingPlan,
     Contact,
     MediaFile,
     SyncState,
+    Subscription,
     Tenant,
     TenantWecomConfig,
 )
@@ -29,6 +31,9 @@ CREATE TABLE sync_states (id INTEGER PRIMARY KEY AUTOINCREMENT, corp_id TEXT NOT
 CREATE TABLE contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, wecom_userid TEXT NOT NULL, name TEXT, tenant_id TEXT, avatar_storage_backend TEXT, avatar_storage_ref TEXT, avatar_content_type TEXT, avatar_source TEXT, avatar_synced_at TEXT, avatar_status TEXT, created_at TEXT, updated_at TEXT);
 CREATE TABLE tenant_wecom_configs (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, corp_id TEXT NOT NULL, agent_id TEXT NOT NULL, app_secret TEXT NOT NULL, private_key_encrypted TEXT, callback_token_encrypted TEXT, callback_encoding_aes_key_encrypted TEXT, publickey_version INTEGER, callback_domain TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT, updated_at TEXT);
 CREATE TABLE admin_users (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, wecom_user_id TEXT NOT NULL, name TEXT, avatar_url TEXT, last_login_at TEXT, password_hash TEXT, role TEXT NOT NULL DEFAULT 'admin', status TEXT NOT NULL DEFAULT 'active', email TEXT, phone TEXT, department TEXT, last_active_at TEXT, invite_token TEXT, invited_by TEXT, invite_status TEXT, ui_theme TEXT NOT NULL DEFAULT 'light', ui_locale TEXT NOT NULL DEFAULT 'zh-CN', created_at TEXT, updated_at TEXT);
+CREATE TABLE billing_plans (id TEXT PRIMARY KEY, code TEXT NOT NULL, display_name VARCHAR(128) NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, amount_cents INTEGER NOT NULL, currency VARCHAR(3) NOT NULL, billing_period_months INTEGER NOT NULL, storage_quota_bytes BIGINT NOT NULL, created_at TEXT, updated_at TEXT);
+CREATE TABLE subscriptions (id TEXT PRIMARY KEY, tenant_id VARCHAR(36) NOT NULL, plan_id VARCHAR(36) NOT NULL, status VARCHAR(16) NOT NULL, starts_at DATETIME NOT NULL, ends_at DATETIME NOT NULL, grace_ends_at DATETIME, cancel_at_period_end INTEGER NOT NULL DEFAULT 0, source VARCHAR(32) NOT NULL, renewal_count INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 1, created_at TEXT, updated_at TEXT);
+CREATE TABLE plan_entitlements (id TEXT PRIMARY KEY, plan_id VARCHAR(36) NOT NULL, capability VARCHAR(64) NOT NULL, is_enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT);
 """
 TENANT_A, TENANT_B = "tenant-a", "tenant-b"
 
@@ -92,6 +97,32 @@ def _seed(db: Session) -> None:
     db.commit()
 
 
+def _subscription(
+    db: Session,
+    *,
+    plan_code: str = "annual_base_cny_99",
+    period_months: int = 12,
+    status: str = "active",
+    ends_at: datetime | None = None,
+) -> datetime:
+    """Assign one current subscription row and return its ends_at (UTC)."""
+    plan_id = f"plan-{plan_code}"
+    ends = ends_at or datetime(2027, 10, 1, tzinfo=timezone.utc)
+    db.add(BillingPlan(
+        id=plan_id, code=plan_code, display_name="年费套餐", is_active=True,
+        amount_cents=9900, currency="CNY", billing_period_months=period_months,
+        storage_quota_bytes=10**9,
+    ))
+    db.add(Subscription(
+        id=f"sub-{TENANT_A}-{plan_code}", tenant_id=TENANT_A, plan_id=plan_id,
+        status=status, starts_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        ends_at=ends, grace_ends_at=ends + timedelta(days=7),
+        source="test", renewal_count=0, revision=1, cancel_at_period_end=False,
+    ))
+    db.commit()
+    return ends
+
+
 def _authenticated_app(db: Session):
     from app.auth import get_current_user
     from app.db.session import get_db
@@ -123,6 +154,7 @@ def test_dashboard_range_tenant_aggregate_and_series(client, db) -> None:
         assert data["archive_status"] == "normal"
         assert data["archive_configured"] is True
         assert data["can_manage_settings"] is True
+        assert data["annual_plan_expires_at"] is None  # no subscription row: self-deployed stays hidden
         assert data["first_archived_at"] and data["last_archived_at"]
         assert len(data["daily_series"]) == 14
         assert sum(p["text_count"] + p["media_count"] for p in data["daily_series"]) == data["total_messages"]
@@ -230,6 +262,66 @@ def test_dashboard_keeps_summary_when_an_optional_insight_fails(client, db, monk
         data = response.json()
         assert data["insight_errors"] == {"type_composition": "unavailable"}
         assert data["type_composition"] == []
+        assert data["total_archived_messages"] == 3
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_dashboard_exposes_annual_plan_expiry_for_annual_subscription(client, db) -> None:
+    _seed(db)
+    ends = _subscription(db)
+    app = _authenticated_app(db)
+    try:
+        response = client.get("/api/admin/dashboard?range=14")
+        assert response.status_code == 200
+        assert response.json()["annual_plan_expires_at"] == ends.isoformat()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_dashboard_exposes_expiry_for_expired_annual_subscription(client, db) -> None:
+    """The expiry date stays factual once the plan has lapsed."""
+    _seed(db)
+    past = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    _subscription(db, status="expired", ends_at=past)
+    app = _authenticated_app(db)
+    try:
+        response = client.get("/api/admin/dashboard?range=14")
+        assert response.status_code == 200
+        assert response.json()["annual_plan_expires_at"] == past.isoformat()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_dashboard_hides_plan_expiry_for_non_annual_subscription(client, db) -> None:
+    _seed(db)
+    _subscription(db, plan_code="monthly_base_cny_15", period_months=1)
+    app = _authenticated_app(db)
+    try:
+        response = client.get("/api/admin/dashboard?range=14")
+        assert response.status_code == 200
+        assert response.json()["annual_plan_expires_at"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_dashboard_hides_plan_expiry_when_billing_lookup_fails(client, db, monkeypatch) -> None:
+    """A billing-layer failure must not take the tenant overview down."""
+    import app.services.dashboard_service as dashboard_service
+    from sqlalchemy.exc import SQLAlchemyError
+
+    _seed(db)
+
+    def unavailable(*_args, **_kwargs):
+        raise SQLAlchemyError("test-only failed billing query")
+
+    monkeypatch.setattr(dashboard_service, "get_subscription_summary", unavailable)
+    app = _authenticated_app(db)
+    try:
+        response = client.get("/api/admin/dashboard?range=14")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["annual_plan_expires_at"] is None
         assert data["total_archived_messages"] == 3
     finally:
         app.dependency_overrides.clear()

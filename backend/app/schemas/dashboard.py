@@ -48,3 +48,8 @@ class DashboardOut(BaseModel):
     hourly_distribution: List[dict]
     # Optional insight errors are generic and safe to render to end users.
     insight_errors: dict[str, str]
+    # KPI card input for the annual plan's expiry (ISO-8601 UTC). Populated
+    # only when the tenant has a subscription whose plan bills annually; a
+    # self-deployed instance without any subscription row keeps None, which
+    # the dashboard renders as no card at all.
+    annual_plan_expires_at: Optional[str] = None
