@@ -2295,6 +2295,11 @@ class MediaFile(Base):
         UniqueConstraint(
             "tenant_id", "sdkfileid", name="uq_media_files_tenant_sdkfileid"
         ),
+        # ArchiveFavorite uses (tenant_id, id) as its composite FK so a
+        # favorite cannot point at a media row owned by another tenant.
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_media_files_tenant_id_id"
+        ),
         CheckConstraint(
             "download_status != 'downloaded' OR file_size IS NOT NULL",
             name="ck_media_files_downloaded_requires_file_size",
@@ -2358,6 +2363,97 @@ class MediaFile(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class ArchiveFavorite(Base):
+    """One tenant-shared favorite relation to an existing archive object.
+
+    Content and storage bytes stay on their authoritative rows. A canceled
+    relation is retained for idempotent reactivation; permanent deletion of
+    its target cascades the relation away. A media favorite is keyed by the
+    tenant's canonical MediaFile row, shared by message and media-library
+    entry points.
+    """
+
+    __tablename__ = "archive_favorites"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "archive_message_id",
+            name="uq_archive_favorites_tenant_message",
+        ),
+        UniqueConstraint(
+            "tenant_id", "media_file_id",
+            name="uq_archive_favorites_tenant_media",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "archive_message_id"],
+            ["archive_messages.tenant_id", "archive_messages.id"],
+            name="fk_archive_favorites_tenant_message",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "media_file_id"],
+            ["media_files.tenant_id", "media_files.id"],
+            name="fk_archive_favorites_tenant_media",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "(object_type = 'message' AND archive_message_id IS NOT NULL AND media_file_id IS NULL) "
+            "OR (object_type = 'media' AND archive_message_id IS NULL AND media_file_id IS NOT NULL)",
+            name="ck_archive_favorites_object_target",
+        ),
+        CheckConstraint(
+            "source_page IS NULL OR source_page IN ('messages', 'media', 'favorites')",
+            name="ck_archive_favorites_source_page",
+        ),
+        Index(
+            "ix_archive_favorites_tenant_active_time",
+            "tenant_id", "canceled_at", "favorited_at", "id",
+        ),
+        Index(
+            "ix_archive_favorites_tenant_active_actor",
+            "tenant_id", "canceled_at", "favorited_by_admin_user_id",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(
+        String(36),
+        ForeignKey("tenants.id", name="fk_archive_favorites_tenant", ondelete="CASCADE"),
+        nullable=False,
+    )
+    object_type = Column(String(16), nullable=False)
+    # The polymorphic target is constrained to exactly one tenant-matched row
+    # by the CHECK and composite foreign keys above.
+    archive_message_id = Column(BigInteger, nullable=True)
+    media_file_id = Column(Integer, nullable=True)
+    favorited_by_admin_user_id = Column(
+        String(36),
+        ForeignKey(
+            "admin_users.id",
+            name="fk_archive_favorites_favorited_by_admin_user",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    favorited_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    canceled_at = Column(DateTime(timezone=True), nullable=True)
+    canceled_by_admin_user_id = Column(
+        String(36),
+        ForeignKey(
+            "admin_users.id",
+            name="fk_archive_favorites_canceled_by_admin_user",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    source_page = Column(String(16), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 

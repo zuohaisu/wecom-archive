@@ -406,7 +406,8 @@ def test_router_count() -> None:
     # RND-415 adds three platform account HTML shells and four guarded/public
     # account APIs: list, invite, invitation acceptance, and self password
     # rotation. GH-122 removes the customer cancel-intent API.
-    assert route_count == 212
+    # RND-366 adds five tenant-scoped favorites API operations.
+    assert route_count == 217
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -533,6 +534,10 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/conversations/{conversation_id}/messages/{msgid}/media/access",
             "/api/conversations/{conversation_id}/messages/{msgid}/nested-media/{item_path}",
             "/api/conversations/{conversation_id}/messages/{msgid}/nested-media/{item_path}/access",
+            "/api/favorites",
+            "/api/favorites/batch",
+            "/api/favorites/status",
+            "/api/favorites/{object_type}/{object_id}",
             "/api/messages",
             "/api/messages/{msgid}",
             "/api/monitored-accounts",
@@ -962,6 +967,16 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/branding/domain", frozenset({"DELETE"}), "BrandingStatusOut", "None"),
         ("/api/contacts", frozenset({"GET"}), "list[ContactOut]", "None"),
         ("/api/conversations", frozenset({"GET"}), "list[ConversationOut]", "None"),
+        ("/api/favorites", frozenset({"POST"}), "FavoriteMutationOut", "None"),
+        ("/api/favorites", frozenset({"GET"}), "FavoritePageOut", "None"),
+        ("/api/favorites/batch", frozenset({"POST"}), "FavoriteMutationOut", "None"),
+        ("/api/favorites/status", frozenset({"POST"}), "FavoriteStatusOut", "None"),
+        (
+            "/api/favorites/{object_type}/{object_id}",
+            frozenset({"DELETE"}),
+            "FavoriteMutationOut",
+            "None",
+        ),
         (
             "/api/conversations/{conversation_id}/detail",
             frozenset({"GET"}),

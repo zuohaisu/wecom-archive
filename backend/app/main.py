@@ -24,6 +24,7 @@ from app.routers.branding import router as branding_router
 from app.routers.conversations import router as conversations_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.export_approval import router as export_approval_router
+from app.routers.favorites import router as favorites_router
 from app.routers.export_audit import router as export_audit_router
 from app.routers.exports import router as exports_router
 from app.routers.external_contacts import router as external_contacts_router
@@ -178,6 +179,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics_router)
     app.include_router(messages_router)
     app.include_router(message_deletion_router)
+    app.include_router(favorites_router)
     app.include_router(export_approval_router)
     app.include_router(export_audit_router)
     app.include_router(exports_router)
