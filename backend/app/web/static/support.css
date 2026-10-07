@@ -5,6 +5,9 @@
 
 .feedback-form { display: flex; flex-direction: column; gap: var(--space-2); max-width: 560px; }
 .feedback-form textarea, .feedback-form input, .feedback-form select { width: 100%; }
+/* design-system.css fixes .input at one control height, which flattened the
+   multi-line feedback box to a single row; give the textarea real room. */
+.feedback-form textarea { height: auto; min-height: 10.5rem; resize: vertical; }
 
 .notice { padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); }
 .notice-warning { background: var(--color-surface-sunken); border: 1px solid var(--color-border); color: var(--color-text-2); }
