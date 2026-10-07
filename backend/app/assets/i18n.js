@@ -407,7 +407,7 @@
         "login.startTrial": "开始 15 天免费试用",
         "login.trialFeeDisclaimer": "软件试用免费；需使用企业微信管理员身份完成授权；企业微信会话存档接口开通及官方费用另计。",
 
-        "nav.diagnostics": "消息可查阅性",
+        "nav.diagnostics": "企微接口检测",
 
         "search.placeholder": "搜索联系人或聊天内容…",
         "search.noResults": "未找到匹配结果",
@@ -452,7 +452,7 @@
         "nav.globalSearch": "全局搜索",
         "nav.mediaAttachments": "媒体与附件",
         "nav.exports": "数据导出",
-        "nav.seats": "座席",
+        "nav.users": "用户管理",
         "nav.staffDirectory": "内部员工",
         "nav.externalContacts": "外部联系人",
         "nav.auditLog": "审计日志",
@@ -549,7 +549,7 @@
         "settings.connectionFailed": "连接失败",
 
         /* RND-327 users page keys — insert below */
-        "users.pageTitle": "座席", "users.description": "管理控制台座席的邀请、角色、状态和登录情况。", "users.invite": "邀请管理员", "users.sendInvite": "发送邀请", "users.inviteSent": "邀请已发送。", "users.total": "控制台账号", "users.active": "已启用", "users.disabled": "已停用", "users.silent30": "静默 ≥30 天", "users.searchPlaceholder": "搜索姓名、账号或部门", "users.allRoles": "全部角色", "users.allStatuses": "全部状态", "users.user": "用户 / 账号", "users.department": "部门", "users.role": "角色", "users.status": "状态", "users.lastActive": "最后活跃", "users.actions": "操作", "users.name": "姓名", "users.email": "企业邮箱", "users.cancel": "取消", "users.loading": "正在加载用户…", "users.empty": "未找到用户", "users.never": "从未活跃", "users.unnamed": "未命名用户", "users.enable": "启用", "users.disable": "停用", "users.resetPassword": "重置密码", "users.resetSent": "重置密码邮件已发送。", "users.requestFailed": "请求失败，请稍后重试。", "users.confirmEnable": "确定要启用此用户吗？", "users.confirmDisable": "确定要停用此用户吗？", "users.confirmReset": "确定要发送重置密码邮件吗？", "users.role.owner": "所有者", "users.role.admin": "管理员", "users.role.compliance": "合规", "users.role.legal": "法务", "users.role.readonlyaudit": "只读审计", "staff.pageTitle": "内部员工", "staff.description": "罗列公司内部员工及其会话存档消息统计，只读展示，不提供任何操作。", "staff.searchPlaceholder": "搜索姓名或账号", "staff.member": "员工 / 账号", "staff.department": "部门", "staff.seat": "座席", "staff.seatYes": "已开通", "staff.seatNo": "未开通", "staff.messages30": "近 30 天消息", "staff.messagesTotal": "累计消息", "staff.count": "员工总数", "staff.loading": "正在加载员工…", "staff.empty": "未找到员工", "staff.unnamed": "未命名员工", "staff.requestFailed": "请求失败，请稍后重试。",
+        "users.pageTitle": "用户管理", "users.description": "管理控制台账号的邀请、角色、状态和登录情况。", "users.invite": "邀请管理员", "users.sendInvite": "发送邀请", "users.inviteSent": "邀请已发送。", "users.total": "控制台账号", "users.active": "已启用", "users.disabled": "已停用", "users.silent30": "静默 ≥30 天", "users.searchPlaceholder": "搜索姓名、账号或部门", "users.allRoles": "全部角色", "users.allStatuses": "全部状态", "users.user": "用户 / 账号", "users.department": "部门", "users.role": "角色", "users.status": "状态", "users.lastActive": "最后活跃", "users.actions": "操作", "users.name": "姓名", "users.email": "企业邮箱", "users.cancel": "取消", "users.loading": "正在加载用户…", "users.empty": "未找到用户", "users.never": "从未活跃", "users.unnamed": "未命名用户", "users.enable": "启用", "users.disable": "停用", "users.resetPassword": "重置密码", "users.resetSent": "重置密码邮件已发送。", "users.requestFailed": "请求失败，请稍后重试。", "users.confirmEnable": "确定要启用此用户吗？", "users.confirmDisable": "确定要停用此用户吗？", "users.confirmReset": "确定要发送重置密码邮件吗？", "users.role.owner": "所有者", "users.role.admin": "管理员", "users.role.compliance": "合规", "users.role.legal": "法务", "users.role.readonlyaudit": "只读审计", "staff.pageTitle": "内部员工", "staff.description": "罗列公司内部员工及其会话存档消息统计，只读展示，不提供任何操作。", "staff.searchPlaceholder": "搜索姓名或账号", "staff.member": "员工 / 账号", "staff.department": "部门", "staff.seat": "座席", "staff.seatYes": "已开通", "staff.seatNo": "未开通", "staff.messages30": "近 30 天消息", "staff.messagesTotal": "累计消息", "staff.count": "员工总数", "staff.loading": "正在加载员工…", "staff.empty": "未找到员工", "staff.unnamed": "未命名员工", "staff.requestFailed": "请求失败，请稍后重试。",
         "users.changeRole": "修改权限", "users.changeRoleTitle": "修改用户权限", "users.saveRole": "保存权限", "users.roleUpdated": "用户权限已更新。", "users.confirmRoleChange": "确定要更新此用户的权限吗？",
         "users.accessRequests.title": "待处理访问申请", "users.accessRequests.description": "已通过企业微信身份验证、但尚未关联控制台账号的员工。关联或创建账号前不会发放任何登录权限。", "users.accessRequests.loading": "正在加载访问申请…", "users.accessRequests.empty": "暂无待处理的访问申请", "users.accessRequests.employee": "员工", "users.accessRequests.emailHint": "邮箱线索", "users.accessRequests.noEmailHint": "未提供", "users.accessRequests.requestedAt": "申请时间", "users.accessRequests.actions": "操作", "users.accessRequests.suspectedMatch": "疑似匹配已有账号：{name}（仅供参考，不会自动关联）", "users.accessRequests.suspectedMatchMultiple": "多个已有账号使用相同邮箱，无法确定唯一疑似匹配，请人工核实后再关联或创建账号", "users.accessRequests.linkAction": "关联到已有账号", "users.accessRequests.createAction": "创建新账号", "users.accessRequests.linkModalTitle": "关联访问申请到已有账号", "users.accessRequests.selectAccount": "目标账号", "users.accessRequests.selectAccountPlaceholder": "请选择账号…", "users.accessRequests.confirmLink": "确定要将此访问申请关联到所选账号吗？关联后该账号可通过企业微信扫码登录。", "users.accessRequests.linkSubmit": "确认关联", "users.accessRequests.linked": "访问申请已关联到账号。", "users.accessRequests.createModalTitle": "从访问申请创建新账号", "users.accessRequests.accountName": "账号姓名", "users.accessRequests.initialStatus": "初始状态", "users.accessRequests.confirmCreate": "确定要为此访问申请创建新账号吗？", "users.accessRequests.createSubmit": "创建并关联", "users.accessRequests.created": "已创建新账号并关联访问申请。", "users.accessRequests.legacyConflictConfirm": "该企业微信身份此前被账号「{name}」（历史遗留、尚未处理的记录）占用。是否释放该账号的历史身份认领以继续本次操作？该账号本身不会被删除，仅所有者可执行此操作。", "users.accessRequests.legacyConflictCancelled": "操作已取消，访问申请仍处于待处理状态。",
         /* RND-328 audit-log page keys — insert below */
@@ -620,7 +620,7 @@
         "composite.unsupportedSegment": "该片段类型暂不支持展示，原始类型已保留",
 
         "contacts.tagAll": "全部标签",
-        "diagnostics.pageTitle": "消息可查阅性",
+        "diagnostics.pageTitle": "企微接口检测",
         "diagnostics.pageDescription": "确认归档消息能否在对应员工、联系人和群聊中被正常找到。",
         "diagnostics.loading": "正在加载最近检查结果…",
         "diagnostics.failedToLoad": "暂时无法加载检查结果，请重试。",
@@ -1071,7 +1071,7 @@
         "login.startTrial": "開始 15 天免費試用",
         "login.trialFeeDisclaimer": "軟體試用免費；需使用企業微信管理員身分完成授權；企業微信會話存檔介面開通及官方費用另計。",
 
-        "nav.diagnostics": "訊息可查閱性",
+        "nav.diagnostics": "企微介面檢測",
 
         "search.placeholder": "搜尋聯絡人或聊天內容…",
         "search.noResults": "未找到匹配結果",
@@ -1116,7 +1116,7 @@
         "nav.globalSearch": "全域搜尋",
         "nav.mediaAttachments": "媒體與附件",
         "nav.exports": "數據匯出",
-        "nav.seats": "座席",
+        "nav.users": "使用者管理",
         "nav.staffDirectory": "內部員工",
         "nav.externalContacts": "外部聯絡人",
         "nav.auditLog": "稽核日誌",
@@ -1213,7 +1213,7 @@
         "settings.connectionFailed": "連線失敗",
 
         /* RND-327 users page keys — insert below */
-        "users.pageTitle": "座席", "users.description": "管理控制台座席的邀請、角色、狀態和登入情況。", "users.invite": "邀請管理員", "users.sendInvite": "傳送邀請", "users.inviteSent": "邀請已傳送。", "users.total": "控制台帳號", "users.active": "已啟用", "users.disabled": "已停用", "users.silent30": "靜默 ≥30 天", "users.searchPlaceholder": "搜尋姓名、帳號或部門", "users.allRoles": "全部角色", "users.allStatuses": "全部狀態", "users.user": "使用者 / 帳號", "users.department": "部門", "users.role": "角色", "users.status": "狀態", "users.lastActive": "最後活躍", "users.actions": "操作", "users.name": "姓名", "users.email": "企業信箱", "users.cancel": "取消", "users.loading": "正在載入使用者…", "users.empty": "找不到使用者", "users.never": "從未活躍", "users.unnamed": "未命名使用者", "users.enable": "啟用", "users.disable": "停用", "users.resetPassword": "重設密碼", "users.resetSent": "重設密碼郵件已傳送。", "users.requestFailed": "要求失敗，請稍後再試。", "users.confirmEnable": "確定要啟用此使用者嗎？", "users.confirmDisable": "確定要停用此使用者嗎？", "users.confirmReset": "確定要傳送重設密碼郵件嗎？", "users.role.owner": "擁有者", "users.role.admin": "管理員", "users.role.compliance": "合規", "users.role.legal": "法務", "users.role.readonlyaudit": "唯讀稽核", "staff.pageTitle": "內部員工", "staff.description": "羅列公司內部員工及其會話封存訊息統計，唯讀展示，不提供任何操作。", "staff.searchPlaceholder": "搜尋姓名或帳號", "staff.member": "員工 / 帳號", "staff.department": "部門", "staff.seat": "座席", "staff.seatYes": "已開通", "staff.seatNo": "未開通", "staff.messages30": "近 30 天訊息", "staff.messagesTotal": "累計訊息", "staff.count": "員工總數", "staff.loading": "正在載入員工…", "staff.empty": "找不到員工", "staff.unnamed": "未命名員工", "staff.requestFailed": "要求失敗，請稍後再試。",
+        "users.pageTitle": "使用者管理", "users.description": "管理控制台帳號的邀請、角色、狀態和登入情況。", "users.invite": "邀請管理員", "users.sendInvite": "傳送邀請", "users.inviteSent": "邀請已傳送。", "users.total": "控制台帳號", "users.active": "已啟用", "users.disabled": "已停用", "users.silent30": "靜默 ≥30 天", "users.searchPlaceholder": "搜尋姓名、帳號或部門", "users.allRoles": "全部角色", "users.allStatuses": "全部狀態", "users.user": "使用者 / 帳號", "users.department": "部門", "users.role": "角色", "users.status": "狀態", "users.lastActive": "最後活躍", "users.actions": "操作", "users.name": "姓名", "users.email": "企業信箱", "users.cancel": "取消", "users.loading": "正在載入使用者…", "users.empty": "找不到使用者", "users.never": "從未活躍", "users.unnamed": "未命名使用者", "users.enable": "啟用", "users.disable": "停用", "users.resetPassword": "重設密碼", "users.resetSent": "重設密碼郵件已傳送。", "users.requestFailed": "要求失敗，請稍後再試。", "users.confirmEnable": "確定要啟用此使用者嗎？", "users.confirmDisable": "確定要停用此使用者嗎？", "users.confirmReset": "確定要傳送重設密碼郵件嗎？", "users.role.owner": "擁有者", "users.role.admin": "管理員", "users.role.compliance": "合規", "users.role.legal": "法務", "users.role.readonlyaudit": "唯讀稽核", "staff.pageTitle": "內部員工", "staff.description": "羅列公司內部員工及其會話封存訊息統計，唯讀展示，不提供任何操作。", "staff.searchPlaceholder": "搜尋姓名或帳號", "staff.member": "員工 / 帳號", "staff.department": "部門", "staff.seat": "座席", "staff.seatYes": "已開通", "staff.seatNo": "未開通", "staff.messages30": "近 30 天訊息", "staff.messagesTotal": "累計訊息", "staff.count": "員工總數", "staff.loading": "正在載入員工…", "staff.empty": "找不到員工", "staff.unnamed": "未命名員工", "staff.requestFailed": "要求失敗，請稍後再試。",
         "users.changeRole": "修改權限", "users.changeRoleTitle": "修改使用者權限", "users.saveRole": "儲存權限", "users.roleUpdated": "使用者權限已更新。", "users.confirmRoleChange": "確定要更新此使用者的權限嗎？",
         "users.accessRequests.title": "待處理存取申請", "users.accessRequests.description": "已通過企業微信身分驗證、但尚未關聯控制台帳號的員工。關聯或建立帳號前不會授予任何登入權限。", "users.accessRequests.loading": "正在載入存取申請…", "users.accessRequests.empty": "暫無待處理的存取申請", "users.accessRequests.employee": "員工", "users.accessRequests.emailHint": "電子郵件線索", "users.accessRequests.noEmailHint": "未提供", "users.accessRequests.requestedAt": "申請時間", "users.accessRequests.actions": "操作", "users.accessRequests.suspectedMatch": "疑似符合既有帳號：{name}（僅供參考，不會自動關聯）", "users.accessRequests.suspectedMatchMultiple": "多個既有帳號使用相同電子郵件，無法判斷唯一疑似符合帳號，請人工核實後再關聯或建立帳號", "users.accessRequests.linkAction": "關聯到既有帳號", "users.accessRequests.createAction": "建立新帳號", "users.accessRequests.linkModalTitle": "將存取申請關聯到既有帳號", "users.accessRequests.selectAccount": "目標帳號", "users.accessRequests.selectAccountPlaceholder": "請選擇帳號…", "users.accessRequests.confirmLink": "確定要將此存取申請關聯到所選帳號嗎？關聯後該帳號可透過企業微信掃碼登入。", "users.accessRequests.linkSubmit": "確認關聯", "users.accessRequests.linked": "存取申請已關聯到帳號。", "users.accessRequests.createModalTitle": "從存取申請建立新帳號", "users.accessRequests.accountName": "帳號姓名", "users.accessRequests.initialStatus": "初始狀態", "users.accessRequests.confirmCreate": "確定要為此存取申請建立新帳號嗎？", "users.accessRequests.createSubmit": "建立並關聯", "users.accessRequests.created": "已建立新帳號並關聯存取申請。", "users.accessRequests.legacyConflictConfirm": "該企業微信身分先前被帳號「{name}」（歷史遺留、尚未處理的記錄）占用。是否釋放該帳號的歷史身分認領以繼續本次操作？該帳號本身不會被刪除，僅擁有者可執行此操作。", "users.accessRequests.legacyConflictCancelled": "操作已取消，存取申請仍處於待處理狀態。",
         /* RND-328 audit-log page keys — insert below */
@@ -1284,7 +1284,7 @@
         "composite.unsupportedSegment": "該片段類型暫不支援顯示，原始類型已保留",
 
         "contacts.tagAll": "全部標籤",
-        "diagnostics.pageTitle": "訊息可查閱性",
+        "diagnostics.pageTitle": "企微介面檢測",
         "diagnostics.pageDescription": "確認歸檔訊息能否在對應員工、聯絡人和群聊中被正常找到。",
         "diagnostics.loading": "正在載入最近檢查結果…",
         "diagnostics.failedToLoad": "暫時無法載入檢查結果，請重試。",
@@ -1736,7 +1736,7 @@
         "login.startTrial": "Start your 15-day free trial",
         "login.trialFeeDisclaimer": "The software trial is free; a WeCom management administrator must complete the authorization; enabling WeCom's conversation-archive interface has its own official fees.",
 
-        "nav.diagnostics": "Message visibility",
+        "nav.diagnostics": "WeCom API check",
 
         "search.placeholder": "Search contacts or messages...",
         "search.noResults": "No results found",
@@ -1781,7 +1781,7 @@
         "nav.globalSearch": "Global Search",
         "nav.mediaAttachments": "Media & Attachments",
         "nav.exports": "Data Export",
-        "nav.seats": "Seats",
+        "nav.users": "User Management",
         "nav.staffDirectory": "Internal staff",
         "nav.externalContacts": "External Contacts",
         "nav.auditLog": "Audit Log",
@@ -1878,7 +1878,7 @@
         "settings.connectionFailed": "Connection failed",
 
         /* RND-327 users page keys — insert below */
-        "users.pageTitle": "Seats", "users.description": "Manage console seat invitations, roles, status, and sign-in activity.", "users.invite": "Invite administrator", "users.sendInvite": "Send invitation", "users.inviteSent": "Invitation sent.", "users.total": "Console accounts", "users.active": "Active", "users.disabled": "Disabled", "users.silent30": "Inactive ≥30 days", "users.searchPlaceholder": "Search name, account, or department", "users.allRoles": "All roles", "users.allStatuses": "All statuses", "users.user": "User / account", "users.department": "Department", "users.role": "Role", "users.status": "Status", "users.lastActive": "Last active", "users.actions": "Actions", "users.name": "Name", "users.email": "Work email", "users.cancel": "Cancel", "users.loading": "Loading users…", "users.empty": "No users found", "users.never": "Never active", "users.unnamed": "Unnamed user", "users.enable": "Enable", "users.disable": "Disable", "users.resetPassword": "Reset password", "users.resetSent": "Password reset email sent.", "users.requestFailed": "Request failed. Please try again.", "users.confirmEnable": "Enable this user?", "users.confirmDisable": "Disable this user?", "users.confirmReset": "Send a password reset email?", "users.role.owner": "Owner", "users.role.admin": "Administrator", "users.role.compliance": "Compliance", "users.role.legal": "Legal", "users.role.readonlyaudit": "Read-only audit", "staff.pageTitle": "Internal staff", "staff.description": "List internal staff with read-only archive message statistics. Display only, no actions.", "staff.searchPlaceholder": "Search name or account", "staff.member": "Staff / account", "staff.department": "Department", "staff.seat": "Seat", "staff.seatYes": "Seated", "staff.seatNo": "No seat", "staff.messages30": "Messages (30 days)", "staff.messagesTotal": "Messages (all time)", "staff.count": "Total staff", "staff.loading": "Loading staff…", "staff.empty": "No staff found", "staff.unnamed": "Unnamed staff", "staff.requestFailed": "Request failed. Please try again.",
+        "users.pageTitle": "User Management", "users.description": "Manage console account invitations, roles, status, and sign-in activity.", "users.invite": "Invite administrator", "users.sendInvite": "Send invitation", "users.inviteSent": "Invitation sent.", "users.total": "Console accounts", "users.active": "Active", "users.disabled": "Disabled", "users.silent30": "Inactive ≥30 days", "users.searchPlaceholder": "Search name, account, or department", "users.allRoles": "All roles", "users.allStatuses": "All statuses", "users.user": "User / account", "users.department": "Department", "users.role": "Role", "users.status": "Status", "users.lastActive": "Last active", "users.actions": "Actions", "users.name": "Name", "users.email": "Work email", "users.cancel": "Cancel", "users.loading": "Loading users…", "users.empty": "No users found", "users.never": "Never active", "users.unnamed": "Unnamed user", "users.enable": "Enable", "users.disable": "Disable", "users.resetPassword": "Reset password", "users.resetSent": "Password reset email sent.", "users.requestFailed": "Request failed. Please try again.", "users.confirmEnable": "Enable this user?", "users.confirmDisable": "Disable this user?", "users.confirmReset": "Send a password reset email?", "users.role.owner": "Owner", "users.role.admin": "Administrator", "users.role.compliance": "Compliance", "users.role.legal": "Legal", "users.role.readonlyaudit": "Read-only audit", "staff.pageTitle": "Internal staff", "staff.description": "List internal staff with read-only archive message statistics. Display only, no actions.", "staff.searchPlaceholder": "Search name or account", "staff.member": "Staff / account", "staff.department": "Department", "staff.seat": "Seat", "staff.seatYes": "Seated", "staff.seatNo": "No seat", "staff.messages30": "Messages (30 days)", "staff.messagesTotal": "Messages (all time)", "staff.count": "Total staff", "staff.loading": "Loading staff…", "staff.empty": "No staff found", "staff.unnamed": "Unnamed staff", "staff.requestFailed": "Request failed. Please try again.",
         "users.changeRole": "Change permissions", "users.changeRoleTitle": "Change user permissions", "users.saveRole": "Save permissions", "users.roleUpdated": "User permissions updated.", "users.confirmRoleChange": "Update this user's permissions?",
         "users.accessRequests.title": "Pending access requests", "users.accessRequests.description": "Employees WeCom has verified but who are not yet linked to a console account. No login access is granted until you link or create an account.", "users.accessRequests.loading": "Loading access requests…", "users.accessRequests.empty": "No pending access requests", "users.accessRequests.employee": "Employee", "users.accessRequests.emailHint": "Email hint", "users.accessRequests.noEmailHint": "Not provided", "users.accessRequests.requestedAt": "Requested", "users.accessRequests.actions": "Actions", "users.accessRequests.suspectedMatch": "Possible match: {name} (for reference only — never linked automatically)", "users.accessRequests.suspectedMatchMultiple": "Multiple existing accounts share this email — no single suspected match could be determined; please review manually before linking or creating an account", "users.accessRequests.linkAction": "Link to existing account", "users.accessRequests.createAction": "Create new account", "users.accessRequests.linkModalTitle": "Link access request to an existing account", "users.accessRequests.selectAccount": "Target account", "users.accessRequests.selectAccountPlaceholder": "Select an account…", "users.accessRequests.confirmLink": "Link this access request to the selected account? Once linked, that account can sign in via WeCom QR login.", "users.accessRequests.linkSubmit": "Confirm link", "users.accessRequests.linked": "Access request linked to the account.", "users.accessRequests.createModalTitle": "Create a new account from this access request", "users.accessRequests.accountName": "Account name", "users.accessRequests.initialStatus": "Initial status", "users.accessRequests.confirmCreate": "Create a new account for this access request?", "users.accessRequests.createSubmit": "Create and link", "users.accessRequests.created": "New account created and linked to the access request.", "users.accessRequests.legacyConflictConfirm": "This WeCom identity is currently claimed by account \"{name}\" (an old, unresolved legacy record). Release that account's claim to continue? The account itself will not be deleted — only an owner can do this.", "users.accessRequests.legacyConflictCancelled": "Cancelled — the access request is still pending.",
         /* RND-328 audit-log page keys — insert below */
@@ -1949,7 +1949,7 @@
         "composite.unsupportedSegment": "This segment type isn't supported for display yet — the original type is preserved",
 
         "contacts.tagAll": "All tags",
-        "diagnostics.pageTitle": "Message visibility",
+        "diagnostics.pageTitle": "WeCom API check",
         "diagnostics.pageDescription": "Confirm that archived messages can be found under the right employee, contact, and group conversation.",
         "diagnostics.loading": "Loading the latest check result…",
         "diagnostics.failedToLoad": "The latest check result could not be loaded. Try again.",
