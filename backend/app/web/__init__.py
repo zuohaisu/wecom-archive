@@ -57,4 +57,11 @@ def render_template(name: str, **ctx) -> str:
             raise KeyError(f"unresolved template token __{token}__ in {name}.html")
         return values[token]
 
-    return _TOKEN_RE.sub(_sub, text)
+    text = _TOKEN_RE.sub(_sub, text)
+    # GH-101: bootstrap the dark-theme contract on every design-system page
+    # before first paint (theme.js sets <html data-theme> from localStorage
+    # or prefers-color-scheme). Platform chrome intentionally stays light.
+    if not name.startswith("platform") and "design-system.css" in text:
+        theme_tag = f'<script src="/web/static/theme.js?v={STATIC_VERSION}"></script>'
+        text = text.replace("</head>", theme_tag + "</head>", 1)
+    return text

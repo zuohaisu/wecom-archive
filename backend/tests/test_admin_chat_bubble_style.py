@@ -143,7 +143,7 @@ def test_base_media_placeholder_style_updated_for_console_v2() -> None:
     base_rule = _extract_rule(css, ".media-placeholder")
     assert "background:var(--color-surface)" in base_rule
     assert ":root{" in css and "--color-surface:#fff" in css
-    assert "#d9dde3" in base_rule
+    assert "border:1px dashed var(--color-border-input)" in base_rule
 
 
 # ---------------------------------------------------------------------------
