@@ -61,7 +61,6 @@ class Tenant(Base):
     id = Column(String(36), primary_key=True)
     name = Column(String(255), nullable=False)
     slug = Column(String(128), nullable=False)
-    is_active = Column(Boolean, nullable=False, default=True)
     lifecycle_status = Column(
         String(16), nullable=False, default="active", server_default=text("'active'")
     )

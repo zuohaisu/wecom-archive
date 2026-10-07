@@ -111,7 +111,7 @@ def _mock_wecom_token(monkeypatch):
 
 def _seed_config(engine, corp_id: str = "corp-qr") -> None:
     with Session(engine) as db:
-        db.add(Tenant(id="tenant-qr", name="QR tenant", slug="qr", is_active=True))
+        db.add(Tenant(id="tenant-qr", name="QR tenant", slug="qr"))
         db.add(
             TenantWecomConfig(
                 id="config-qr",
@@ -413,7 +413,7 @@ def test_access_requests_are_isolated_per_tenant(client, db_engine, monkeypatch)
     never a cross-tenant match or a single shared row."""
     _set_wecom_env(monkeypatch)
     with Session(db_engine) as db:
-        db.add(Tenant(id="tenant-other", name="Other tenant", slug="other", is_active=True))
+        db.add(Tenant(id="tenant-other", name="Other tenant", slug="other"))
         db.add(
             TenantWecomConfig(
                 id="config-other",

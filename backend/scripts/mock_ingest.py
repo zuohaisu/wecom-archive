@@ -389,8 +389,9 @@ def _ensure_default_tenant(session: Session) -> None:
         session.execute(
             text(
                 """
-                INSERT INTO tenants (id, name, slug, is_active, created_at, updated_at)
-                VALUES (:id, 'Default', 'default', true, NOW(), NOW())
+                INSERT INTO tenants
+                    (id, name, slug, lifecycle_status, created_at, updated_at)
+                VALUES (:id, 'Default', 'default', 'active', NOW(), NOW())
                 ON CONFLICT (id) DO NOTHING
                 """
             ),

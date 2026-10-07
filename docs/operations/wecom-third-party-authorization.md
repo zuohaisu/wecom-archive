@@ -134,7 +134,8 @@ permanent code、CorpID、UserID 或完整回调 URL。
 配置不完整或字段加密密钥缺失/无效时，install 与授权码 callback 均安全跳转至
 `/admin/login?error=config_error`，且不创建或消费授权状态、proof、组织或用户数据。
 
-自助创建完成后租户保持 `provisioning` 且 `is_active=false`。其会话只能访问
+自助创建完成后租户仅以 `lifecycle_status=provisioning` 表示待配置状态；租户不再有
+持久化的 `is_active` 字段。其会话只能访问
 `/admin/provisioning`、`/admin/provisioning/settings` 与 `/api/provisioning/status`；归档、
 同步、导出、邀请和普通后台均失败关闭。运维完成会话存档凭证、回调与连通性验证后，
 再由平台启用租户；激活后的 archive dispatch 使用该租户的显式 tenant-scoped

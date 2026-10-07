@@ -25,8 +25,8 @@ def db() -> Session:
         tables=[Tenant.__table__, TenantWecomConfig.__table__, SyncState.__table__],
     )
     session = Session(engine)
-    session.add(Tenant(id="tenant-a", name="Tenant A", slug="tenant-a", is_active=True))
-    session.add(Tenant(id="tenant-b", name="Tenant B", slug="tenant-b", is_active=True))
+    session.add(Tenant(id="tenant-a", name="Tenant A", slug="tenant-a"))
+    session.add(Tenant(id="tenant-b", name="Tenant B", slug="tenant-b"))
     session.add(
         TenantWecomConfig(
             id="config-a",

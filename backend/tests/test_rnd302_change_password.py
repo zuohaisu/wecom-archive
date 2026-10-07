@@ -40,7 +40,7 @@ def password_client() -> Generator[tuple[TestClient, Session, AdminUser], None, 
     )
     session_factory = sessionmaker(bind=engine)
     db = session_factory()
-    tenant = Tenant(id="tenant-rnd302", slug="rnd302", name="RND-302", is_active=True)
+    tenant = Tenant(id="tenant-rnd302", slug="rnd302", name="RND-302")
     user = AdminUser(
         id=str(uuid.uuid4()),
         tenant_id=tenant.id,

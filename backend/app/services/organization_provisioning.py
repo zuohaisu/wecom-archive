@@ -107,7 +107,6 @@ def provision_organization(db: Session, raw_claim_ref: str | None) -> Provisioni
         id=tenant_id,
         name=claim.corp_name,
         slug=_safe_slug(claim.corp_id),
-        is_active=False,
         lifecycle_status="provisioning",
     )
     db.add(tenant)

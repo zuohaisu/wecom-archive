@@ -35,8 +35,8 @@ def _session_with_users() -> tuple[Session, AdminUser, AdminUser]:
         tables=[Tenant.__table__, AdminUser.__table__, ExportApprovalToken.__table__],
     )
     db = Session(engine)
-    tenant_a = Tenant(id="tenant-a", slug="tenant-a", name="Tenant A", is_active=True)
-    tenant_b = Tenant(id="tenant-b", slug="tenant-b", name="Tenant B", is_active=True)
+    tenant_a = Tenant(id="tenant-a", slug="tenant-a", name="Tenant A")
+    tenant_b = Tenant(id="tenant-b", slug="tenant-b", name="Tenant B")
     user_a = AdminUser(
         id=str(uuid.uuid4()), tenant_id=tenant_a.id, wecom_user_id="user-a",
         name="User A", password_hash=hash_password("correct-password"), role="admin",

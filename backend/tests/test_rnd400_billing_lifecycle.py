@@ -217,7 +217,6 @@ def test_grace_end_expires_and_freezes_at_the_exact_exclusive_boundary(factory) 
         assert subscription is not None and subscription.status == "expired"
         assert subscription.revision == 3
         assert tenant is not None and tenant.lifecycle_status == "frozen"
-        assert tenant.is_active is False
         assert tenant.frozen_at is not None
         assert tenant.frozen_at.replace(tzinfo=timezone.utc) == boundary
         assert tenant.lifecycle_revision == 2
@@ -242,7 +241,6 @@ def test_grace_renewal_extends_from_original_end_and_restores_billing_freeze(
         tenant = db.get(Tenant, "tenant-a")
         assert tenant is not None
         tenant.lifecycle_status = "frozen"
-        tenant.is_active = False
         tenant.frozen_at = NOW - timedelta(days=1)
         db.commit()
 
@@ -256,7 +254,7 @@ def test_grace_renewal_extends_from_original_end_and_restores_billing_freeze(
         assert subscription is not None and subscription.status == "active"
         assert subscription.cancel_at_period_end is False
         assert tenant is not None and tenant.lifecycle_status == "active"
-        assert tenant.is_active is True and tenant.frozen_at is None
+        assert tenant.frozen_at is None
         assert db.query(AuditLog).filter_by(
             action=AuditAction.TENANT_BILLING_RESTORED
         ).count() == 1
@@ -376,7 +374,7 @@ def test_resume_after_subscription_expiry_returns_to_frozen_not_active(factory) 
 
         tenant = db.get(Tenant, "tenant-a")
         assert result.lifecycle_status == "frozen"
-        assert tenant is not None and tenant.is_active is False
+        assert tenant is not None and tenant.lifecycle_status == "frozen"
         assert tenant.frozen_at is not None
         assert tenant.frozen_at.replace(tzinfo=timezone.utc) == NOW + timedelta(
             minutes=1

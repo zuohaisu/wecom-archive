@@ -59,7 +59,7 @@ def _make_tenant(tenant_id: str = "00000000-0000-0000-0000-000000000001") -> Mag
     t = MagicMock()
     t.id = tenant_id
     t.slug = "default"
-    t.is_active = True
+    t.lifecycle_status = "active"
     return t
 
 
@@ -776,18 +776,17 @@ def test_password_login_missing_config_fails_closed_401(client) -> None:
 
 # ---------------------------------------------------------------------------
 # Tenant-binding safety (Codex QA regression) — password login must NEVER
-# fall back to an arbitrary active tenant when the RND-111 default tenant
-# (slug='default') is missing or inactive. It must fail closed.
+# fall back to an arbitrary tenant when the RND-111 default tenant
+# (slug='default') is missing. It must fail closed.
 # ---------------------------------------------------------------------------
 
 
 def _mock_db_default_tenant_missing_other_tenant_active(other_tenant_id: str):
     """
-    Simulates: no tenant matches (slug='default' AND is_active), but a
-    *different* active tenant row exists in the table. The password-login
-    query filters on slug+active in a single .filter(...).first() call, so a
-    correctly-scoped query returns None here — only a buggy fallback query
-    (querying Tenant by is_active alone) would find `other_tenant`.
+    Simulates: no tenant matches slug='default', but a different tenant row
+    exists in the table. The password-login query is bound to the default
+    slug, so a correctly-scoped query returns None here — only a buggy
+    fallback query would find `other_tenant`.
 
     Tracks every AdminUser/AdminSession added and every Tenant query made so
     tests can assert no session escapes and no unscoped fallback query ran.
@@ -810,7 +809,7 @@ def _mock_db_default_tenant_missing_other_tenant_active(other_tenant_id: str):
 
             if model is Tenant:
                 tenant_queries.append(True)
-                # Correctly-scoped lookup (slug='default' AND is_active) finds nothing.
+                # Correctly-scoped lookup by the required default slug finds nothing.
                 q.first.return_value = None
             elif model is AdminUser:
                 q.first.return_value = None
@@ -900,12 +899,8 @@ def test_password_login_fails_when_default_tenant_missing_but_other_active_tenan
     assert "some-other-tenant" not in resp.text
 
 
-def test_password_login_fails_when_default_tenant_inactive(client) -> None:
-    """
-    Regression: a tenant row with slug='default' exists but is_active=False.
-    The query filters on is_active=True, so this must behave identically to
-    "missing" — fail closed, no session, no cookie.
-    """
+def test_password_login_fails_when_default_tenant_suspended(client) -> None:
+    """Manual suspension blocks login without creating a session or cookie."""
     from app.auth import hash_password
     from app.db.session import get_db
     from app.main import app
@@ -915,7 +910,7 @@ def test_password_login_fails_when_default_tenant_inactive(client) -> None:
 
     added_sessions: list = []
 
-    def _db_default_tenant_inactive():
+    def _db_default_tenant_suspended():
         mock = MagicMock()
 
         def _query(model):
@@ -924,8 +919,9 @@ def test_password_login_fails_when_default_tenant_inactive(client) -> None:
             q = MagicMock()
             q.filter.return_value = q
             if model is Tenant:
-                # is_active.is_(True) filter excludes the inactive default row.
-                q.first.return_value = None
+                tenant = _make_tenant()
+                tenant.lifecycle_status = "suspended"
+                q.first.return_value = tenant
             else:
                 q.first.return_value = None
             return q
@@ -942,7 +938,7 @@ def test_password_login_fails_when_default_tenant_inactive(client) -> None:
         mock.commit.return_value = None
         yield mock
 
-    app.dependency_overrides[get_db] = _db_default_tenant_inactive
+    app.dependency_overrides[get_db] = _db_default_tenant_suspended
     try:
         with patch.dict(os.environ, env):
             resp = client.post(
@@ -952,7 +948,8 @@ def test_password_login_fails_when_default_tenant_inactive(client) -> None:
     finally:
         app.dependency_overrides[get_db] = _mock_db_no_session
 
-    assert resp.status_code == 500
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "service_suspended"
     assert len(added_sessions) == 0
     assert "session_id" not in resp.headers.get("set-cookie", "")
 

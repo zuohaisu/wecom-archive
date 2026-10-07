@@ -324,8 +324,8 @@ def test_two_real_concurrent_sessions_racing_on_the_same_revoke_event() -> None:
         setup_session = _Session(setup_engine)
         setup_session.execute(
             text(
-                "INSERT INTO tenants (id, name, slug, is_active) "
-                "VALUES (:id, 'Tenant A', 'tenant-a', true)"
+                "INSERT INTO tenants (id, name, slug) "
+                "VALUES (:id, 'Tenant A', 'tenant-a')"
             ),
             {"id": _TENANT_A},
         )
@@ -433,7 +433,7 @@ def test_two_different_revoke_events_racing_to_link_the_same_original_earliest_w
         setup_engine = _create_engine(target_dsn)
         setup_session = _Session(setup_engine)
         setup_session.execute(
-            text("INSERT INTO tenants (id, name, slug, is_active) VALUES (:id, 'Tenant A', 'tenant-a', true)"),
+            text("INSERT INTO tenants (id, name, slug) VALUES (:id, 'Tenant A', 'tenant-a')"),
             {"id": _TENANT_A},
         )
         setup_session.commit()

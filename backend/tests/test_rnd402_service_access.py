@@ -251,7 +251,6 @@ def _set_lifecycle(db: Session, tenant_id: str, status: str) -> None:
     tenant = db.get(Tenant, tenant_id)
     assert tenant is not None
     tenant.lifecycle_status = status
-    tenant.is_active = status == "active"
     db.commit()
 
 
@@ -325,7 +324,6 @@ def test_batch_renews_frozen_tenant_back_to_active(factory) -> None:
         summary = run_lifecycle_batch_once(db, now=NOW + timedelta(minutes=1))
         assert summary.tenant_changed == 1
         assert db.get(Tenant, "tenant-a").lifecycle_status == "active"
-        assert db.get(Tenant, "tenant-a").is_active is True
 
 
 def test_batch_never_reprojects_a_manual_suspension(factory) -> None:
@@ -468,7 +466,9 @@ def test_export_notifications_skip_frozen_tenant(monkeypatch, factory) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_archive_worker_gate_skips_frozen_and_audits(factory) -> None:
+def test_gh94_archive_worker_gate_skips_non_active_lifecycle_even_with_stale_boolean(
+    factory,
+) -> None:
     from scripts.run_archive_worker_once import ArchiveWorkerExit, _gate_single_tenant
 
     with factory() as db:
@@ -484,6 +484,24 @@ def test_archive_worker_gate_skips_frozen_and_audits(factory) -> None:
         )
         assert audit.detail["error_code"] == DENY_FROZEN
         assert audit.detail["capability"] == WORKER_SYNC
+
+        # Manual suspension remains denied by the authoritative lifecycle.
+        suspended = db.get(Tenant, "tenant-suspended")
+        assert suspended is not None
+        suspended.lifecycle_status = "suspended"
+        db.commit()
+        with pytest.raises(ArchiveWorkerExit) as suspended_exc:
+            _gate_single_tenant(db, "tenant-suspended", "digest")
+        assert suspended_exc.value.code == 0
+        suspended_audit = (
+            db.query(AuditLog)
+            .filter(AuditLog.tenant_id == "tenant-suspended")
+            .filter(AuditLog.action == AuditAction.SERVICE_ACCESS_DENIED)
+            .one()
+        )
+        assert suspended_audit.detail["error_code"] == DENY_SUSPENDED
+        assert suspended_audit.detail["capability"] == WORKER_SYNC
+
         # Active tenants pass the gate without side effects.
         _gate_single_tenant(db, "tenant-a", "digest")
         assert (
@@ -536,33 +554,61 @@ def test_media_dispatch_skips_frozen_tenant(monkeypatch, factory) -> None:
         assert outcome is not MediaWorkerDispatch.SKIPPED
 
 
-def test_contact_refresh_worker_skips_frozen_tenant(factory) -> None:
-    from app.services.tenant_credentials import active_tenant_configs
+def test_gh94_worker_selection_uses_lifecycle_for_all_and_explicit_paths(
+    factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cryptography.fernet import Fernet
 
+    from app.services.tenant_credentials import (
+        TENANT_CONFIG_UNAVAILABLE,
+        TenantCredentialError,
+        active_tenant_configs,
+        active_tenant_ids,
+        resolve_tenant_archive_credentials,
+    )
+
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     with factory() as db:
-        db.add(
-            TenantWecomConfig(
-                id="cfg-frozen",
-                tenant_id="tenant-frozen",
-                corp_id="corp-frozen",
+        configs = []
+        for tenant_id in (
+            "tenant-a",
+            "tenant-b",
+            "tenant-frozen",
+            "tenant-suspended",
+            "tenant-legacy",
+        ):
+            config = TenantWecomConfig(
+                id=f"cfg-{tenant_id}",
+                tenant_id=tenant_id,
+                corp_id=f"corp-{tenant_id}",
                 is_active=True,
-                app_secret="unused",
+                app_secret="placeholder",
                 agent_id="1",
             )
-        )
-        db.add(
-            TenantWecomConfig(
-                id="cfg-active",
-                tenant_id="tenant-a",
-                corp_id="corp-active",
-                is_active=True,
-                app_secret="unused",
-                agent_id="1",
-            )
-        )
-        db.commit()
+            config.set_app_secret(f"synthetic-secret-{tenant_id}")
+            configs.append(config)
+        db.add_all(configs)
+        _set_lifecycle(db, "tenant-b", "provisioning")
         _set_lifecycle(db, "tenant-frozen", "frozen")
-        assert [config.tenant_id for config in active_tenant_configs(db)] == ["tenant-a"]
+        _set_lifecycle(db, "tenant-suspended", "suspended")
+        db.commit()
+
+        assert set(active_tenant_ids(db)) == {"tenant-a", "tenant-legacy"}
+        active_ids = {"tenant-a", "tenant-legacy"}
+        assert set(active_tenant_ids(db)) == active_ids
+        assert {
+            config.tenant_id for config in active_tenant_configs(db)
+        } == active_ids
+
+        for tenant_id in active_ids:
+            credentials = resolve_tenant_archive_credentials(db, tenant_id)
+            assert credentials.tenant_id == tenant_id
+            assert credentials.archive_secret == f"synthetic-secret-{tenant_id}"
+
+        for tenant_id in {"tenant-b", "tenant-frozen", "tenant-suspended", "missing"}:
+            with pytest.raises(TenantCredentialError) as error:
+                resolve_tenant_archive_credentials(db, tenant_id)
+            assert error.value.error_class == TENANT_CONFIG_UNAVAILABLE
 
 
 # ---------------------------------------------------------------------------
@@ -761,7 +807,6 @@ def test_password_login_denied_for_suspended_default_tenant(monkeypatch, app_cli
             default = Tenant(id="default", name="Default", slug="default")
             db.add(default)
         default.lifecycle_status = "suspended"
-        default.is_active = False
         db.commit()
     response = client.post(
         "/api/auth/password/login",
@@ -785,7 +830,6 @@ def test_renewal_recovery_reopens_interactive_gate(app_client) -> None:
         assert tenant is not None
         assert tenant.lifecycle_status == "active"  # default fixture state
         tenant.lifecycle_status = "frozen"
-        tenant.is_active = False
         db.commit()
         assert (
             client.get(

@@ -468,7 +468,6 @@ def test_frozen_notice_waits_for_authoritative_tenant_projection(factory, monkey
 
         tenant = db.get(Tenant, "tenant-a")
         tenant.lifecycle_status = "frozen"
-        tenant.is_active = False
         db.commit()
         second = run_billing_notifications_once(
             db,

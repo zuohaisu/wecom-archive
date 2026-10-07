@@ -198,7 +198,6 @@ def _apply_projected_tenant_status(
         return False
     previous_status = tenant.lifecycle_status
     tenant.lifecycle_status = target_status
-    tenant.is_active = target_status == "active"
     tenant.lifecycle_revision += 1
     if target_status == "frozen":
         tenant.frozen_at = tenant.frozen_at or at
@@ -336,7 +335,6 @@ def suspend_tenant_service(
 
     previous_status = tenant.lifecycle_status
     tenant.lifecycle_status = "suspended"
-    tenant.is_active = False
     tenant.lifecycle_revision += 1
     tenant.suspended_at = checked_at
     tenant.suspension_reason = normalized_reason
@@ -395,7 +393,6 @@ def resume_tenant_service(
     )
 
     tenant.lifecycle_status = target_status
-    tenant.is_active = target_status == "active"
     tenant.lifecycle_revision += 1
     if target_status == "active":
         tenant.frozen_at = None

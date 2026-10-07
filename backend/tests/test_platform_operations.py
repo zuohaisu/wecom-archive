@@ -505,6 +505,40 @@ def test_paginated_tenant_detail_is_audited_and_manual_operations_are_audited(
         assert "internal-only note" not in str(financial)
 
 
+def test_gh94_platform_service_suspend_resume_projects_legacy_boolean(
+    operations_client: tuple[TestClient, sessionmaker],
+) -> None:
+    client, factory = operations_client
+    path = "/api/platform/operations/tenants/tenant-active/service"
+    common = {
+        "reason_code": "risk_review",
+        "confirmation": "active-co",
+    }
+
+    suspended = client.patch(
+        path,
+        headers={**_basic(), "Idempotency-Key": "issue-94-suspend"},
+        json={**common, "lifecycle_status": "suspended"},
+    )
+    assert suspended.status_code == 200
+    assert suspended.json()["lifecycle_status"] == "suspended"
+    assert suspended.json()["is_active"] is False
+
+    resumed = client.patch(
+        path,
+        headers={**_basic(), "Idempotency-Key": "issue-94-service-resume"},
+        json={**common, "lifecycle_status": "active"},
+    )
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["lifecycle_status"] == "active"
+    assert resumed.json()["is_active"] is True
+
+    with factory() as db:
+        tenant = db.get(Tenant, "tenant-active")
+        assert tenant is not None
+        assert tenant.lifecycle_status == "active"
+
+
 def test_rnd405_commercial_filters_sort_and_control_confirmation(
     operations_client: tuple[TestClient, sessionmaker],
 ) -> None:

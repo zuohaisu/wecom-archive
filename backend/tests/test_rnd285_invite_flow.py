@@ -22,7 +22,7 @@ def _session_with_inviter() -> tuple[Session, AdminUser, str]:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine, tables=[Tenant.__table__, AdminUser.__table__])
     db = Session(engine)
-    tenant = Tenant(id="tenant-1", slug="default", name="Default", is_active=True)
+    tenant = Tenant(id="tenant-1", slug="default", name="Default")
     inviter = AdminUser(
         id=str(uuid.uuid4()),
         tenant_id=tenant.id,

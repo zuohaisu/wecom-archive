@@ -50,7 +50,7 @@ def db():
 
 
 def _make_tenant(db: Session, tenant_id: str, slug: str) -> Tenant:
-    tenant = Tenant(id=tenant_id, name=slug, slug=slug, is_active=True)
+    tenant = Tenant(id=tenant_id, name=slug, slug=slug)
     db.add(tenant)
     db.commit()
     return tenant

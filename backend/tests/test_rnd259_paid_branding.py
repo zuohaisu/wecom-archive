@@ -34,6 +34,7 @@ from app.routers.branding import router as branding_router
 from app.routers.platform import managed_branding_domain_metrics
 from app.services.branding import (
     BrandingHostMiddleware,
+    active_tenant_for_custom_host,
     configure_domain,
     record_certificate_status,
     utc_now,
@@ -189,6 +190,27 @@ def test_logo_and_optional_favicon_are_real_mime_checked_and_tenant_scoped(brand
     assert custom_b.status_code == 200
     assert custom_b.content == logo_b
     assert client.get("/api/branding/logo", headers={"Host": "unknown.example"}).status_code == 421
+
+
+def test_custom_host_resolution_requires_active_tenant_lifecycle(branding_client) -> None:
+    _client, db, _current = branding_client
+    config, _token = configure_domain(db, "tenant-a", "archive.a.example.com")
+    config.domain_state = "active"
+    config.domain_enabled = True
+    config.certificate_status = "issued"
+    config.certificate_expires_at = utc_now() + timedelta(days=30)
+    db.commit()
+
+    assert active_tenant_for_custom_host(db, "archive.a.example.com") == "tenant-a"
+    tenant = db.get(Tenant, "tenant-a")
+    assert tenant is not None
+    tenant.lifecycle_status = "frozen"
+    db.commit()
+    assert active_tenant_for_custom_host(db, "archive.a.example.com") is None
+
+    tenant.lifecycle_status = "suspended"
+    db.commit()
+    assert active_tenant_for_custom_host(db, "archive.a.example.com") is None
 
 
 def test_domain_token_is_one_time_hash_only_and_activation_needs_dns_and_tls(branding_client, monkeypatch: pytest.MonkeyPatch) -> None:

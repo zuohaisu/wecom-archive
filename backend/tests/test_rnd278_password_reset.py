@@ -23,7 +23,7 @@ def _session_with_user() -> tuple[Session, AdminUser]:
         tables=[Tenant.__table__, AdminUser.__table__, PasswordResetToken.__table__],
     )
     db = Session(engine)
-    tenant = Tenant(id="tenant-1", slug="default", name="Default", is_active=True)
+    tenant = Tenant(id="tenant-1", slug="default", name="Default")
     user = AdminUser(
         id=str(uuid.uuid4()),
         tenant_id=tenant.id,

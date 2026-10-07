@@ -575,7 +575,7 @@ def password_forgot(body: _ForgotBody, db: Session = Depends(get_db)):
         .join(Tenant, Tenant.id == AdminUser.tenant_id)
         .filter(
             Tenant.slug == "default",
-            Tenant.is_active.is_(True),
+            Tenant.lifecycle_status == "active",
             func.lower(AdminUser.email) == submitted,
             AdminUser.status == "active",
             AdminUser.password_hash.isnot(None),
@@ -932,10 +932,9 @@ def password_login(
     # Resolve default tenant — bound to slug='default' created by RND-111 bootstrap.
     # Must NEVER fall back to any other tenant: password-mode sessions are only
     # ever valid for the RND-111 default tenant. If it's missing, fail closed
-    # rather than binding to an arbitrary tenant. RND-402: the legacy
-    # is_active filter is intentionally not applied here — a billing-frozen
-    # tenant has is_active=False but its Owner must still be able to log in
-    # for the billing/renewal recovery surface; only a manual suspension
+    # rather than binding to an arbitrary tenant. Password login uses the
+    # lifecycle directly: a billing-frozen tenant's Owner must still be able to
+    # log in for the billing/renewal recovery surface; only manual suspension
     # denies login below.
     tenant = (
         db.query(Tenant)

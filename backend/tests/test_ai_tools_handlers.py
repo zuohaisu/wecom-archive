@@ -97,6 +97,23 @@ def test_tenant_service_status_reflects_real_row(db: Session, tenant_and_user) -
     assert result.data["lifecycle_status"] == "active"
     assert result.data["is_active"] is True
 
+    from app.db.models import Tenant
+
+    tenant = db.get(Tenant, tenant_id)
+    assert tenant is not None
+    tenant.lifecycle_status = "frozen"
+    db.commit()
+    frozen_result = invoke_tool(
+        db,
+        "tenant_service_status",
+        _context(tenant_id, user_id),
+        consent_given=True,
+    )
+    assert frozen_result.data == {
+        "lifecycle_status": "frozen",
+        "is_active": False,
+    }
+
 
 def test_config_status_reports_wecom_not_connected_for_fresh_tenant(db: Session, tenant_and_user) -> None:
     tenant_id, user_id = tenant_and_user

@@ -57,7 +57,7 @@ def active_tenant_ids(db: Session) -> list[str]:
         tenant_id
         for (tenant_id,) in (
             db.query(Tenant.id)
-            .filter(Tenant.is_active.is_(True), Tenant.lifecycle_status == "active")
+            .filter(Tenant.lifecycle_status == "active")
             .order_by(Tenant.created_at)
             .all()
         )
@@ -67,16 +67,14 @@ def active_tenant_ids(db: Session) -> list[str]:
 def active_tenant_configs(db: Session) -> list[TenantWecomConfig]:
     """Active, non-provisioning tenant config rows in stable creation order.
 
-    Only fully live tenants archive: ``Tenant.is_active`` plus
-    ``lifecycle_status == 'active'`` (RND-398) gate the per-tenant loop, and
-    the config row itself must be active. Provisioning tenants are excluded
-    until activation promotes them.
+    Only fully live tenants archive: ``lifecycle_status == 'active'`` gates
+    the per-tenant loop, and the config row itself must be active. Provisioning
+    tenants are excluded until activation promotes them.
     """
     return (
         db.query(TenantWecomConfig)
         .join(Tenant, Tenant.id == TenantWecomConfig.tenant_id)
         .filter(
-            Tenant.is_active.is_(True),
             Tenant.lifecycle_status == "active",
             TenantWecomConfig.is_active.is_(True),
         )
@@ -135,7 +133,7 @@ def resolve_tenant_archive_credentials(
 ) -> TenantArchiveCredentials:
     """Resolve one explicitly targeted active tenant's archive credentials.
 
-    A missing tenant, inactive tenant, missing config, or inactive config is
+    A missing or non-active tenant, missing config, or inactive config is
     deliberately one safe operational category. The returned values must only
     be passed to the SDK/child environment and never to logs or API responses.
     """
@@ -145,7 +143,12 @@ def resolve_tenant_archive_credentials(
         .filter(TenantWecomConfig.tenant_id == tenant_id)
         .first()
     )
-    if tenant is None or not tenant.is_active or config is None or not config.is_active:
+    if (
+        tenant is None
+        or tenant.lifecycle_status != "active"
+        or config is None
+        or not config.is_active
+    ):
         raise TenantCredentialError(TENANT_CONFIG_UNAVAILABLE)
     return credentials_for_active_config(config)
 
