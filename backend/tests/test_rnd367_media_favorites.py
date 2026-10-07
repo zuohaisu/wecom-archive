@@ -135,3 +135,58 @@ def test_successful_write_reconciles_visible_status_after_items_change() -> None
 """
     )
     assert output.strip() == "revision-change=visible-status-reconciled"
+
+
+def test_late_same_list_status_read_cannot_overwrite_write_and_reconciliation() -> None:
+    output = _run(
+        """
+(async function () {
+  var serverFavorited = false;
+  var statusCalls = 0;
+  var resolveLateListStatus, resolvePostWriteStatus, resolveBatch;
+  function statusResponse(body, favorited) {
+    return {items: body.items.map(function (item) {
+      return {object_type: 'media', object_id: item.object_id, result: 'found', is_favorited: favorited};
+    })};
+  }
+  var favorites = MediaFavorites.create({request: function (url, options) {
+    var body = JSON.parse(options.body);
+    if (url === '/api/favorites/status') {
+      statusCalls += 1;
+      if (statusCalls === 1) return Promise.resolve(statusResponse(body, false));
+      if (statusCalls === 2) return new Promise(function (resolve) {
+        resolveLateListStatus = function () { resolve(statusResponse(body, false)); };
+      });
+      if (statusCalls === 3) return new Promise(function (resolve) {
+        resolvePostWriteStatus = function () { resolve(statusResponse(body, serverFavorited)); };
+      });
+      throw new Error('unexpected status request ' + statusCalls);
+    }
+    return new Promise(function (resolve) {
+      resolveBatch = function (data) { serverFavorited = true; resolve(data); };
+    });
+  }});
+  await favorites.setItems([{id: 1}]);
+  favorites.setRole('owner');
+  favorites.selectAllLoaded();
+  var action = favorites.apply('favorite');
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  var replacementLoad = favorites.setItems([{id: 1}]);
+  for (var i = 0; i < 20 && !resolveLateListStatus; i++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (!resolveBatch || !resolveLateListStatus) throw new Error('fixture failed to overlap list status with write');
+  resolveBatch({requested: 1, unique: 1, applied: 1, unchanged: 0, not_found: 0, items: [
+    {object_type: 'media', object_id: '1', result: 'favorited'}
+  ]});
+  for (var j = 0; j < 20 && !resolvePostWriteStatus; j++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (!resolvePostWriteStatus) throw new Error('post-write reconciliation did not start');
+  resolvePostWriteStatus();
+  await action;
+  if (favorites.getStatus(1).isFavorited !== true) throw new Error('post-write status was not visible before stale response');
+  resolveLateListStatus();
+  await replacementLoad;
+  if (favorites.getStatus(1).isFavorited !== true) throw new Error('same-list pre-write response overwrote authoritative write status');
+  console.log('same-list-late-read=discarded post-write-status=true');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "same-list-late-read=discarded post-write-status=true"

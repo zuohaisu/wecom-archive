@@ -35,6 +35,34 @@
     var statusReady = false;
     var busy = false;
     var revision = 0;
+    var statusVersions = Object.create(null);
+
+    function bumpStatusVersion(id) {
+      var key = String(id);
+      statusVersions[key] = (statusVersions[key] || 0) + 1;
+      return statusVersions[key];
+    }
+
+    function captureStatusVersions(targets) {
+      var versions = Object.create(null);
+      targets.forEach(function (item) {
+        var key = String(item.id);
+        versions[key] = bumpStatusVersion(key);
+      });
+      return versions;
+    }
+
+    function statusVersionMatches(id, versions) {
+      var key = String(id);
+      return Object.prototype.hasOwnProperty.call(versions, key)
+        && statusVersions[key] === versions[key];
+    }
+
+    function allStatusVersionsMatch(versions) {
+      return Object.keys(versions).every(function (id) {
+        return statusVersions[id] === versions[id];
+      });
+    }
 
     function selectedIds() {
       return Object.keys(selected);
@@ -69,6 +97,7 @@
       revision += 1;
       var currentRevision = revision;
       items = Array.isArray(nextItems) ? nextItems.slice() : [];
+      var versions = captureStatusVersions(items);
       selected = Object.create(null);
       statuses = Object.create(null);
       statusReady = items.length === 0;
@@ -94,6 +123,7 @@
             if (currentRevision !== revision) return;
             data.items.forEach(function (item) {
               if (item.object_type !== "media" || typeof item.object_id !== "string") return;
+              if (!statusVersionMatches(item.object_id, versions)) return;
               statuses[item.object_id] = {
                 result: item.result,
                 isFavorited: typeof item.is_favorited === "boolean" ? item.is_favorited : null,
@@ -111,7 +141,7 @@
         });
         notify();
       }).catch(function (error) {
-        if (currentRevision === revision) {
+        if (currentRevision === revision && allStatusVersionsMatch(versions)) {
           statusReady = false;
           notify();
         }
@@ -126,6 +156,7 @@
       if (!visibleItems.length) return Promise.resolve();
 
       var currentRevision = revision;
+      var versions = captureStatusVersions(visibleItems);
       var batches = chunks(visibleItems, BATCH_LIMIT);
       return batches.reduce(function (promise, batch) {
         return promise.then(function () {
@@ -145,6 +176,7 @@
             if (currentRevision !== revision) return;
             data.items.forEach(function (item) {
               if (item.object_type !== "media" || typeof item.object_id !== "string") return;
+              if (!statusVersionMatches(item.object_id, versions)) return;
               statuses[item.object_id] = {
                 result: item.result,
                 isFavorited: typeof item.is_favorited === "boolean" ? item.is_favorited : null,
@@ -161,7 +193,7 @@
         });
         notify();
       }).catch(function () {
-        if (currentRevision === revision) {
+        if (currentRevision === revision && allStatusVersionsMatch(versions)) {
           statusReady = false;
           notify();
         }
@@ -213,6 +245,7 @@
 
       var currentRevision = revision;
       var targets = items.filter(function (item) { return !!selected[String(item.id)]; });
+      var writeVersions = captureStatusVersions(targets);
       var batches = chunks(targets, BATCH_LIMIT);
       var summary = emptySummary();
       busy = true;
@@ -239,6 +272,11 @@
           summary.unchanged += Number(data.unchanged) || 0;
           summary.not_found += Number(data.not_found) || 0;
           summary.items = summary.items.concat(data.items);
+          data.items.forEach(function (item) {
+            if (item.object_type !== "media" || typeof item.object_id !== "string") return;
+            if (!Object.prototype.hasOwnProperty.call(writeVersions, item.object_id)) return;
+            bumpStatusVersion(item.object_id);
+          });
           if (currentRevision === revision) {
             data.items.forEach(function (item) {
               if (item.object_type !== "media" || typeof item.object_id !== "string") return;
