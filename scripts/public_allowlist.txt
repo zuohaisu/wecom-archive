@@ -81,13 +81,17 @@ static_site/company_homepage/assets
 static_site/company_homepage/brand
 static_site/company_homepage/demo
 SECURITY.md
-CLA.md
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
+# DCO 1.1 and sign-off instructions are included in CONTRIBUTING.md; no CLA is used.
 Makefile
 pyproject.toml
 .gitignore
 .env.example
+
+# ── Community issue and pull-request templates ──────────────────────
+.github/ISSUE_TEMPLATE
+.github/PULL_REQUEST_TEMPLATE.md
 
 # ── CI ──────────────────────────────────────────────────────────────
 # CI/test workflows plus a manual uptime check whose target is an explicit

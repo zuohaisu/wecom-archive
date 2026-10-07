@@ -1,49 +1,47 @@
-## GitHub issues and commits
+## Related issue
 
-One ticket must map to exactly one final commit. Add one row per ticket.
+Closes #<number> (replace before submitting)
 
-| Issue | Commit | Goal |
-|---|---|---|
-| RND-<N> / GH-<N> | `<sha>` | <one-sentence outcome> |
+## Ticket → commit mapping
 
-## Scope
+Use one row per ticket; each ticket maps to exactly one commit.
+
+| Ticket | Commit (SHA and subject) |
+|---|---|
+| RND-<n> (#<n>) or GH-<n> (#<n>) | `<sha> <subject>` |
+
+## Summary
+
+Describe the user-visible behavior or problem this change addresses.
+
+## Scope and design
 
 - What changed:
-  - <focused change>
 - Intentionally not changed:
-  - <explicit boundary>
-- Grouping rationale when this PR contains multiple tickets:
-  - <same Epic / coherent delivery reason, or N/A>
+- Architectural or data-boundary impact:
 
-## QA evidence
+## Validation
 
-- [ ] Independent QA completed before the approved commit.
-- [ ] `make verify` passed, or every narrower command and remaining gap is listed below.
-- [ ] `backend/tests/test_architecture_boundary.py` passed when application code changed.
-- [ ] No secrets, production data, or unrelated changes are included.
-
-Commands and results:
+List the exact commands run and their actual results. Do not report skipped or unavailable checks as passing.
 
 ```text
-<command>: EXIT=<code> — <summary>
+make verify: <result>
+make public-verify: <result, when applicable>
+Other focused checks: <command and result>
 ```
 
-## Delivery gates
+## Tests
 
-- [ ] Source is an assigned delivery worktree/branch; the source branch is not `main`.
-- [ ] Every GitHub issue maps to exactly one final commit, and no commit mixes issues.
-- [ ] All tickets in this PR form one coherent delivery, normally within the same Epic.
-- [ ] If this PR contains multiple tickets, the selected merge strategy preserves their
-      individual commits; the PR will not be squash-merged into one commit.
-- [ ] The PR CI workflow is green before merge.
-- [ ] Haisu performs or explicitly approves the merge to `main`.
+- Test files added or changed and why:
+- [ ] No test was weakened, skipped, or removed to make the change pass.
 
-CD impact:
+## Safety and limitations
 
-- [ ] Deployable paths changed — merging triggers CD.
-- [ ] Only ignored documentation/task paths changed — merging does not trigger CD.
+- [ ] No credentials, customer data, production archive content, or proprietary SDK files are included.
+- Risk, migration/rollback considerations, and known limitations:
 
-## Risks and rollback
+## Contributor checklist
 
-- Risk: <risk or none>
-- Rollback: <how to revert safely>
+- [ ] Every commit is signed off with the DCO (`Signed-off-by`); see [CONTRIBUTING.md](CONTRIBUTING.md#developer-certificate-of-origin-dco).
+- [ ] The change is focused on the related issue and public documentation is updated where needed.
+- [ ] Required CI passes before merge; merging remains a maintainer action.
