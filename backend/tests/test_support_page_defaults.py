@@ -40,3 +40,22 @@ def test_support_page_title_localized_in_all_three_locales() -> None:
     ):
         assert len(re.findall(re.escape(value), source)) == 1, value
     assert '"support.pageTitle": "AI' not in source
+
+
+def test_ai_disabled_notice_lives_only_in_the_chat_panel() -> None:
+    """Haisu request: the 提交反馈 tab must not show the AI-disabled notice."""
+    source = _TEMPLATE.read_text(encoding="utf-8")
+
+    chat_panel_start = source.index('id="support-chat-panel"')
+    feedback_panel_start = source.index('id="support-feedback-panel"')
+    notice_start = source.index('id="support-disabled"')
+    assert chat_panel_start < notice_start < feedback_panel_start
+
+
+def test_feedback_intro_copy_names_no_ai() -> None:
+    source = _I18N.read_text(encoding="utf-8")
+
+    assert '"support.feedbackIntro": "在此提交问题、Bug或建议"' in source
+    assert '"support.feedbackIntro": "在此提交問題、Bug或建議"' in source
+    assert '"support.feedbackIntro": "Submit questions, bugs, or suggestions here"' in source
+    assert "不需要先向 AI 提问" not in source
