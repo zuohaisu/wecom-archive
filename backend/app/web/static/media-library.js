@@ -80,7 +80,9 @@
   function favoriteIndicator(item) {
     var status = favorites.getStatus(item.id);
     if (!status) {
-      return '<span class="media-favorite-state pending" aria-label="' + escapeHtml(t("media.favoriteStatusLoading")) + '">☆</span>';
+      var failed = favorites.getSnapshot().statusFailed;
+      var label = escapeHtml(t(failed ? "media.favoriteStatusFailed" : "media.favoriteStatusLoading"));
+      return '<span class="media-favorite-state ' + (failed ? "failed" : "pending") + '" role="img" aria-label="' + label + '" title="' + label + '">☆</span>';
     }
     if (status.result === "not_found") {
       return '<span class="media-favorite-state unavailable">' + escapeHtml(t("media.favoriteUnavailable")) + "</span>";
@@ -421,9 +423,12 @@
   });
   document.getElementById("media-retry-favorite-status").addEventListener("click", function () {
     if (state.loading || favorites.getSnapshot().busy) return;
+    var requestId = state.requestId;
     favorites.refreshStatuses().then(function () {
+      if (requestId !== state.requestId) return;
       setStatus("");
     }).catch(function () {
+      if (requestId !== state.requestId) return;
       setStatus(t("media.favoriteStatusFailed"), true);
     });
   });
