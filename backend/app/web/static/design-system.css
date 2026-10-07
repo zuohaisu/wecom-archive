@@ -89,6 +89,20 @@
   --focus-ring:0 0 0 3px rgba(59,140,255,.32);
 }
 
+
+/* ------------------------------------------------ GH-102 窄屏导航抽屉 */
+/* Gated on html.has-nav-drawer (set by nav-drawer.js, which the platform
+   plane never loads) so the drawer can never leak into platform chrome. */
+.nav-toggle{display:none}
+.nav-backdrop{display:none}
+@media (max-width:900px){
+  html.has-nav-drawer .side-nav{position:fixed;left:0;top:0;bottom:0;z-index:300;transform:translateX(-100%);transition:transform .2s ease;overflow-y:auto}
+  html.has-nav-drawer .side-nav.open{transform:none;box-shadow:var(--shadow-3)}
+  html.has-nav-drawer .nav-toggle{display:inline-flex;align-items:center;justify-content:center;position:fixed;top:10px;left:10px;z-index:320;width:36px;height:36px;border-radius:var(--radius-md);border:1px solid var(--color-border-strong);background:var(--color-surface);color:var(--color-text);cursor:pointer;font-size:15px;line-height:1}
+  html.has-nav-drawer .nav-backdrop{display:block;position:fixed;inset:0;background:var(--color-overlay);z-index:290}
+  html.has-nav-drawer .topbar{padding-left:52px}
+}
+
 /* --------------------------------------------------------------- base */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}

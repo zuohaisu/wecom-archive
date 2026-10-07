@@ -63,5 +63,6 @@ def render_template(name: str, **ctx) -> str:
     # or prefers-color-scheme). Platform chrome intentionally stays light.
     if not name.startswith("platform") and "design-system.css" in text:
         theme_tag = f'<script src="/web/static/theme.js?v={STATIC_VERSION}"></script>'
-        text = text.replace("</head>", theme_tag + "</head>", 1)
+        nav_tag = f'<script src="/web/static/nav-drawer.js?v={STATIC_VERSION}"></script>'
+        text = text.replace("</head>", theme_tag + nav_tag + "</head>", 1)
     return text

@@ -411,13 +411,28 @@ function toggleAuditMode(){
   if(btn)btn.classList.toggle('active',auditMode);
   if(timelineConvId&&timelineMsgs.length)renderTimeline(false);
 }
-function togglePanel(){
-  panelOpen=!panelOpen;
+function applyPanelState(){
   var col=document.getElementById('panel-col');
   var btn=document.getElementById('btn-panel-toggle');
-  if(col)col.style.display=panelOpen?'flex':'none';
+  var bd=document.getElementById('panel-backdrop');
+  if(col){col.classList.toggle('panel-open',panelOpen);col.classList.toggle('panel-closed',!panelOpen);col.style.display='';}
   if(btn)btn.classList.toggle('active',panelOpen);
+  if(bd)bd.classList.toggle('panel-open',panelOpen);
 }
+function togglePanel(){
+  panelOpen=!panelOpen;
+  applyPanelState();
+}
+/* GH-102: <=900px 会话列表收成左抽屉；宽屏按钮隐藏、列表常驻。 */
+var convOpen=false;
+function applyConvState(){
+  var col=document.querySelector('.col-conv');
+  var bd=document.getElementById('drawer-backdrop');
+  if(col)col.classList.toggle('conv-open',convOpen);
+  if(bd)bd.hidden=!convOpen;
+}
+function toggleConvList(){convOpen=!convOpen;applyConvState();}
+function closeConvList(){if(convOpen){convOpen=false;applyConvState();}}
 function setPanelTab(tab){
   panelTab=tab;
   var infoTab=document.getElementById('panel-tab-info');
@@ -614,3 +629,10 @@ setMode('staff');
 initializeSyncStatus();
 if(typeof window!=='undefined'&&window.ProductAnalytics)window.ProductAnalytics.track('product.conversation.review_opened.v1');
 readFocusFromUrl();
+/* GH-102: 窄断点默认收起面板；绑定抽屉遮罩与 Esc。 */
+if(window.matchMedia&&window.matchMedia('(max-width:1300px)').matches){panelOpen=false;}
+applyPanelState();
+applyConvState();
+document.getElementById('drawer-backdrop').addEventListener('click',closeConvList);
+document.getElementById('panel-backdrop').addEventListener('click',function(){if(!panelOpen){applyPanelState();return;}panelOpen=false;applyPanelState();});
+document.addEventListener('keydown',function(event){if(event.key==='Escape'){closeConvList();if(!panelOpen)applyPanelState();}});
