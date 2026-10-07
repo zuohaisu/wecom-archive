@@ -267,6 +267,27 @@ def send_billing_notification_email(
     )
 
 
+def send_api_performance_alert_email(
+    to_email: str,
+    subject: str,
+    body: str,
+    *, operation_id: str,
+) -> bool:
+    """GH-186: one merged slow-endpoint alert per Beijing natural day.
+
+    Content is rendered by the detector service and contains only
+    endpoint identifiers (method + route template), window/sample/
+    threshold numbers and the admin entry -- never request bodies,
+    query strings, tokens or business content. The per-day operation_id
+    makes provider-side technical retries idempotent; the caller enforces
+    the once-a-day quota and never retries an unknown outcome. Provider
+    acceptance is not proof of inbox delivery (same boundary as every
+    other sender here)."""
+    return _send_transactional_email(
+        to_email, subject, body, operation_id=operation_id,
+    )
+
+
 def _render_invite_email(accept_link: str, locale: str) -> tuple[str, str]:
     """Render the invitation mail; its link is the only account action."""
     subject = "您被邀请加入康冠时代企业微信会话存档"

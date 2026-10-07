@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>接口性能 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>接口性能</h1><p>HTTP 接口请求量与耗时（小时/日聚合，15 分钟批量落库）。仅聚合统计；不收集请求内容、query、header 或任何用户标识。</p></div>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <section class="card" aria-labelledby="apiperf-status-title">
+    <div class="card-hd"><div><h2 id="apiperf-status-title">采集状态</h2></div><span id="apiperf-refreshed" class="muted"></span></div>
+    <div class="card-bd">
+      <div class="metric-grid" aria-label="采集状态概览">
+        <article class="card metric"><span>采集状态</span><strong id="apiperf-enabled">—</strong><small id="apiperf-observations">—</small></article>
+        <article class="card metric"><span>落库状态</span><strong id="apiperf-flush">—</strong><small id="apiperf-flush-at">—</small></article>
+        <article class="card metric"><span>持续异常接口</span><strong id="apiperf-anomaly-count">—</strong><small id="apiperf-detection">—</small></article>
+        <article class="card metric"><span>今日邮件</span><strong id="apiperf-email">—</strong><small>一天最多一封 · 接受≠送达</small></article>
+      </div>
+      <p class="muted" id="apiperf-coverage">—</p>
+      <ul class="summary-list" id="apiperf-notes"></ul>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="apiperf-anomaly-title">
+    <div class="card-hd"><div><h2 id="apiperf-anomaly-title">近期持续变慢（短窗口实时判定，不等落库）</h2></div></div>
+    <div class="card-bd table-wrap">
+      <table>
+        <thead><tr><th>接口</th><th>类型</th><th>窗口样本</th><th>p95</th><th>阈值</th><th>已持续</th><th>首次发现</th></tr></thead>
+        <tbody id="apiperf-anomaly-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="apiperf-list-title">
+    <div class="card-hd"><div><h2 id="apiperf-list-title">接口列表</h2><p class="muted" id="apiperf-window-note">—</p></div></div>
+    <form id="apiperf-filters" class="filter-grid">
+      <label>时间窗口（小时）<input id="apiperf-window-hours" type="number" min="1" max="168" value="24"></label>
+      <label>方法<select id="apiperf-method">
+        <option value="">全部方法</option>
+        <option value="GET">GET</option><option value="POST">POST</option><option value="PUT">PUT</option>
+        <option value="PATCH">PATCH</option><option value="DELETE">DELETE</option><option value="OTHER">OTHER</option>
+      </select></label>
+      <label>分类<select id="apiperf-traffic">
+        <option value="business">业务接口</option>
+        <option value="unmatched">未匹配</option>
+        <option value="infra">基础设施 / 静态</option>
+        <option value="self">统计自身轮询</option>
+        <option value="all">全部</option>
+      </select></label>
+      <label>路由包含<input id="apiperf-q" type="search" maxlength="200" placeholder="例如 /api/conversations"></label>
+      <label>排序<select id="apiperf-sort">
+        <option value="requests">请求数</option>
+        <option value="avg_ms">平均耗时</option>
+        <option value="p95_ms">p95 耗时</option>
+        <option value="error_rate">错误率</option>
+      </select></label>
+      <div class="filter-actions"><button class="btn btn-primary" type="submit">应用</button></div>
+    </form>
+    <div class="card-bd table-wrap">
+      <table>
+        <thead><tr>
+          <th>接口</th><th>请求数</th><th>错误率</th><th>平均耗时</th><th>成功 p95</th>
+          <th>成功 min/max</th><th>取消</th><th>流式</th><th>样本</th>
+        </tr></thead>
+        <tbody id="apiperf-endpoint-rows"></tbody>
+      </table>
+    </div>
+    <div class="card-bd">
+      <span class="muted" id="apiperf-site-summary">—</span>
+      <span class="muted" id="apiperf-pagination"></span>
+    </div>
+  </section>
+
+  <div class="platform-grid">
+    <section class="card" aria-labelledby="apiperf-daily-title">
+      <div class="card-hd"><div><h2 id="apiperf-daily-title">日趋势（最近 180 天内）</h2></div></div>
+      <form id="apiperf-daily-form" class="filter-grid">
+        <label>天数<input id="apiperf-daily-days" type="number" min="1" max="180" value="30"></label>
+        <label>方法<input id="apiperf-daily-method" type="text" maxlength="8" placeholder="留空=全站"></label>
+        <label>路由模板<input id="apiperf-daily-route" type="text" maxlength="500" placeholder="留空=全站加权汇总"></label>
+        <div class="filter-actions"><button class="btn" type="submit">查看</button></div>
+      </form>
+      <div class="card-bd table-wrap">
+        <table>
+          <thead><tr><th>日期（Asia/Shanghai）</th><th>请求数</th><th>错误数</th><th>平均耗时</th><th>成功 p95</th><th>流式</th></tr></thead>
+          <tbody id="apiperf-daily-rows"></tbody>
+        </table>
+      </div>
+      <div class="card-bd"><p class="muted">第 31–180 天的小时明细已按 720 小时保留策略过期，仅日趋势可用。</p></div>
+    </section>
+    <section class="card" aria-labelledby="apiperf-hourly-title">
+      <div class="card-hd"><div><h2 id="apiperf-hourly-title">小时趋势（最近 720 小时内某天）</h2></div></div>
+      <form id="apiperf-hourly-form" class="filter-grid">
+        <label>日期<input id="apiperf-hourly-date" type="date"></label>
+        <label>方法<input id="apiperf-hourly-method" type="text" maxlength="8" placeholder="留空=全站"></label>
+        <label>路由模板<input id="apiperf-hourly-route" type="text" maxlength="500" placeholder="留空=全站加权汇总"></label>
+        <div class="filter-actions"><button class="btn" type="submit">查看</button></div>
+      </form>
+      <div class="card-bd table-wrap">
+        <table>
+          <thead><tr><th>小时（Asia/Shanghai）</th><th>请求数</th><th>错误数</th><th>平均耗时</th><th>成功 p95</th><th>流式</th></tr></thead>
+          <tbody id="apiperf-hourly-rows"></tbody>
+        </table>
+      </div>
+      <div class="card-bd"><p class="muted" id="apiperf-hourly-note">当前小时为未完成桶：显示已落库值，最多落后约 15 分钟。</p></div>
+    </section>
+  </div>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-api-performance.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

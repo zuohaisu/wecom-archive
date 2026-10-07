@@ -3452,3 +3452,166 @@ class TenantActivationCheck(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class ApiPerformanceEndpointHourly(Base):
+    """GH-186 hourly API performance aggregate for one endpoint bucket.
+
+    Written only by the 15-minute flush service (single web process per
+    database in the supported topology). Durations are microseconds;
+    ``hist`` is the success-duration histogram (see
+    api_performance_collector.HIST_BOUNDS_MS, hist_version 1). Rows are
+    pure aggregates: no request identifiers, no user/tenant attribution.
+    """
+
+    __tablename__ = "api_performance_endpoint_hourly"
+    __table_args__ = (
+        UniqueConstraint(
+            "method", "route", "bucket_start",
+            name="uq_api_perf_hourly_endpoint_bucket",
+        ),
+        Index("ix_api_perf_hourly_bucket_start", "bucket_start"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    method = Column(String(8), nullable=False)
+    route = Column(String(500), nullable=False)
+    traffic_class = Column(String(16), nullable=False, default="business")
+    bucket_start = Column(DateTime(timezone=True), nullable=False)
+    request_count = Column(BigInteger, nullable=False, default=0)
+    class_counts = Column(JSONB, nullable=False, default=dict)
+    completed_count = Column(BigInteger, nullable=False, default=0)
+    duration_sum_us = Column(BigInteger, nullable=False, default=0)
+    duration_min_us = Column(BigInteger, nullable=True)
+    duration_max_us = Column(BigInteger, nullable=True)
+    success_count = Column(BigInteger, nullable=False, default=0)
+    success_duration_sum_us = Column(BigInteger, nullable=False, default=0)
+    success_min_us = Column(BigInteger, nullable=True)
+    success_max_us = Column(BigInteger, nullable=True)
+    hist = Column(JSONB, nullable=True)
+    hist_version = Column(Integer, nullable=False, default=1)
+    stream_count = Column(BigInteger, nullable=False, default=0)
+    stream_error_count = Column(BigInteger, nullable=False, default=0)
+    stream_duration_sum_us = Column(BigInteger, nullable=False, default=0)
+    stream_min_us = Column(BigInteger, nullable=True)
+    stream_max_us = Column(BigInteger, nullable=True)
+    stream_ttfb_sum_us = Column(BigInteger, nullable=False, default=0)
+    stream_ttfb_min_us = Column(BigInteger, nullable=True)
+    stream_ttfb_max_us = Column(BigInteger, nullable=True)
+    stats_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ApiPerformanceEndpointDaily(Base):
+    """GH-186 daily API performance aggregate, persisted independently of
+    the hourly table so 180-day trends survive hourly retention cleanup."""
+
+    __tablename__ = "api_performance_endpoint_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "method", "route", "bucket_date",
+            name="uq_api_perf_daily_endpoint_bucket",
+        ),
+        Index("ix_api_perf_daily_bucket_date", "bucket_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    method = Column(String(8), nullable=False)
+    route = Column(String(500), nullable=False)
+    traffic_class = Column(String(16), nullable=False, default="business")
+    bucket_date = Column(Date, nullable=False)
+    request_count = Column(BigInteger, nullable=False, default=0)
+    class_counts = Column(JSONB, nullable=False, default=dict)
+    completed_count = Column(BigInteger, nullable=False, default=0)
+    duration_sum_us = Column(BigInteger, nullable=False, default=0)
+    duration_min_us = Column(BigInteger, nullable=True)
+    duration_max_us = Column(BigInteger, nullable=True)
+    success_count = Column(BigInteger, nullable=False, default=0)
+    success_duration_sum_us = Column(BigInteger, nullable=False, default=0)
+    success_min_us = Column(BigInteger, nullable=True)
+    success_max_us = Column(BigInteger, nullable=True)
+    hist = Column(JSONB, nullable=True)
+    hist_version = Column(Integer, nullable=False, default=1)
+    stream_count = Column(BigInteger, nullable=False, default=0)
+    stream_error_count = Column(BigInteger, nullable=False, default=0)
+    stream_duration_sum_us = Column(BigInteger, nullable=False, default=0)
+    stream_min_us = Column(BigInteger, nullable=True)
+    stream_max_us = Column(BigInteger, nullable=True)
+    stream_ttfb_sum_us = Column(BigInteger, nullable=False, default=0)
+    stream_ttfb_min_us = Column(BigInteger, nullable=True)
+    stream_ttfb_max_us = Column(BigInteger, nullable=True)
+    stats_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ApiPerformanceFlushBatch(Base):
+    """GH-186 flush batch identity for atomic dedup.
+
+    A batch row is inserted in the SAME transaction that applies the
+    increments; its existence (unique batch_id) is the dedup proof, so a
+    retry after an unknown commit result can never double-apply. Rows are
+    kept only for the bounded retry window, then cleaned up."""
+
+    __tablename__ = "api_performance_flush_batches"
+    __table_args__ = (
+        Index("ix_api_perf_batches_created_at", "created_at"),
+    )
+
+    batch_id = Column(String(120), primary_key=True)
+    instance_id = Column(String(64), nullable=False)
+    flush_seq = Column(BigInteger, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ApiPerformanceAlertState(Base):
+    """GH-186 daily slow-endpoint email intent, persisted BEFORE sending.
+
+    Unique on alert_date (one deployment/database == one instance in the
+    supported single-process topology), so at most one notification intent
+    exists per Beijing natural day across concurrency and restarts.
+    status: pending -> accepted | failed_or_unknown. The row is only
+    created when a send is actually attempted; absence == no attempt.
+    """
+
+    __tablename__ = "api_performance_alert_state"
+    __table_args__ = (
+        UniqueConstraint("alert_date", name="uq_api_perf_alert_date"),
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'failed_or_unknown')",
+            name="ck_api_perf_alert_status",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    alert_date = Column(Date, nullable=False)
+    instance_id = Column(String(64), nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    anomaly_count = Column(Integer, nullable=False, default=0)
+    attempted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

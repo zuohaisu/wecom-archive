@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from pathlib import Path
 
@@ -16,6 +18,7 @@ from app.routers.admin_recycle_bin_page import router as admin_recycle_bin_page_
 from app.routers.admin_staff_page import router as admin_staff_page_router
 from app.routers.admin_users_page import router as admin_users_page_router
 from app.routers.ai_support import router as ai_support_router
+from app.routers.platform_api_performance import router as platform_api_performance_router
 from app.routers.public_ai_support import router as public_ai_support_router
 from app.routers.audit import router as audit_router
 from app.routers.avatars import router as avatars_router
@@ -57,6 +60,12 @@ from app.routers.wecom_events import router as wecom_events_router
 from app.routers.wecom_org_authorization import router as wecom_org_authorization_router
 from app.routers.wecom_provider_instructions import router as wecom_provider_instructions_router
 from app.services.alipay import validate_alipay_configuration_if_enabled
+from app.services.api_performance_collector import (
+    ApiPerformanceCollector,
+    ApiPerformanceConfig,
+    ApiPerformanceMiddleware,
+)
+from app.services.api_performance_service import ApiPerformanceRuntime, run_background_loop
 from app.services.branding import BrandingHostMiddleware
 from app.services.wechat_pay import validate_wechat_pay_configuration_if_configured
 
@@ -137,6 +146,28 @@ class _VersionedStaticFiles(StaticFiles):
 _STATIC_DIR = Path(__file__).parent / "web" / "static"
 
 
+@contextlib.asynccontextmanager
+async def _api_performance_lifespan(app: FastAPI):
+    """GH-186: start/stop the per-instance telemetry loop. The loop owns
+    every DB touch (15-minute flush, retention, detection/email) so the
+    request path never gains I/O; graceful shutdown gets one time-boxed
+    final flush inside run_background_loop itself."""
+    runtime = getattr(app.state, "api_performance_runtime", None)
+    loop_task = None
+    if runtime is not None and runtime.config.enabled:
+        loop_task = asyncio.create_task(run_background_loop(runtime))
+    try:
+        yield
+    finally:
+        if loop_task is not None:
+            if runtime.stop_event is not None:
+                runtime.stop_event.set()
+            try:
+                await asyncio.wait_for(loop_task, timeout=10.0)
+            except (asyncio.TimeoutError, Exception):  # noqa: BLE001 - shutdown must proceed
+                loop_task.cancel()
+
+
 def create_app() -> FastAPI:
     """Composition root: builds and returns a fresh, fully-wired FastAPI
     instance. Kept as a factory (RND-223) rather than a module-level side
@@ -144,7 +175,15 @@ def create_app() -> FastAPI:
     module-level `app` below is what `uvicorn app.main:app` actually serves."""
     validate_wechat_pay_configuration_if_configured()
     validate_alipay_configuration_if_enabled()
-    app = FastAPI(title="Crowntime WeCom Archive")
+    # GH-186: per-instance telemetry. Construction validates configuration
+    # and fails loudly on bad values; each app instance owns its collector
+    # (no shared global registry).
+    api_perf_config = ApiPerformanceConfig.from_settings()
+    api_perf_collector = ApiPerformanceCollector()
+    api_perf_runtime = ApiPerformanceRuntime(api_perf_collector, api_perf_config)
+    app = FastAPI(title="Crowntime WeCom Archive", lifespan=_api_performance_lifespan)
+    app.state.api_performance_runtime = api_perf_runtime
+    app.add_middleware(ApiPerformanceMiddleware, collector=api_perf_collector)
     # RND-187: guarantees Cache-Control: no-store on every response (success or
     # error, any status code) for the media access descriptor endpoint — see
     # MediaAccessNoStoreMiddleware's docstring for why this must be a
@@ -199,6 +238,11 @@ def create_app() -> FastAPI:
     app.include_router(provisioning_router)
     app.include_router(ai_support_router)
     app.include_router(public_ai_support_router)
+    app.include_router(platform_api_performance_router)
+
+    # GH-186: the registry must see the complete route table, so it is
+    # captured after every include_router above.
+    api_perf_collector.register_app_routes(app.routes)
 
     @app.get("/health/live")
     def health_live():
