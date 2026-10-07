@@ -16,6 +16,9 @@
 .auth-point .n{width:20px;height:20px;border-radius:var(--radius-sm);background:var(--color-primary-soft);color:var(--color-primary-hover);font-size:var(--text-2xs);font-weight:var(--weight-bold);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
 .auth-point h3{font-size:var(--text-md);margin-bottom:2px}
 .auth-point p{font-size:var(--text-sm);color:var(--color-text-4);line-height:var(--leading-loose)}
+/* GH-100 follow-up: a deliberately faint entry to the super-admin plane. */
+.admin-entry{margin-left:var(--space-3);color:var(--color-text-5);text-decoration:none;font-weight:var(--weight-regular)}
+.admin-entry:hover{color:var(--color-text-3);text-decoration:underline}
 .btn-wecom{height:40px;font-size:var(--text-base);font-weight:var(--weight-medium)}
 .auth-title{font-size:var(--text-2xl);font-weight:var(--weight-semibold);letter-spacing:-.01em;margin-bottom:6px}
 .auth-sub{font-size:var(--text-sm);color:var(--color-text-4);margin-bottom:var(--space-6)}
@@ -64,7 +67,7 @@
           <div class="lang-menu" id="lang-menu" style="display:none"></div>
         </div>
       </div>
-      <p class="auth-legal mt-4" data-i18n="login.legalDisclaimerShort">非腾讯官方产品 · © 2026 康冠时代</p>
+      <p class="auth-legal mt-4"><span data-i18n="login.legalDisclaimerShort">非腾讯官方产品 · © 2026 康冠时代</span><a class="admin-entry" href="/platform/login" data-i18n="login.superAdminEntry">超管入口</a></p>
     </div>
   </main>
 </div>
