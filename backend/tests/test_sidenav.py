@@ -61,16 +61,19 @@ def test_navigation_includes_shared_data_export_page() -> None:
     assert "sync" not in {item["id"] for item in items}
 
 
-def test_split_places_seats_under_overview_and_staff_under_directory() -> None:
-    """Haisu split: 座席 rides the 总览 group; 内部员工 sits beside 外部联系人."""
+def test_split_places_staff_under_directory_and_users_under_system() -> None:
+    """Haisu ordering: 内部员工 sits beside 外部联系人; 用户管理 heads the
+    系统 group (用户管理 → 企微接口检测 → 设置)."""
     groups = {group["group_key"]: [item["id"] for item in group["items"]] for group in NAV}
-    assert groups["nav.group.overview"] == ["dashboard", "billing", "users"]
+    assert groups["nav.group.overview"] == ["dashboard", "billing"]
     assert groups["nav.group.directory"] == ["staff", "contacts"]
+    assert groups["nav.group.system"] == ["users", "diagnostics", "settings"]
 
     seats = next(
-        item for item in NAV[0]["items"] if item["id"] == "users"
+        item for group in NAV if group["group_key"] == "nav.group.system"
+        for item in group["items"] if item["id"] == "users"
     )
-    assert seats == {"id": "users", "key": "nav.seats", "path": "/admin/users"}
+    assert seats == {"id": "users", "key": "nav.users", "path": "/admin/users"}
     staff = next(
         item for group in NAV if group["group_key"] == "nav.group.directory"
         for item in group["items"] if item["id"] == "staff"
@@ -92,7 +95,7 @@ def test_registered_path_changes_users_from_disabled_to_link_without_config_chan
     enabled = render_sidenav("review", {"/admin/conversations", "/admin/users"})
 
     assert 'data-nav-id="users" aria-disabled="true"' in disabled
-    assert '<a class="side-nav-item" href="/admin/users" data-i18n="nav.seats"></a>' in enabled
+    assert '<a class="side-nav-item" href="/admin/users" data-i18n="nav.users"></a>' in enabled
     assert 'data-nav-id="users"' not in enabled
 
 
