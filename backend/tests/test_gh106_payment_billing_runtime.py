@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 MANAGED_UNITS = ROOT / "deploy/systemd/MANAGED_UNITS"
 DEPLOY_SCRIPT = ROOT / "scripts/deploy_server.sh"
@@ -81,6 +83,7 @@ def test_managed_unit_deployment_contract_installs_and_enables_only_timers() -> 
     assert "only trigger units are enabled directly" in source
 
 
+@pytest.mark.requires_internal_ops_docs
 def test_runbook_states_observability_rollback_and_provider_boundary() -> None:
     text = " ".join(RUNBOOK.read_text(encoding="utf-8").split())
 

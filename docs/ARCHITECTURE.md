@@ -27,8 +27,8 @@
 | Contribution, safety, architecture-boundary, ticket, and validation rules | [`AGENTS.md`](../AGENTS.md) |
 | Environment-variable contract | [`.env.example`](../.env.example) |
 | Deployment asset ownership and CD behavior | [`DEPLOYMENT.md`](DEPLOYMENT.md) |
-| Third-party provider authorization and isolated callbacks | [`operations/wecom-third-party-authorization.md`](operations/wecom-third-party-authorization.md) |
-| Non-production isolation | [`operations/nonproduction-deployment.md`](operations/nonproduction-deployment.md) |
+| WeCom integration and credential handling | [`kb/customer/wecom-integration.md`](kb/customer/wecom-integration.md) |
+| Non-production isolation | [`OPERATIONS.md#non-production-isolation`](OPERATIONS.md#non-production-isolation) |
 | Product strategy | [`adr/0003-product-strategy-hosted-only.md`](adr/0003-product-strategy-hosted-only.md) |
 | Billing, refund, and service lifecycle decisions | [`adr/0004-annual-plan-wechat-pay-gates.md`](adr/0004-annual-plan-wechat-pay-gates.md), [`adr/0005-saas-billing-lifecycle-refunds-and-service-gates.md`](adr/0005-saas-billing-lifecycle-refunds-and-service-gates.md), and [`adr/0006-alipay-pc-page-pay.md`](adr/0006-alipay-pc-page-pay.md) |
 

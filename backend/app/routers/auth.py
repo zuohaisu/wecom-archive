@@ -1080,10 +1080,7 @@ def _wecom_callback_base(admin_domain: str) -> str:
     against.
 
     RND-321 QA-005: ADMIN_DOMAIN is documented (.env.example) as a bare
-    host, but production's actual value has been observed *with* a scheme
-    already on it (docs/ops/rnd-261-domain-cutover-runbook.md flagged
-    `ADMIN_DOMAIN=https://qwhhcd.crowntime.cn` as a live anomaly, left
-    unfixed because OAuth wasn't enabled yet — RND-321 is what enables it).
+    host, but deployments may provide a URL with its scheme already present.
     Naively prepending "https://" in that case double-schemes the callback
     into "https://https://...", which WeCom cannot reach; the failure
     surfaces far from here (a dead callback) and is hard to trace back to

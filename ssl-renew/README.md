@@ -4,14 +4,14 @@
 
 ## 架构
 
-详见 [docs/ssl-renewal/ARCHITECTURE.md](../docs/ssl-renewal/ARCHITECTURE.md)。
+通用部署边界见 [TLS 与 provider-specific tooling 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling)；本 README 介绍仓库中实际提供的脚本和测试。
 
 ## 文件
 
 | 文件 | 用途 |
 |------|------|
 | `renew.sh` | 主脚本: 续期 + 部署 + 验证编排 (单域名, per-domain Qiniu CDN 证书绑定) |
-| `renew-wildcard.sh` | 通配符 `*.crowntime.cn` 续期脚本 (GH-104 Follow-up B, 从生产已验证实现原样纳入): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。与 `renew.sh` 语义不同，详见 [docs/operations/wildcard-ssl-renewal.md](../docs/operations/wildcard-ssl-renewal.md) |
+| `renew-wildcard.sh` | 通配符证书续期示例 (GH-104 Follow-up B): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。与 `renew.sh` 语义不同；改用于其他环境前请阅读 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling) 并替换域名、provider 与凭据 |
 | `notify.sh` | 通用 Webhook 告警 (支持任意接受 JSON POST 的端点) |
 | `verify_https.sh` | 独立 HTTPS/TLS 验证 (可单独运行) |
 | `install.sh` | 幂等安装 / 预检脚本 |
@@ -82,7 +82,7 @@ macOS: `brew install shellcheck shfmt bats-core coreutils`。
   `requests.get()` 发起。
 - Golden parity 测试（`tests/test_qiniu_helper.py`）用固定假凭证对照预先算好并固化的官方 SDK
   token，覆盖 GET 无 body / POST JSON / POST form / query string / 空 body / 特殊字符 body 六种
-  输入 —— 详见 [ARCHITECTURE.md 第 6.1 节](../docs/ssl-renewal/ARCHITECTURE.md)。
+  输入 —— 实现见 `qiniu_helper.py` 及其测试；provider-specific tooling 的使用边界见 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling)。
 
 **Secret 从不出现在命令行参数、stdout、stderr 或日志中：**
 
@@ -139,8 +139,8 @@ systemctl enable --now qiniu-ssl-renew@api.example.com.timer
 **通配符 (`*.crowntime.cn`) 是独立的固定 flow，不属于这套"新增域名"机制**：只有一个
 `renew-wildcard.sh` + `qiniu-ssl-renew-wildcard.{service,timer}` 实例，配置文件
 `/etc/qiniu-ssl-renew/media.crowntime.cn.env`（见 `examples/wildcard-domain.env.example`），
-不通过 `qiniu-ssl-renew@<domain>` 模板实例化。详见
-[docs/operations/wildcard-ssl-renewal.md](../docs/operations/wildcard-ssl-renewal.md)。
+不通过 `qiniu-ssl-renew@<domain>` 模板实例化。它是特定部署示例，不应原样用于其他域名；见
+[TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling)。
 
 ## 本地测试 (不需要真实 secrets)
 
@@ -184,11 +184,7 @@ echo "exit=$?"   # 见 ARCHITECTURE.md 第 6.2 节退出码表
 
 ## 部署
 
-首次部署指南: [docs/ssl-renewal/DEPLOYMENT_GUIDE.md](../docs/ssl-renewal/DEPLOYMENT_GUIDE.md)
-
-故障排查: [docs/ssl-renewal/TROUBLESHOOTING.md](../docs/ssl-renewal/TROUBLESHOOTING.md)
-
-灾难恢复: [docs/ssl-renewal/DISASTER_RECOVERY.md](../docs/ssl-renewal/DISASTER_RECOVERY.md)
+部署前请在隔离环境中验证配置和 dry-run 行为；TLS 工具的通用边界见 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling)。证书与备份恢复应纳入你自己的变更和恢复流程，参见[备份与恢复指南](../docs/OPERATIONS.md#backup-and-recovery)。
 
 ## 安装脚本 (install.sh)
 

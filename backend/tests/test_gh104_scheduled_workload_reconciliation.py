@@ -241,6 +241,7 @@ def test_backup_cadence_and_retention_semantics_are_unchanged() -> None:
 # ── 11. SSL production renewal path is represented ──────────────────────
 
 
+@pytest.mark.requires_internal_ops_docs
 def test_wildcard_ssl_renewal_is_captured_and_reproducible() -> None:
     """GH-104 Follow-up B: the wildcard SSL workload used to be an
     explicitly-tracked repo_status=absent gap (a server-only, never-
@@ -297,6 +298,7 @@ def test_ssl_template_is_marked_template_only_and_not_deleted() -> None:
 # ── 12. Deprecated telegram relay cannot re-enter deployment ────────────
 
 
+@pytest.mark.requires_internal_ops_docs
 def test_telegram_relay_is_absent_from_every_deployable_surface() -> None:
     assert not list(DEPLOY_SYSTEMD.glob("*telegram*"))
     assert "telegram" not in MANAGED_UNITS.read_text(encoding="utf-8").lower()

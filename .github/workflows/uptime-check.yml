@@ -4,14 +4,13 @@ name: External Uptime Check
 # production ECS failure domain, so a host-down or network-down condition
 # on that single host is still externally detectable. The existing
 # host-local resource-check timer (scripts/disk_usage_check.sh) cannot see
-# this class of failure by construction — see docs/operations/alerting.md.
+# this class of failure by construction.
 #
-# Scheduled checks are intentionally paused during the pre-promotion phase.
-# Keep workflow_dispatch available for manual production verification.
-# Re-enable schedule when the product enters active external promotion.
+# This workflow is manual-only during the pre-promotion phase. Configure the
+# UPTIME_BASE_URL repository variable before running it; an unset value fails
+# closed, and forks never default to the Crowntime production endpoint.
 #
-# Uses no repository secrets to perform the checks themselves: the checked
-# URLs are public production endpoints, not credentials. ALERT_WEBHOOK_URL
+# Uses no repository secrets to perform the checks themselves. ALERT_WEBHOOK_URL
 # is only read, never echoed, when routing a failure alert.
 
 on:
@@ -30,8 +29,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PRODUCTION_URL: https://archive.crowntime.cn/
-  READINESS_URL: https://archive.crowntime.cn/health/ready
+  UPTIME_BASE_URL: ${{ vars.UPTIME_BASE_URL }}
 
 jobs:
   test-alert:
@@ -45,7 +43,7 @@ jobs:
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
         run: |
           if [ -z "$ALERT_WEBHOOK_URL" ]; then
-            echo "ALERT_WEBHOOK_URL repository secret is not configured — nothing to test. See docs/operations/alerting.md."
+            echo "ALERT_WEBHOOK_URL repository secret is not configured — configure it before dispatch."
             exit 1
           fi
           payload=$(printf '{"domain":"external-uptime-check","hostname":"github-actions","failed_stage":"manual_test","timestamp":"%s","error_summary":"test alert requested via workflow_dispatch — not a real outage"}' \
@@ -67,16 +65,36 @@ jobs:
       - name: Check public endpoint availability
         id: public
         run: |
-          http_code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 "$PRODUCTION_URL" || echo "000")
+          if [ -z "$UPTIME_BASE_URL" ]; then
+            echo "UPTIME_BASE_URL repository variable is not configured" >&2
+            exit 1
+          fi
+          case "$UPTIME_BASE_URL" in
+            https://*) ;;
+            *) echo "UPTIME_BASE_URL must be an HTTPS base URL" >&2; exit 1 ;;
+          esac
+          base_url="${UPTIME_BASE_URL%/}"
+          http_code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 "$base_url/" || true)
+          http_code="${http_code:-000}"
           echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
-          echo "production endpoint responded HTTP $http_code"
+          echo "public endpoint responded HTTP $http_code"
           test "$http_code" = "200"
 
       - name: Check /health/ready
         id: ready
-        if: always()
+        if: always() && steps.public.outcome != 'skipped'
         run: |
-          http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$READINESS_URL" || echo "000")
+          if [ -z "$UPTIME_BASE_URL" ]; then
+            echo "UPTIME_BASE_URL repository variable is not configured" >&2
+            exit 1
+          fi
+          case "$UPTIME_BASE_URL" in
+            https://*) ;;
+            *) echo "UPTIME_BASE_URL must be an HTTPS base URL" >&2; exit 1 ;;
+          esac
+          base_url="${UPTIME_BASE_URL%/}"
+          http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$base_url/health/ready" || true)
+          http_code="${http_code:-000}"
           echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
           echo "/health/ready responded HTTP $http_code"
           test "$http_code" = "200"
@@ -87,7 +105,7 @@ jobs:
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
         run: |
           if [ -z "$ALERT_WEBHOOK_URL" ]; then
-            echo "ALERT_WEBHOOK_URL repository secret is not configured — alert not sent, see workflow run status only. See docs/operations/alerting.md."
+            echo "ALERT_WEBHOOK_URL repository secret is not configured — alert not sent; see workflow run status."
             exit 0
           fi
           summary="public=${{ steps.public.outputs.http_code }} ready=${{ steps.ready.outputs.http_code }}"

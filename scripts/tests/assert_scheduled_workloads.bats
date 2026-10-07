@@ -89,6 +89,23 @@ EOF
 	assert_output_contains "all checks passed"
 }
 
+@test "repo mode resolves entrypoints under an arbitrary current checkout root" {
+	write_unit "demo-job.service" "/srv/example-app/current/backend/.venv/bin/python scripts/demo.py" "/srv/example-app/current/backend"
+	touch "$DEPLOY_DIR/backend/scripts/demo.py"
+	write_trigger "demo-job.timer" "demo-job.service"
+	cat >"$MANIFEST" <<'EOF'
+demo-job.service|required|present|true|false|oneshot|false|fixture
+demo-job.timer|required|present|true|true|timer|false|fixture
+EOF
+	cat >"$MANAGED_UNITS_FILE" <<'EOF'
+demo-job.service
+demo-job.timer
+EOF
+	run run_assert
+	[ "$status" -eq 0 ]
+	assert_output_contains "all checks passed"
+}
+
 @test "canonical manifest and MANAGED_UNITS parse and agree (real repo files)" {
 	# Empty (not unset) DEPLOY_DIR/MANIFEST/MANAGED_UNITS_FILE still hit the
 	# script's own ${VAR:-default} fallback, which resolves against the

@@ -39,7 +39,7 @@ static_site/company_homepage/
 - The public homepage retains the legal entity, ICP record, public security record, and public contact email. Do **not** publish a detailed street address or telephone number.
 - Keep the clear independent-product disclaimer: this is not a Tencent or WeCom official product.
 - Do not market the service as an official Qiniu reseller or partner without documented authorization. Capacity-based pricing is the public product message; the underlying storage provider is not a marketing claim.
-- Present only shipped capabilities. Risk-signal automation, business-record export, recycle-bin cleanup, and larger storage plans must remain explicitly planned/unavailable until their own delivery tickets pass acceptance.
+- Present only shipped capabilities. Controlled text export and full-media ZIP export are available with Owner re-confirmation; the cloud edition has current plan quotas and self-host has no monthly commercial export quota. Risk-signal automation, recycle-bin cleanup, and larger cloud storage plans remain unavailable until their delivery gates pass.
 - Never promise 100% flying-order prevention, personal-WeChat monitoring, automatic employee-violation decisions, or absolute legal validity.
 - Every record in `demo/` must be synthetic. Never copy production conversations, customer details, media, exports, identifiers, or credentials into a static asset.
 - The demo must remain static and read-only: no backend dependency, authentication, API calls, tracking pixels, download, export, or write operation.
