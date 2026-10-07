@@ -160,3 +160,24 @@ def test_data_group_navigation_order_is_media_exports_messages_cleanup_recycle()
         "/admin/media", "/admin/exports", "/admin/messages", "/admin/cleanup", "/admin/recycle-bin",
     )]
     assert positions == sorted(positions)
+
+
+def test_review_console_brand_block_matches_the_shared_sidenav_style() -> None:
+    """Haisu request: the review console's top-left logo area must look like
+    every other page — the brand mark renders on a transparent tile, never
+    on the old hardcoded blue square, and the title uses the shared font
+    stack and text color."""
+    template = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "web" / "templates" / "review_console.html"
+    ).read_text(encoding="utf-8")
+
+    logo_rule = next(
+        line for line in template.splitlines() if ".side-nav-logo{" in line
+    )
+    assert "background" not in logo_rule
+    title_rule = next(
+        line for line in template.splitlines() if ".side-nav-title{" in line
+    )
+    assert "color:#1f2329" in title_rule
+    assert "'PingFang SC'" in title_rule
