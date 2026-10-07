@@ -1,0 +1,17 @@
+# Build only the Python runtime shipped in the application image.
+**
+!backend/
+!backend/requirements.txt
+!backend/alembic.ini
+!backend/alembic/
+!backend/alembic/**
+!backend/app/
+!backend/app/**
+!backend/scripts/
+!backend/scripts/**
+
+# Never send local credentials, native SDK binaries, caches, or generated files.
+backend/.env
+backend/vendor/
+**/__pycache__/
+**/*.py[cod]

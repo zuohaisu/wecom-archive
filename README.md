@@ -51,6 +51,79 @@ for the controlled profile-image contract.
 
 ## Quick start
 
+### Five-minute self-host quickstart / 五分钟自部署
+
+**English:** This Compose path is for a complete self-hosted installation. It
+uses PostgreSQL 16, applies migrations, starts the web app, and runs the
+self-host worker schedule. It does not require the official cloud service or a
+paid cloud subscription.
+
+**中文：** Compose 路径用于完整自部署，包含 PostgreSQL 16、自动数据库迁移、Web
+应用和自部署 worker 调度；不依赖康冠时代官方云服务，也不要求云版订阅。
+
+**Prerequisites / 前置条件:** Docker Engine with the Docker Compose v2 plugin;
+a Linux host compatible with the Tencent WeCom C SDK; a WeCom organization
+with Conversation Archive enabled; and the SDK obtained directly from Tencent
+under its terms. The SDK is proprietary and is not included in this repository
+or image. Real WeCom callbacks also require a public HTTPS endpoint and an
+operator-managed reverse proxy; Compose binds the app to localhost and does not
+install DNS, TLS, or a proxy.
+
+1. **Create local configuration / 创建本地配置.** Copy the example and set a
+   URL-safe database password (hex works), plus two distinct Fernet keys:
+   `FIELD_ENCRYPTION_KEY` and `SETTINGS_ENCRYPTION_KEY`.
+
+   ```bash
+   cp .env.example .env
+   openssl rand -hex 32
+   openssl rand -base64 32 | tr '+/' '-_'  # generate one Fernet key; run twice
+   ```
+
+   Paste the outputs into the corresponding values in `.env`. The Compose
+   stack overrides the local `DATABASE_URL` host with its private `db` service.
+
+2. **Provide the SDK and start the stack / 放置 SDK 并启动.** Put Tencent's
+   `libWeWorkFinanceSdk_C.so` at the path shown below, then start the services.
+   The migration service must succeed before web and worker start.
+
+   ```bash
+   mkdir -p backend/vendor/wecom_sdk
+   # Copy the SDK library to backend/vendor/wecom_sdk/libWeWorkFinanceSdk_C.so
+   docker compose up -d --build
+   docker compose ps
+   ```
+
+3. **Initialize and configure / 初始化并配置.** Open
+   `http://127.0.0.1:8035/admin/settings/init` and create the local
+   administrator. The example uses `AUTH_MODE=password`, so sign in at
+   `/admin/login` with that account; global WeCom OAuth settings are optional
+   for this local login. Then open
+   `http://127.0.0.1:8035/admin/provisioning/settings` (the S2 setup wizard) to
+   enter and test the tenant-scoped archive credentials.
+
+4. **Run the first sync / 执行首次同步.** With a test organization and SDK
+   configured, run the existing one-shot worker and then refresh the review
+   console:
+
+   ```bash
+   docker compose exec worker python scripts/run_archive_worker_once.py
+   docker compose logs --tail=100 worker
+   ```
+
+   The first archived message appears after WeCom returns an eligible record;
+   message availability and WeCom-side permissions are external prerequisites.
+   Email is not required for sync; configure your own SMTP transport in `.env`
+   if you want outbound notifications.
+
+The app port is bound to `127.0.0.1` by default. Before enabling remote access
+or WeCom callbacks, set `ADMIN_DOMAIN` to the public hostname, set
+`APP_ENV=production`, and place an operator-managed TLS reverse proxy in front
+of the app; Compose does not provision DNS, certificates, or a proxy.
+`docker compose down` preserves the named database and media volumes; **do not
+use `docker compose down -v` unless you intend to delete that data**. The
+Compose worker runs only self-host jobs; cloud billing/payment jobs and
+deferred destructive cleanup/purge jobs are not started.
+
 ### Prerequisites
 
 - Python 3.11+

@@ -2,8 +2,9 @@
 
 WeCom callbacks and archive decryption must never call the external-contact
 API themselves. They only coalesce an identifier into the database-backed
-task source and touch one identifier-free systemd-path signal. A separate
-worker owns all network I/O and retry timing.
+task source and touch one identifier-free signal. A systemd path unit or the
+self-host container scheduler may consume it; a separate worker owns network I/O
+and retry timing.
 """
 
 from __future__ import annotations
@@ -91,14 +92,18 @@ def enqueue_external_contact_refresh(
 
 
 def _signal_refresh_worker() -> bool:
-    """Touch one identifier-free path watched by a dedicated systemd unit."""
+    """Touch one identifier-free signal watched by the configured worker runner."""
+    path = (
+        os.environ.get("EXTERNAL_CONTACT_REFRESH_SIGNAL_PATH", "").strip()
+        or _DEFAULT_SIGNAL_PATH
+    )
     try:
-        directory = os.path.dirname(_DEFAULT_SIGNAL_PATH)
+        directory = os.path.dirname(path)
         if directory:
             os.makedirs(directory, mode=0o750, exist_ok=True)
-        fd = os.open(_DEFAULT_SIGNAL_PATH, os.O_CREAT | os.O_WRONLY, 0o640)
+        fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o640)
         try:
-            os.utime(_DEFAULT_SIGNAL_PATH, None)
+            os.utime(path, None)
         finally:
             os.close(fd)
         return True

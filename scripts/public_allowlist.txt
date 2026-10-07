@@ -24,6 +24,11 @@ backend/alembic.ini
 backend/requirements.txt
 backend/requirements-dev.txt
 
+# ── Community self-host container deployment ────────────────────────
+Dockerfile
+.dockerignore
+docker-compose.yml
+
 # ── Deployment reference ────────────────────────────────────────────
 # Sanitized on export (real hostnames and the private repo's deploy path
 # are rewritten to placeholders — see SANITIZERS in the export script).

@@ -1,0 +1,110 @@
+name: wecom-archive
+
+x-app-environment: &app-environment
+  APP_EDITION: selfhost
+  DB_HOST: db
+  DB_PORT: "5432"
+  DB_NAME: ${DB_NAME:-wecom_archive}
+  DB_USER: ${DB_USER:-postgres}
+  DB_PASSWORD: "${DB_PASSWORD:?Set a URL-safe DB_PASSWORD in .env}"
+  DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:?Set a URL-safe DB_PASSWORD in .env}@db:5432/${DB_NAME:-wecom_archive}"
+  FIELD_ENCRYPTION_KEY: "${FIELD_ENCRYPTION_KEY:?Generate FIELD_ENCRYPTION_KEY in .env}"
+  SETTINGS_ENCRYPTION_KEY: "${SETTINGS_ENCRYPTION_KEY:?Generate SETTINGS_ENCRYPTION_KEY in .env}"
+  WECOM_SDK_LIB_PATH: /opt/wecom-sdk/libWeWorkFinanceSdk_C.so
+  STORAGE_LOCAL_PATH: /var/lib/wecom-archive/media
+  WORKER_LOCK_PATH: /var/lib/wecom-archive/run/archive-worker.lock
+  MEDIA_DOWNLOAD_LOCK_PATH: /var/lib/wecom-archive/run/media-download.lock
+  MEDIA_EVENT_SIGNAL_PATH: /var/lib/wecom-archive/run/media-event.trigger
+  EXTERNAL_CONTACT_REFRESH_SIGNAL_PATH: /var/lib/wecom-archive/run/external-contact-refresh.trigger
+
+x-app-common: &app-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: wecom-archive:local
+  env_file:
+    - .env
+  environment: *app-environment
+  networks:
+    - app
+  read_only: true
+  tmpfs:
+    - /tmp:mode=1777,size=64m
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-wecom_archive}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: "${DB_PASSWORD:?Set a URL-safe DB_PASSWORD in .env}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - app
+
+  migrate:
+    <<: *app-common
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    <<: *app-common
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8035"]
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8035}:8035"
+    volumes:
+      - media_data:/var/lib/wecom-archive/media
+      - worker_run:/var/lib/wecom-archive/run
+      - ./backend/vendor/wecom_sdk:/opt/wecom-sdk:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8035/health/ready', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    init: true
+    restart: unless-stopped
+
+  worker:
+    <<: *app-common
+    command: ["python", "scripts/run_selfhost_worker_scheduler.py"]
+    environment:
+      <<: *app-environment
+      ARCHIVE_WORKER_TRIGGER_SOURCE: timer
+    volumes:
+      - media_data:/var/lib/wecom-archive/media
+      - worker_run:/var/lib/wecom-archive/run
+      - ./backend/vendor/wecom_sdk:/opt/wecom-sdk:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  postgres_data:
+  media_data:
+  worker_run:
+
+networks:
+  app:

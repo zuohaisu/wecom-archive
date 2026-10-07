@@ -65,6 +65,50 @@ Not versioned in this repository:
 
 ---
 
+## Self-hosted Docker Compose path
+
+The community self-host path is a single-host Docker Compose stack described
+in the [README quickstart](../README.md#quick-start).
+`docker-compose.yml` starts PostgreSQL 16, a one-shot Alembic migration,
+the FastAPI web service, and a separate self-host worker container. The
+Compose configuration forces `APP_EDITION=selfhost`, exposes only the web
+port (bound to `127.0.0.1` by default), keeps PostgreSQL private to the
+Compose network, and persists PostgreSQL data and local media in named
+volumes. It does not contain cloud payment services, a Docker socket mount,
+reverse-proxy/TLS setup, backup automation, or deployment to a hosted
+infrastructure.
+
+The worker uses the standard-library
+`backend/scripts/run_selfhost_worker_scheduler.py` to invoke existing
+one-shot commands. This was chosen over an Ofelia-style Docker scheduler so
+the worker does not need the host's privileged Docker socket or an additional
+scheduler image. Each job runs serially with a bounded fallback interval;
+callback-triggered archive work still uses the existing web-to-worker path.
+The shared run volume carries only coalescing media/contact signal files, which
+the scheduler polls for prompt work. The fallback intervals are five minutes
+for archive reconciliation and export jobs, 15 minutes for external-contact
+refresh, 30 minutes for media reconciliation, and daily/hourly for the optional
+contact, AI-index, and retention jobs. Cloud billing/payment, internal AI eval
+reports, backups/TLS renewal, and deferred destructive cleanup/purge jobs are
+not scheduled in this self-host stack.
+
+Before starting the stack, configure the database password and both Fernet
+keys in the root `.env` file, and provide Tencent's separately licensed
+WeCom SDK at `backend/vendor/wecom_sdk/libWeWorkFinanceSdk_C.so`. Email is not
+required for archive sync; configure your own SMTP transport for notifications.
+The image build deliberately excludes the SDK directory and all `.env` files. Real
+WeCom callbacks require an operator-managed public HTTPS endpoint and reverse
+proxy; the Compose stack itself remains bound to localhost. Before exposing it,
+set `APP_ENV=production` and `ADMIN_DOMAIN` to the public hostname and configure
+the proxy/TLS separately. `docker compose down` preserves named volumes.
+`docker compose down -v` deletes the database and local media and must be
+treated as destructive.
+
+**Production reference:** The host bootstrap, web-service, and systemd worker
+sections below document the existing operator-managed deployment path. They
+remain in place and are not modified or replaced by the community Compose
+stack.
+
 ## 2. Local / New-Server Bootstrap
 
 Run from `backend/` after creating `.env`:
