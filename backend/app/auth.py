@@ -53,7 +53,11 @@ from app.services.service_access import (
     tenant_service_denial,
 )
 from app.session_lifecycle import touch_last_active
-from app.settings import get_auth_settings
+from app.settings import (
+    APP_EDITION_SELFHOST,
+    get_app_edition,
+    get_auth_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -716,26 +720,44 @@ def get_provisioning_user(
     if not session_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
     now = datetime.now(timezone.utc)
-    session = (
-        db.query(AdminSession)
-        .filter(
-            AdminSession.id == session_id,
-            AdminSession.expires_at > now,
-            AdminSession.is_revoked.is_(False),
-            AdminSession.session_scope == "provisioning",
-        )
-        .first()
+    edition = get_app_edition()
+    session_query = db.query(AdminSession).filter(
+        AdminSession.id == session_id,
+        AdminSession.expires_at > now,
+        AdminSession.is_revoked.is_(False),
     )
+    if edition != APP_EDITION_SELFHOST:
+        session_query = session_query.filter(
+            AdminSession.session_scope == "provisioning"
+        )
+    session = session_query.first()
     if session is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     user = db.query(AdminUser).filter(AdminUser.id == session.admin_user_id).first()
     tenant = db.query(Tenant).filter(Tenant.id == session.tenant_id).first()
+    if edition == APP_EDITION_SELFHOST:
+        authorized_lifecycle = (
+            tenant is not None
+            and tenant.lifecycle_status in {"active", "frozen"}
+            and tenant_service_denial(tenant.lifecycle_status, INTERACTIVE) is None
+        )
+        authorized_scope = session.session_scope == "admin"
+        authorized_role = user is not None and user.role in {"owner", "admin"}
+    else:
+        authorized_lifecycle = (
+            tenant is not None and tenant.lifecycle_status == "provisioning"
+        )
+        authorized_scope = session.session_scope == "provisioning"
+        authorized_role = user is not None and user.role == "owner"
+
     if (
         user is None
         or user.status != "active"
-        or user.role != "owner"
+        or user.tenant_id != session.tenant_id
+        or not authorized_role
         or tenant is None
-        or tenant.lifecycle_status != "provisioning"
+        or not authorized_lifecycle
+        or not authorized_scope
     ):
         raise HTTPException(status_code=403, detail="Provisioning access denied")
     return user, tenant

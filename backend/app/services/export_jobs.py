@@ -29,7 +29,7 @@ from app.media_storage import (
     object_key_tenant_prefix_matches,
     resolve_effective_storage_reference,
 )
-from app.settings import get_wecom_oauth_settings
+from app.settings import APP_EDITION_SELFHOST, get_app_edition, get_wecom_oauth_settings
 
 
 EXPORT_RETENTION_DAYS = 7
@@ -479,16 +479,19 @@ def _claimable_job_condition(now: datetime):
 
 
 def _active_tenant_job_join():
-    """Join that restricts export work to tenants whose authoritative
-    service projection still allows the export capability (RND-402).
+    """Join export work to tenants allowed by the current edition policy.
 
-    Frozen/suspended tenants' jobs are deliberately left untouched: they
-    are neither claimed, polled, nor notified, and resume after the
-    tenant is renewed or resumed — no export data is fabricated or
-    deleted.
+    Cloud leaves frozen/suspended tenants' jobs untouched until renewal or
+    manual resume. Selfhost ignores the stale subscription-frozen projection,
+    but suspended and unknown lifecycle states remain blocked.
     """
+    allowed_statuses = (
+        ("active", "frozen")
+        if get_app_edition() == APP_EDITION_SELFHOST
+        else ("active",)
+    )
     return select(ExportJob).join(Tenant, Tenant.id == ExportJob.tenant_id).where(
-        Tenant.lifecycle_status == "active"
+        Tenant.lifecycle_status.in_(allowed_statuses)
     )
 
 
@@ -739,15 +742,19 @@ def run_export_maintenance_once(
     checked_at = _utc(now)
     claimed = failed = 0
 
-    # RND-402: count claimable jobs whose tenant denies the export
-    # capability so operations can observe the frozen queue without any
-    # identifier escaping the summary.
+    # Count jobs whose tenant is blocked by this edition's lifecycle policy;
+    # identifiers never escape the aggregate summary.
+    allowed_statuses = (
+        ("active", "frozen")
+        if get_app_edition() == APP_EDITION_SELFHOST
+        else ("active",)
+    )
     blocked = db.scalar(
         select(func.count())
         .select_from(ExportJob)
         .join(Tenant, Tenant.id == ExportJob.tenant_id)
         .where(
-            Tenant.lifecycle_status != "active",
+            Tenant.lifecycle_status.notin_(allowed_statuses),
             _claimable_job_condition(checked_at),
         )
     )

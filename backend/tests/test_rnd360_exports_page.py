@@ -41,8 +41,10 @@ def test_export_frontend_uses_server_authority_without_foreground_polling() -> N
     assert "/api/admin/exports/text" in script
     assert "/api/admin/exports/media" in script
     assert "/api/admin/exports/jobs" in script
-    assert "quota.text.remaining<=0" in script
-    assert "quota.media_zip.remaining<=0" in script
+    assert "quota.text.limit!==null&&quota.text.remaining<=0" in script
+    assert "quota.media_zip.limit!==null&&quota.media_zip.remaining<=0" in script
+    assert "exports.quotaTitleUnlimited" in script
+    assert "exports.unlimited" in script
     assert "setInterval" not in script
 
 

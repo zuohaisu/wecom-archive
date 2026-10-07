@@ -54,7 +54,7 @@ from app.media_download import (
     get_or_reset_media_file,
 )
 from app.media_storage import MediaStorageProvider
-from app.services.storage_capacity import check_storage_write
+from app.services.storage_capacity import StorageCapacityError, check_storage_write
 from app.services.tenant_storage_rollup import refresh_tenant_storage_daily
 from app.thumbnail_pipeline import maybe_generate_after_download
 from app.voice_playback_pipeline import (
@@ -216,11 +216,16 @@ def download_media_candidates(
     summary = MediaDownloadSummary()
 
     def server_quota_gate(incoming_bytes: int) -> str:
-        return check_storage_write(
-            session,
-            tenant_id,
-            incoming_bytes,
-        ).reason
+        try:
+            return check_storage_write(
+                session,
+                tenant_id,
+                incoming_bytes,
+            ).reason
+        except StorageCapacityError:
+            # Invalid selfhost limit configuration and missing tenant capacity
+            # both fail closed before any storage-provider write.
+            return "usage_unavailable"
 
     quota_gate = server_quota_gate if enforce_quota else None
 

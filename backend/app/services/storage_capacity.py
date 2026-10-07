@@ -12,9 +12,10 @@ from app.db.models import Tenant
 from app.services.entitlements import get_subscription_summary
 from app.services.tenant_storage_rollup import upsert_tenant_storage_daily
 from app.services.usageservice import sum_downloaded_storage
+from app.settings import APP_EDITION_SELFHOST, get_app_edition, get_runtime_edition_settings
 
 CAPACITY_STATES = frozenset(
-    {"normal", "warning_80", "warning_90", "full", "over_limit", "unavailable"}
+    {"normal", "warning_80", "warning_90", "full", "over_limit", "unavailable", "unlimited"}
 )
 WRITE_REASONS = frozenset(
     {"allowed", "quota_exceeded", "subscription_inactive", "usage_unavailable"}
@@ -26,6 +27,10 @@ class StorageCapacityError(RuntimeError):
 
 
 class CapacityTenantNotFoundError(StorageCapacityError):
+    pass
+
+
+class StorageCapacityConfigurationError(StorageCapacityError):
     pass
 
 
@@ -61,10 +66,11 @@ def capacity_from_values(
     plan_code: str | None,
     subscription_status: str,
     entitled: bool,
+    unlimited: bool = False,
 ) -> StorageCapacitySnapshot:
     """Classify one measurement without database or floating-point drift."""
     checked_at = measured_at.astimezone(timezone.utc)
-    if used_bytes is None or quota_bytes <= 0 or not entitled:
+    if used_bytes is None:
         return StorageCapacitySnapshot(
             tenant_id=tenant_id,
             plan_code=plan_code,
@@ -75,6 +81,34 @@ def capacity_from_values(
             utilization_basis_points=None,
             state="unavailable",
             usage_status="unavailable" if used_bytes is None else "available",
+            can_accept_new_media=False,
+            measured_at=checked_at,
+        )
+    if unlimited:
+        return StorageCapacitySnapshot(
+            tenant_id=tenant_id,
+            plan_code=plan_code,
+            subscription_status=subscription_status,
+            quota_bytes=0,
+            used_bytes=used_bytes,
+            remaining_bytes=None,
+            utilization_basis_points=None,
+            state="unlimited",
+            usage_status="available",
+            can_accept_new_media=True,
+            measured_at=checked_at,
+        )
+    if quota_bytes <= 0 or not entitled:
+        return StorageCapacitySnapshot(
+            tenant_id=tenant_id,
+            plan_code=plan_code,
+            subscription_status=subscription_status,
+            quota_bytes=max(quota_bytes, 0),
+            used_bytes=used_bytes,
+            remaining_bytes=max(quota_bytes - used_bytes, 0),
+            utilization_basis_points=None,
+            state="unavailable",
+            usage_status="available",
             can_accept_new_media=False,
             measured_at=checked_at,
         )
@@ -105,6 +139,20 @@ def capacity_from_values(
     )
 
 
+def _selfhost_storage_limit_bytes() -> int:
+    raw = get_runtime_edition_settings().selfhost_storage_limit_bytes.strip()
+    if not raw.isascii() or not raw.isdecimal():
+        raise StorageCapacityConfigurationError(
+            "SELFHOST_STORAGE_LIMIT_BYTES must be a non-negative integer"
+        )
+    value = int(raw)
+    if value > 2**63 - 1:
+        raise StorageCapacityConfigurationError(
+            "SELFHOST_STORAGE_LIMIT_BYTES is out of range"
+        )
+    return value
+
+
 def measure_storage_capacity(
     db: Session,
     tenant_id: str,
@@ -125,9 +173,19 @@ def measure_storage_capacity(
         tenant_query = tenant_query.with_for_update()
     if db.scalar(tenant_query) is None:
         raise CapacityTenantNotFoundError("tenant does not exist")
-    subscription = get_subscription_summary(db, tenant_id, at=measured_at)
+    selfhost = get_app_edition() == APP_EDITION_SELFHOST
+    limit_bytes = _selfhost_storage_limit_bytes() if selfhost else None
+    subscription = (
+        None
+        if selfhost
+        else get_subscription_summary(db, tenant_id, at=measured_at)
+    )
     entitled = subscription is not None and subscription.is_entitled
-    quota_bytes = subscription.storage_quota_bytes if entitled else 0
+    quota_bytes = (
+        int(limit_bytes or 0)
+        if selfhost
+        else subscription.storage_quota_bytes if entitled else 0
+    )
     used_bytes = sum_downloaded_storage(db, tenant_id)
     upsert_tenant_storage_daily(
         db,
@@ -143,9 +201,12 @@ def measure_storage_capacity(
         measured_at=measured_at,
         plan_code=subscription.plan_code if subscription else None,
         subscription_status=(
-            subscription.effective_status if subscription else "not_subscribed"
+            "not_applicable"
+            if selfhost
+            else subscription.effective_status if subscription else "not_subscribed"
         ),
-        entitled=entitled,
+        entitled=(limit_bytes is not None) if selfhost else entitled,
+        unlimited=selfhost and limit_bytes == 0,
     )
 
 
@@ -167,6 +228,8 @@ def check_storage_write(
     )
     if capacity.usage_status != "available" or capacity.used_bytes is None:
         reason = "usage_unavailable"
+    elif capacity.state == "unlimited":
+        reason = "allowed"
     elif capacity.quota_bytes <= 0 or capacity.state == "unavailable":
         reason = "subscription_inactive"
     elif capacity.used_bytes + incoming_bytes > capacity.quota_bytes:

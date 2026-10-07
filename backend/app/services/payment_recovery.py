@@ -26,6 +26,7 @@ from app.services.payment_orders import (
     query_and_reconcile_order,
 )
 from app.services.payment_provider import PaymentProvider
+from app.settings import APP_EDITION_CLOUD, get_app_edition
 from app.services.wechat_pay import WECHAT_PAY_PROVIDER, WechatPayProtocolError
 
 SessionFactory = Callable[[], Session]
@@ -611,6 +612,8 @@ def run_payment_recovery_once(
     at: datetime | None = None,
     limit: int = RECOVERY_BATCH_LIMIT,
 ) -> RecoveryRunSummary:
+    if get_app_edition() != APP_EDITION_CLOUD:
+        raise RuntimeError("payment recovery worker is cloud-only")
     checked_at = _utc(at or datetime.now(timezone.utc))
     claims = _claim_recovery_candidates(session_factory, at=checked_at, limit=limit)
     return _run_claims(
@@ -625,6 +628,8 @@ def run_payment_reconciliation_once(
     at: datetime | None = None,
     limit: int = RECONCILIATION_BATCH_LIMIT,
 ) -> RecoveryRunSummary:
+    if get_app_edition() != APP_EDITION_CLOUD:
+        raise RuntimeError("payment reconciliation worker is cloud-only")
     checked_at = _utc(at or datetime.now(timezone.utc))
     claims = _claim_reconciliation_candidates(
         session_factory, at=checked_at, limit=limit

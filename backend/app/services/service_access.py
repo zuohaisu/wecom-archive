@@ -37,6 +37,8 @@ Capability classes (see ADR-0005 §2.6 access matrix):
 
 from __future__ import annotations
 
+from app.settings import APP_EDITION_SELFHOST, resolve_app_edition
+
 # Capability classes -----------------------------------------------------
 
 INTERACTIVE = "interactive"
@@ -81,7 +83,10 @@ _DENIAL_CODE_BY_STATUS: dict[str, str] = {
 
 
 def tenant_service_denial(
-    tenant_lifecycle_status: str | None, capability: str
+    tenant_lifecycle_status: str | None,
+    capability: str,
+    *,
+    edition: str | None = None,
 ) -> str | None:
     """Return the stable denial code for *capability*, or ``None`` when allowed.
 
@@ -89,15 +94,34 @@ def tenant_service_denial(
     most restrictive code.
     """
     status = tenant_lifecycle_status or "suspended"
+    selected_edition = resolve_app_edition(edition)
     if capability not in CAPABILITIES:
         raise ValueError(f"unknown service capability: {capability!r}")
+    # `frozen` is a commercial projection of subscription expiry. In a
+    # selfhost process it must not disable core capabilities; manual
+    # suspension and unknown lifecycle values remain fail-closed below.
+    if selected_edition == APP_EDITION_SELFHOST:
+        if status == "suspended":
+            return DENY_SUSPENDED
+        if capability == OWNER_BILLING:
+            return DENY_UNKNOWN_STATUS
+        if status == "frozen":
+            return None
     if capability in _ALLOWED.get(status, frozenset()):
         return None
     return _DENIAL_CODE_BY_STATUS.get(status, DENY_UNKNOWN_STATUS)
 
 
 def tenant_service_allows(
-    tenant_lifecycle_status: str | None, capability: str
+    tenant_lifecycle_status: str | None,
+    capability: str,
+    *,
+    edition: str | None = None,
 ) -> bool:
     """Boolean form of :func:`tenant_service_denial` for worker gates."""
-    return tenant_service_denial(tenant_lifecycle_status, capability) is None
+    return (
+        tenant_service_denial(
+            tenant_lifecycle_status, capability, edition=edition
+        )
+        is None
+    )

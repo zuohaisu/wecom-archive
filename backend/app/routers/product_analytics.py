@@ -23,6 +23,7 @@ from app.services import product_analytics
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["product-analytics"])
+platform_router = APIRouter(tags=["product-analytics"])
 
 
 def _invalid_filter(error: ValueError) -> HTTPException:
@@ -70,7 +71,7 @@ def collect_product_analytics_event(
     return ProductAnalyticsEventAcceptedOut()
 
 
-@router.get(
+@platform_router.get(
     "/api/platform/operations/product-analytics/overview",
     response_model=ProductAnalyticsOverviewOut,
 )
@@ -96,7 +97,7 @@ def product_analytics_overview(
         raise _invalid_filter(error) from error
 
 
-@router.get(
+@platform_router.get(
     "/api/platform/operations/product-analytics/tenants",
     response_model=ProductAnalyticsTenantListOut,
 )
@@ -128,7 +129,7 @@ def product_analytics_tenants(
         raise _invalid_filter(error) from error
 
 
-@router.get(
+@platform_router.get(
     "/api/platform/operations/product-analytics/tenants/{tenant_id}",
     response_model=ProductAnalyticsTenantDetailOut,
 )

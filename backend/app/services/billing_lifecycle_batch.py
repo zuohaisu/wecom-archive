@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Subscription, Tenant
 from app.services.billing_lifecycle import reconcile_tenant_billing_lifecycle
+from app.settings import APP_EDITION_CLOUD, get_app_edition
 
 DEFAULT_BATCH_RETRIES = 2
 
@@ -110,6 +111,8 @@ def run_lifecycle_batch_once(
     counted and never aborts the scan.  The caller owns no surrounding
     transaction — this function commits per tenant.
     """
+    if get_app_edition() != APP_EDITION_CLOUD:
+        raise RuntimeError("billing lifecycle worker is cloud-only")
     checked_at = now or datetime.now(timezone.utc)
     if checked_at.tzinfo is None or checked_at.utcoffset() is None:
         checked_at = checked_at.replace(tzinfo=timezone.utc)

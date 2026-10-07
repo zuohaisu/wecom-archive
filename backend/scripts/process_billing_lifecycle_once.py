@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.settings import APP_EDITION_CLOUD, get_app_edition  # noqa: E402
 from app.services.billing_lifecycle_batch import (  # noqa: E402
     DEFAULT_BATCH_RETRIES,
     batch_summary_line,
@@ -52,6 +53,14 @@ def _bounded_int_env(name: str, default: int, maximum: int) -> int:
 
 
 def main() -> int:
+    try:
+        edition = get_app_edition()
+    except ValueError:
+        print("[FAIL] billing_lifecycle invalid_edition", flush=True)
+        return 1
+    if edition != APP_EDITION_CLOUD:
+        print("[INFO] billing_lifecycle skipped selfhost edition", flush=True)
+        return 0
     database_url = os.environ.get("DATABASE_URL", "").strip()
     if not database_url:
         print("[FAIL] billing_lifecycle configuration_missing", flush=True)
