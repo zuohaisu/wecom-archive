@@ -114,7 +114,7 @@ def test_production_conversations_route_renders_the_sidenav_without_tokens() -> 
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert '<nav class="side-nav">' in response.text
+    assert '<nav class="side-nav" id="side-nav">' in response.text
     assert not re.search(r"__[A-Z0-9_]+__", response.text)
 
 

@@ -581,9 +581,10 @@ def test_narrow_viewport_breakpoint_shrinks_fixed_width_columns() -> None:
     # half of this breakpoint converged into design-system.css, which
     # shrinks it via --nav-w-sm (170px < 212px) at the same width.
     col_conv = re.search(r"\.col-conv\{width:(\d+)px\}", block)
-    col_panel = re.search(r"\.col-panel\{width:(\d+)px\}", block)
     assert col_conv and int(col_conv.group(1)) < 328
-    assert col_panel and int(col_panel.group(1)) < 300
+    # GH-102: col-panel 与 side-nav 在窄断点不再是并排固定列——面板变右侧
+    # overlay 抽屉，side-nav 收缩收敛进 design-system（--nav-w-sm:170px）。
+    assert ".col-panel{position:fixed;right:0;top:0;bottom:0" in block
     assert ".side-nav{width:var(--nav-w-sm)}" in _DESIGN_SYSTEM_CSS
     assert "--nav-w-sm:170px" in _DESIGN_SYSTEM_CSS
 

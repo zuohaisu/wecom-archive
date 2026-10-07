@@ -9,27 +9,23 @@
 <link rel="stylesheet" href="/web/static/console/media-viewer.css?v=__STATIC_VERSION__">
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
+*{box-sizing:border-box;margin:0;padding:0}.btn-conv-list{display:none}
 :root{--bubble-self-bg:#cfe6fd;--bubble-self-text:#000;--bubble-other-bg:#fff;--bubble-other-text:#000;--link-color:#417ce8}
 body{font-family:system-ui,sans-serif;color:var(--color-text);background:var(--color-canvas);height:100vh;overflow:hidden}
 a{color:var(--link-color)}
-/* ------------------------------------------------------------------ */
-/* Console main column                                                 */
-/* ------------------------------------------------------------------ */
+/* Console main column */
 .console-main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
 .layout{display:flex;flex:1;overflow:hidden}
 .loading{padding:1rem;text-align:center;color:var(--color-text-5);font-size:.82rem}
-/* ------------------------------------------------------------------ */
-/* Left column: monitoring-scope popover + conv-type tabs + conv list   */
-/* ------------------------------------------------------------------ */
+/* Left column: monitoring-scope popover + conv-type tabs + conv list */
 .col-conv{width:328px;flex-shrink:0;border-right:1px solid var(--color-border);position:relative}
 .badge{display:inline-block;font-size:.7rem;padding:.05rem .3rem;border-radius:2px;font-weight:var(--weight-medium);line-height:1.4}
 .btn-danger{border-color:#ffa39e;color:var(--color-danger-fg);background:var(--color-danger-bg)}
 @media (prefers-reduced-motion: reduce){[data-msgid].target-flash{animation:none}}
-/* ------------------------------------------------------------------ */
-/* Right column: 会话信息 / 消息详情 panel                               */
-/* ------------------------------------------------------------------ */
-.col-panel{width:300px;flex-shrink:0;border-left:1px solid var(--color-border)}
+/* Right column: 会话信息 / 消息详情 panel */
+.col-panel{width:300px;flex-shrink:0;border-left:1px solid var(--color-border);transition:transform .2s ease}
+.col-panel.panel-closed{display:none}
+.col-panel.panel-open{display:flex}
 /* QA fix: side-nav (212px) + col-conv (328px) + col-panel (300px) are all
    fixed-width with no breakpoint, so at common laptop widths (~1024-1366px)
    the timeline -- the one flexible column -- was squeezed down to as
@@ -37,12 +33,27 @@ a{color:var(--link-color)}
    instead of hiding any of them outright (hiding the panel would fight the
    user's own 详情面板 toggle state). */
 @media (max-width: 1300px){
-  .col-conv{width:260px}
-  .col-panel{width:260px}
+  .col-conv{width:240px}
+  .col-panel{position:fixed;right:0;top:0;bottom:0;width:min(320px,86vw);z-index:330;transform:translateX(100%);box-shadow:var(--shadow-3)}
+  .col-panel.panel-closed{display:flex;transform:translateX(100%)}
+  .col-panel.panel-open{transform:none}
+  .panel-backdrop{display:none}
+  .panel-backdrop.panel-open{display:block;position:fixed;inset:0;background:var(--color-overlay);z-index:325}
 }
 @media (max-width: 900px){
+  .top-bar{padding-left:52px}
+  .btn-conv-list{display:inline-flex}
+  .col-conv{position:fixed;left:0;top:0;bottom:0;width:min(328px,86vw);z-index:330;transform:translateX(-100%);transition:transform .2s ease;box-shadow:var(--shadow-3)}
+  .col-conv.conv-open{transform:none}
+  .drawer-backdrop{position:fixed;inset:0;background:var(--color-overlay);z-index:325}
+  .drawer-backdrop[hidden]{display:none}
+  .scope-popover{max-width:calc(100vw - 24px)}
   .delete-bar{flex-wrap:wrap;padding:8px 12px}
   .favorite-selection-bar{flex-wrap:wrap;padding:8px 12px}.favorite-selection-bar button{flex:1 1 auto}.favorite-selection-count,.favorite-selection-hint{flex-basis:100%}.timeline-header-bar{padding:0 12px}.timeline-favorites-filter{font-size:11px}
+}
+@media (max-width: 640px){
+  .col-conv{width:100vw}
+  .col-panel{width:min(320px,88vw)}
 }
 
 </style>
@@ -63,6 +74,7 @@ __SIDENAV__
       <span class="enter-hint" data-i18n="search.enterHintShort">↵ 结果页</span>
     </div>
     <div class="top-bar-actions">
+      <button type="button" class="btn-toggle btn-conv-list" id="btn-conv-list" onclick="toggleConvList()" data-i18n="console.convList">会话列表</button>
       <span id="sync-status" class="sync-status" aria-live="polite"></span>
       <button type="button" class="btn-toggle" id="btn-export-conversation" onclick="openConversationExport()" data-i18n="exports.openConversation" disabled>导出当前会话</button>
       <button type="button" class="btn-toggle" id="btn-favorite-mode" aria-pressed="false" data-i18n="favorites.enterSelection" disabled>选择收藏</button>
@@ -72,6 +84,7 @@ __SIDENAV__
     </div>
   </div>
 
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
   <div class="layout">
 
     <div class="col col-conv">
@@ -148,6 +161,7 @@ __SIDENAV__
       <div class="timeline-footer" data-i18n="console.readOnlyNote">归档只读 · 不可发送消息</div>
     </div>
 
+    <div class="panel-backdrop" id="panel-backdrop"></div>
     <div class="col col-panel" id="panel-col">
       <div class="panel-tabs">
         <button type="button" class="panel-tab active" id="panel-tab-info" onclick="setPanelTab('info')" data-i18n="panel.info">会话信息</button>
