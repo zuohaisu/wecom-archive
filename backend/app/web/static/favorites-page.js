@@ -114,8 +114,13 @@
     }
     if (item.conversation_type) params.set("conversation_type", item.conversation_type);
     var query = params.toString();
+    var nested = item.message_type === "mixed" || item.message_type === "chatrecord";
+    if (nested && !item.media_item_path) return null;
+    var mediaPath = nested
+      ? "/nested-media/" + encodeURIComponent(item.media_item_path) + "/access"
+      : "/media/access";
     return "/api/conversations/" + encodeURIComponent(item.conversation_id)
-      + "/messages/" + encodeURIComponent(item.message_id) + "/media/access"
+      + "/messages/" + encodeURIComponent(item.message_id) + mediaPath
       + (query ? "?" + query : "");
   }
 
@@ -210,7 +215,7 @@
         : '<span class="favorites-unavailable" title="' + escapeHtml(t("favoritesPage.locateUnavailable")) + '">' + escapeHtml(t("favoritesPage.locateUnavailable")) + "</span>";
       var preview = "";
       if (item.object_type === "media") {
-        if (item.media_download_status === "downloaded" && isSupportedMediaType(item.media_type) && item.conversation_id && item.message_id && item.focus_entity_id && item.focus_entity_type) {
+        if (item.media_download_status === "downloaded" && isSupportedMediaType(item.media_type) && item.conversation_id && item.message_id && item.focus_entity_id && item.focus_entity_type && mediaAccessUrl(item)) {
           preview = '<button class="btn btn-secondary btn-sm" type="button" data-favorites-preview="' + escapeHtml(item.favorite_id) + '">' + escapeHtml(t("favoritesPage.previewMedia")) + "</button>";
         } else {
           preview = '<span class="favorites-unavailable">' + escapeHtml(t("favoritesPage.previewUnavailable")) + "</span>";

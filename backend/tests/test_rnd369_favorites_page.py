@@ -197,6 +197,31 @@ def test_favorites_page_preview_batch_remove_and_escape_dynamic_content() -> Non
     assert output.strip() == "preview=controlled-context exportPrefill=2 batchUnfavorite=2 refreshed=true escaped=true"
 
 
+def test_favorites_page_uses_nested_controlled_route_for_nested_media_preview() -> None:
+    output = _run(
+        r"""
+(async function () {
+  var nested = {favorite_id: 'fav-nested', object_type: 'media', object_id: '3', media_file_id: 3, message_id: 'msg-nested', conversation_id: 'room-a', conversation_name: 'Room A', conversation_type: 'group', focus_entity_type: 'staff', focus_entity_id: 'staff_1', favorited_at: '2026-04-01T12:00:00Z', media_type: 'image', media_mime_type: 'image/jpeg', media_size_bytes: 4, media_download_status: 'downloaded', message_type: 'mixed', media_item_path: '0.1'};
+  globalThis.fetch = function (url) {
+    if (url === '/api/auth/me') return Promise.resolve({ok: true, json: function () { return Promise.resolve({authenticated: true, role: 'owner'}); }});
+    if (url.indexOf('/api/favorites?') === 0) return Promise.resolve({ok: true, json: function () { return Promise.resolve({items: [nested], total: 1, offset: 0, limit: 50}); }});
+    throw new Error('unexpected request: ' + url);
+  };
+  eval(PAGE_SOURCE);
+  await new Promise(function (resolve) { setTimeout(resolve, 10); });
+  var preview = elements['favorites-rows'].querySelectorAll('[data-favorites-preview]')[0];
+  if (!preview || preview.disabled) throw new Error('nested media preview was unavailable');
+  preview.dispatch('click');
+  var accessUrl = openedViewer && openedViewer.items[0].accessUrl;
+  if (!accessUrl || accessUrl.indexOf('/api/conversations/room-a/messages/msg-nested/nested-media/0.1/access?') !== 0) throw new Error('nested media did not use its controlled nested-media route: ' + accessUrl);
+  if (accessUrl.indexOf('mode=staff') === -1 || accessUrl.indexOf('staff_id=staff_1') === -1) throw new Error('nested media route omitted authorization context');
+  console.log('nested-preview=controlled-path context=staff');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "nested-preview=controlled-path context=staff"
+
+
 def test_favorites_page_readonly_role_fails_closed() -> None:
     output = _run(
         r"""

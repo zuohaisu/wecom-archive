@@ -116,6 +116,7 @@ class FavoriteItemOut(BaseModel):
     media_mime_type: Optional[str] = None
     media_size_bytes: Optional[int] = None
     media_download_status: Optional[str] = None
+    media_item_path: Optional[str] = None
 
 
 class FavoritePageOut(BaseModel):

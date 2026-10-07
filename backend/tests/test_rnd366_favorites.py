@@ -729,6 +729,89 @@ def test_rnd369_favorites_filters_details_and_stable_pagination(api_client, db_f
     }
 
 
+def test_rnd369_contact_id_filter_matches_archive_only_participants(api_client, db_factory) -> None:
+    client, _identity = api_client
+    with db_factory() as db:
+        db.add_all(
+            [
+                ArchiveMessage(
+                    id=6, msgid="msg-archive-only-sender", seq=6, publickey_ver=1,
+                    encrypt_random_key="key", encrypt_chat_msg="payload",
+                    decrypt_status="success", content_text="sender-side message",
+                    msgtype="text", sender="archive_only_sender", roomid="room-a",
+                    msgtime=6000, tenant_id="tenant-a",
+                ),
+                ArchiveMessage(
+                    id=7, msgid="msg-archive-only-recipient", seq=7, publickey_ver=1,
+                    encrypt_random_key="key", encrypt_chat_msg="payload",
+                    decrypt_status="success", content_text="recipient-side message",
+                    msgtype="text", sender="staff_1", roomid=None,
+                    msgtime=7000, tenant_id="tenant-a",
+                ),
+                ArchiveMessageRecipient(
+                    message_id=7, tenant_id="tenant-a", receiver_userid="archive_only_recipient"
+                ),
+            ]
+        )
+        db.commit()
+
+    for message_id in ("msg-archive-only-sender", "msg-archive-only-recipient"):
+        assert client.post(
+            "/api/favorites",
+            json={"object_type": "message", "object_id": message_id},
+        ).status_code == 200
+
+    by_sender_id = client.get(
+        "/api/favorites", params={"contact_filter": "archive_only_sender"}
+    )
+    by_recipient_id = client.get(
+        "/api/favorites", params={"contact_filter": "archive_only_recipient"}
+    )
+    assert [item["object_id"] for item in by_sender_id.json()["items"]] == [
+        "msg-archive-only-sender"
+    ]
+    assert [item["object_id"] for item in by_recipient_id.json()["items"]] == [
+        "msg-archive-only-recipient"
+    ]
+
+
+def test_rnd369_nested_media_favorite_projects_safe_item_path(api_client, db_factory) -> None:
+    client, _identity = api_client
+    with db_factory() as db:
+        db.add(
+            ArchiveMessage(
+                id=6, msgid="msg-nested-media", seq=6, publickey_ver=1,
+                encrypt_random_key="key", encrypt_chat_msg="payload",
+                decrypt_status="success", content_text="nested attachment",
+                msgtype="mixed", sender="staff_1", roomid="room-a",
+                msgtime=6000, tenant_id="tenant-a",
+                structured_content={
+                    "media_refs": [{"path": "0.1", "type": "image", "sdkfileid": "synthetic-nested-id"}]
+                },
+            )
+        )
+        db.add(
+            MediaFile(
+                id=3, sdkfileid="synthetic-nested-id", archive_message_id=6,
+                tenant_id="tenant-a", file_type="image", mime_type="image/jpeg",
+                file_size=4, download_status="downloaded", storage_backend="local",
+                storage_ref="synthetic-private-reference.jpg",
+            )
+        )
+        db.commit()
+
+    assert client.post(
+        "/api/favorites", json={"object_type": "media", "object_id": "3"}
+    ).status_code == 200
+    response = client.get("/api/favorites?object_type=media")
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["media_item_path"] == "0.1"
+    serialized = response.text
+    assert "synthetic-nested-id" not in serialized
+    assert "synthetic-private-reference.jpg" not in serialized
+
+
 def test_rnd369_favorites_page_requires_html_session_and_renders_controls(api_client) -> None:
     from app.auth import require_html_session
     from app.main import app

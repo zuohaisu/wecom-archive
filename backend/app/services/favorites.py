@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.types import Integer, String
 
 from app.audit import AuditAction, AuditObjectType, write_audit
+from app.media_download import iter_nested_media_refs
 from app.conversation_membership import (
     _derive_conversation_membership,
     _fetch_conversation_messages_compact,
@@ -48,6 +49,7 @@ from app.schemas.favorites import (
     FavoriteStatusItemOut,
     FavoriteStatusOut,
 )
+from app.services.media_access import _validate_nested_media_path
 from app.services.message_deletion import active_message_filter
 
 MAX_FAVORITE_BATCH = 100
@@ -500,12 +502,28 @@ def list_favorites(
             ArchiveMessageRecipient.tenant_id == tenant_id,
             ArchiveMessageRecipient.receiver_userid.in_(select(matching_contact_ids.c[0])),
         )
-        common_conditions.append(
-            or_(
-                ArchiveMessage.sender.in_(select(matching_contact_ids.c[0])),
-                ArchiveMessage.id.in_(recipient_ids),
+        contact_is_known_staff = contact_filter.startswith("staff_") or db.scalar(
+            select(AdminUser.id).where(
+                AdminUser.tenant_id == tenant_id,
+                AdminUser.wecom_user_id == contact_filter,
             )
-        )
+        ) is not None
+        contact_conditions = [
+            ArchiveMessage.sender.in_(select(matching_contact_ids.c[0])),
+            ArchiveMessage.id.in_(recipient_ids),
+        ]
+        if not contact_is_known_staff:
+            archived_recipient_ids = select(ArchiveMessageRecipient.message_id).where(
+                ArchiveMessageRecipient.tenant_id == tenant_id,
+                ArchiveMessageRecipient.receiver_userid == contact_filter,
+            )
+            contact_conditions.extend(
+                [
+                    ArchiveMessage.sender == contact_filter,
+                    ArchiveMessage.id.in_(archived_recipient_ids),
+                ]
+            )
+        common_conditions.append(or_(*contact_conditions))
     if staff_filter:
         known_staff = staff_filter.startswith("staff_") or db.scalar(
             select(AdminUser.id).where(
@@ -621,6 +639,40 @@ def list_favorites(
     ).mappings().all()
 
     message_ids = [int(row["message_row_id"]) for row in rows]
+    nested_media_file_ids = {
+        int(row["media_file_id"])
+        for row in rows
+        if row["object_type"] == "media"
+        and row["message_type"] in {"mixed", "chatrecord"}
+        and row["media_file_id"] is not None
+    }
+    nested_media_paths: dict[int, str] = {}
+    if nested_media_file_ids:
+        nested_media_rows = db.execute(
+            select(MediaFile.id, MediaFile.sdkfileid, ArchiveMessage.structured_content)
+            .join(
+                ArchiveMessage,
+                and_(
+                    MediaFile.archive_message_id == ArchiveMessage.id,
+                    MediaFile.tenant_id == ArchiveMessage.tenant_id,
+                ),
+            )
+            .where(
+                MediaFile.tenant_id == tenant_id,
+                ArchiveMessage.tenant_id == tenant_id,
+                ArchiveMessage.id.in_(message_ids),
+                MediaFile.id.in_(nested_media_file_ids),
+                active_message_filter(),
+            )
+        ).mappings()
+        for nested_row in nested_media_rows:
+            for media_ref in iter_nested_media_refs(nested_row["structured_content"]):
+                if media_ref["sdkfileid"] != nested_row["sdkfileid"]:
+                    continue
+                item_path = _validate_nested_media_path(media_ref["path"])
+                if item_path:
+                    nested_media_paths[int(nested_row["id"])] = item_path
+                    break
     recipients_by_message = _load_recipients_map(db, tenant_id, message_ids)
     participant_ids = {
         participant
@@ -708,6 +760,10 @@ def list_favorites(
         focus_entity_type = "staff" if staff_id else ("contact" if contact_id else None)
         focus_entity_id = staff_id or contact_id
         sender_id = row["sender_id"]
+        media_item_path = (
+            nested_media_paths.get(int(row["media_file_id"]))
+            if row["media_file_id"] is not None else None
+        )
         items.append(
             FavoriteItemOut(
                 favorite_id=row["favorite_id"],
@@ -740,6 +796,7 @@ def list_favorites(
                 media_mime_type=row["media_mime_type"],
                 media_size_bytes=row["media_size_bytes"],
                 media_download_status=row["media_download_status"],
+                media_item_path=media_item_path,
             )
         )
     return FavoritePageOut(
