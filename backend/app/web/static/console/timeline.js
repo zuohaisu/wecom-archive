@@ -90,6 +90,9 @@ function showHistoryRetry(){
   if(el)el.innerHTML=historyRetryHtml();
 }
 function fetchOlderMessages(convId,before){
+  // Every history-page request can replace/extend the loaded selection
+  // scope, whether it came from scroll loading or a search locator.
+  if(typeof clearTimelineFavoriteSelection==='function')clearTimelineFavoriteSelection();
   // RND-206 QA fix: captures the generation token at call time (this is
   // always invoked synchronously from loadOlderAutomatically, right when
   // the request starts, same guarantee as requestConvId below) rather than
@@ -117,7 +120,6 @@ function fetchOlderMessages(convId,before){
 }
 function loadOlderAutomatically(){
   if(timelineLoadingOlder||!timelineHasOlder||timelineHistoryError)return;
-  if(typeof clearTimelineFavoriteSelection==='function')clearTimelineFavoriteSelection();
   var requestConvId=timelineConvId, requestGen=timelineRequestGen;
   var body=document.getElementById('timeline-body');
   var beforeHeight=body?body.scrollHeight:0;

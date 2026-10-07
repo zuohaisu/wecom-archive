@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,10 @@ from tests._rnd216_web_shims import review_console_html
 _BACKEND = Path(__file__).resolve().parent.parent
 _FAVORITES_JS = _BACKEND / "app" / "web" / "static" / "console" / "timeline-favorites.js"
 _TIMELINE_JS = _BACKEND / "app" / "web" / "static" / "console" / "timeline.js"
+_CONVERSATION_LIST_JS = _BACKEND / "app" / "web" / "static" / "console" / "conversation-list.js"
+_API_CLIENT_JS = _BACKEND / "app" / "web" / "static" / "console" / "api-client.js"
+_REFRESH_JS = _BACKEND / "app" / "web" / "static" / "console" / "refresh.js"
+_CONSOLE_ENTRY_JS = _BACKEND / "app" / "web" / "static" / "console" / "console-entry.js"
 _I18N_JS = _BACKEND / "app" / "assets" / "i18n.js"
 _TEMPLATE = review_console_html()
 NODE = shutil.which("node")
@@ -62,6 +67,13 @@ eval(%s);
     result = run_node(harness)
     assert result.returncode == 0, "node harness failed: %s" % result.stderr
     return result.stdout
+
+
+def _extract_function(path: Path, name: str) -> str:
+    source = path.read_text(encoding="utf-8")
+    match = re.search(r"^function\s+" + re.escape(name) + r"\([^)]*\)\s*\{.*?^\}", source, re.M | re.S)
+    assert match is not None, "could not find function %s in %s" % (name, path)
+    return match.group(0)
 
 
 def test_favorite_status_permission_batch_mutation_and_filter_payload() -> None:
@@ -179,3 +191,190 @@ process.stdout.write(JSON.stringify({locales: I18N.availableLocales().map(functi
         "locales": ["en", "zh-CN", "zh-TW"],
         "translated": {"zh-CN": True, "zh-TW": True, "en": True},
     }
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_switching_conversation_during_write_loads_new_favorites_status() -> None:
+    functions = {
+        "favorites": json.dumps(_FAVORITES_JS.read_text(encoding="utf-8")),
+        "fetch_page": json.dumps(_extract_function(_TIMELINE_JS, "fetchTimelinePage")),
+        "load_timeline": json.dumps(_extract_function(_API_CLIENT_JS, "loadTimeline")),
+        "on_conv_click": json.dumps(_extract_function(_CONVERSATION_LIST_JS, "onConvClick")),
+    }
+    harness = r"""
+var elements = {
+  'timeline-header': {textContent: ''}, 'timeline-body': {innerHTML: ''}
+};
+function node(id) { return elements[id] || null; }
+var cardA = {dataset: {id: 'conversation-A', name: 'A', type: 'group'}, classList: {add: function(){}, remove: function(){}}};
+var cardB = {dataset: {id: 'conversation-B', name: 'B', type: 'group'}, classList: {add: function(){}, remove: function(){}}};
+var document = {
+  getElementById: node,
+  querySelectorAll: function (selector) { return selector === '.conv-card' ? [cardA, cardB] : []; },
+  querySelector: function () { return null; }
+};
+var I18N = {t: function (key) { return key; }};
+var timelineConvId = 'conversation-A', timelineRequestGen = 1, timelineMsgs = [{msgid: 'message-A'}];
+var timelineHasOlder = false, timelineNextBefore = null, timelineLoadingOlder = false;
+var timelineFavoritesOnly = false, timelineMode = 'staff', timelineEntityId = 'staff-1', timelineConvType = 'group';
+var selConvId = 'conversation-A', selConvName = 'A', selEntityId = 'staff-1', mode = 'staff', deleteMode = false;
+var favoriteMode = false, favoriteSelection = {}, favoriteStates = {'message-A': {result: 'found', isFavorited: false}};
+var favoriteStateVersions = {}, favoriteUserCanWrite = true, favoriteBusy = false;
+var favoriteStatusFailed = false, favoriteStatusRetrying = false, timelineFavoriteRevision = 0;
+var selectedMsgId = null, focusPending = false;
+var statusCalls = 0, batchResolve;
+function clearDeleteSelection() {}
+function updateDeleteModeButton() {}
+function updateConversationExportButton() {}
+function clearPanelForNewConversation() {}
+function renderTimeline() {}
+function startHistoryObserver() {}
+function stopHistoryObserver() {}
+function hideNewMessageIndicator() {}
+function loadConversationDetail() {}
+function timelineEntityQueryParams() { return ''; }
+function handleUnauth() { return false; }
+function response(data) { return Promise.resolve({ok: true, json: function () { return Promise.resolve(data); }}); }
+function fetch(url, options) {
+  if (url.indexOf('/api/conversations/conversation-B/messages?') === 0) return response({messages: [{msgid: 'message-B'}], pagination: {has_older: false, next_before: null}});
+  if (url === '/api/favorites/status') {
+    statusCalls += 1;
+    var body = JSON.parse(options.body);
+    return response({items: body.items.map(function (item) { return {object_type: 'message', object_id: item.object_id, result: 'found', is_favorited: false}; })});
+  }
+  if (url === '/api/favorites/batch') return new Promise(function (resolve) { batchResolve = function (data) { resolve({ok: true, json: function () { return Promise.resolve(data); }}); }; });
+  throw new Error('unexpected request: ' + url);
+}
+global.document = document; global.I18N = I18N; global.fetch = fetch;
+eval(%(favorites)s); eval(%(fetch_page)s); eval(%(load_timeline)s); eval(%(on_conv_click)s);
+(async function () {
+  var write = runTimelineFavoriteAction('favorite', ['message-A']);
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (!batchResolve) throw new Error('favorite write did not start');
+  onConvClick(cardB);
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (timelineConvId !== 'conversation-B' || timelineMsgs[0].msgid !== 'message-B') throw new Error('actual conversation-click path did not load B');
+  if (statusCalls !== 0 || timelineFavoriteStatusReady('message-B')) throw new Error('fixture failed to hold B status loading behind A write');
+  batchResolve({requested: 1, unique: 1, applied: 1, unchanged: 0, not_found: 0, items: [{object_type: 'message', object_id: 'message-A', result: 'favorited'}]});
+  await write;
+  if (statusCalls !== 1 || !timelineFavoriteStatusReady('message-B')) throw new Error('new conversation remained unhydrated after old write settled');
+  console.log('onConvClick=B loaded B status=ready after A write');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+""" % functions
+    result = run_node(harness)
+    assert result.returncode == 0, "node harness failed: %s" % result.stderr
+    assert result.stdout.strip() == "onConvClick=B loaded B status=ready after A write"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_sync_refresh_does_not_restore_a_removed_favorite_row() -> None:
+    functions = {
+        "favorites": json.dumps(_FAVORITES_JS.read_text(encoding="utf-8")),
+        "refresh_timeline": json.dumps(_extract_function(_REFRESH_JS, "refreshTimelineIfSelected")),
+        "refresh_data": json.dumps(_extract_function(_REFRESH_JS, "refreshData")),
+        "refresh_for_version": json.dumps(_extract_function(_REFRESH_JS, "refreshForSyncVersion")),
+        "merge": json.dumps(_extract_function(_TIMELINE_JS, "mergeMessagesByMsgid")),
+    }
+    harness = r"""
+var body = {scrollTop: 0};
+var document = {getElementById: function (id) { return id === 'timeline-body' ? body : null; }, querySelector: function () { return null; }};
+var I18N = {t: function (key) { return key; }};
+var timelineConvId = 'conversation-C', timelineRequestGen = 7, timelineMsgs = [{msgid: 'message-C', msgtime: 10}];
+var timelineFavoritesOnly = true, timelineMode = 'staff', timelineEntityId = 'staff-1', timelineConvType = 'group';
+var timelineLoadingOlder = false, timelineFavoriteRevision = 0, favoriteSelection = {};
+var favoriteStates = {'message-C': {result: 'found', isFavorited: true}}, favoriteStateVersions = {};
+var favoriteUserCanWrite = true, favoriteBusy = false, favoriteMode = false;
+var favoriteStatusFailed = false, favoriteStatusRetrying = false, deleteMode = false;
+var selectedMsgId = null, lastRenderedTimelineSignature = null, refreshInFlight = false, selEntityId = null;
+var requestCount = 0, resolveOldRefresh;
+function handleUnauth() { return false; }
+function timelineEntityQueryParams() { return '&mode=staff&staff_id=staff-1&conversation_type=group&favorited_only=true'; }
+function isNearBottom() { return false; }
+function timelineSignature(messages) { return JSON.stringify((messages || []).map(function (message) { return message.msgid; })); }
+function applyTimelineRefresh() {}
+function renderTimeline() {}
+function finishRefresh() { refreshInFlight = false; }
+function refreshEntityList() { return Promise.resolve(); }
+function refreshConversationList() { return Promise.resolve(); }
+function response(data) { return Promise.resolve({ok: true, json: function () { return Promise.resolve(data); }}); }
+function fetch(url, options) {
+  if (url.indexOf('/api/conversations/conversation-C/messages?') === 0) {
+    requestCount += 1;
+    if (requestCount === 1) return new Promise(function (resolve) { resolveOldRefresh = function (data) { resolve({ok: true, json: function () { return Promise.resolve(data); }}); }; });
+    return response({messages: []});
+  }
+  if (url === '/api/favorites/batch') return response({requested: 1, unique: 1, applied: 1, unchanged: 0, not_found: 0, items: [{object_type: 'message', object_id: 'message-C', result: 'unfavorited'}]});
+  if (url === '/api/favorites/status') {
+    var body = JSON.parse(options.body);
+    return response({items: body.items.map(function (item) { return {object_type: 'message', object_id: item.object_id, result: 'found', is_favorited: false}; })});
+  }
+  throw new Error('unexpected request: ' + url);
+}
+global.document = document; global.I18N = I18N; global.fetch = fetch;
+eval(%(favorites)s); eval(%(merge)s); eval(%(refresh_timeline)s); eval(%(refresh_data)s); eval(%(refresh_for_version)s);
+(async function () {
+  refreshForSyncVersion();
+  for (var i = 0; i < 20 && requestCount < 1; i++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (!resolveOldRefresh) throw new Error('sync-version refresh did not start');
+  await runTimelineFavoriteAction('unfavorite', ['message-C']);
+  if (timelineMsgs.length) throw new Error('fixture did not remove the favorite first');
+  resolveOldRefresh({messages: [{msgid: 'message-C', msgtime: 10}]});
+  for (var j = 0; j < 30 && requestCount < 2; j++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (requestCount < 2) throw new Error('changed favorite state did not trigger a fresh filtered read');
+  for (var k = 0; k < 30 && refreshInFlight; k++) await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (timelineMsgs.length || favoriteStates['message-C'].isFavorited !== false) throw new Error('stale refresh restored an unfavorited row');
+  console.log('sync-version-refresh=reconciled unfavorited-row=absent');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+""" % functions
+    result = run_node(harness)
+    assert result.returncode == 0, "node harness failed: %s" % result.stderr
+    assert result.stdout.strip() == "sync-version-refresh=reconciled unfavorited-row=absent"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_search_location_history_page_clears_favorite_selection_at_fetch_boundary() -> None:
+    functions = {
+        "favorites": json.dumps(_FAVORITES_JS.read_text(encoding="utf-8")),
+        "fetch_older": json.dumps(_extract_function(_TIMELINE_JS, "fetchOlderMessages")),
+        "focus_check": json.dumps(_extract_function(_CONSOLE_ENTRY_JS, "focusCheckRow")),
+    }
+    harness = r"""
+var loaded = false, cleared = 0;
+var targetRow = {scrollIntoView: function () {}, classList: {add: function () {}}, addEventListener: function () {}};
+var document = {
+  querySelector: function () { return loaded ? targetRow : null; },
+  getElementById: function () { return null; }
+};
+var I18N = {t: function (key) { return key; }};
+var timelineConvId = 'conversation-D', timelineRequestGen = 4, timelineMsgs = [{msgid: 'newer'}];
+var timelineHasOlder = true, timelineNextBefore = 'cursor-1', timelineMode = 'staff', timelineEntityId = 'staff-1', timelineConvType = 'group';
+var timelineFavoritesOnly = false, favoriteMode = true, favoriteSelection = {selected: true};
+var favoriteStates = {}, favoriteStateVersions = {}, favoriteUserCanWrite = true, favoriteBusy = false;
+var favoriteStatusFailed = false, favoriteStatusRetrying = false, deleteMode = false;
+var focusMsgId = 'target', focusIsUrlArrival = false, selectedMsgId = null;
+function clearTimelineFavoriteSelection() { favoriteSelection = {}; cleared += 1; }
+function timelineEntityQueryParams() { return ''; }
+function handleUnauth() { return false; }
+function renderTimeline() {}
+function loadTimelineFavoriteStatuses() {}
+function fetch(url) {
+  if (url.indexOf('/api/conversations/conversation-D/messages?') !== 0) throw new Error('unexpected request: ' + url);
+  loaded = true;
+  return Promise.resolve({ok: true, json: function () { return Promise.resolve({messages: [{msgid: 'target'}], pagination: {has_older: false, next_before: null}}); }});
+}
+global.document = document; global.I18N = I18N; global.fetch = fetch;
+eval(%(favorites)s);
+var clearActual = clearTimelineFavoriteSelection;
+clearTimelineFavoriteSelection = function () { clearActual(); cleared += 1; };
+eval(%(fetch_older)s); eval(%(focus_check)s);
+(async function () {
+  focusCheckRow();
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  if (cleared !== 1 || Object.keys(favoriteSelection).length) throw new Error('locator-driven history fetch retained favorite selection');
+  await new Promise(function (resolve) { setTimeout(resolve, 270); });
+  console.log('locator-history-fetch=selection-cleared target=focused');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+""" % functions
+    result = run_node(harness)
+    assert result.returncode == 0, "node harness failed: %s" % result.stderr
+    assert result.stdout.strip() == "locator-history-fetch=selection-cleared target=focused"

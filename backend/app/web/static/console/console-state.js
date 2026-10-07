@@ -127,6 +127,9 @@ var favoriteStates={};
 var favoriteStateVersions={};
 var favoriteUserCanWrite=false;
 var favoriteBusy=false;
+// Invalidates an in-flight favorites-only refresh when a favorite mutation
+// completes before that refresh response is applied.
+var timelineFavoriteRevision=0;
 var favoriteStatusFailed=false;
 var favoriteStatusRetrying=false;
 var timelineFavoritesOnly=false;

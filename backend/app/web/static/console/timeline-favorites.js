@@ -269,6 +269,7 @@ function loadTimelineFavoriteStatuses(messages,convId,requestGen){
           if(!data||!Array.isArray(data.items))throw new Error('invalid_favorite_status');
           if(timelineConvId!==convId||timelineRequestGen!==requestGen)return;
           var removed=[];
+          var noLongerFavorited=[];
           data.items.forEach(function(item){
             if(item.object_type!=='message'||typeof item.object_id!=='string')return;
             if(!Object.prototype.hasOwnProperty.call(versions,item.object_id)||favoriteStateVersions[item.object_id]!==versions[item.object_id])return;
@@ -278,9 +279,14 @@ function loadTimelineFavoriteStatuses(messages,convId,requestGen){
               removed.push(item.object_id);
             }else if(item.result==='found'&&typeof item.is_favorited==='boolean'){
               favoriteStates[item.object_id]={result:'found',isFavorited:item.is_favorited};
+              if(timelineFavoritesOnly&&!item.is_favorited){
+                delete favoriteSelection[item.object_id];
+                noLongerFavorited.push(item.object_id);
+              }
             }
           });
           if(removed.length)removeTimelineFavoriteRows(removed,true);
+          if(noLongerFavorited.length)removeTimelineFavoriteRows(noLongerFavorited,false);
           updateTimelineFavoriteControls();
           updateTimelineFavoriteRows(data.items.map(function(item){return item.object_id;}));
         });
@@ -298,6 +304,14 @@ function loadTimelineFavoriteStatuses(messages,convId,requestGen){
       updateTimelineFavoriteControls();
     }
   });
+}
+
+function refreshMissingTimelineFavoriteStatuses(){
+  if(!timelineConvId||!timelineMsgs.length)return Promise.resolve();
+  var convId=timelineConvId, requestGen=timelineRequestGen;
+  var missing=timelineMsgs.filter(function(message){return !timelineFavoriteStatusReady(message.msgid);});
+  if(!missing.length)return Promise.resolve();
+  return loadTimelineFavoriteStatuses(missing,convId,requestGen);
 }
 
 function retryTimelineFavoriteStatuses(){
@@ -377,6 +391,7 @@ function applyTimelineFavoriteItems(data,action,targets,versions,summary){
         isFavorited:item.result==='favorited'||item.result==='already_favorited'
       };
       bumpTimelineFavoriteVersion(item.object_id);
+      if(typeof timelineFavoriteRevision==='number')timelineFavoriteRevision+=1;
       if(timelineFavoritesOnly&&action==='unfavorite'&&!favoriteStates[item.object_id].isFavorited)remove.push(item.object_id);
     }
   });
@@ -429,16 +444,14 @@ function runTimelineFavoriteAction(action,ids){
       favoriteStatusFailed=false;
       setTimelineFavoriteResult(timelineFavoriteSummaryMessage(summary,false),false,true);
       updateTimelineFavoriteRows(targets.map(function(message){return message.msgid;}));
-      var missing=timelineMsgs.filter(function(message){return !timelineFavoriteStatusReady(message.msgid);});
-      if(missing.length)loadTimelineFavoriteStatuses(missing,requestConvId,requestGen);
     }
     updateTimelineFavoriteControls();
-    return summary;
+    return refreshMissingTimelineFavoriteStatuses().then(function(){return summary;});
   }).catch(function(){
     favoriteBusy=false;
     if(timelineConvId!==requestConvId||timelineRequestGen!==requestGen){
       updateTimelineFavoriteControls();
-      return false;
+      return refreshMissingTimelineFavoriteStatuses().then(function(){return false;});
     }
     var currentTargets=targets.filter(function(message){return !!timelineFavoriteMessage(message.msgid);});
     currentTargets.forEach(function(message){favoriteStates[message.msgid]={result:'pending',isFavorited:null};});
@@ -448,9 +461,7 @@ function runTimelineFavoriteAction(action,ids){
     );
     updateTimelineFavoriteControls();
     updateTimelineFavoriteRows(currentTargets.map(function(message){return message.msgid;}));
-    var missing=timelineMsgs.filter(function(message){return !timelineFavoriteStatusReady(message.msgid);});
-    if(missing.length)loadTimelineFavoriteStatuses(missing,requestConvId,requestGen);
-    return false;
+    return refreshMissingTimelineFavoriteStatuses().then(function(){return false;});
   });
 }
 
