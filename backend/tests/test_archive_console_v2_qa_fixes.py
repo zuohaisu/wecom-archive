@@ -37,12 +37,16 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 import shutil
 
 import pytest
 
 from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_html, review_console_js_source
+
+_BACKEND = Path(__file__).resolve().parent.parent
+_DESIGN_SYSTEM_CSS = (_BACKEND / "app" / "web" / "static" / "design-system.css").read_text(encoding="utf-8")
 
 _REVIEW_CONSOLE_JS = review_console_js_source()
 _REVIEW_CONSOLE_HTML = review_console_html()
@@ -558,24 +562,30 @@ process.stdout.write(JSON.stringify({{zhTitle:zhTitle,enTitle:document.title}}))
 
 
 def _extract_style_block() -> str:
-    match = re.search(r"<style>(.*?)</style>", _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None
-    return match.group(1)
-
-
+    """The cascade the browser actually sees: design-system.css (which now
+    hosts the console's migrated component rules) followed by the console's
+    inline page-specific block."""
+    inline = re.search(r"<style>(.*?)</style>", _REVIEW_CONSOLE_HTML, re.S)
+    assert inline is not None, "expected an embedded <style> block"
+    ds = (_BACKEND / "app" / "web" / "static" / "design-system.css").read_text(
+        encoding="utf-8"
+    )
+    return ds + "\n" + inline.group(1)
 def test_narrow_viewport_breakpoint_shrinks_fixed_width_columns() -> None:
-    css = _extract_style_block()
-    match = re.search(r"@media \(max-width:\s*1300px\)\{(.*?)\n\}", css, re.S)
+    inline = re.search(r"<style>(.*?)</style>", _REVIEW_CONSOLE_HTML, re.S).group(1)
+    match = re.search(r"@media \(max-width:\s*1300px\)\{(.*?)\n\}", inline, re.S)
     assert match is not None, "expected an @media (max-width: 1300px) breakpoint"
     block = match.group(1)
     # Each shrunk width must be strictly less than its full-width value
-    # (212/328/300) so the timeline actually gains room back.
-    side_nav = re.search(r"\.side-nav\{width:(\d+)px\}", block)
+    # (212/328/300) so the timeline actually gains room back. The side-nav
+    # half of this breakpoint converged into design-system.css, which
+    # shrinks it via --nav-w-sm (170px < 212px) at the same width.
     col_conv = re.search(r"\.col-conv\{width:(\d+)px\}", block)
     col_panel = re.search(r"\.col-panel\{width:(\d+)px\}", block)
-    assert side_nav and int(side_nav.group(1)) < 212
     assert col_conv and int(col_conv.group(1)) < 328
     assert col_panel and int(col_panel.group(1)) < 300
+    assert ".side-nav{width:var(--nav-w-sm)}" in _DESIGN_SYSTEM_CSS
+    assert "--nav-w-sm:170px" in _DESIGN_SYSTEM_CSS
 
 
 def test_locator_text_truncates_instead_of_wrapping_per_character() -> None:

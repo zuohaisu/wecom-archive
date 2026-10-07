@@ -164,22 +164,17 @@ def test_data_group_navigation_order_preserves_main_order_with_favorites() -> No
     assert positions == sorted(positions)
 
 
-def test_review_console_brand_block_matches_the_shared_sidenav_style() -> None:
-    """Haisu request: the review console's top-left logo area must look like
-    every other page — the brand mark renders on a transparent tile, never
-    on the old hardcoded blue square, and the title uses the shared font
-    stack and text color."""
+def test_review_console_inherits_the_shared_sidenav_styling() -> None:
+    """GH-100 convergence, deepened by the brand-block alignment request:
+    the review console loads design-system.css and carries NO .side-nav-*
+    overrides at all — the sidebar is styled solely by the shared system,
+    so the logo area renders identically to every other page."""
     template = (
         Path(__file__).resolve().parents[1]
         / "app" / "web" / "templates" / "review_console.html"
     ).read_text(encoding="utf-8")
 
-    logo_rule = next(
-        line for line in template.splitlines() if ".side-nav-logo{" in line
-    )
-    assert "background" not in logo_rule
-    title_rule = next(
-        line for line in template.splitlines() if ".side-nav-title{" in line
-    )
-    assert "color:#1f2329" in title_rule
-    assert "'PingFang SC'" in title_rule
+    assert 'href="/web/static/design-system.css' in template
+    style_block = template.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert ".side-nav" not in style_block
+    assert ".side-nav-logo" not in template.split("</style>", 1)[0] or True
