@@ -421,6 +421,7 @@ class _BucketIntervalExtrema:
 
 @dataclass
 class _BucketState:
+    generation: int
     acc: Accumulator = field(default_factory=Accumulator)
     snapshot: Accumulator = field(default_factory=Accumulator)
     interval_extrema: _BucketIntervalExtrema = field(default_factory=_BucketIntervalExtrema)
@@ -450,13 +451,18 @@ class Observation:
 
 @dataclass
 class BucketDelta:
-    """Increment for one (endpoint, bucket) since the last flush snapshot."""
+    """Increment for one bucket generation since the last flush snapshot.
+
+    ``bucket_generation`` is collector-local metadata used to keep a frozen
+    batch from advancing a newer in-memory bucket that reused the same key.
+    """
 
     key: EndpointKey
     granularity: str  # "hourly" | "daily"
     bucket_start: datetime  # UTC instant of bucket start (hour / Shanghai midnight)
     bucket_date: Optional[date]
     acc: Accumulator
+    bucket_generation: Optional[int] = None
 
 
 @dataclass
@@ -508,6 +514,7 @@ class ApiPerformanceCollector:
         self._pending: List[BucketDelta] = []
         self._windows: Dict[Tuple[str, str], "OrderedDict[int, List[MinuteWindow]]"] = {}
         self._pending_batch: Optional[_FrozenBatch] = None
+        self._bucket_generation_seq = 0
         # Honest diagnostics: anything dropped is counted, never hidden.
         self.dropped_late_observations = 0
         self.dropped_pending_overflow = 0
@@ -589,7 +596,9 @@ class ApiPerformanceCollector:
                     # them would DOUBLE count once the batch is confirmed --
                     # subtract the frozen portion (QA finding 6, double-count
                     # direction).
-                    frozen = self._frozen_delta_for(key, granularity, evicted_key)
+                    frozen = self._frozen_delta_for(
+                        key, granularity, evicted_key, evicted_state.generation,
+                    )
                     if frozen is not None:
                         evicted_delta = _subtract_frozen_delta(
                             evicted_delta, frozen, evicted_state.interval_extrema,
@@ -601,11 +610,13 @@ class ApiPerformanceCollector:
                         bucket_start=evicted_key if granularity == GRANULARITY_HOURLY else daily_bucket_start(evicted_key),
                         bucket_date=evicted_key if granularity == GRANULARITY_DAILY else None,
                         acc=evicted_delta,
+                        bucket_generation=evicted_state.generation,
                     ))
                 if len(self._pending) > _PENDING_CAP:
                     self._pending.pop(0)
                     self.dropped_pending_overflow += 1
-            entry = _BucketState()
+            self._bucket_generation_seq += 1
+            entry = _BucketState(generation=self._bucket_generation_seq)
             buckets[bucket_key] = entry
         entry.acc.observe(
             status_class=observation.status_class,
@@ -683,6 +694,7 @@ class ApiPerformanceCollector:
                         deltas.append(BucketDelta(
                             key=key, granularity=GRANULARITY_HOURLY,
                             bucket_start=bucket_key, bucket_date=None, acc=delta,
+                            bucket_generation=state.generation,
                         ))
             for key, buckets in self._days.items():
                 for bucket_day, state in buckets.items():
@@ -692,6 +704,7 @@ class ApiPerformanceCollector:
                         deltas.append(BucketDelta(
                             key=key, granularity=GRANULARITY_DAILY,
                             bucket_start=daily_bucket_start(bucket_day), bucket_date=bucket_day, acc=delta,
+                            bucket_generation=state.generation,
                         ))
             frozen_pending = self._pending
             self._pending = []
@@ -763,7 +776,13 @@ class ApiPerformanceCollector:
         self._advance_snapshots(batch.deltas)
         self._pending_batch = None
 
-    def _frozen_delta_for(self, key: EndpointKey, granularity: str, bucket_key) -> Optional[Accumulator]:
+    def _frozen_delta_for(
+        self,
+        key: EndpointKey,
+        granularity: str,
+        bucket_key,
+        bucket_generation: int,
+    ) -> Optional[Accumulator]:
         """The delta this bucket contributes to the currently frozen batch,
         if any."""
         batch = self._pending_batch
@@ -771,20 +790,25 @@ class ApiPerformanceCollector:
             return None
         bucket_start = bucket_key if granularity == GRANULARITY_HOURLY else daily_bucket_start(bucket_key)
         for delta in batch.deltas:
-            if delta.key == key and delta.granularity == granularity and delta.bucket_start == bucket_start:
+            if (
+                delta.key == key
+                and delta.granularity == granularity
+                and delta.bucket_start == bucket_start
+                and delta.bucket_generation == bucket_generation
+            ):
                 return delta.acc
         return None
 
     def _advance_snapshots(self, deltas: List[BucketDelta]) -> None:
         by_key = {
-            (d.key, d.granularity, d.bucket_start): d.acc
+            (d.key, d.granularity, d.bucket_start, d.bucket_generation): d.acc
             for d in deltas
         }
         for table, granularity in ((self._hours, GRANULARITY_HOURLY), (self._days, GRANULARITY_DAILY)):
             for key, buckets in table.items():
                 for bucket_key, state in buckets.items():
                     bucket_start = bucket_key if granularity == GRANULARITY_HOURLY else daily_bucket_start(bucket_key)
-                    delta = by_key.get((key, granularity, bucket_start))
+                    delta = by_key.get((key, granularity, bucket_start, state.generation))
                     if delta is not None:
                         _advance_snapshot(state.snapshot, delta)
 

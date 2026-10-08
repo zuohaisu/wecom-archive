@@ -656,6 +656,70 @@ def test_batch_confirmation_only_releases_its_own_pending_prefix():
     assert daily_total == 6
 
 
+@pytest.mark.parametrize("batch_outcome", ["applied", "expired"])
+@pytest.mark.parametrize("evict_recreated_bucket", [False, True])
+def test_old_batch_does_not_advance_recreated_bucket_snapshot(
+    monkeypatch, batch_outcome, evict_recreated_bucket,
+):
+    from app.services import api_performance_collector as collector_module
+
+    monotonic = [1000.0]
+    monkeypatch.setattr(collector_module.time, "monotonic", lambda: monotonic[0])
+    collector = ApiPerformanceCollector(retry_deadline_seconds=10)
+    hour_zero = datetime(2026, 10, 1, 0, tzinfo=UTC)
+    collector.record(_obs(duration_us=100_000, completed_at=hour_zero))
+    batch_id, frozen_deltas = collector.drain_deltas()
+    collector.mark_flushed(batch_id, "error:OperationalError")
+
+    # Move forward far enough to evict hour zero, then simulate one late
+    # observation that recreates that same key while the old batch is frozen.
+    for hour_offset in (1, 2, 3):
+        collector.record(_obs(
+            duration_us=100_000,
+            completed_at=hour_zero + timedelta(hours=hour_offset),
+        ))
+    collector.record(_obs(
+        duration_us=100_000,
+        completed_at=hour_zero + timedelta(minutes=15),
+    ))
+    if evict_recreated_bucket:
+        for hour_offset in (4, 5, 6):
+            collector.record(_obs(
+                duration_us=100_000,
+                completed_at=hour_zero + timedelta(hours=hour_offset),
+            ))
+
+    retry_id, retry_deltas = collector.drain_deltas()
+    assert retry_id == batch_id and retry_deltas == frozen_deltas
+    new_observation_count = 7 if evict_recreated_bucket else 4
+    if batch_outcome == "applied":
+        collector.mark_flushed(batch_id, "applied")
+        flushed_deltas = frozen_deltas
+        expected_total = new_observation_count + 1
+    else:
+        monotonic[0] += 11
+        collector.mark_flushed(batch_id, "error:OperationalError")
+        assert collector.dropped_stale_batch_observations == 1
+        flushed_deltas = []
+        expected_total = new_observation_count
+    _next_id, later_deltas = collector.drain_deltas()
+    flushed_deltas.extend(later_deltas)
+
+    flushed_hourly = sum(
+        delta.acc.request_count
+        for delta in flushed_deltas
+        if delta.granularity == "hourly"
+    )
+    flushed_daily = sum(
+        delta.acc.request_count
+        for delta in flushed_deltas
+        if delta.granularity == "daily"
+    )
+    assert flushed_hourly == expected_total, "the old generation must not hide the recreated hour"
+    assert flushed_daily == expected_total
+    assert collector.dropped_late_observations == 0
+
+
 def test_batch_retry_deadline_drops_with_counted_loss():
     collector = ApiPerformanceCollector(retry_deadline_seconds=0.05)
     collector.record(_obs(duration_us=100_000))
