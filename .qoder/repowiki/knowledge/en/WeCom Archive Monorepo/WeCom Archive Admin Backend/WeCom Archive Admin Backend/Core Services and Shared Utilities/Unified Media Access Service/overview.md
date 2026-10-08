@@ -1,1 +1,0 @@
-Consolidated service that authorizes and serves WeCom media (top-level and nested mixed/chatrecord items) through a single authorization, storage resolution, byte proxying, and access-descriptor pipeline for all four media routes.

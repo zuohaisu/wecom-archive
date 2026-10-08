@@ -1,1 +1,0 @@
-The `MediaAccessNoStoreMiddleware` must be registered on the application in `main.py` so it wraps all requests before FastAPI's exception-to-Response conversion; without it, error responses from `/media/access` and `/nested-media/.../access` would lack the required `Cache-Control: no-store` header.

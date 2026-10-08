@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: backend_app/tests
-title: WeCom Archive Backend Test Suite
-scope:
-    - backend/tests/
-source_files: []
-depends_on: []
-related_to: []

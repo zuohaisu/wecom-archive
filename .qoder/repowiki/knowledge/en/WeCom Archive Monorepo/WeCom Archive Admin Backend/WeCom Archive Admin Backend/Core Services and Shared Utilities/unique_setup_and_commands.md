@@ -1,1 +1,0 @@
-The i18n core lives in `backend/app/assets/i18n.js` and is consumed by Python through `i18n_assets.I18N_JS_SOURCE` / `I18N_SCRIPT_TAG`; adding a new locale requires editing only that JS file — no Python strings need updating. The message type registry must stay in sync with the frontend's embedded `MessageTypeRegistry` (checked by tests against `build_frontend_registry_entries`).

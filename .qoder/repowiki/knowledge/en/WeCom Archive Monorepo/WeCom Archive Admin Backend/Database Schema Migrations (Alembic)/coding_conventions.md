@@ -1,5 +1,0 @@
-- Each migration file defines top-level `revision`, `down_revision`, `branch_labels`, and `depends_on` variables plus paired `upgrade()` and `downgrade()` functions using `alembic.op.*` DDL calls.
-- New columns are added with `server_default` values (e.g., `sa.text('false')`, `sa.text("'pending'")`, `sa.func.now()`) to keep existing rows valid without backfills.
-- Child association tables (e.g., `archive_message_recipients`, `media_files`, `message_revocations`) follow a consistent pattern: integer PK with autoincrement, FK to `archive_messages.id`, indexed foreign keys, and `created_at`/`updated_at` timestamps with `server_default=sa.func.now()`.
-- Indexes use the `ix_<table>_<column(s)>` naming convention, with GIN indexes declared via `postgresql_using='gin'` for JSONB and full-text search columns.
-- Unique constraints are named with the `uq_<table>_<column>` pattern and enforced at the SQLAlchemy column level via `UniqueConstraint`.

@@ -277,3 +277,6 @@ docs/ip-protection-plan-365huifang.md
 
 # Local task artifacts — never commit
 tasks/
+
+# Local agent-tool state (untracked since GH-201)
+.hermes/

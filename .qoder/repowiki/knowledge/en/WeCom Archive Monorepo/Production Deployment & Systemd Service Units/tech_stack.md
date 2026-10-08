@@ -1,1 +1,0 @@
-Bash deployment script with `set -euo pipefail`; Alembic for database migrations; systemd service/timer units with security hardening directives; BATS test framework with custom mock binaries for deterministic integration testing.

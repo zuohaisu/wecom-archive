@@ -1,1 +1,0 @@
-Collection of standalone, idempotent Python CLI scripts for database bootstrapping, WeCom archive sync backfills, message-revocation integrity checks, and development mock data seeding against the application's SQLAlchemy models.

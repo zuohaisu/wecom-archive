@@ -1,6 +1,0 @@
-The module is organized into four clear layers around a single SQLAlchemy declarative base:
-- `base.py` declares the shared `Base(DeclarativeBase)` that all ORM classes inherit from.
-- `session.py` owns a process-global `_engine` (lazy-initialized from `DATABASE_URL`) and exposes `get_db()` as a generator-based dependency-injection helper returning a `Session`, plus `get_engine()` for raw connection access used by readiness checks.
-- `models.py` contains all ORM entity classes (`Tenant`, `TenantWecomConfig`, `AdminUser`, `AdminSession`, `KeyVersion`, `SyncState`, `ArchiveMessage`, `ArchiveMessageRecipient`, `MediaFile`, `MessageRevocation`, `Contact`) with constraints, indexes, foreign keys, and `before_insert`/`before_update` event listeners enforcing application invariants at write time.
-- `contacts.py` provides a thin upsert helper over the `Contact` model; `schema_check.py` is a self-contained Alembic integration that compares repository HEAD revisions against the database's current revision set to power health/readiness endpoints.
-Dependency direction is strictly one-way: helpers and schema checks import models, models import only `base`, and nothing imports back from higher-level app code.

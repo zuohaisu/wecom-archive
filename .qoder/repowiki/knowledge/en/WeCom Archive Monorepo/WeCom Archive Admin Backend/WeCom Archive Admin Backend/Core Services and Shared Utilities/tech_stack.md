@@ -1,1 +1,0 @@
-SQLAlchemy ORM with explicit column projections and `SimpleNamespace` lightweight objects for performance-critical paths; frozen dataclasses and enum-based strategy dispatch for the message-type registry; JavaScript I18N core loaded as raw script text via `pathlib.Path.read_text`.
