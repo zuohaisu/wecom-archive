@@ -86,6 +86,9 @@ def test_public_contribution_entrypoints_use_the_current_edition_contract() -> N
     assert "[CONTRIBUTING.md](CONTRIBUTING.md)" in readme
     assert "[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)" in contributing
     assert "architecture/current-state.md" not in architecture
+    assert "[CONTRIBUTING.md](../CONTRIBUTING.md)" in architecture
+    assert "../AGENTS.md" not in architecture
+    assert (ROOT / "CONTRIBUTING.md").is_file()
     assert "AGPL-3.0" in architecture
     assert "ADR-0007" in architecture
     assert "Superseded" in adr_0003.splitlines()[2]

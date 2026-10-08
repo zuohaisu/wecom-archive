@@ -52,4 +52,4 @@ writes, exports, and worker operations.
 - [ADR-0007 — runtime edition and self-hosted policy](adr/0007-runtime-edition-policies.md) is the current edition decision.
 - [ADR-0005 — cloud billing lifecycle and service gates](adr/0005-saas-billing-lifecycle-refunds-and-service-gates.md) remains the cloud commercial policy.
 - [ADR-0003 — hosted-only strategy](adr/0003-product-strategy-hosted-only.md) is retained as a historical record and is superseded by the current AGPL/self-host decision.
-- [`AGENTS.md`](../AGENTS.md) contains the binding contribution, validation, safety, and architecture rules.
+- [CONTRIBUTING.md](../CONTRIBUTING.md) is the public entry point for contribution, validation, safety, and architecture guidance.
