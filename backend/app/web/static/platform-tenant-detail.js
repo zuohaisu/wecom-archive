@@ -1,4 +1,4 @@
-/* RND-414: /platform/tenants/{id} (租户详情, 5 tabs). */
+/* RND-414: /platform/tenants/{id} (客户详情, 5 tabs). */
 (function () {
   'use strict';
   var PC = window.PC;
@@ -41,7 +41,7 @@
     var quotaAlert = PC.el('quota-alert');
     if (item.storage_utilization_basis_points >= 10000) {
       quotaAlert.hidden = false;
-      quotaAlert.textContent = '存储超出配额 ' + ((item.storage_utilization_basis_points - 10000) / 100).toFixed(2) + '%。年度基础套餐固定 5 GiB 存储，超出部分按 1 元/GB/月 展示、v1 不自动计费。持续超限的租户通常通过手工账本登记定制合同费用（见「手工账本」页签）。';
+      quotaAlert.textContent = '存储超出配额 ' + ((item.storage_utilization_basis_points - 10000) / 100).toFixed(2) + '%。年度基础套餐固定 5 GiB 存储，超出部分按 1 元/GB/月 展示、v1 不自动计费。持续超限的客户通常通过手工账本登记定制合同费用（见「手工账本」页签）。';
     } else { quotaAlert.hidden = true; }
 
     PC.list(PC.el('usage-summary'), [

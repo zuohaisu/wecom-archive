@@ -63,11 +63,11 @@
         body.appendChild(h3);
         body.appendChild(diffTable([
           ['服务状态 lifecycle_status', tenant.lifecycle_status, next, true],
-          ['租户端登录', suspending ? '可用' : '拒绝', suspending ? '立即拒绝' : '恢复可用', true],
+          ['客户端登录', suspending ? '可用' : '拒绝', suspending ? '立即拒绝' : '恢复可用', true],
           ['会话同步', suspending ? '运行中' : '已暂停', suspending ? '暂停，归档数据保留' : '恢复运行', true],
           ['订阅与账期', '不受影响', '不受影响', false]
         ]));
-        body.appendChild(alertBox('neutral', null, suspending ? '暂停可通过「恢复服务」还原，不影响进行中的退款流程。' : '恢复后租户端登录立即可用。'));
+        body.appendChild(alertBox('neutral', null, suspending ? '暂停可通过「恢复服务」还原，不影响进行中的退款流程。' : '恢复后客户端登录立即可用。'));
       },
       reasonCodes: [
         { value: 'risk_review', label: '风险复核' },
@@ -77,7 +77,7 @@
         { value: 'data_correction', label: '数据更正' }
       ],
       notePlaceholder: '工单号、审批人、判断依据。写入审计，不可修改。',
-      unlock: suspending ? { label: '租户 slug', match: tenant.tenant_slug } : null,
+      unlock: suspending ? { label: '客户 slug', match: tenant.tenant_slug } : null,
       idempotencyPrefix: 'service-control',
       auditAction: suspending ? 'platform.service.suspended' : 'platform.service.resumed',
       submitLabel: suspending ? '确认暂停服务' : '确认恢复服务',
@@ -187,7 +187,7 @@
           (context.tenantOptions || []).forEach(function (t) {
             var opt = document.createElement('option'); opt.value = t.tenant_id; opt.textContent = t.tenant_name; tenantSelect.appendChild(opt);
           });
-          grid.appendChild(PC.fieldWrap('租户', true, tenantSelect));
+          grid.appendChild(PC.fieldWrap('客户', true, tenantSelect));
         }
         var kindSelect = document.createElement('select'); kindSelect.className = 'select'; kindSelect.id = 'ledger-kind';
         kindSelect.disabled = editing;
@@ -269,7 +269,7 @@
       renderImpact: function (body) {
         body.appendChild(kv([
           ['条目', entry.transaction_id],
-          ['租户', tenant ? tenant.tenant_name : entry.tenant_name],
+          ['客户', tenant ? tenant.tenant_name : entry.tenant_name],
           ['类型 / 金额', (entry.kind === 'receipt' ? '收款' : '退款') + ' · ' + PC.money(entry.amount_cents)],
           ['发生时间', PC.date(entry.occurred_at)],
           ['参考号', entry.reference_masked || '—']
@@ -309,13 +309,13 @@
       danger: true,
       renderImpact: function (body) {
         body.appendChild(kv([
-          ['租户', tenant.tenant_name],
+          ['客户', tenant.tenant_name],
           ['支付订单', (order.provider_transaction_ref_masked || order.provider_order_ref_masked) + ' · ' + PC.date(order.paid_at || order.created_at)],
           ['退款金额', PC.money(order.amount_cents) + '（全额，v1 不支持部分退款）'],
           ['渠道', '微信支付 · 原路退回'],
           ['预计到账', '1–3 个工作日']
         ]));
-        body.appendChild(alertBox('danger', '不可撤销。', '提交后将减少渠道净收入，且不会自动调整该租户的订阅——如需同时调整订阅，请另行使用「调整订阅」。'));
+        body.appendChild(alertBox('danger', '不可撤销。', '提交后将减少渠道净收入，且不会自动调整该客户的订阅——如需同时调整订阅，请另行使用「调整订阅」。'));
       },
       reasonCodes: [
         { value: 'customer_request', label: '客户要求' },
@@ -323,7 +323,7 @@
         { value: 'duplicate_payment', label: '重复支付' },
         { value: 'contract_termination', label: '合同终止' }
       ],
-      unlock: { label: '租户 slug', match: tenant.tenant_slug },
+      unlock: { label: '客户 slug', match: tenant.tenant_slug },
       idempotencyPrefix: 'refund-submit',
       auditAction: 'platform.refund.submitted',
       submitLabel: '确认提交退款',

@@ -231,7 +231,7 @@
     if (config.slugConfirm) {
       slugConfirmInput = document.createElement('input'); slugConfirmInput.className = 'input mono'; slugConfirmInput.id = 'platform-modal-slug-confirm';
       slugConfirmInput.placeholder = config.slugConfirm.match;
-      body.appendChild(fieldWrap('确认租户标识', true, slugConfirmInput, '只读/幂等操作仍需简要确认租户身份（接口要求），输入 ' + config.slugConfirm.match + '。'));
+      body.appendChild(fieldWrap('确认客户标识', true, slugConfirmInput, '只读/幂等操作仍需简要确认客户身份（接口要求），输入 ' + config.slugConfirm.match + '。'));
     }
 
     var disclosure = document.createElement('div'); disclosure.className = 'alert alert-neutral';
@@ -267,7 +267,7 @@
       if (!reasonCodeValid(reasonCode)) { modalAlert(body, 'danger', '请选择原因代码。'); return; }
       if (config.noteRequired !== false && !note) { modalAlert(body, 'danger', '请填写原因说明。'); return; }
       if (config.unlock && unlockInput.value !== config.unlock.match) { modalAlert(body, 'danger', '输入的标识不匹配，操作已取消。'); return; }
-      if (config.slugConfirm && slugConfirmInput.value !== config.slugConfirm.match) { modalAlert(body, 'danger', '租户标识不匹配，操作已取消。'); return; }
+      if (config.slugConfirm && slugConfirmInput.value !== config.slugConfirm.match) { modalAlert(body, 'danger', '客户标识不匹配，操作已取消。'); return; }
       submit.disabled = true;
       modalAlert(body, 'neutral', null);
       var confirmation = config.unlock ? unlockInput.value : (config.slugConfirm ? slugConfirmInput.value : undefined);

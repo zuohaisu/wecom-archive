@@ -17,8 +17,8 @@ __SIDENAV__
 __TOPBAR__
 <main class="page">
   <div class="page-hd">
-    <div><h1>订阅状态</h1><p>运营主工作台。筛选后进入租户详情页执行受控操作。</p></div>
-    <div class="page-hd-actions"><a class="btn btn-primary" href="/platform/tenants/new">新建租户</a></div>
+    <div><h1>订阅状态</h1><p>运营主工作台。筛选后进入客户详情页执行受控操作。</p></div>
+    <div class="page-hd-actions"><a class="btn btn-primary" href="/platform/tenants/new">新建客户</a></div>
   </div>
   <div id="error" class="alert alert-danger" role="alert" hidden></div>
 
@@ -31,12 +31,12 @@ __TOPBAR__
       <label>异常<select id="filter-exception"><option value="">全部</option><option value="any">仅有异常</option><option value="payment">支付/激活</option><option value="refund">退款</option><option value="none">无异常</option></select></label>
       <label>到期自<input id="filter-ends-from" type="date"></label>
       <label>到期至<input id="filter-ends-to" type="date"></label>
-      <label>排序<select id="filter-sort"><option value="created_desc">最近创建</option><option value="name_asc">租户名称</option><option value="ends_asc">最早到期</option><option value="ends_desc">最晚到期</option></select></label>
+      <label>排序<select id="filter-sort"><option value="created_desc">最近创建</option><option value="name_asc">客户名称</option><option value="ends_asc">最早到期</option><option value="ends_desc">最晚到期</option></select></label>
       <div class="filter-actions"><button class="btn btn-primary" type="submit">应用筛选</button><button id="reset-filters" class="btn" type="button">重置</button></div>
     </form>
     <div class="card-bd table-wrap">
       <table>
-        <thead><tr><th>租户</th><th>服务</th><th>套餐 / 到期</th><th>渠道净收入</th><th>手工账本</th><th>异常</th><th>媒体 / 存储</th><th>操作</th></tr></thead>
+        <thead><tr><th>客户</th><th>服务</th><th>套餐 / 到期</th><th>渠道净收入</th><th>手工账本</th><th>异常</th><th>媒体 / 存储</th><th>操作</th></tr></thead>
         <tbody id="tenant-rows"></tbody>
       </table>
       <div class="pager"><button id="previous-page" class="btn" type="button">上一页</button><button id="next-page" class="btn" type="button">下一页</button></div>

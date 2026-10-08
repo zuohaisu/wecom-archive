@@ -30,11 +30,11 @@
 
   function render() {
     var rows = tenants.filter(matches);
-    metaBox.textContent = '共 ' + rows.length + ' 个租户';
+    metaBox.textContent = '共 ' + rows.length + ' 个客户';
     metaBox.hidden = false;
     listBox.replaceChildren();
     if (!rows.length) {
-      listBox.appendChild(el('div', 'result-empty', '没有匹配的租户'));
+      listBox.appendChild(el('div', 'result-empty', '没有匹配的客户'));
       return;
     }
     rows.forEach(function (t) {
@@ -63,7 +63,7 @@
       tenants = data.tenants || [];
       render();
     }).catch(function () {
-      metaBox.textContent = '租户列表加载失败，请稍后重试。';
+      metaBox.textContent = '客户列表加载失败，请稍后重试。';
       metaBox.hidden = false;
     });
   }

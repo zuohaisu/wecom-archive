@@ -158,7 +158,7 @@ PLATFORM_NAV = (
         ),
     },
     {
-        "group": "租户",
+        "group": "客户",
         "items": (
             {"id": "tenants", "label": "订阅状态", "path": "/platform/tenants"},
             {"id": "search", "label": "搜索", "path": "/platform/search"},
@@ -246,7 +246,7 @@ def render_platform_topbar(breadcrumb_current: str) -> str:
         f'<span class="cur">{escape(breadcrumb_current)}</span></div>'
         '<div class="search-input"><span class="ico">⌕</span>'
         '<input class="input" id="platform-search" type="search" '
-        'placeholder="搜索租户名称 / slug / corp_id，回车跳转详情"></div>'
+        'placeholder="搜索客户名称 / slug / corp_id，回车跳转详情"></div>'
         '<div class="topbar-actions"><span class="tz-note" id="platform-last-refresh"></span>'
         '<button class="btn btn-sm" type="button" id="platform-refresh">刷新数据</button></div>'
         '</header>'

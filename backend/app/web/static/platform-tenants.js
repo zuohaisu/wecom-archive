@@ -1,4 +1,4 @@
-/* RND-414: /platform/tenants (租户商业状态) list page. */
+/* RND-414: /platform/tenants (客户商业状态) list page. */
 (function () {
   'use strict';
   var PC = window.PC;
@@ -20,7 +20,7 @@
     state.total = data.total;
     var body = PC.el('tenant-rows');
     PC.clear(body);
-    if (!data.items.length) { PC.emptyRow(body, 8, '没有符合筛选条件的租户'); }
+    if (!data.items.length) { PC.emptyRow(body, 8, '没有符合筛选条件的客户'); }
     data.items.forEach(function (item) {
       var name = document.createElement('td'), nameMain = document.createElement('span'), slug = document.createElement('span');
       nameMain.className = 'tenant-name'; nameMain.textContent = item.tenant_name;

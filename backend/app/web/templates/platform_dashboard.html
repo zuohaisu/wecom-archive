@@ -17,12 +17,12 @@ __SIDENAV__
 __TOPBAR__
 <main class="page">
   <div class="page-hd">
-    <div><h1>运营看板</h1><p>跨租户规模、用量、商业状态与渠道资金事实。手工账本单独统计，不并入渠道净收入。当前仅有一个可购买套餐：年度基础套餐（annual_base_cny_99 · ¥99/年 · 5 GiB 存储 · 席位不限）。</p></div>
+    <div><h1>运营看板</h1><p>跨客户规模、用量、商业状态与渠道资金事实。手工账本单独统计，不并入渠道净收入。当前仅有一个可购买套餐：年度基础套餐（annual_base_cny_99 · ¥99/年 · 5 GiB 存储 · 席位不限）。</p></div>
   </div>
   <div id="error" class="alert alert-danger" role="alert" hidden></div>
 
   <section class="metric-grid" aria-label="核心指标">
-    <article class="card metric"><span>租户总数</span><strong id="tenant-total">—</strong><small id="tenant-states">—</small></article>
+    <article class="card metric"><span>客户总数</span><strong id="tenant-total">—</strong><small id="tenant-states">—</small></article>
     <article class="card metric"><span>管理员账号</span><strong id="admin-accounts">—</strong><small id="observed-users">—</small></article>
     <article class="card metric"><span>消息总数</span><strong id="message-total">—</strong><small>仅汇总，不展示内容</small></article>
     <article class="card metric"><span>媒体与存储</span><strong id="storage-total">—</strong><small id="media-total">—</small></article>
@@ -42,8 +42,8 @@ __TOPBAR__
   <div class="platform-grid">
     <section class="card"><div class="card-hd"><h2>套餐 / 订阅分布</h2></div><div class="card-bd"><ul id="subscriptions" class="summary-list"></ul></div></section>
     <section class="card"><div class="card-hd"><h2>接近或超过存储配额</h2></div><div class="card-bd"><ul id="quota-risks" class="summary-list"></ul></div></section>
-    <section class="card"><div class="card-hd"><h2>最近新增租户</h2></div><div class="card-bd"><ul id="recent-tenants" class="summary-list"></ul></div></section>
-    <section class="card"><div class="card-hd"><h2>支付恢复 / 对账异常</h2><a class="btn btn-sm" href="/platform/tenants">查看租户</a></div><div class="card-bd"><ul id="payment-recovery-findings" class="summary-list"></ul></div></section>
+    <section class="card"><div class="card-hd"><h2>最近新增客户</h2></div><div class="card-bd"><ul id="recent-tenants" class="summary-list"></ul></div></section>
+    <section class="card"><div class="card-hd"><h2>支付恢复 / 对账异常</h2><a class="btn btn-sm" href="/platform/tenants">查看客户</a></div><div class="card-bd"><ul id="payment-recovery-findings" class="summary-list"></ul></div></section>
     <section class="card"><div class="card-hd"><h2>近期受控操作</h2><a class="btn btn-sm" href="/platform/audit">查看全部审计</a></div><div class="card-bd"><ul id="recent-operations" class="summary-list"></ul></div></section>
   </div>
 
