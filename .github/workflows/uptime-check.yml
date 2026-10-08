@@ -74,10 +74,19 @@ jobs:
             *) echo "UPTIME_BASE_URL must be an HTTPS base URL" >&2; exit 1 ;;
           esac
           base_url="${UPTIME_BASE_URL%/}"
-          http_code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 "$base_url/" || true)
+          if http_code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 15 "$base_url/"); then
+            curl_exit_code=0
+          else
+            curl_exit_code=$?
+          fi
           http_code="${http_code:-000}"
           echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
-          echo "public endpoint responded HTTP $http_code"
+          echo "curl_exit_code=$curl_exit_code" >> "$GITHUB_OUTPUT"
+          echo "public endpoint responded HTTP $http_code (curl exit $curl_exit_code)"
+          if [ "$curl_exit_code" -ne 0 ]; then
+            echo "::error::public endpoint transfer failed (curl exit $curl_exit_code)"
+            exit "$curl_exit_code"
+          fi
           test "$http_code" = "200"
 
       - name: Check /health/ready
@@ -93,10 +102,19 @@ jobs:
             *) echo "UPTIME_BASE_URL must be an HTTPS base URL" >&2; exit 1 ;;
           esac
           base_url="${UPTIME_BASE_URL%/}"
-          http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$base_url/health/ready" || true)
+          if http_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$base_url/health/ready"); then
+            curl_exit_code=0
+          else
+            curl_exit_code=$?
+          fi
           http_code="${http_code:-000}"
           echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
-          echo "/health/ready responded HTTP $http_code"
+          echo "curl_exit_code=$curl_exit_code" >> "$GITHUB_OUTPUT"
+          echo "/health/ready responded HTTP $http_code (curl exit $curl_exit_code)"
+          if [ "$curl_exit_code" -ne 0 ]; then
+            echo "::error::readiness transfer failed (curl exit $curl_exit_code)"
+            exit "$curl_exit_code"
+          fi
           test "$http_code" = "200"
 
       - name: Send alert on failure
@@ -108,7 +126,7 @@ jobs:
             echo "ALERT_WEBHOOK_URL repository secret is not configured — alert not sent; see workflow run status."
             exit 0
           fi
-          summary="public=${{ steps.public.outputs.http_code }} ready=${{ steps.ready.outputs.http_code }}"
+          summary="public=${{ steps.public.outputs.http_code }} (curl=${{ steps.public.outputs.curl_exit_code }}) ready=${{ steps.ready.outputs.http_code }} (curl=${{ steps.ready.outputs.curl_exit_code }})"
           payload=$(printf '{"domain":"external-uptime-check","hostname":"github-actions","failed_stage":"public_endpoint_or_readiness","timestamp":"%s","error_summary":"%s"}' \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$summary")
           curl -s -o /dev/null --max-time 10 -X POST "$ALERT_WEBHOOK_URL" \
