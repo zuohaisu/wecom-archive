@@ -76,11 +76,6 @@
         'suite_ticket', fresh ? '渠道票据正常' : '票据状态异常',
         (data.age_seconds === null || data.age_seconds === undefined ? 'age 未知' : 'age ' + PC.number(data.age_seconds) + 's') + ' · 不展示票据值');
     }).catch(function (err) { infraGapTile(PC.el('infra-suite-ticket'), 'suite_ticket 状态'); PC.error(err.message || 'suite_ticket 状态加载失败'); });
-    PC.request('/api/platform/operations/connectivity/summary').then(function (data) {
-      var failing = data.fail_count > 0;
-      infraTile(PC.el('infra-connectivity'), failing ? 'danger' : 'success', failing ? (data.fail_count + ' FAIL') : 'OK', '连通性检查',
-        failing ? (data.fail_count + ' 个租户凭据不可用') : '全部租户凭据可用', data.reasons || '—');
-    }).catch(function () { infraGapTile(PC.el('infra-connectivity'), '连通性检查'); });
     PC.request('/api/platform/branding/domain-metrics').then(function (data) {
       var expiring = data.certificates_expiring_30_days_count > 0;
       infraTile(PC.el('infra-domains'), expiring ? 'warning' : 'success', expiring ? (PC.number(data.certificates_expiring_30_days_count) + ' 即将过期') : 'OK', '托管 TLS 域名',
