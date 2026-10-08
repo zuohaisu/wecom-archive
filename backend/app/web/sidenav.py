@@ -160,7 +160,7 @@ PLATFORM_NAV = (
     {
         "group": "租户",
         "items": (
-            {"id": "tenants", "label": "租户商业状态", "path": "/platform/tenants"},
+            {"id": "tenants", "label": "订阅状态", "path": "/platform/tenants"},
         ),
     },
     {
