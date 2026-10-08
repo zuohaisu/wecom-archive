@@ -24,6 +24,9 @@ from tests._node_runner import run_node
 from tests._rnd216_web_shims import review_console_js_source
 
 _REVIEW_CONSOLE_JS = review_console_js_source()
+_DESIGN_SYSTEM_CSS = (
+    Path(__file__).resolve().parents[1] / "app" / "web" / "static" / "design-system.css"
+).read_text(encoding="utf-8")
 _REVIEW_CONSOLE_TEMPLATE = (
     Path(__file__).resolve().parents[1] / "app/web/templates/review_console.html"
 ).read_text(encoding="utf-8")
@@ -420,9 +423,11 @@ def test_sphfeed_fallback_still_explains_playback_is_unavailable() -> None:
 
 
 def test_sphfeed_share_card_styles_have_no_play_affordance() -> None:
-    assert ".structured-card-sphfeed" in _REVIEW_CONSOLE_TEMPLATE
-    assert ".sphfeed-cover-placeholder" in _REVIEW_CONSOLE_TEMPLATE
-    assert ".sphfeed-playback-unavailable" in _REVIEW_CONSOLE_TEMPLATE
+    # GH-100: the sphfeed card styles moved into design-system.css.
+    assert ".structured-card-sphfeed" in _DESIGN_SYSTEM_CSS
+    assert ".sphfeed-cover-placeholder" in _DESIGN_SYSTEM_CSS
+    assert ".sphfeed-playback-unavailable" in _DESIGN_SYSTEM_CSS
+    assert ".sphfeed-play-button" not in _DESIGN_SYSTEM_CSS
     assert ".sphfeed-play-button" not in _REVIEW_CONSOLE_TEMPLATE
 
 

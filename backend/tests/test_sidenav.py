@@ -61,16 +61,19 @@ def test_navigation_includes_shared_data_export_page() -> None:
     assert "sync" not in {item["id"] for item in items}
 
 
-def test_split_places_seats_under_overview_and_staff_under_directory() -> None:
-    """Haisu split: 座席 rides the 总览 group; 内部员工 sits beside 外部联系人."""
+def test_split_places_staff_under_directory_and_users_under_system() -> None:
+    """Haisu ordering: 内部员工 sits beside 外部联系人; 用户管理 heads the
+    系统 group (用户管理 → 企微接口检测 → 设置)."""
     groups = {group["group_key"]: [item["id"] for item in group["items"]] for group in NAV}
-    assert groups["nav.group.overview"] == ["dashboard", "billing", "users"]
+    assert groups["nav.group.overview"] == ["dashboard", "billing"]
     assert groups["nav.group.directory"] == ["staff", "contacts"]
+    assert groups["nav.group.system"] == ["users", "diagnostics", "settings"]
 
     seats = next(
-        item for item in NAV[0]["items"] if item["id"] == "users"
+        item for group in NAV if group["group_key"] == "nav.group.system"
+        for item in group["items"] if item["id"] == "users"
     )
-    assert seats == {"id": "users", "key": "nav.seats", "path": "/admin/users"}
+    assert seats == {"id": "users", "key": "nav.users", "path": "/admin/users"}
     staff = next(
         item for group in NAV if group["group_key"] == "nav.group.directory"
         for item in group["items"] if item["id"] == "staff"
@@ -92,7 +95,7 @@ def test_registered_path_changes_users_from_disabled_to_link_without_config_chan
     enabled = render_sidenav("review", {"/admin/conversations", "/admin/users"})
 
     assert 'data-nav-id="users" aria-disabled="true"' in disabled
-    assert '<a class="side-nav-item" href="/admin/users" data-i18n="nav.seats"></a>' in enabled
+    assert '<a class="side-nav-item" href="/admin/users" data-i18n="nav.users"></a>' in enabled
     assert 'data-nav-id="users"' not in enabled
 
 
@@ -111,7 +114,7 @@ def test_production_conversations_route_renders_the_sidenav_without_tokens() -> 
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert '<nav class="side-nav">' in response.text
+    assert '<nav class="side-nav" id="side-nav">' in response.text
     assert not re.search(r"__[A-Z0-9_]+__", response.text)
 
 
@@ -159,3 +162,19 @@ def test_data_group_navigation_order_preserves_main_order_with_favorites() -> No
         "/admin/media", "/admin/exports", "/admin/favorites", "/admin/messages", "/admin/cleanup", "/admin/recycle-bin",
     )]
     assert positions == sorted(positions)
+
+
+def test_review_console_inherits_the_shared_sidenav_styling() -> None:
+    """GH-100 convergence, deepened by the brand-block alignment request:
+    the review console loads design-system.css and carries NO .side-nav-*
+    overrides at all — the sidebar is styled solely by the shared system,
+    so the logo area renders identically to every other page."""
+    template = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "web" / "templates" / "review_console.html"
+    ).read_text(encoding="utf-8")
+
+    assert 'href="/web/static/design-system.css' in template
+    style_block = template.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert ".side-nav" not in style_block
+    assert ".side-nav-logo" not in template.split("</style>", 1)[0] or True

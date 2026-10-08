@@ -26,19 +26,26 @@ Run (from backend/):
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from tests._rnd216_web_shims import review_console_html, review_console_js_source
+
+_BACKEND = Path(__file__).resolve().parent.parent
 
 _REVIEW_CONSOLE_HTML = review_console_html()
 _REVIEW_CONSOLE_JS = review_console_js_source()
 
 
 def _extract_style_block() -> str:
-    match = re.search(r"<style>(.*?)</style>", _REVIEW_CONSOLE_HTML, re.S)
-    assert match is not None, "expected an embedded <style> block"
-    return match.group(1)
-
-
+    """The cascade the browser actually sees: design-system.css (which now
+    hosts the console's migrated component rules) followed by the console's
+    inline page-specific block."""
+    inline = re.search(r"<style>(.*?)</style>", _REVIEW_CONSOLE_HTML, re.S)
+    assert inline is not None, "expected an embedded <style> block"
+    ds = (_BACKEND / "app" / "web" / "static" / "design-system.css").read_text(
+        encoding="utf-8"
+    )
+    return ds + "\n" + inline.group(1)
 def _extract_rule(css: str, selector: str) -> str:
     # Anchor to start-of-line so a bare selector (e.g. ".tl-bubble")
     # doesn't accidentally match inside a longer descendant/related
@@ -134,8 +141,9 @@ def test_bubble_radius_matches_wecom_range() -> None:
 def test_base_media_placeholder_style_updated_for_console_v2() -> None:
     css = _extract_style_block()
     base_rule = _extract_rule(css, ".media-placeholder")
-    assert "#fff" in base_rule
-    assert "#d9dde3" in base_rule
+    assert "background:var(--color-surface)" in base_rule
+    assert ":root{" in css and "--color-surface:#fff" in css
+    assert "border:1px dashed var(--color-border-input)" in base_rule
 
 
 # ---------------------------------------------------------------------------

@@ -42,7 +42,7 @@ def test_users_page_uses_registered_active_users_sidenav_link() -> None:
         client.app.dependency_overrides.clear()
         client.close()
 
-    assert 'href="/admin/users" data-i18n="nav.seats" aria-current="page"' in response.text
+    assert 'href="/admin/users" data-i18n="nav.users" aria-current="page"' in response.text
     assert 'data-nav-id="users"' not in response.text
 
 
@@ -65,7 +65,9 @@ def test_users_page_carries_no_message_statistics_or_directory_leftovers() -> No
     assert "msg_count_30d" not in source
     assert "users.messages30" not in source
     assert "users.breadcrumbDirectory" not in source
-    assert 'data-i18n="nav.group.overview"' in source
+    # 用户管理入口在系统类目（Haisu 后续指令）。
+    assert 'data-i18n="nav.group.system"' in source
+    assert 'data-i18n="nav.group.overview"' not in source
     assert "fetch('/api/admin/staff'" not in source
 
 
