@@ -74,6 +74,7 @@ from app.schemas.auth import (
 )
 from app.session_lifecycle import cleanup_expired_sessions
 from app.services import product_analytics
+from app.services.service_access import INTERACTIVE, tenant_service_denial
 from app.schemas.product_analytics import LANGUAGE_CHANGED, LOGIN_FAILED, LOGIN_SUCCEEDED
 from app.settings import (
     APP_EDITION_CLOUD,
@@ -579,18 +580,22 @@ def password_forgot(body: _ForgotBody, db: Session = Depends(get_db)):
     from app.email import send_password_reset_email
 
     submitted = (body.email or "").strip().lower()
-    user = (
-        db.query(AdminUser)
+    candidate = (
+        db.query(AdminUser, Tenant.lifecycle_status)
         .join(Tenant, Tenant.id == AdminUser.tenant_id)
         .filter(
             Tenant.slug == "default",
-            Tenant.lifecycle_status == "active",
             func.lower(AdminUser.email) == submitted,
             AdminUser.status == "active",
             AdminUser.password_hash.isnot(None),
         )
         .first()
     )
+    user = None
+    if candidate is not None:
+        candidate_user, lifecycle_status = candidate
+        if tenant_service_denial(lifecycle_status, INTERACTIVE) is None:
+            user = candidate_user
     if user is not None and user.email:
         raw_token = create_password_reset_token(db, user, _password_reset_ttl_hours())
         write_audit(

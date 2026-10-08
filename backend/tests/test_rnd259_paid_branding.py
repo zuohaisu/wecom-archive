@@ -152,9 +152,46 @@ def test_no_entitlement_is_rejected_by_the_api_not_just_hidden_ui(branding_clien
     assert status_response.status_code == 200
     assert status_response.json()["custom_branding_entitled"] is False
     assert status_response.json()["upgrade_required"] is True
+    assert status_response.json()["upgrade_available"] is True
     assert upload_response.status_code == domain_response.status_code == 403
     assert upload_response.json()["detail"] == "custom_branding_upgrade_required"
     assert domain_response.json()["detail"] == "custom_domain_upgrade_required"
+
+
+def test_selfhost_does_not_offer_an_unavailable_cloud_upgrade(
+    branding_client, monkeypatch
+) -> None:
+    from pathlib import Path
+
+    monkeypatch.setenv("APP_EDITION", "selfhost")
+    client, _db, current = branding_client
+    current[0] = (
+        AdminUser(
+            id="user-c",
+            tenant_id="tenant-c",
+            wecom_user_id="c",
+            role="owner",
+            status="active",
+        ),
+        "tenant-c",
+    )
+
+    status_response = client.get("/api/branding")
+    upload_response = client.put(
+        "/api/branding/logo",
+        content=_png(1, 2, 3),
+        headers={"Content-Type": "image/png"},
+    )
+    script = (
+        Path(__file__).resolve().parents[1] / "app/web/static/branding.js"
+    ).read_text(encoding="utf-8")
+
+    assert status_response.status_code == 200
+    assert status_response.json()["upgrade_required"] is True
+    assert status_response.json()["upgrade_available"] is False
+    assert upload_response.status_code == 403
+    assert "自托管版本当前不提供品牌与自有域名功能。" in script
+    assert "!state.upgrade_available" in script
 
 
 def test_logo_and_optional_favicon_are_real_mime_checked_and_tenant_scoped(branding_client) -> None:

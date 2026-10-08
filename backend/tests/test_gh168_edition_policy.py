@@ -351,3 +351,222 @@ def test_selfhost_first_run_creates_default_tenant_and_uses_s2_wizard(
         app.dependency_overrides.clear()
         resolver.invalidate()
         engine.dispose()
+
+
+def _edition_policy_test_db():
+    from sqlalchemy.pool import StaticPool
+
+    from app.db.models import (
+        BillingPlan,
+        MediaFile,
+        PasswordResetToken,
+        PlanEntitlement,
+        Subscription,
+        TenantStorageDaily,
+    )
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Tenant.__table__,
+            AdminUser.__table__,
+            PasswordResetToken.__table__,
+            BillingPlan.__table__,
+            PlanEntitlement.__table__,
+            Subscription.__table__,
+            MediaFile.__table__,
+            TenantStorageDaily.__table__,
+        ],
+    )
+    return engine, sessionmaker(bind=engine, expire_on_commit=False)
+
+
+@pytest.mark.parametrize(
+    ("edition", "lifecycle", "user_status", "email", "password_hash", "expected"),
+    [
+        (APP_EDITION_SELFHOST, "frozen", "active", "person@example.test", "synthetic-hash", True),
+        (APP_EDITION_SELFHOST, "active", "active", "person@example.test", "synthetic-hash", True),
+        (APP_EDITION_CLOUD, "frozen", "active", "person@example.test", "synthetic-hash", False),
+        (APP_EDITION_SELFHOST, "suspended", "active", "person@example.test", "synthetic-hash", False),
+        (APP_EDITION_SELFHOST, "provisioning", "active", "person@example.test", "synthetic-hash", False),
+        (APP_EDITION_SELFHOST, "future-state", "active", "person@example.test", "synthetic-hash", False),
+        (APP_EDITION_SELFHOST, "active", "disabled", "person@example.test", "synthetic-hash", False),
+        (APP_EDITION_SELFHOST, "active", "active", None, "synthetic-hash", False),
+        (APP_EDITION_SELFHOST, "active", "active", "person@example.test", None, False),
+    ],
+)
+def test_password_forgot_uses_edition_aware_service_access(
+    monkeypatch: pytest.MonkeyPatch,
+    edition: str,
+    lifecycle: str,
+    user_status: str,
+    email: str | None,
+    password_hash: str | None,
+    expected: bool,
+) -> None:
+    from sqlalchemy import text
+
+    from app.db.models import PasswordResetToken
+    from app.routers import auth as auth_router
+    from app.routers.auth import _ForgotBody, password_forgot
+
+    monkeypatch.setenv("APP_EDITION", edition)
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(auth_router, "write_audit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "app.email.send_password_reset_email",
+        lambda address, link: sent.append((address, link)) or True,
+    )
+    engine, factory = _edition_policy_test_db()
+    try:
+        with factory() as db:
+            if lifecycle == "future-state":
+                db.execute(text("PRAGMA ignore_check_constraints = ON"))
+            tenant = Tenant(
+                id="tenant-reset",
+                name="Default",
+                slug="default",
+                lifecycle_status=lifecycle,
+            )
+            user = AdminUser(
+                id="user-reset",
+                tenant_id=tenant.id,
+                wecom_user_id="synthetic-user",
+                email=email,
+                password_hash=password_hash,
+                role="admin",
+                status=user_status,
+            )
+            db.add_all([tenant, user])
+            db.commit()
+
+            response = password_forgot(
+                _ForgotBody(email="person@example.test"), db
+            )
+
+            assert response.body == b'{"ok":true}'
+            assert bool(sent) is expected
+            assert db.query(PasswordResetToken).count() == int(expected)
+            if expected:
+                assert sent[0][0] == "person@example.test"
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("edition", "lifecycle", "expected_active", "expected_can_accept"),
+    [
+        (APP_EDITION_SELFHOST, "frozen", True, True),
+        (APP_EDITION_SELFHOST, "suspended", False, False),
+        (APP_EDITION_CLOUD, "frozen", False, False),
+    ],
+)
+def test_ai_diagnostics_match_edition_access_and_storage_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    edition: str,
+    lifecycle: str,
+    expected_active: bool,
+    expected_can_accept: bool,
+) -> None:
+    from app.db.models import TenantStorageDaily
+    from app.services.ai_tools.handlers import (
+        storage_quota_summary_handler,
+        tenant_service_status_handler,
+    )
+    from app.services.ai_tools.registry import ToolContext, ToolScope
+
+    monkeypatch.setenv("APP_EDITION", edition)
+    monkeypatch.setenv("SELFHOST_STORAGE_LIMIT_BYTES", "0")
+    engine, factory = _edition_policy_test_db()
+    try:
+        with factory() as db:
+            tenant = Tenant(
+                id="tenant-diagnostic",
+                name="Synthetic tenant",
+                slug="diagnostic",
+                lifecycle_status=lifecycle,
+            )
+            db.add(tenant)
+            db.commit()
+            context = ToolContext(
+                tenant_id=tenant.id,
+                admin_user_id="synthetic-admin",
+                scope=ToolScope.TENANT_ADMIN,
+                page_context={},
+            )
+            before = db.query(TenantStorageDaily).filter_by(tenant_id=tenant.id).count()
+
+            service = tenant_service_status_handler(db, context)
+            storage = storage_quota_summary_handler(db, context)
+
+            after = db.query(TenantStorageDaily).filter_by(tenant_id=tenant.id).count()
+            assert service["is_active"] is expected_active
+            assert storage["can_accept_new_media"] is expected_can_accept
+            assert before == after == 0
+            if edition == APP_EDITION_SELFHOST and lifecycle == "frozen":
+                assert storage["quota_bytes"] == 0
+                assert storage["remaining_bytes"] is None
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("used_bytes", "expected_can_accept", "expected_remaining"),
+    [(80, True, 20), (100, False, 0), (101, False, 0)],
+)
+def test_ai_capacity_diagnostic_uses_finite_selfhost_limit_without_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    used_bytes: int,
+    expected_can_accept: bool,
+    expected_remaining: int,
+) -> None:
+    from app.db.models import MediaFile, TenantStorageDaily
+    from app.services.ai_tools.handlers import storage_quota_summary_handler
+    from app.services.ai_tools.registry import ToolContext, ToolScope
+
+    monkeypatch.setenv("APP_EDITION", APP_EDITION_SELFHOST)
+    monkeypatch.setenv("SELFHOST_STORAGE_LIMIT_BYTES", "100")
+    engine, factory = _edition_policy_test_db()
+    try:
+        with factory() as db:
+            tenant = Tenant(
+                id="tenant-capacity-diagnostic",
+                name="Synthetic tenant",
+                slug="capacity-diagnostic",
+                lifecycle_status="frozen",
+            )
+            db.add(tenant)
+            if used_bytes:
+                db.add(
+                    MediaFile(
+                        sdkfileid="synthetic-downloaded-media",
+                        archive_message_id=1,
+                        tenant_id=tenant.id,
+                        download_status="downloaded",
+                        file_size=used_bytes,
+                    )
+                )
+            db.commit()
+            context = ToolContext(
+                tenant_id=tenant.id,
+                admin_user_id="synthetic-admin",
+                scope=ToolScope.TENANT_ADMIN,
+                page_context={},
+            )
+            before = db.query(TenantStorageDaily).filter_by(tenant_id=tenant.id).count()
+
+            storage = storage_quota_summary_handler(db, context)
+
+            after = db.query(TenantStorageDaily).filter_by(tenant_id=tenant.id).count()
+            assert storage["quota_bytes"] == 100
+            assert storage["used_bytes"] == used_bytes
+            assert storage["remaining_bytes"] == expected_remaining
+            assert storage["can_accept_new_media"] is expected_can_accept
+            assert before == after == 0
+    finally:
+        engine.dispose()

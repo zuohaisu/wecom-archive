@@ -37,7 +37,12 @@ from starlette.responses import PlainTextResponse
 
 from app.db.models import AdminSession, AdminUser, Tenant, TenantBranding
 from app.services.entitlements import CUSTOM_BRANDING, CUSTOM_DOMAIN, has_entitlement
-from app.settings import get_auth_settings, get_wecom_oauth_settings
+from app.settings import (
+    APP_EDITION_CLOUD,
+    get_app_edition,
+    get_auth_settings,
+    get_wecom_oauth_settings,
+)
 
 MAX_LOGO_BYTES = 2 * 1024 * 1024
 MAX_FAVICON_BYTES = 1 * 1024 * 1024
@@ -595,6 +600,7 @@ def branding_status(db: Session, tenant_id: str) -> dict[str, object]:
         "custom_branding_entitled": branding_entitled,
         "custom_domain_entitled": domain_entitled,
         "upgrade_required": not (branding_entitled and domain_entitled),
+        "upgrade_available": get_app_edition() == APP_EDITION_CLOUD,
         "logo_configured": bool(config and config.logo_content),
         "favicon_configured": bool(config and config.favicon_content),
         "custom_domain": config.custom_domain if config else None,

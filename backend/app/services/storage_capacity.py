@@ -153,20 +153,14 @@ def _selfhost_storage_limit_bytes() -> int:
     return value
 
 
-def measure_storage_capacity(
+def _storage_capacity_snapshot(
     db: Session,
     tenant_id: str,
     *,
-    at: datetime | None = None,
-    lock_tenant: bool = False,
+    at: datetime | None,
+    lock_tenant: bool,
+    refresh_daily_rollup: bool,
 ) -> StorageCapacitySnapshot:
-    """Measure live downloaded bytes and refresh today's existing rollup.
-
-    With ``lock_tenant=True`` the caller owns a tenant-scoped serialization
-    lock until commit/rollback. The media worker holds that lock from the exact
-    payload-size decision through storage publication and DB persistence, so
-    concurrent writes cannot each spend the same remaining bytes.
-    """
     measured_at = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
     tenant_query = select(Tenant).where(Tenant.id == tenant_id)
     if lock_tenant:
@@ -187,13 +181,14 @@ def measure_storage_capacity(
         else subscription.storage_quota_bytes if entitled else 0
     )
     used_bytes = sum_downloaded_storage(db, tenant_id)
-    upsert_tenant_storage_daily(
-        db,
-        tenant_id=tenant_id,
-        usage_date=measured_at.date(),
-        used_bytes=used_bytes,
-    )
-    db.flush()
+    if refresh_daily_rollup:
+        upsert_tenant_storage_daily(
+            db,
+            tenant_id=tenant_id,
+            usage_date=measured_at.date(),
+            used_bytes=used_bytes,
+        )
+        db.flush()
     return capacity_from_values(
         tenant_id=tenant_id,
         quota_bytes=quota_bytes,
@@ -207,6 +202,45 @@ def measure_storage_capacity(
         ),
         entitled=(limit_bytes is not None) if selfhost else entitled,
         unlimited=selfhost and limit_bytes == 0,
+    )
+
+
+def read_storage_capacity(
+    db: Session,
+    tenant_id: str,
+    *,
+    at: datetime | None = None,
+) -> StorageCapacitySnapshot:
+    """Read authoritative capacity without updating the daily rollup."""
+    return _storage_capacity_snapshot(
+        db,
+        tenant_id,
+        at=at,
+        lock_tenant=False,
+        refresh_daily_rollup=False,
+    )
+
+
+def measure_storage_capacity(
+    db: Session,
+    tenant_id: str,
+    *,
+    at: datetime | None = None,
+    lock_tenant: bool = False,
+) -> StorageCapacitySnapshot:
+    """Measure live downloaded bytes and refresh today's existing rollup.
+
+    With ``lock_tenant=True`` the caller owns a tenant-scoped serialization
+    lock until commit/rollback. The media worker holds that lock from the exact
+    payload-size decision through storage publication and DB persistence, so
+    concurrent writes cannot each spend the same remaining bytes.
+    """
+    return _storage_capacity_snapshot(
+        db,
+        tenant_id,
+        at=at,
+        lock_tenant=lock_tenant,
+        refresh_daily_rollup=True,
     )
 
 
