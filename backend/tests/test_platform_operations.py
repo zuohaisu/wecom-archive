@@ -804,10 +804,6 @@ def test_all_platform_console_html_routes_reachable(
         "/platform/tenants",
         "/platform/tenants/tenant-active",
         "/platform/tenants/new",
-        "/platform/usage",
-        "/platform/ledger",
-        "/platform/infra",
-        "/platform/analytics",
         "/platform/audit",
     ]
     for route in routes:

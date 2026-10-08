@@ -414,7 +414,8 @@ def test_router_count() -> None:
     # page route on top of the earlier five favorites API operations.
     # GH-186 adds five routes: the /platform/api-performance page shell and
     # four PlatformAdmin-only read APIs (endpoints/series/status/anomalies).
-    assert route_count == 225
+    # GH-199 removes four platform page shells (usage/ledger/infra/analytics).
+    assert route_count == 221
 
 
 def test_selfhost_router_count() -> None:
@@ -639,10 +640,6 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/platform/tenants",
             "/platform/tenants/new",
             "/platform/tenants/{tenant_id}",
-            "/platform/usage",
-            "/platform/ledger",
-            "/platform/infra",
-            "/platform/analytics",
             "/platform/audit",
             "/platform/api-performance",
             "/redoc",
@@ -774,10 +771,6 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/platform/tenants", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/tenants/new", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/tenants/{tenant_id}", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/platform/usage", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/platform/ledger", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/platform/infra", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/platform/analytics", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/audit", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/api-performance", frozenset({"GET"}), "None", "HTMLResponse"),
         (

@@ -161,27 +161,12 @@ PLATFORM_NAV = (
         "group": "租户",
         "items": (
             {"id": "tenants", "label": "租户商业状态", "path": "/platform/tenants"},
-            {"id": "tenant-new", "label": "新建租户", "note": "人工开通", "path": "/platform/tenants/new"},
-        ),
-    },
-    {
-        "group": "计量与资金",
-        "items": (
-            {"id": "usage", "label": "用量与配额", "path": "/platform/usage"},
-            {"id": "ledger", "label": "手工账本", "path": "/platform/ledger"},
         ),
     },
     {
         "group": "基础设施",
         "items": (
-            {"id": "infra", "label": "连通性 / 域名 / 渠道", "path": "/platform/infra"},
             {"id": "api-performance", "label": "接口性能", "path": "/platform/api-performance"},
-        ),
-    },
-    {
-        "group": "分析",
-        "items": (
-            {"id": "analytics", "label": "产品使用分析", "path": "/platform/analytics"},
         ),
     },
     {
