@@ -251,3 +251,48 @@ def test_media_signal_fails_closed_on_invalid_configured_path(
 
     assert media_event_dispatch._signal_media_worker() is False
     assert not fallback_path.exists()
+
+
+def test_runtime_image_installs_the_voice_transcode_dependency() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    install_command = next(
+        line for line in dockerfile.splitlines() if "apt-get install" in line
+    )
+    assert "ffmpeg" in install_command
+    assert "RUN ffmpeg -version" in dockerfile
+
+
+def test_runtime_image_contains_every_required_knowledge_base_source(tmp_path) -> None:
+    from shutil import copyfile, copytree
+
+    from app.ai_kb.manifest_schema import load_manifest
+
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    assert "COPY --chown=app:app docs/kb/ /app/docs/kb/" in dockerfile
+    assert (
+        "COPY --chown=app:app docs/ARCHITECTURE.md /app/docs/ARCHITECTURE.md"
+        in dockerfile
+    )
+    for rule in (
+        "!docs/",
+        "!docs/ARCHITECTURE.md",
+        "!docs/kb/",
+        "!docs/kb/public/",
+        "!docs/kb/public/**",
+        "!docs/kb/customer/",
+        "!docs/kb/customer/**",
+    ):
+        assert rule in dockerignore
+
+    manifest_source = ROOT / "backend/app/ai_kb/manifest.json"
+    manifest_in_image = tmp_path / "backend/app/ai_kb/manifest.json"
+    manifest_in_image.parent.mkdir(parents=True)
+    copyfile(manifest_source, manifest_in_image)
+    copytree(ROOT / "docs/kb", tmp_path / "docs/kb")
+    (tmp_path / "docs").mkdir(exist_ok=True)
+    copyfile(ROOT / "docs/ARCHITECTURE.md", tmp_path / "docs/ARCHITECTURE.md")
+
+    entries = load_manifest(manifest_in_image, repo_root=tmp_path)
+    assert len(entries) == 12

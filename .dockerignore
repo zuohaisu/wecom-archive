@@ -10,6 +10,15 @@
 !backend/scripts/
 !backend/scripts/**
 
+# Approved AI knowledge-base sources plus the manifest's internal entry.
+!docs/
+!docs/ARCHITECTURE.md
+!docs/kb/
+!docs/kb/public/
+!docs/kb/public/**
+!docs/kb/customer/
+!docs/kb/customer/**
+
 # Never send local credentials, native SDK binaries, caches, or generated files.
 backend/.env
 backend/vendor/
