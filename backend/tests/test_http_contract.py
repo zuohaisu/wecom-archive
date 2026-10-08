@@ -410,7 +410,11 @@ def test_router_count() -> None:
     # RND-369 adds the authenticated unified-favorites page.
     # Haisu split request adds two routes: the /admin/staff directory page
     # shell and its /api/admin/staff read-only listing API.
-    assert route_count == 220
+    # RND-369 (merged from main) adds the authenticated unified-favorites
+    # page route on top of the earlier five favorites API operations.
+    # GH-186 adds five routes: the /platform/api-performance page shell and
+    # four PlatformAdmin-only read APIs (endpoints/series/status/anomalies).
+    assert route_count == 225
 
 
 def test_selfhost_router_count() -> None:
@@ -565,6 +569,10 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/operators",
             "/api/platform/operators/invitations",
             "/api/platform/operators/accept-invite",
+            "/api/platform/api-performance/endpoints",
+            "/api/platform/api-performance/series",
+            "/api/platform/api-performance/status",
+            "/api/platform/api-performance/anomalies",
             "/api/platform/branding/domains",
             "/api/platform/branding/domain-metrics",
             "/api/platform/operations/dashboard",
@@ -636,6 +644,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/platform/infra",
             "/platform/analytics",
             "/platform/audit",
+            "/platform/api-performance",
             "/redoc",
         ]
     )
@@ -770,6 +779,31 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/platform/infra", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/analytics", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/audit", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/api-performance", frozenset({"GET"}), "None", "HTMLResponse"),
+        (
+            "/api/platform/api-performance/endpoints",
+            frozenset({"GET"}),
+            "EndpointListOut",
+            "None",
+        ),
+        (
+            "/api/platform/api-performance/series",
+            frozenset({"GET"}),
+            "SeriesOut",
+            "None",
+        ),
+        (
+            "/api/platform/api-performance/status",
+            frozenset({"GET"}),
+            "ApiPerformanceStatusOut",
+            "None",
+        ),
+        (
+            "/api/platform/api-performance/anomalies",
+            frozenset({"GET"}),
+            "AnomalyListOut",
+            "None",
+        ),
         ("/platform/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         (
             "/platform/settings/operators/new",
@@ -1402,6 +1436,8 @@ class TestAuthGates:
             "/api/admin/reachability-findings",
             "/api/admin/sync-status",
             "/api/admin/users",
+            # GH-186: platform statistics APIs are platform-admin-only too.
+            "/api/platform/api-performance/status",
         ],
     )
     def test_api_401(self, client: TestClient, path: str) -> None:

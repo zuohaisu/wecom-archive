@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from app.routers.ai_support import (
     platform_router as ai_support_platform_router,
     router as ai_support_router,
 )
+from app.routers.platform_api_performance import router as platform_api_performance_router
 from app.routers.public_ai_support import router as public_ai_support_router
 from app.routers.audit import router as audit_router
 from app.routers.avatars import router as avatars_router
@@ -67,6 +70,12 @@ from app.routers.wecom_events import router as wecom_events_router
 from app.routers.wecom_org_authorization import router as wecom_org_authorization_router
 from app.routers.wecom_provider_instructions import router as wecom_provider_instructions_router
 from app.services.alipay import validate_alipay_configuration_if_enabled
+from app.services.api_performance_collector import (
+    ApiPerformanceCollector,
+    ApiPerformanceConfig,
+    ApiPerformanceMiddleware,
+)
+from app.services.api_performance_service import ApiPerformanceRuntime, run_background_loop
 from app.services.branding import BrandingHostMiddleware
 from app.services.wechat_pay import validate_wechat_pay_configuration_if_configured
 from app.settings import APP_EDITION_CLOUD, resolve_app_edition
@@ -148,6 +157,28 @@ class _VersionedStaticFiles(StaticFiles):
 _STATIC_DIR = Path(__file__).parent / "web" / "static"
 
 
+@contextlib.asynccontextmanager
+async def _api_performance_lifespan(app: FastAPI):
+    """GH-186: start/stop the per-instance telemetry loop. The loop owns
+    every DB touch (15-minute flush, retention, detection/email) so the
+    request path never gains I/O; graceful shutdown gets one time-boxed
+    final flush inside run_background_loop itself."""
+    runtime = getattr(app.state, "api_performance_runtime", None)
+    loop_task = None
+    if runtime is not None and runtime.config.enabled:
+        loop_task = asyncio.create_task(run_background_loop(runtime))
+    try:
+        yield
+    finally:
+        if loop_task is not None:
+            if runtime.stop_event is not None:
+                runtime.stop_event.set()
+            try:
+                await asyncio.wait_for(loop_task, timeout=10.0)
+            except (asyncio.TimeoutError, Exception):  # noqa: BLE001 - shutdown must proceed
+                loop_task.cancel()
+
+
 def create_app(edition: str | None = None) -> FastAPI:
     """Build a fresh app for the validated process edition.
 
@@ -159,8 +190,22 @@ def create_app(edition: str | None = None) -> FastAPI:
     if selected_edition == APP_EDITION_CLOUD:
         validate_wechat_pay_configuration_if_configured()
         validate_alipay_configuration_if_enabled()
-    app = FastAPI(title="Crowntime WeCom Archive")
+    app = FastAPI(title="Crowntime WeCom Archive", lifespan=_api_performance_lifespan)
     app.state.edition = selected_edition
+    app.state.api_performance_runtime = None
+    api_perf_collector = None
+    if selected_edition == APP_EDITION_CLOUD:
+        # GH-186: cloud-only per-instance telemetry. Construction validates
+        # configuration and fails loudly; each app instance owns its collector.
+        api_perf_config = ApiPerformanceConfig.from_settings()
+        api_perf_collector = ApiPerformanceCollector(
+            retry_deadline_seconds=api_perf_config.batch_retry_hours * 3600,
+        )
+        app.state.api_performance_runtime = ApiPerformanceRuntime(api_perf_collector, api_perf_config)
+        if api_perf_config.enabled:
+            # A disabled module keeps the page/API wired for persisted history
+            # without collecting or growing in-memory state.
+            app.add_middleware(ApiPerformanceMiddleware, collector=api_perf_collector)
     # RND-187: guarantees Cache-Control: no-store on every response (success or
     # error, any status code) for the media access descriptor endpoint — see
     # MediaAccessNoStoreMiddleware's docstring for why this must be a
@@ -226,6 +271,7 @@ def create_app(edition: str | None = None) -> FastAPI:
     if selected_edition == APP_EDITION_CLOUD:
         app.include_router(ai_support_platform_router)
         app.include_router(public_ai_support_router)
+        app.include_router(platform_api_performance_router)
 
     @app.get("/health/live")
     def health_live():
@@ -268,6 +314,12 @@ def create_app(edition: str | None = None) -> FastAPI:
         _VersionedStaticFiles(directory=str(_STATIC_DIR), check_dir=False),
         name="web-static",
     )
+
+    # GH-186: the cloud registry must see the COMPLETE route table --
+    # including health probes and all included routers -- so the never-called
+    # listing is complete. Selfhost does not construct telemetry or its routes.
+    if api_perf_collector is not None:
+        api_perf_collector.register_app_routes(app.routes)
 
     return app
 

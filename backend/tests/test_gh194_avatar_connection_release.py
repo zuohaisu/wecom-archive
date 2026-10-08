@@ -116,7 +116,9 @@ def _make_synthetic_app(engine):
             )
         db.commit()
 
-    return create_app()
+    # This regression targets shared archive/admin routes; use the default
+    # selfhost surface so its TestClient does not start the cloud telemetry worker.
+    return create_app(edition="selfhost")
 
 
 def _repository_heads() -> frozenset[str]:

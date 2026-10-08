@@ -264,6 +264,40 @@ def get_product_analytics_settings() -> ProductAnalyticsSettings:
     return ProductAnalyticsSettings()
 
 
+class ApiPerformanceSettings(BaseSettings):
+    """GH-186 super-admin API performance telemetry.
+
+    All values stay str here by module convention; bounds-checking and
+    parsing live in app/services/api_performance_collector.py
+    (ApiPerformanceConfig.from_settings), which fails loudly on bad
+    values. api_perf_alert_email is the single configurable alert
+    recipient -- empty means "unconfigured": collection/page/detection
+    still work and the page reports the email as 未配置, never as sent.
+    """
+
+    api_perf_enabled: str = "true"
+    api_perf_flush_interval_seconds: str = "900"
+    api_perf_retention_hours: str = "720"
+    api_perf_retention_days: str = "180"
+    api_perf_batch_retention_hours: str = "48"
+    api_perf_batch_retry_hours: str = "24"
+    api_perf_detection_enabled: str = "true"
+    api_perf_detection_interval_seconds: str = "60"
+    api_perf_window_minutes: str = "5"
+    api_perf_min_samples: str = "20"
+    api_perf_p95_threshold_ms: str = "1000"
+    api_perf_sustained_minutes: str = "5"
+    api_perf_stream_p95_threshold_ms: str = "3000"
+    api_perf_stream_min_samples: str = "20"
+    api_perf_route_overrides: str = ""
+    api_perf_alert_email: str = ""
+    api_perf_admin_url: str = ""
+
+
+def get_api_performance_settings() -> ApiPerformanceSettings:
+    return ApiPerformanceSettings()
+
+
 class AiSettings(BaseSettings):
     """AI support (RND-354 epic) configuration. ai_support_enabled is the
     single kill switch every AI surface (T2 answer service, T3 UI, T5

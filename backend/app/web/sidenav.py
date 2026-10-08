@@ -175,6 +175,7 @@ PLATFORM_NAV = (
         "group": "基础设施",
         "items": (
             {"id": "infra", "label": "连通性 / 域名 / 渠道", "path": "/platform/infra"},
+            {"id": "api-performance", "label": "接口性能", "path": "/platform/api-performance"},
         ),
     },
     {
