@@ -415,7 +415,8 @@ def test_router_count() -> None:
     # GH-186 adds five routes: the /platform/api-performance page shell and
     # four PlatformAdmin-only read APIs (endpoints/series/status/anomalies).
     # GH-199 removes four platform page shells (usage/ledger/infra/analytics).
-    assert route_count == 221
+    # GH-84 adds the staff-customer directory API (one route, nested).
+    assert route_count == 222
 
 
 def test_selfhost_router_count() -> None:
@@ -425,8 +426,9 @@ def test_selfhost_router_count() -> None:
     route_count = len([route for route in app.routes if hasattr(route, "methods")])
     # GH-168 keeps the non-commercial archive/setup routes in selfhost;
     # GH-179 adds five tenant-scoped favorites API operations. Later mainline
-    # route additions bring the current selfhost total to 145.
-    assert route_count == 145
+    # route additions bring the current selfhost total to 146. GH-84 adds
+    # one staff-customer directory route (present in both editions).
+    assert route_count == 146
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -499,6 +501,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/retention-config",
             "/api/admin/usage",
             "/api/admin/staff",
+            "/api/admin/staff/{wecom_userid}/customers",
             "/api/admin/settings",
             "/api/admin/settings/bootstrap",
             "/api/admin/settings/bootstrap-status",
@@ -879,6 +882,12 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/usage", frozenset({"GET"}), "UsageAnalyticsOut", "None"),
         ("/api/admin/settings", frozenset({"GET"}), "SettingsGetOut", "None"),
         ("/api/admin/staff", frozenset({"GET"}), "StaffDirectoryPage", "None"),
+        (
+            "/api/admin/staff/{wecom_userid}/customers",
+            frozenset({"GET"}),
+            "StaffCustomersPage",
+            "None",
+        ),
         ("/api/admin/settings", frozenset({"PUT"}), "SettingsUpdateOut", "None"),
         ("/api/admin/settings/bootstrap", frozenset({"POST"}), "dict", "None"),
         ("/api/admin/settings/bootstrap-status", frozenset({"GET"}), "dict", "None"),

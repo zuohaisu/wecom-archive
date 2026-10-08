@@ -54,11 +54,12 @@ def test_staff_page_is_read_only_and_fetches_the_real_directory_api() -> None:
     source = _TEMPLATE.read_text(encoding="utf-8")
 
     assert "fetch('/api/admin/staff?'" in source
-    # 只读展示：仅调用目录 API，没有任何管理端点或操作按钮。
+    # 只读目录 + RND-374 相关客户下钻（GET only）：仍无任何管理端点或操作按钮。
     assert "method:'PATCH'" not in source
     assert "'/api/admin/users" not in source
     assert "data-action=" not in source
-    assert source.count("fetch(") == 2  # 目录列表、登出、语言无关的兜底之外无其他调用
+    assert "fetch('/api/admin/staff/'" in source  # RND-374: 按员工下钻相关客户
+    assert source.count("fetch(") == 3  # 目录列表、相关客户、登出
     for field in ("staff.messages30", "staff.messagesTotal", "msg_count_30d"):
         assert field in source
     assert "mock" not in source.lower()
@@ -90,6 +91,11 @@ def test_staff_i18n_keys_are_complete_in_all_three_locales() -> None:
         "staff.empty",
         "staff.unnamed",
         "staff.requestFailed",
+        "staff.customersSearch",
+        "staff.customerName",
+        "staff.customerMessages",
+        "staff.customerLast",
+        "staff.customerFirst",
     }
     assert key_sets[0] == expected
 

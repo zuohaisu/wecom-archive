@@ -29,6 +29,7 @@ from app.services.external_contact_identity import (
     safe_display_nickname,
 )
 from app.services.listing_service import list_conversations
+from app.services.customer_relations import related_staff_for_contact
 
 router = APIRouter()
 
@@ -287,4 +288,5 @@ def get_external_contact_detail(
             for item in history
         ],
         conversations=list_conversations(db, tenant_id, entity_id=external_userid),
+        related_staff=related_staff_for_contact(db, tenant_id, external_userid),
     )
