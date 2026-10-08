@@ -49,13 +49,14 @@ a{color:var(--link-color)}
   .drawer-backdrop[hidden]{display:none}
   .scope-popover{max-width:calc(100vw - 24px)}
   .delete-bar{flex-wrap:wrap;padding:8px 12px}
+  .favorite-selection-bar{flex-wrap:wrap;padding:8px 12px}.favorite-selection-bar button{flex:1 1 auto}.favorite-selection-count,.favorite-selection-hint{flex-basis:100%}.timeline-header-bar{padding:0 12px}.timeline-favorites-filter{font-size:11px}
 }
 @media (max-width: 640px){
   .col-conv{width:100vw}
   .col-panel{width:min(320px,88vw)}
 }
 
-</style>
+   /* #181 favorites UI (token-ized). */</style>
 </head>
 <body>
 __I18N_SCRIPT__
@@ -76,6 +77,7 @@ __SIDENAV__
       <button type="button" class="btn-toggle btn-conv-list" id="btn-conv-list" onclick="toggleConvList()" data-i18n="console.convList">会话列表</button>
       <span id="sync-status" class="sync-status" aria-live="polite"></span>
       <button type="button" class="btn-toggle" id="btn-export-conversation" onclick="openConversationExport()" data-i18n="exports.openConversation" disabled>导出当前会话</button>
+      <button type="button" class="btn-toggle" id="btn-favorite-mode" aria-pressed="false" data-i18n="favorites.enterSelection" disabled>选择收藏</button>
       <button class="btn-sync-now" id="btn-sync-now" onclick="syncNow()" data-i18n="sync.now">立即同步</button>
       <button type="button" class="btn-toggle" id="btn-audit-mode" onclick="toggleAuditMode()" data-i18n="console.auditMode">审阅模式</button>
       <button type="button" class="btn-toggle active" id="btn-panel-toggle" onclick="togglePanel()" data-i18n="console.detailPanel">详情面板</button>
@@ -121,8 +123,21 @@ __SIDENAV__
 
     <div class="col col-timeline">
       <div class="timeline-header-bar">
-        <div class="timeline-title" id="timeline-header" data-i18n="console.timelineHeader">消息时间线</div>
+        <div class="timeline-header-actions">
+          <div class="timeline-title" id="timeline-header" data-i18n="console.timelineHeader">消息时间线</div>
+          <label class="timeline-favorites-filter" for="timeline-favorites-only"><input type="checkbox" id="timeline-favorites-only"><span data-i18n="favorites.onlyMessages">仅看已收藏</span></label>
+        </div>
       </div>
+      <div class="favorite-selection-bar" id="favorite-selection-bar" role="toolbar" aria-labelledby="favorite-selected-count" hidden>
+        <span class="favorite-selection-count" id="favorite-selected-count" role="status" aria-live="polite"></span>
+        <button type="button" class="btn-toggle" id="btn-favorite-select-all" data-i18n="favorites.selectAllLoaded">全选已加载</button>
+        <button type="button" class="btn-toggle" id="btn-favorite-clear-selection" data-i18n="favorites.clearSelection">清空选择</button>
+        <button type="button" class="btn-toggle" id="btn-favorite-selected" data-i18n="favorites.favoriteSelected" disabled>收藏所选</button>
+        <button type="button" class="btn-toggle" id="btn-unfavorite-selected" data-i18n="favorites.unfavoriteSelected" disabled>取消收藏</button>
+        <button type="button" class="btn-toggle" id="btn-favorite-exit" data-i18n="favorites.exitSelection">退出选择</button>
+        <p class="favorite-selection-hint" id="favorite-selection-hint" aria-live="polite"></p>
+      </div>
+      <div class="timeline-favorite-feedback"><span id="timeline-favorite-result" role="status" aria-live="polite" hidden></span><a id="timeline-favorite-link" href="/admin/favorites" data-i18n="favorites.viewAll" hidden>查看收藏夹</a><button type="button" class="btn-toggle" id="timeline-favorite-status-retry" data-i18n="favorites.retryStatus" hidden>重试状态</button></div>
       <!-- RND-363: delete-selection action bar (visible only in delete mode). -->
       <div class="delete-bar" id="delete-bar" role="toolbar" aria-label="删除模式" hidden>
         <span class="delete-selected-count" id="delete-selected-count">已选择 0 条</span>
@@ -190,6 +205,7 @@ __SIDENAV__
 <script src="/web/static/console/conversation-list.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/timeline.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/delete-timeline.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/console/timeline-favorites.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/message-renderers.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/media-viewer.js?v=__STATIC_VERSION__"></script>
 <script src="/web/static/console/refresh.js?v=__STATIC_VERSION__"></script>

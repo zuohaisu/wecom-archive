@@ -26,6 +26,7 @@ NAV = (
         "items": (
             {"id": "media", "key": "nav.mediaAttachments", "path": "/admin/media"},
             {"id": "exports", "key": "nav.exports", "path": "/admin/exports"},
+            {"id": "favorites", "key": "nav.favorites", "path": "/admin/favorites"},
             {"id": "messages", "key": "nav.messages", "path": "/admin/messages"},
             {"id": "cleanup", "key": "nav.cleanup", "path": "/admin/cleanup"},
             {"id": "recycle-bin", "key": "nav.recycleBin", "path": "/admin/recycle-bin"},

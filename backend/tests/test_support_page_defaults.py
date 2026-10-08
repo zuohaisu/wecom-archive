@@ -1,4 +1,9 @@
-"""Haisu request: the help page titles itself 帮助与客服 and opens on 提交反馈."""
+"""Help-page contract after the #188 feedback-only rewrite (merged from main).
+
+The page is a single feedback form titled 帮助与客服 — no tabs, no AI chat
+surfaces, no diagnostics consent checkbox. These assertions travel with the
+merged page so the batch branch and main agree on the same contract.
+"""
 from __future__ import annotations
 
 import re
@@ -15,19 +20,19 @@ def test_support_page_titles_itself_help_and_support() -> None:
 
     assert "<title>帮助与客服</title>" in source
     assert source.count('data-i18n="support.pageTitle">帮助与客服') == 2  # breadcrumb + h1
-    # 标题不再是 AI 客服；聊天禁用提示的兜底文案不在本断言范围内。
-    assert 'data-i18n="support.pageTitle">AI 客服' not in source
+    assert "AI 客服" not in source
 
 
-def test_support_page_defaults_to_the_feedback_tab() -> None:
+def test_support_page_is_the_single_feedback_form_without_diagnostics() -> None:
     source = _TEMPLATE.read_text(encoding="utf-8")
 
-    assert 'id="tab-chat" role="tab" aria-selected="false"' in source
-    assert 'id="tab-feedback" role="tab" aria-selected="true"' in source
-    chat_panel = source[source.index('id="support-chat-panel"') : source.index('id="support-chat-panel"') + 120]
-    feedback_panel = source[source.index('id="support-feedback-panel"') : source.index('id="support-feedback-panel"') + 120]
-    assert 'class="hidden"' in chat_panel
-    assert 'class="hidden"' not in feedback_panel
+    assert 'id="feedback-form"' in source
+    assert "fetch('/api/ai/support/feedback'" in source
+    assert "feedback-include-diagnostics" not in source
+    assert "support.includeDiagnostics" not in source
+    assert "support-tab" not in source
+    assert 'id="support-chat-panel"' not in source
+    assert 'id="handoff-modal"' not in source
 
 
 def test_support_page_title_localized_in_all_three_locales() -> None:
@@ -39,23 +44,3 @@ def test_support_page_title_localized_in_all_three_locales() -> None:
         '"support.pageTitle": "Help & Support"',
     ):
         assert len(re.findall(re.escape(value), source)) == 1, value
-    assert '"support.pageTitle": "AI' not in source
-
-
-def test_ai_disabled_notice_lives_only_in_the_chat_panel() -> None:
-    """Haisu request: the 提交反馈 tab must not show the AI-disabled notice."""
-    source = _TEMPLATE.read_text(encoding="utf-8")
-
-    chat_panel_start = source.index('id="support-chat-panel"')
-    feedback_panel_start = source.index('id="support-feedback-panel"')
-    notice_start = source.index('id="support-disabled"')
-    assert chat_panel_start < notice_start < feedback_panel_start
-
-
-def test_feedback_intro_copy_names_no_ai() -> None:
-    source = _I18N.read_text(encoding="utf-8")
-
-    assert '"support.feedbackIntro": "在此提交问题、Bug或建议"' in source
-    assert '"support.feedbackIntro": "在此提交問題、Bug或建議"' in source
-    assert '"support.feedbackIntro": "Submit questions, bugs, or suggestions here"' in source
-    assert "不需要先向 AI 提问" not in source

@@ -32,6 +32,11 @@ function deletionUnavailableReason(){
 function toggleDeleteMode(){
   if(!deletionEligible())return;
   deleteMode=!deleteMode;
+  if(deleteMode&&typeof favoriteMode!=='undefined'&&favoriteMode){
+    favoriteMode=false;
+    if(typeof clearTimelineFavoriteSelection==='function')clearTimelineFavoriteSelection();
+    if(typeof updateTimelineFavoriteModeRows==='function')updateTimelineFavoriteModeRows();
+  }
   if(!deleteMode)clearDeleteSelection();
   updateDeleteModeButton();
   updateDeleteBar();
@@ -43,6 +48,7 @@ function updateDeleteModeButton(){
   if(!btn)return;
   btn.disabled=!deletionEligible()||!selConvId;
   btn.classList.toggle('active',deleteMode&&deletionEligible());
+  if(typeof updateTimelineFavoriteModeButton==='function')updateTimelineFavoriteModeButton();
 }
 
 function clearDeleteSelection(){deleteSelection={};}

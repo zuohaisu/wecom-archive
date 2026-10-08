@@ -54,6 +54,7 @@ function applyLocale(){
   // Keep the guard for isolated test harnesses that intentionally load only
   // console-entry.js to exercise locale rendering.
   if(typeof updateSyncStatus==='function')updateSyncStatus();
+  if(typeof updateTimelineFavoriteControls==='function')updateTimelineFavoriteControls();
   // QA fix: everything below is dynamic content built via I18N.t(...) at
   // RENDER time (not a static data-i18n element applyStaticI18n() already
   // refreshed above) -- each one previously stayed in whatever language it
@@ -109,6 +110,7 @@ function setMode(m){
   // whether the delete surface may be shown for the new scope.
   if(typeof clearDeleteSelection==='function')clearDeleteSelection();
   if(typeof updateDeleteModeButton==='function')updateDeleteModeButton();
+  if(typeof resetTimelineFavoriteScope==='function')resetTimelineFavoriteScope();
   lastConvItems=null;
   timelineConvId=null; timelineMsgs=[]; timelineHasOlder=false; timelineNextBefore=null;
   document.getElementById('tab-staff').classList.toggle('active',m==='staff');
@@ -625,6 +627,7 @@ document.getElementById('search-input').addEventListener('keydown',function(e){
 // "if(selEntityId)" branch inside it is a no-op at this point).
 applyLocale();
 loadCurrentUser();
+if(typeof initTimelineFavorites==='function')initTimelineFavorites();
 setMode('staff');
 initializeSyncStatus();
 if(typeof window!=='undefined'&&window.ProductAnalytics)window.ProductAnalytics.track('product.conversation.review_opened.v1');

@@ -79,3 +79,19 @@ def test_dashboard_renders_the_annual_plan_expiry_card_only_when_populated() -> 
     assert "grid.classList.add('has-plan')" in source
     # The card is opt-in data: absent from the API it must not render.
     assert "metric(grid,t('dashboard.archiveStatus')" in source
+
+
+def test_dashboard_swaps_capacity_card_with_hourly_distribution() -> None:
+    """Haisu request: 沟通活跃时段 fills the side column beside the trend
+    chart; 容量与费用 closes the 数据洞察 row as its last card."""
+    source = _DASHBOARD_JS.read_text(encoding="utf-8")
+
+    assert "var hourlyCard=append(main,'section','card dashboard-card')" in source
+    assert "renderHourly(hourlyBody,data)" in source
+    assert "var capacityCard=append(main" not in source
+    capacity_position = source.index(
+        "insightCard(insights,t('dashboard.capacityTitle'),renderCapacity,data)"
+    )
+    type_position = source.index("insightCard(insights,t('dashboard.typeComposition'")
+    storage_position = source.index("insightCard(insights,t('dashboard.storageComposition'")
+    assert type_position < storage_position < capacity_position

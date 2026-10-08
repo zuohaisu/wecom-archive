@@ -1,17 +1,24 @@
 """RND-329 contracts for the SSR admin media page."""
 from __future__ import annotations
 
+import json
 import re
+import shutil
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import require_html_session
 from app.main import create_app
+from tests._node_runner import run_node
 
 _BACKEND = Path(__file__).resolve().parent.parent
 _TEMPLATE = _BACKEND / "app" / "web" / "templates" / "media.html"
 _I18N = _BACKEND / "app" / "assets" / "i18n.js"
+_MEDIA_JS = _BACKEND / "app" / "web" / "static" / "media-library.js"
+_FAVORITES_JS = _BACKEND / "app" / "web" / "static" / "media-favorites.js"
+NODE = shutil.which("node")
 _MEDIA_KEYS = (
     "media.pageTitle", "media.breadcrumbData", "media.description",
     "media.searchPlaceholder", "media.allTypes", "media.type.image",
@@ -19,7 +26,15 @@ _MEDIA_KEYS = (
     "media.allTime", "media.days7", "media.days30", "media.days90",
     "media.sortNewest", "media.sortOldest", "media.sortLargest",
     "media.preview", "media.unnamed", "media.empty", "media.results",
-    "media.loadMore", "media.loadFailed",
+    "media.loadMore", "media.loadFailed", "media.enterSelection",
+    "media.exitSelection", "media.favoritesOnly", "media.selectedCount",
+    "media.selectAllLoaded", "media.clearSelection", "media.favoriteSelected",
+    "media.unfavoriteSelected", "media.favoritePermissionDenied",
+    "media.favoritePermissionUnavailable", "media.favoriteStatusLoading",
+    "media.favoriteStatusFailed", "media.retryFavoriteStatus", "media.favoriteActionFailed",
+    "media.favoritePartial", "media.favoriteResult", "media.favoriteUnavailable",
+    "media.favorited", "media.notFavorited", "media.viewFavorites",
+    "media.selectItem", "media.loadingMore", "media.favoritesEmpty",
 )
 
 
@@ -54,10 +69,10 @@ def test_media_page_renders_without_tokens_and_enables_active_navigation() -> No
     assert '<a class="side-nav-item active" href="/admin/media" data-i18n="nav.mediaAttachments" aria-current="page"></a>' in response.text
 
 
-def test_media_page_fetches_real_api_and_passes_type_and_time_filters_to_it() -> None:
-    source = _TEMPLATE.read_text(encoding="utf-8")
-    assert "fetch('/api/admin/media?'+params().toString()" in source
-    for parameter in ("file_type", "days", "q", "sort", "offset", "limit"):
+def test_media_page_fetches_real_api_and_passes_type_time_and_favorite_filters() -> None:
+    source = _MEDIA_JS.read_text(encoding="utf-8")
+    assert 'fetch("/api/admin/media?" + query' in source
+    for parameter in ("file_type", "days", "q", "sort", "offset", "limit", "favorited_only"):
         assert parameter in source
     for field in ("item.file_type", "item.file_size", "item.created_at", "item.session_title"):
         assert field in source
@@ -65,20 +80,21 @@ def test_media_page_fetches_real_api_and_passes_type_and_time_filters_to_it() ->
 
 
 def test_media_thumbnails_use_conversation_message_media_route_without_provider_urls() -> None:
-    source = _TEMPLATE.read_text(encoding="utf-8")
+    source = _MEDIA_JS.read_text(encoding="utf-8")
     assert "item.conversation_id" in source
     assert "item.msgid" in source
-    assert "'/api/conversations/'+encodeURIComponent(item.conversation_id)+'/messages/'+encodeURIComponent(item.msgid)+'/media?variant=thumb'" in source
+    assert '"/api/conversations/" + encodeURIComponent(item.conversation_id) + "/messages/" + encodeURIComponent(item.msgid) + "/media?variant=thumb"' in source
     assert not re.search(r"qiniu|QINIU_|qiniu\.com", source, re.IGNORECASE)
 
 
 def test_media_page_reuses_the_conversation_review_overlay_for_every_media_kind() -> None:
     source = _TEMPLATE.read_text(encoding="utf-8")
+    page_js = _MEDIA_JS.read_text(encoding="utf-8")
     viewer = (_BACKEND / "app" / "web" / "static" / "console" / "media-viewer.js").read_text(encoding="utf-8")
     assert 'class="toolbar toolbar-compact"' in source
     assert "/web/static/console/media-viewer.js" in source
-    assert "openViewer(state.items.map(viewerItem),index)" in source
-    assert "/media/access" in source
+    assert "openViewer(state.items.map(viewerItem), index)" in page_js
+    assert "/media/access" in page_js
     assert "item.kind==='video'" in viewer
     assert "item.kind==='voice'" in viewer
     assert "item.kind==='file'" in viewer
@@ -98,7 +114,463 @@ def test_media_i18n_keys_exist_in_all_locales_directly_under_own_anchor() -> Non
             assert f'"{key}"' in block
 
 
+def test_media_selection_ui_is_accessible_and_consumes_shared_favorite_apis() -> None:
+    template = _TEMPLATE.read_text(encoding="utf-8")
+    page_js = _MEDIA_JS.read_text(encoding="utf-8")
+    favorites_js = _FAVORITES_JS.read_text(encoding="utf-8")
+    for element_id in (
+        "media-select-mode", "media-selection-toolbar", "media-select-all",
+        "media-clear-selection", "media-favorite-selected", "media-unfavorite-selected",
+        "media-favorited-only", "media-favorites-link", "media-retry-favorite-status",
+    ):
+        assert 'id="%s"' % element_id in template
+    assert 'role="status" aria-live="polite"' in template
+    assert 'aria-pressed="false"' in template
+    assert "Escape" in page_js
+    assert "/api/favorites/status" in favorites_js
+    assert "/api/favorites/batch" in favorites_js
+    assert "source_page: \"media\"" in favorites_js
+    assert "mediaUrl(item)" in page_js
+    assert "/api/admin/media/" in page_js
+    assert "/admin/favorites" in page_js
+    assert not re.search(r"qiniu|QINIU_|qiniu\.com|signed_url|storage_ref", page_js + template, re.IGNORECASE)
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_media_page_filter_clears_selection_and_favorite_action_does_not_reload_page() -> None:
+    harness = """
+var handlers = Object.create(null);
+var elements = Object.create(null);
+function element(id) {
+  if (!elements[id]) {
+    var classes = new Set();
+    elements[id] = {
+      id: id, value: id === 'media-sort' ? 'newest' : '', checked: false, disabled: false,
+      textContent: '', innerHTML: '', placeholder: '', style: {display: 'none'}, attrs: {},
+      classList: {
+        add: function (name) { classes.add(name); },
+        remove: function (name) { classes.delete(name); },
+        contains: function (name) { return classes.has(name); },
+        toggle: function (name, force) { if (force) classes.add(name); else classes.delete(name); return classes.has(name); }
+      },
+      addEventListener: function (type, callback) { handlers[id + ':' + type] = callback; },
+      setAttribute: function (name, value) { this.attrs[name] = value; },
+      getAttribute: function (name) { return this.attrs[name] || null; },
+      focus: function () { this.focused = true; },
+      insertAdjacentHTML: function (_where, html) { this.innerHTML += html; }
+    };
+  }
+  return elements[id];
+}
+var document = {
+  title: '',
+  getElementById: element,
+  createElement: function () { var value = ''; return {set textContent(v) { value = String(v); }, get innerHTML() { return value; }}; },
+  querySelectorAll: function () { return []; },
+  querySelector: function () { return null; },
+  addEventListener: function (type, callback) { handlers['document:' + type] = callback; }
+};
+var window = globalThis;
+window.scrollY = 0; window.scrollX = 0; window.scrollTo = function () {};
+var I18N = {
+  t: function (key) { return key === 'media.selectedCount' ? '{n} selected' : key; },
+  getLocale: function () { return 'en-US'; }, availableLocales: function () { return []; },
+  onChange: function () {}, setLocale: function () {}
+};
+var calls = [];
+var favorited = false;
+function response(data, ok) { return Promise.resolve({ok: ok !== false, json: function () { return Promise.resolve(data); }}); }
+function fetch(url, options) {
+  options = options || {}; calls.push({url: url, options: options});
+  if (url === '/api/auth/me') return response({authenticated: true, role: 'owner'});
+  if (url.indexOf('/api/auth/me/preferences') === 0) return response({});
+  if (url.indexOf('/api/admin/media?') === 0) {
+    var parsed = new URL(url, 'https://unit.test');
+    var id = parsed.searchParams.get('favorited_only') === 'true' ? 1 : 2;
+    return response({items: [{id: id, name: 'synthetic.png', file_type: 'image', mime_type: 'image/png', file_size: 10, created_at: '2026-01-01T00:00:00Z', conversation_id: 'c1', msgid: 'm1', session_title: 'Synthetic'}], total: 1, has_more: false});
+  }
+  if (url === '/api/favorites/status') {
+    var statusBody = JSON.parse(options.body);
+    return response({items: statusBody.items.map(function (item) { return {object_type: 'media', object_id: item.object_id, result: 'found', is_favorited: favorited}; })});
+  }
+  if (url === '/api/favorites/batch') {
+    var batch = JSON.parse(options.body); favorited = batch.action === 'favorite';
+    return response({requested: batch.items.length, unique: batch.items.length, applied: batch.items.length, unchanged: 0, not_found: 0, items: batch.items.map(function (item) { return {object_type: 'media', object_id: item.object_id, result: favorited ? 'favorited' : 'unfavorited'}; })});
+  }
+  throw new Error('unexpected endpoint');
+}
+var openViewer = function () {};
+var refreshViewerLabels = function () {};
+global.document = document; global.window = window; global.fetch = fetch;
+global.I18N = I18N; global.openViewer = openViewer; global.refreshViewerLabels = refreshViewerLabels;
+require(%(favorites)s);
+require(%(page)s);
+function event(id, type, payload) { handlers[id + ':' + type](payload || {target: element(id)}); }
+function flush() { return new Promise(function (resolve) { setTimeout(resolve, 5); }); }
+(async function () {
+  await flush();
+  event('media-select-mode', 'click');
+  event('media-select-all', 'click');
+  if (element('media-selection-count').textContent !== '1 selected') throw new Error('loaded row was not selected');
+  element('media-favorited-only').checked = true;
+  event('media-favorited-only', 'change');
+  if (element('media-selection-count').textContent !== '0 selected') throw new Error('filter change retained stale selection');
+  await flush();
+  var mediaCallsBeforeMutation = calls.filter(function (call) { return call.url.indexOf('/api/admin/media?') === 0; }).length;
+  event('media-select-all', 'click');
+  if (element('media-favorite-selected').disabled) throw new Error('permitted selected action stayed disabled');
+  event('media-favorite-selected', 'click');
+  await flush();
+  var mediaCallsAfterMutation = calls.filter(function (call) { return call.url.indexOf('/api/admin/media?') === 0; }).length;
+  if (mediaCallsAfterMutation !== mediaCallsBeforeMutation) throw new Error('favorite mutation reloaded media page');
+  if (!favorited || !calls.some(function (call) { return call.url === '/api/favorites/batch'; })) throw new Error('shared favorite API was not called');
+  if (element('media-favorites-link').classList.contains('hidden')) throw new Error('success did not offer favorites link');
+  if (!calls.some(function (call) { return call.url.indexOf('/api/admin/media?') === 0 && new URL(call.url, 'https://unit.test').searchParams.get('favorited_only') === 'true'; })) throw new Error('favorites filter was not server-side');
+  console.log('selection=cleared filter=server-side action=no-page-reload link=shown');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+""" % {"favorites": json.dumps(str(_FAVORITES_JS)), "page": json.dumps(str(_MEDIA_JS))}
+    result = run_node(harness)
+    assert result.returncode == 0, "node harness failed: %s" % result.stderr
+    assert result.stdout.strip() == "selection=cleared filter=server-side action=no-page-reload link=shown"
+
+
 def test_media_template_has_no_template_engine_syntax() -> None:
     source = _TEMPLATE.read_text(encoding="utf-8")
     assert "{%" not in source
     assert "{{" not in source
+
+
+def _run_media_page_race(script: str) -> str:
+    harness = r"""
+var handlers = Object.create(null), elements = Object.create(null);
+function element(id) {
+  if (!elements[id]) {
+    var classes = Object.create(null);
+    if (id === 'media-retry-favorite-status') classes.hidden = true;
+    elements[id] = {
+      id: id, value: id === 'media-sort' ? 'newest' : '', checked: false, disabled: false,
+      textContent: '', innerHTML: '', placeholder: '', style: {display: 'none'}, attrs: {},
+      classList: {
+        add: function (name) { classes[name] = true; },
+        remove: function (name) { delete classes[name]; },
+        contains: function (name) { return !!classes[name]; },
+        toggle: function (name, force) { classes[name] = force === undefined ? !classes[name] : !!force; return classes[name]; }
+      },
+      addEventListener: function (type, callback) { handlers[id + ':' + type] = callback; },
+      setAttribute: function (name, value) { this.attrs[name] = String(value); },
+      getAttribute: function (name) { return this.attrs[name] || null; },
+      focus: function () {}, insertAdjacentHTML: function (_where, html) { this.innerHTML += html; }
+    };
+  }
+  return elements[id];
+}
+var document = {
+  documentElement: {lang: 'en'}, title: '', getElementById: element,
+  createElement: function () { var value = ''; return {set textContent(v) { value = String(v); }, get innerHTML() { return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;'); }}; },
+  querySelectorAll: function () { return []; }, querySelector: function () { return null; },
+  addEventListener: function (type, callback) { handlers['document:' + type] = callback; }
+};
+var window = globalThis; window.scrollY = 0; window.scrollX = 0; window.scrollTo = function () {};
+var I18N = {t: function (key) { return key === 'media.results' ? '{n} results' : key; }, getLocale: function () { return 'en'; }, availableLocales: function () { return []; }, onChange: function () {}, setLocale: function () {}};
+var mediaRequests = [], batchRequests = [], serverFavorites = Object.create(null);
+var failFavoriteStatusReads = 0, favoriteStatusRequests = 0;
+function response(data, ok) { return Promise.resolve({ok: ok !== false, json: function () { return Promise.resolve(data); }}); }
+function fetch(url, options) {
+  options = options || {};
+  if (url === '/api/auth/me') return response({authenticated: true, role: 'owner'});
+  if (url.indexOf('/api/auth/me/preferences') === 0) return response({});
+  if (url.indexOf('/api/admin/media?') === 0) {
+    var resolve;
+    var promise = new Promise(function (done) { resolve = done; });
+    mediaRequests.push({url: url, resolve: function (data) { resolve({ok: true, json: function () { return Promise.resolve(data); }}); }});
+    return promise;
+  }
+  if (url === '/api/favorites/status') {
+    favoriteStatusRequests += 1;
+    var statusBody = JSON.parse(options.body);
+    if (failFavoriteStatusReads > 0) { failFavoriteStatusReads -= 1; return Promise.reject(new Error('synthetic status failure')); }
+    return response({items: statusBody.items.map(function (item) { return {object_type: 'media', object_id: item.object_id, result: 'found', is_favorited: !!serverFavorites[item.object_id]}; })});
+  }
+  if (url === '/api/favorites/batch') {
+    var resolveBatch, rejectBatch, batch = {body: JSON.parse(options.body), resolve: function (data) { resolveBatch({ok: true, json: function () { return Promise.resolve(data); }}); }, reject: function (error) { rejectBatch(error); }};
+    var promise = new Promise(function (done, reject) { resolveBatch = done; rejectBatch = reject; });
+    batchRequests.push(batch);
+    return promise;
+  }
+  throw new Error('unexpected endpoint: ' + url);
+}
+function openViewer() {}
+function refreshViewerLabels() {}
+global.document = document; global.window = window; global.fetch = fetch; global.I18N = I18N;
+global.openViewer = openViewer; global.refreshViewerLabels = refreshViewerLabels;
+require(%(favorites)s); require(%(page)s);
+function event(id, type) {
+  if (element(id).disabled) return false;
+  if (!handlers[id + ':' + type]) throw new Error('missing handler ' + id + ':' + type);
+  handlers[id + ':' + type]({target: element(id)});
+  return true;
+}
+function flush() { return new Promise(function (resolve) { setTimeout(resolve, 0); }); }
+async function waitFor(predicate) { for (var i = 0; i < 30; i++) { if (predicate()) return; await flush(); } throw new Error('timed out waiting for async request'); }
+function idsInGrid() { var ids = [], re = /data-media-id=\"([^\"]+)\"/g, match; while ((match = re.exec(element('media-grid').innerHTML))) ids.push(match[1]); return ids; }
+%(script)s
+""" % {"favorites": json.dumps(str(_FAVORITES_JS)), "page": json.dumps(str(_MEDIA_JS)), "script": script}
+    result = run_node(harness)
+    assert result.returncode == 0, "node harness failed: %s" % result.stderr
+    return result.stdout
+
+
+def _run_media_status_feedback(script: str) -> str:
+    return _run_media_page_race(
+        r"""
+var originalFetch = fetch, statusReads = [];
+fetch = function (url, options) {
+  if (url !== '/api/favorites/status') return originalFetch(url, options);
+  return new Promise(function (resolve, reject) {
+    var body = JSON.parse(options.body);
+    statusReads.push({
+      reject: reject,
+      resolve: function (favorited) {
+        resolve({ok: true, json: function () {
+          return Promise.resolve({items: body.items.map(function (item) {
+            return Object.assign({}, item, {result: 'found', is_favorited: favorited});
+          })});
+        }});
+      }
+    });
+  });
+};
+global.fetch = fetch;
+var indicator = {innerHTML: '', closest: function () {
+  var match = /data-media-id="([^"]+)"/.exec(element('media-grid').innerHTML);
+  return match ? {dataset: {mediaId: match[1]}} : null;
+}};
+document.querySelectorAll = function (selector) {
+  return selector === '[data-favorite-indicator]' && idsInGrid().length ? [indicator] : [];
+};
+function feedbackRow(id) {
+  return {id: id, name: 'synthetic-' + id, file_type: id === 9 ? 'video' : 'image',
+    created_at: '2026-01-01', conversation_id: 'synthetic-conversation', msgid: 'synthetic-' + id};
+}
+"""
+        + script
+    )
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+@pytest.mark.parametrize("late_retry_fails", [True, False])
+def test_favorite_status_retry_feedback_cannot_overwrite_a_new_view(late_retry_fails: bool) -> None:
+    script = r"""
+var lateRetryFails = __LATE_RETRY_FAILS__;
+(async function () {
+  await waitFor(function () { return mediaRequests.length === 1; });
+  event('media-select-mode', 'click');
+  mediaRequests[0].resolve({items: [feedbackRow(1)], total: 1, has_more: false});
+  await waitFor(function () { return statusReads.length === 1; });
+  statusReads[0].reject(new Error('synthetic initial status failure'));
+  await waitFor(function () { return !element('media-retry-favorite-status').disabled; });
+  event('media-retry-favorite-status', 'click');
+  await waitFor(function () { return statusReads.length === 2; });
+  element('media-type').value = 'video'; event('media-type', 'change');
+  await waitFor(function () { return mediaRequests.length === 2; });
+  mediaRequests[1].resolve({items: [feedbackRow(9)], total: 1, has_more: false});
+  await waitFor(function () { return statusReads.length === 3; });
+  if (lateRetryFails) statusReads[2].resolve(true);
+  else statusReads[2].reject(new Error('synthetic current-view failure'));
+  await waitFor(function () { return !element('media-select-all').disabled; });
+  event('media-select-all', 'click');
+  var expectedStatus = lateRetryFails ? '' : 'media.favoriteStatusFailed';
+  var expectedClass = element('media-status').className;
+  if (element('media-status').textContent !== expectedStatus) throw new Error('fixture did not settle the current view');
+  if (element('media-favorite-selected').disabled !== !lateRetryFails) throw new Error('current view has the wrong permission/status gate');
+  if (lateRetryFails) statusReads[1].reject(new Error('synthetic stale retry failure'));
+  else statusReads[1].resolve(false);
+  await flush(); await flush();
+  if (element('media-status').textContent !== expectedStatus || element('media-status').className !== expectedClass) throw new Error('stale retry overwrote current-view feedback');
+  if (idsInGrid().join(',') !== '9') throw new Error('stale retry changed current media');
+  if (element('media-favorite-selected').disabled !== !lateRetryFails) throw new Error('stale retry changed the current action gate');
+  if (element('media-retry-favorite-status').classList.contains('hidden') !== lateRetryFails) throw new Error('stale retry changed the current retry state');
+  console.log('late-retry=' + (lateRetryFails ? 'failure' : 'success') + ' ignored current-feedback=preserved');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    output = _run_media_status_feedback(script.replace("__LATE_RETRY_FAILS__", json.dumps(late_retry_fails)))
+    outcome = "failure" if late_retry_fails else "success"
+    assert output.strip() == f"late-retry={outcome} ignored current-feedback=preserved"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_favorite_indicator_announces_failure_loading_and_success_without_enabling_unknown_status() -> None:
+    output = _run_media_status_feedback(
+        r"""
+(async function () {
+  await waitFor(function () { return mediaRequests.length === 1; });
+  event('media-select-mode', 'click');
+  mediaRequests[0].resolve({items: [feedbackRow(1)], total: 1, has_more: false});
+  await waitFor(function () { return statusReads.length === 1; });
+  if (indicator.innerHTML.indexOf('aria-label="media.favoriteStatusLoading"') === -1) throw new Error('initial indicator did not announce loading');
+  statusReads[0].reject(new Error('synthetic initial failure'));
+  await waitFor(function () { return !element('media-retry-favorite-status').disabled; });
+  if (indicator.innerHTML.indexOf('aria-label="media.favoriteStatusFailed"') === -1 || indicator.innerHTML.indexOf('pending') !== -1) throw new Error('failed indicator still announced loading');
+  if (indicator.innerHTML.indexOf('role="img"') === -1 || indicator.innerHTML.indexOf('title="media.favoriteStatusFailed"') === -1) throw new Error('failed icon did not expose its accessible label and tooltip');
+  if (element('media-selection-hint').textContent !== 'media.favoriteStatusFailed') throw new Error('failure hint disagreed with indicator');
+  event('media-select-all', 'click');
+  if (!element('media-favorite-selected').disabled) throw new Error('unknown state enabled a write');
+  event('media-retry-favorite-status', 'click');
+  await waitFor(function () { return statusReads.length === 2; });
+  if (indicator.innerHTML.indexOf('aria-label="media.favoriteStatusLoading"') === -1 || indicator.innerHTML.indexOf('media.favoriteStatusFailed') !== -1) throw new Error('retry did not restore loading indicator');
+  if (!element('media-favorite-selected').disabled) throw new Error('loading state enabled a write');
+  statusReads[1].reject(new Error('synthetic retry failure'));
+  await waitFor(function () { return !element('media-retry-favorite-status').disabled; });
+  if (indicator.innerHTML.indexOf('aria-label="media.favoriteStatusFailed"') === -1) throw new Error('current retry failure was not announced');
+  if (element('media-status').textContent !== 'media.favoriteStatusFailed') throw new Error('current retry failure did not update page feedback');
+  event('media-retry-favorite-status', 'click');
+  await waitFor(function () { return statusReads.length === 3; });
+  statusReads[2].resolve(false);
+  await waitFor(function () { return !element('media-favorite-selected').disabled; });
+  if (indicator.innerHTML.indexOf('media.notFavorited') === -1 || indicator.innerHTML.indexOf('pending') !== -1 || indicator.innerHTML.indexOf('media.favoriteStatusFailed') !== -1) throw new Error('success did not restore the known-state label');
+  if (element('media-status').textContent !== '') throw new Error('current retry success retained an error');
+  console.log('indicator=loading-failed-loading-failed-known unknown-write=disabled selection=preserved');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "indicator=loading-failed-loading-failed-known unknown-write=disabled selection=preserved"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_failed_post_write_status_recheck_exposes_retry_without_losing_selection() -> None:
+    output = _run_media_page_race(
+        r"""
+(async function () {
+  await waitFor(function () { return mediaRequests.length === 1; });
+  event('media-select-mode', 'click');
+  mediaRequests[0].resolve({items: [
+    {id: 1, name: 'retry-after-write', file_type: 'image', created_at: '2026-01-01', conversation_id: 'c', msgid: 'm'}
+  ], total: 1, has_more: false});
+  await waitFor(function () { return favoriteStatusRequests === 1 && !element('media-select-all').disabled; });
+  event('media-select-all', 'click');
+  event('media-favorite-selected', 'click');
+  await waitFor(function () { return batchRequests.length === 1; });
+  failFavoriteStatusReads = 1;
+  batchRequests[0].reject(new Error('synthetic lost write response'));
+  await waitFor(function () {
+    return favoriteStatusRequests === 2 && !element('media-retry-favorite-status').classList.contains('hidden') && !element('media-retry-favorite-status').disabled;
+  });
+  if (element('media-selection-hint').textContent !== 'media.favoriteStatusFailed') throw new Error('post-write recheck failure was not surfaced');
+  if (element('media-favorite-status').textContent !== 'media.favoriteActionFailed') throw new Error('original write failure feedback was lost');
+  event('media-retry-favorite-status', 'click');
+  await waitFor(function () { return favoriteStatusRequests === 3 && element('media-retry-favorite-status').classList.contains('hidden'); });
+  if (element('media-favorite-selected').disabled) throw new Error('status retry discarded the selection or left actions disabled');
+  console.log('write-failure=preserved status-recheck-failure=retryable selection=preserved');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "write-failure=preserved status-recheck-failure=retryable selection=preserved"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_failed_favorite_status_read_has_an_accessible_retry_path() -> None:
+    output = _run_media_page_race(
+        r"""
+(async function () {
+  await waitFor(function () { return mediaRequests.length === 1; });
+  event('media-select-mode', 'click');
+  failFavoriteStatusReads = 1;
+  mediaRequests[0].resolve({items: [
+    {id: 1, name: 'retry-me', file_type: 'image', created_at: '2026-01-01', conversation_id: 'c', msgid: 'm'}
+  ], total: 1, has_more: false});
+  await waitFor(function () { return favoriteStatusRequests === 1 && !element('media-retry-favorite-status').classList.contains('hidden'); });
+  if (element('media-selection-hint').textContent !== 'media.favoriteStatusFailed') throw new Error('status failure was reported as loading instead of failed');
+  if (element('media-retry-favorite-status').disabled) throw new Error('status retry stayed disabled after request failure');
+  event('media-retry-favorite-status', 'click');
+  await waitFor(function () { return favoriteStatusRequests === 2 && element('media-retry-favorite-status').classList.contains('hidden'); });
+  event('media-select-all', 'click');
+  if (element('media-favorite-selected').disabled) throw new Error('favorite action remained unavailable after retry');
+  console.log('status-failure=announced retry=available retry-success=actions-enabled');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "status-failure=announced retry=available retry-success=actions-enabled"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_unfavorite_gap_response_cannot_mutate_a_new_filter() -> None:
+    output = _run_media_page_race(
+        r"""
+(async function () {
+  await waitFor(function () { return mediaRequests.length === 1; });
+  mediaRequests[0].resolve({items: [], total: 0, has_more: false});
+  await flush();
+  element('media-favorited-only').checked = true;
+  serverFavorites['1'] = true; serverFavorites['2'] = true;
+  event('media-favorited-only', 'change');
+  await waitFor(function () { return mediaRequests.length === 2; });
+  mediaRequests[1].resolve({items: [
+    {id: 1, name: 'favorite-1', file_type: 'image', created_at: '2026-01-01', conversation_id: 'c', msgid: 'm'},
+    {id: 2, name: 'favorite-2', file_type: 'image', created_at: '2026-01-02', conversation_id: 'c', msgid: 'm2'}
+  ], total: 4, has_more: true});
+  await flush(); await flush();
+  event('media-select-mode', 'click'); event('media-select-all', 'click');
+  event('media-unfavorite-selected', 'click');
+  await waitFor(function () { return batchRequests.length === 1; });
+  serverFavorites['1'] = false; serverFavorites['2'] = false;
+  batchRequests[0].resolve({requested: 2, unique: 2, applied: 2, unchanged: 0, not_found: 0, items: [
+    {object_type: 'media', object_id: '1', result: 'unfavorited'},
+    {object_type: 'media', object_id: '2', result: 'unfavorited'}
+  ]});
+  await waitFor(function () { return mediaRequests.length === 3; });
+  element('media-type').value = 'video'; event('media-type', 'change');
+  await waitFor(function () { return mediaRequests.length === 4; });
+  mediaRequests[3].resolve({items: [{id: 900, name: 'new-video', file_type: 'video', created_at: '2026-02-01', conversation_id: 'c', msgid: 'video'}], total: 1, has_more: false});
+  await flush(); await flush();
+  mediaRequests[2].resolve({items: [{id: 3, name: 'stale-image', file_type: 'image', created_at: '2026-01-03', conversation_id: 'c', msgid: 'old'}], total: 3, has_more: true});
+  await flush(); await flush();
+  if (idsInGrid().join(',') !== '900') throw new Error('expired favorite refill polluted the newly selected type: ' + idsInGrid().join(','));
+  if (element('media-count').textContent !== '1 results') throw new Error('expired refill overwrote the new total: ' + element('media-count').textContent);
+  console.log('stale-refill=discarded new-filter=preserved');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "stale-refill=discarded new-filter=preserved"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not available in this environment")
+def test_favorite_refill_serializes_load_more_requests() -> None:
+    output = _run_media_page_race(
+        r"""
+(async function () {
+  await waitFor(function () { return mediaRequests.length === 1; });
+  mediaRequests[0].resolve({items: [], total: 0, has_more: false});
+  await flush();
+  element('media-favorited-only').checked = true;
+  serverFavorites['1'] = true; serverFavorites['2'] = true;
+  event('media-favorited-only', 'change');
+  await waitFor(function () { return mediaRequests.length === 2; });
+  mediaRequests[1].resolve({items: [
+    {id: 1, name: 'favorite-1', file_type: 'image', created_at: '2026-01-01', conversation_id: 'c', msgid: 'm'},
+    {id: 2, name: 'favorite-2', file_type: 'image', created_at: '2026-01-02', conversation_id: 'c', msgid: 'm2'}
+  ], total: 4, has_more: true});
+  await flush(); await flush();
+  event('media-select-mode', 'click'); event('media-select-all', 'click');
+  event('media-unfavorite-selected', 'click');
+  await waitFor(function () { return batchRequests.length === 1; });
+  serverFavorites['1'] = false; serverFavorites['2'] = false;
+  batchRequests[0].resolve({requested: 2, unique: 2, applied: 2, unchanged: 0, not_found: 0, items: [
+    {object_type: 'media', object_id: '1', result: 'unfavorited'},
+    {object_type: 'media', object_id: '2', result: 'unfavorited'}
+  ]});
+  await waitFor(function () { return mediaRequests.length === 3; });
+  if (!element('media-more').disabled) throw new Error('load-more remained enabled during favorite gap refill');
+  event('media-more', 'click');
+  if (mediaRequests.length !== 3) throw new Error('gap refill and load-more were allowed to overlap');
+  mediaRequests[2].resolve({items: [
+    {id: 3, name: 'replacement-1', file_type: 'image', created_at: '2026-01-03', conversation_id: 'c', msgid: 'm3'},
+    {id: 4, name: 'replacement-2', file_type: 'image', created_at: '2026-01-04', conversation_id: 'c', msgid: 'm4'}
+  ], total: 2, has_more: false});
+  await flush(); await flush();
+  var ids = idsInGrid();
+  if (ids.join(',') !== '3,4' || new Set(ids).size !== ids.length) throw new Error('replacement page contains duplicate media ids: ' + ids.join(','));
+  console.log('gap-refill=exclusive load-more=disabled duplicates=none');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "gap-refill=exclusive load-more=disabled duplicates=none"
