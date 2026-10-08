@@ -254,3 +254,21 @@ def test_staff_listing_includes_seats_without_archive_appearance(client, seeded)
     assert newbie["department"] == "客服部"
     assert newbie["msg_count_30d"] == 0
     assert newbie["msg_count_total"] == 0
+
+
+def test_staff_listing_excludes_opaque_external_id_families(client, seeded) -> None:
+    """GH-101-era production finding: WeCom's archive writes external
+    parties as opaque wma_/wba_/woa_ ids that the external-contact sync
+    never registers — they must not surface as internal staff."""
+    _message(seeded, "wma_unknown_1", TENANT_A, 1, "a-wma-1")
+    _message(seeded, "wba_partner_9", TENANT_A, 1, "a-wba-1")
+    seeded.commit()
+    app = _authenticated_app(seeded)
+    try:
+        response = client.get("/api/admin/staff")
+    finally:
+        app.dependency_overrides.clear()
+
+    ids = [item["wecom_userid"] for item in response.json()["items"]]
+    assert "wma_unknown_1" not in ids
+    assert "wba_partner_9" not in ids
