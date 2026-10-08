@@ -452,6 +452,9 @@ def get_conversation_messages(
             "client following those URLs carries the same context."
         ),
     ),
+    favorited_only: bool = Query(
+        False, description="Return only active message favorites in this conversation"
+    ),
     db: Session = Depends(get_db),
     auth: Tuple[AdminUser, str] = Depends(get_current_user),
 ):
@@ -477,22 +480,35 @@ def get_conversation_messages(
     been stable.
     """
     _, tenant_id = auth
-    resolver = (
-        timeline_service._resolve_timeline_page_legacy
-        if os.environ.get("WEARCHIVE_LEGACY_TIMELINE")
-        else resolve_timeline_page
-    )
-    page = resolver(
-        db,
-        tenant_id,
-        conversation_id,
-        limit=limit,
-        before=before,
-        mode=mode,
-        staff_id=staff_id,
-        contact_id=contact_id,
-        conversation_type=conversation_type,
-    )
+    use_legacy_resolver = bool(os.environ.get("WEARCHIVE_LEGACY_TIMELINE")) and not favorited_only
+    if use_legacy_resolver:
+        page = timeline_service._resolve_timeline_page_legacy(
+            db,
+            tenant_id,
+            conversation_id,
+            limit=limit,
+            before=before,
+            mode=mode,
+            staff_id=staff_id,
+            contact_id=contact_id,
+            conversation_type=conversation_type,
+        )
+    else:
+        # The rollback snapshot predates the favorite filter. Filtered reads
+        # use the maintained resolver so pagination and tenant scoping remain
+        # consistent without evolving that byte-identical rollback path.
+        page = resolve_timeline_page(
+            db,
+            tenant_id,
+            conversation_id,
+            limit=limit,
+            before=before,
+            mode=mode,
+            staff_id=staff_id,
+            contact_id=contact_id,
+            conversation_type=conversation_type,
+            favorited_only=favorited_only,
+        )
     return attach_group_chat_display_name(
         db,
         tenant_id,

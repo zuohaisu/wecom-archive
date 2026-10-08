@@ -19,18 +19,24 @@ from sqlalchemy.orm import Session
 from sqlalchemy.types import Integer, String
 
 from app.audit import AuditAction, AuditObjectType, write_audit
+from app.media_download import iter_nested_media_refs
 from app.conversation_membership import (
     _derive_conversation_membership,
     _fetch_conversation_messages_compact,
     _load_recipients_map,
     _staff_ids_for_participants,
 )
+from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import (
+    AdminUser,
     ArchiveFavorite,
     ArchiveMessage,
     ArchiveMessageRecipient,
+    Contact,
+    ExternalContact,
     MediaFile,
 )
+from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.schemas.favorites import (
     FavoriteBatchIn,
     FavoriteItemOut,
@@ -43,6 +49,7 @@ from app.schemas.favorites import (
     FavoriteStatusItemOut,
     FavoriteStatusOut,
 )
+from app.services.media_access import _validate_nested_media_path
 from app.services.message_deletion import active_message_filter
 
 MAX_FAVORITE_BATCH = 100
@@ -405,17 +412,25 @@ def list_favorites(
     conversation_mode: Optional[str] = None,
     conversation_entity_id: Optional[str] = None,
     contact_id: Optional[str] = None,
+    contact_filter: Optional[str] = None,
     favorited_by: Optional[str] = None,
+    favorited_by_name: Optional[str] = None,
     favorited_since: Optional[datetime] = None,
     favorited_until: Optional[datetime] = None,
     message_since_ms: Optional[int] = None,
     message_until_ms: Optional[int] = None,
+    media_type: Optional[str] = None,
+    staff_filter: Optional[str] = None,
 ) -> FavoritePageOut:
     """Return a stable server-paginated union of live message/media targets."""
     if favorited_since and favorited_until and favorited_since > favorited_until:
         raise ValueError("invalid_favorite_time_range")
     if message_since_ms is not None and message_until_ms is not None and message_since_ms > message_until_ms:
         raise ValueError("invalid_message_time_range")
+    if media_type is not None and media_type not in {"image", "video", "voice", "file"}:
+        raise ValueError("invalid_media_type")
+    if media_type is not None and object_type == "message":
+        raise ValueError("invalid_media_type")
 
     conversation_message_ids = None
     if conversation_id is not None:
@@ -439,6 +454,15 @@ def list_favorites(
         common_conditions.append(
             ArchiveFavorite.favorited_by_admin_user_id == favorited_by
         )
+    if favorited_by_name:
+        actor_pattern = f"%{favorited_by_name.strip()}%"
+        actor_ids_by_name = select(AdminUser.id).where(
+            AdminUser.tenant_id == tenant_id,
+            or_(AdminUser.name.ilike(actor_pattern), AdminUser.id.ilike(actor_pattern)),
+        )
+        common_conditions.append(
+            ArchiveFavorite.favorited_by_admin_user_id.in_(actor_ids_by_name)
+        )
     if favorited_since:
         common_conditions.append(ArchiveFavorite.favorited_at >= favorited_since)
     if favorited_until:
@@ -455,6 +479,67 @@ def list_favorites(
         common_conditions.append(
             or_(ArchiveMessage.sender == contact_id, ArchiveMessage.id.in_(recipient_ids))
         )
+    if contact_filter:
+        contact_pattern = f"%{contact_filter.strip()}%"
+        external_contact_ids = select(ExternalContact.external_userid).where(
+            ExternalContact.tenant_id == tenant_id,
+            or_(
+                ExternalContact.external_userid == contact_filter,
+                ExternalContact.current_nickname_display.ilike(contact_pattern),
+                ExternalContact.name.ilike(contact_pattern),
+            ),
+        )
+        known_contact_ids = select(Contact.wecom_userid).where(
+            Contact.tenant_id == tenant_id,
+            or_(Contact.wecom_userid == contact_filter, Contact.name.ilike(contact_pattern)),
+            ~Contact.wecom_userid.like("staff\\_%", escape="\\"),
+            Contact.wecom_userid.notin_(
+                select(AdminUser.wecom_user_id).where(AdminUser.tenant_id == tenant_id)
+            ),
+        )
+        matching_contact_ids = union_all(external_contact_ids, known_contact_ids).subquery()
+        recipient_ids = select(ArchiveMessageRecipient.message_id).where(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.receiver_userid.in_(select(matching_contact_ids.c[0])),
+        )
+        contact_is_known_staff = contact_filter.startswith("staff_") or db.scalar(
+            select(AdminUser.id).where(
+                AdminUser.tenant_id == tenant_id,
+                AdminUser.wecom_user_id == contact_filter,
+            )
+        ) is not None
+        contact_conditions = [
+            ArchiveMessage.sender.in_(select(matching_contact_ids.c[0])),
+            ArchiveMessage.id.in_(recipient_ids),
+        ]
+        if not contact_is_known_staff:
+            archived_recipient_ids = select(ArchiveMessageRecipient.message_id).where(
+                ArchiveMessageRecipient.tenant_id == tenant_id,
+                ArchiveMessageRecipient.receiver_userid == contact_filter,
+            )
+            contact_conditions.extend(
+                [
+                    ArchiveMessage.sender == contact_filter,
+                    ArchiveMessage.id.in_(archived_recipient_ids),
+                ]
+            )
+        common_conditions.append(or_(*contact_conditions))
+    if staff_filter:
+        known_staff = staff_filter.startswith("staff_") or db.scalar(
+            select(AdminUser.id).where(
+                AdminUser.tenant_id == tenant_id,
+                AdminUser.wecom_user_id == staff_filter,
+            )
+        ) is not None
+        if not known_staff:
+            return FavoritePageOut(items=[], total=0, limit=limit, offset=offset, has_more=False)
+        recipient_ids = select(ArchiveMessageRecipient.message_id).where(
+            ArchiveMessageRecipient.tenant_id == tenant_id,
+            ArchiveMessageRecipient.receiver_userid == staff_filter,
+        )
+        common_conditions.append(
+            or_(ArchiveMessage.sender == staff_filter, ArchiveMessage.id.in_(recipient_ids))
+        )
     if conversation_message_ids is not None:
         common_conditions.append(ArchiveMessage.id.in_(conversation_message_ids))
 
@@ -467,6 +552,7 @@ def list_favorites(
             ArchiveFavorite.favorited_at.label("favorited_at"),
             ArchiveFavorite.source_page.label("source_page"),
             ArchiveMessage.id.label("message_row_id"),
+            ArchiveMessage.msgid.label("message_id"),
             ArchiveMessage.msgtime.label("message_time_ms"),
             ArchiveMessage.roomid.label("room_id"),
             ArchiveMessage.sender.label("sender_id"),
@@ -476,6 +562,7 @@ def list_favorites(
             literal(None, type_=String(32)).label("media_type"),
             literal(None, type_=String(128)).label("media_mime_type"),
             literal(None, type_=Integer).label("media_size_bytes"),
+            literal(None, type_=String(16)).label("media_download_status"),
         )
         .select_from(ArchiveFavorite)
         .join(
@@ -500,6 +587,7 @@ def list_favorites(
             ArchiveFavorite.favorited_at.label("favorited_at"),
             ArchiveFavorite.source_page.label("source_page"),
             ArchiveMessage.id.label("message_row_id"),
+            ArchiveMessage.msgid.label("message_id"),
             ArchiveMessage.msgtime.label("message_time_ms"),
             ArchiveMessage.roomid.label("room_id"),
             ArchiveMessage.sender.label("sender_id"),
@@ -509,6 +597,7 @@ def list_favorites(
             MediaFile.file_type.label("media_type"),
             MediaFile.mime_type.label("media_mime_type"),
             MediaFile.file_size.label("media_size_bytes"),
+            MediaFile.download_status.label("media_download_status"),
         )
         .select_from(ArchiveFavorite)
         .join(
@@ -533,7 +622,14 @@ def list_favorites(
             active_message_filter(),
         )
     )
-    combined = union_all(message_query, media_query).subquery("favorite_items")
+    if media_type is not None:
+        media_query = media_query.where(MediaFile.file_type == media_type)
+    if object_type == "message":
+        combined = message_query.subquery("favorite_items")
+    elif object_type == "media" or media_type is not None:
+        combined = media_query.subquery("favorite_items")
+    else:
+        combined = union_all(message_query, media_query).subquery("favorite_items")
     total = int(db.scalar(select(func.count()).select_from(combined)) or 0)
     rows = db.execute(
         select(combined)
@@ -543,6 +639,40 @@ def list_favorites(
     ).mappings().all()
 
     message_ids = [int(row["message_row_id"]) for row in rows]
+    nested_media_file_ids = {
+        int(row["media_file_id"])
+        for row in rows
+        if row["object_type"] == "media"
+        and row["message_type"] in {"mixed", "chatrecord"}
+        and row["media_file_id"] is not None
+    }
+    nested_media_paths: dict[int, str] = {}
+    if nested_media_file_ids:
+        nested_media_rows = db.execute(
+            select(MediaFile.id, MediaFile.sdkfileid, ArchiveMessage.structured_content)
+            .join(
+                ArchiveMessage,
+                and_(
+                    MediaFile.archive_message_id == ArchiveMessage.id,
+                    MediaFile.tenant_id == ArchiveMessage.tenant_id,
+                ),
+            )
+            .where(
+                MediaFile.tenant_id == tenant_id,
+                ArchiveMessage.tenant_id == tenant_id,
+                ArchiveMessage.id.in_(message_ids),
+                MediaFile.id.in_(nested_media_file_ids),
+                active_message_filter(),
+            )
+        ).mappings()
+        for nested_row in nested_media_rows:
+            for media_ref in iter_nested_media_refs(nested_row["structured_content"]):
+                if media_ref["sdkfileid"] != nested_row["sdkfileid"]:
+                    continue
+                item_path = _validate_nested_media_path(media_ref["path"])
+                if item_path:
+                    nested_media_paths[int(nested_row["id"])] = item_path
+                    break
     recipients_by_message = _load_recipients_map(db, tenant_id, message_ids)
     participant_ids = {
         participant
@@ -551,6 +681,51 @@ def list_favorites(
         if participant
     }
     staff_ids = _staff_ids_for_participants(db, tenant_id, participant_ids)
+    person_names = {
+        user_id: name
+        for user_id, name in db.execute(
+            select(Contact.wecom_userid, Contact.name).where(
+                Contact.tenant_id == tenant_id,
+                Contact.wecom_userid.in_(participant_ids),
+            )
+        )
+    } if participant_ids else {}
+    for user_id, name in db.execute(
+        select(AdminUser.wecom_user_id, AdminUser.name).where(
+            AdminUser.tenant_id == tenant_id,
+            AdminUser.wecom_user_id.in_(participant_ids),
+        )
+    ) if participant_ids else []:
+        if name:
+            person_names.setdefault(user_id, name)
+    external_names = {
+        user_id: name
+        for user_id, name in db.execute(
+            select(
+                ExternalContact.external_userid,
+                func.coalesce(
+                    ExternalContact.current_nickname_display,
+                    ExternalContact.name,
+                ),
+            ).where(
+                ExternalContact.tenant_id == tenant_id,
+                ExternalContact.external_userid.in_(participant_ids),
+            )
+        )
+    } if participant_ids else {}
+    actor_ids = {row["favorited_by_admin_user_id"] for row in rows if row["favorited_by_admin_user_id"]}
+    actor_names = {
+        admin_id: name
+        for admin_id, name in db.execute(
+            select(AdminUser.id, AdminUser.name).where(
+                AdminUser.tenant_id == tenant_id,
+                AdminUser.id.in_(actor_ids),
+            )
+        )
+    } if actor_ids else {}
+    room_names = load_group_chat_display_names(
+        db, tenant_id, (row["room_id"] for row in rows)
+    )
 
     items: list[FavoriteItemOut] = []
     for row in rows:
@@ -561,26 +736,67 @@ def list_favorites(
             recipients,
             lambda user_id: user_id in staff_ids,
         )
+        staff_id = sorted(staff)[0] if staff else None
+        contact_id = sorted(contacts)[0] if contacts else None
+        staff_name = (
+            resolve_person_display_name(staff_id, person_names.get(staff_id))
+            if staff_id else None
+        )
+        contact_name = (
+            resolve_person_display_name(
+                contact_id,
+                external_names.get(contact_id) or person_names.get(contact_id),
+            )
+            if contact_id else None
+        )
+        if conversation_type == "group":
+            conversation_name = resolve_room_display_name(
+                conversation_id, room_names.get(conversation_id)
+            )
+        elif staff_name and contact_name:
+            conversation_name = f"{staff_name} ↔ {contact_name}"
+        else:
+            conversation_name = staff_name or contact_name or conversation_id
+        focus_entity_type = "staff" if staff_id else ("contact" if contact_id else None)
+        focus_entity_id = staff_id or contact_id
+        sender_id = row["sender_id"]
+        media_item_path = (
+            nested_media_paths.get(int(row["media_file_id"]))
+            if row["media_file_id"] is not None else None
+        )
         items.append(
             FavoriteItemOut(
                 favorite_id=row["favorite_id"],
                 object_type=row["object_type"],
                 object_id=row["object_id"],
                 favorited_by_admin_user_id=row["favorited_by_admin_user_id"],
+                favorited_by_name=actor_names.get(row["favorited_by_admin_user_id"]),
                 favorited_at=row["favorited_at"],
                 source_page=row["source_page"],
                 message_time_ms=row["message_time_ms"],
+                message_id=row["message_id"],
                 conversation_id=conversation_id,
+                conversation_name=conversation_name,
                 conversation_type=conversation_type,
-                staff_id=sorted(staff)[0] if conversation_type == "direct" and staff else None,
-                contact_id=sorted(contacts)[0] if conversation_type == "direct" and contacts else None,
-                sender_id=row["sender_id"],
+                staff_id=staff_id,
+                staff_name=staff_name,
+                contact_id=contact_id,
+                contact_name=contact_name,
+                focus_entity_type=focus_entity_type,
+                focus_entity_id=focus_entity_id,
+                sender_id=sender_id,
+                sender_name=resolve_person_display_name(
+                    sender_id,
+                    external_names.get(sender_id) or person_names.get(sender_id),
+                ) if sender_id else None,
                 message_type=row["message_type"],
                 preview=row["preview"],
                 media_file_id=row["media_file_id"],
                 media_type=row["media_type"],
                 media_mime_type=row["media_mime_type"],
                 media_size_bytes=row["media_size_bytes"],
+                media_download_status=row["media_download_status"],
+                media_item_path=media_item_path,
             )
         )
     return FavoritePageOut(

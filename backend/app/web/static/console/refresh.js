@@ -51,6 +51,7 @@ function refreshConversationList(){
 function refreshTimelineIfSelected(){
   if(!timelineConvId||timelineLoadingOlder)return Promise.resolve();
   var convId=timelineConvId, gen=timelineRequestGen;
+  var favoriteRevision=typeof timelineFavoriteRevision==='number'?timelineFavoriteRevision:null;
   var body=document.getElementById('timeline-body');
   var wasNearBottom=isNearBottom();
   var prevScrollTop=body?body.scrollTop:0;
@@ -66,9 +67,14 @@ function refreshTimelineIfSelected(){
     // conversation while this request is still in flight, which would let
     // a genuinely stale response through a convId-only guard.
     if(!data||timelineConvId!==convId||timelineRequestGen!==gen||timelineLoadingOlder)return;
+    if(typeof timelineFavoritesOnly!=='undefined'&&timelineFavoritesOnly&&favoriteRevision!==null&&
+      typeof timelineFavoriteRevision==='number'&&favoriteRevision!==timelineFavoriteRevision){
+      return refreshTimelineIfSelected();
+    }
     var existingIds={};
     timelineMsgs.forEach(function(m){existingIds[m.msgid]=true;});
     var hasNew=data.messages.some(function(m){return!existingIds[m.msgid];});
+    if(typeof loadTimelineFavoriteStatuses==='function')loadTimelineFavoriteStatuses(data.messages,convId,gen);
     var merged=mergeMessagesByMsgid(timelineMsgs,data.messages);
     // RND-206 QA fix: an auto-refresh that produces a byte-identical
     // rendered set (same messages, same content/media/revoke state) must

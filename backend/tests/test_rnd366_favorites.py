@@ -21,6 +21,9 @@ from app.db.models import (
     ArchiveMessage,
     ArchiveMessageRecipient,
     AuditLog,
+    Contact,
+    ExternalContact,
+    GroupChatMetadata,
     MediaFile,
     MediaPurgeRetry,
     MessageRevocation,
@@ -63,6 +66,9 @@ def db_factory():
             tables=[
                 Tenant.__table__,
                 AdminUser.__table__,
+                Contact.__table__,
+                ExternalContact.__table__,
+                GroupChatMetadata.__table__,
                 ArchiveMessage.__table__,
                 ArchiveMessageRecipient.__table__,
                 MediaFile.__table__,
@@ -630,3 +636,201 @@ def test_favorite_list_filters_page_stably_and_only_projects_current_content(
     assert client.get(
         "/api/favorites?favorited_since=2026-01-02T00:00:00Z&favorited_until=2026-01-01T00:00:00Z"
     ).status_code == 422
+
+
+def test_rnd369_favorites_filters_details_and_stable_pagination(api_client, db_factory) -> None:
+    client, _identity = api_client
+    with db_factory() as db:
+        db.query(AdminUser).filter_by(id="owner-a").one().name = "Owner Alice"
+        db.query(AdminUser).filter_by(id="owner-b").one().name = "Owner Bob"
+        db.add_all(
+            [
+                Contact(tenant_id="tenant-a", wecom_userid="staff_1", name="Alice"),
+                Contact(tenant_id="tenant-a", wecom_userid="contact_1", name="Legacy Contact"),
+                ExternalContact(
+                    tenant_id="tenant-a",
+                    external_userid="contact_1",
+                    name="Employee Remark",
+                    current_nickname_display="Customer One",
+                ),
+                GroupChatMetadata(
+                    tenant_id="tenant-a", roomid="room-a", display_name="Support Room"
+                ),
+            ]
+        )
+        db.commit()
+
+    for object_type, object_id in (
+        ("message", "msg-a1"),
+        ("message", "msg-a2"),
+        ("media", "1"),
+        ("message", "msg-a5"),
+    ):
+        assert client.post(
+            "/api/favorites",
+            json={"object_type": object_type, "object_id": object_id},
+        ).status_code == 200
+
+    page_one = client.get("/api/favorites?limit=2&offset=0")
+    page_two = client.get("/api/favorites?limit=2&offset=2")
+    assert page_one.status_code == page_two.status_code == 200
+    assert page_one.json()["total"] == 4
+    assert page_one.json()["has_more"] is True
+    assert page_two.json()["has_more"] is False
+    assert not {
+        item["favorite_id"] for item in page_one.json()["items"]
+    } & {item["favorite_id"] for item in page_two.json()["items"]}
+
+    media = client.get("/api/favorites?media_type=image")
+    assert media.status_code == 200
+    assert media.json()["total"] == 1
+    assert media.json()["items"][0]["object_type"] == "media"
+    assert media.json()["items"][0]["media_download_status"] == "downloaded"
+    assert client.get("/api/favorites?media_type=image&object_type=message").status_code == 422
+
+    by_staff = client.get("/api/favorites?staff_filter=staff_1")
+    assert by_staff.status_code == 200
+    assert by_staff.json()["total"] == 4
+    assert client.get("/api/favorites?staff_filter=unknown-contact").json()["total"] == 0
+    by_actor = client.get("/api/favorites?favorited_by_name=Owner%20Alice")
+    assert by_actor.status_code == 200
+    assert by_actor.json()["total"] == 4
+    assert by_actor.json()["items"][0]["favorited_by_name"] == "Owner Alice"
+    assert client.get("/api/favorites?favorited_by_name=Owner%20Bob").json()["total"] == 0
+
+    by_conversation = client.get("/api/favorites?conversation_id=room-a")
+    assert by_conversation.status_code == 200
+    assert by_conversation.json()["total"] == 3
+    assert all(item["conversation_name"] == "Support Room" for item in by_conversation.json()["items"])
+    assert all(item["staff_name"] == "Alice" for item in by_conversation.json()["items"])
+
+    direct = client.get(
+        "/api/favorites?conversation_id=direct__contact_1___staff_1&mode=staff&staff_id=staff_1"
+    )
+    assert direct.status_code == 200
+    assert direct.json()["total"] == 1
+    direct_item = direct.json()["items"][0]
+    assert direct_item["object_id"] == direct_item["message_id"] == "msg-a5"
+    assert direct_item["conversation_name"] == "Alice ↔ Customer One"
+    assert direct_item["contact_name"] == "Customer One"
+    assert direct_item["focus_entity_type"] == "staff"
+    assert direct_item["focus_entity_id"] == "staff_1"
+    for contact_filter in ("Customer One", "contact_1"):
+        by_contact = client.get(
+            "/api/favorites", params={"contact_filter": contact_filter}
+        )
+        assert by_contact.status_code == 200
+        assert [item["object_id"] for item in by_contact.json()["items"]] == ["msg-a5"]
+
+    by_message_time = client.get("/api/favorites?message_since_ms=1500")
+    assert by_message_time.status_code == 200
+    assert {item["object_id"] for item in by_message_time.json()["items"]} == {
+        "msg-a2", "msg-a5"
+    }
+
+
+def test_rnd369_contact_id_filter_matches_archive_only_participants(api_client, db_factory) -> None:
+    client, _identity = api_client
+    with db_factory() as db:
+        db.add_all(
+            [
+                ArchiveMessage(
+                    id=6, msgid="msg-archive-only-sender", seq=6, publickey_ver=1,
+                    encrypt_random_key="key", encrypt_chat_msg="payload",
+                    decrypt_status="success", content_text="sender-side message",
+                    msgtype="text", sender="archive_only_sender", roomid="room-a",
+                    msgtime=6000, tenant_id="tenant-a",
+                ),
+                ArchiveMessage(
+                    id=7, msgid="msg-archive-only-recipient", seq=7, publickey_ver=1,
+                    encrypt_random_key="key", encrypt_chat_msg="payload",
+                    decrypt_status="success", content_text="recipient-side message",
+                    msgtype="text", sender="staff_1", roomid=None,
+                    msgtime=7000, tenant_id="tenant-a",
+                ),
+                ArchiveMessageRecipient(
+                    message_id=7, tenant_id="tenant-a", receiver_userid="archive_only_recipient"
+                ),
+            ]
+        )
+        db.commit()
+
+    for message_id in ("msg-archive-only-sender", "msg-archive-only-recipient"):
+        assert client.post(
+            "/api/favorites",
+            json={"object_type": "message", "object_id": message_id},
+        ).status_code == 200
+
+    by_sender_id = client.get(
+        "/api/favorites", params={"contact_filter": "archive_only_sender"}
+    )
+    by_recipient_id = client.get(
+        "/api/favorites", params={"contact_filter": "archive_only_recipient"}
+    )
+    assert [item["object_id"] for item in by_sender_id.json()["items"]] == [
+        "msg-archive-only-sender"
+    ]
+    assert [item["object_id"] for item in by_recipient_id.json()["items"]] == [
+        "msg-archive-only-recipient"
+    ]
+
+
+def test_rnd369_nested_media_favorite_projects_safe_item_path(api_client, db_factory) -> None:
+    client, _identity = api_client
+    with db_factory() as db:
+        db.add(
+            ArchiveMessage(
+                id=6, msgid="msg-nested-media", seq=6, publickey_ver=1,
+                encrypt_random_key="key", encrypt_chat_msg="payload",
+                decrypt_status="success", content_text="nested attachment",
+                msgtype="mixed", sender="staff_1", roomid="room-a",
+                msgtime=6000, tenant_id="tenant-a",
+                structured_content={
+                    "media_refs": [{"path": "0.1", "type": "image", "sdkfileid": "synthetic-nested-id"}]
+                },
+            )
+        )
+        db.add(
+            MediaFile(
+                id=3, sdkfileid="synthetic-nested-id", archive_message_id=6,
+                tenant_id="tenant-a", file_type="image", mime_type="image/jpeg",
+                file_size=4, download_status="downloaded", storage_backend="local",
+                storage_ref="synthetic-private-reference.jpg",
+            )
+        )
+        db.commit()
+
+    assert client.post(
+        "/api/favorites", json={"object_type": "media", "object_id": "3"}
+    ).status_code == 200
+    response = client.get("/api/favorites?object_type=media")
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["media_item_path"] == "0.1"
+    serialized = response.text
+    assert "synthetic-nested-id" not in serialized
+    assert "synthetic-private-reference.jpg" not in serialized
+
+
+def test_rnd369_favorites_page_requires_html_session_and_renders_controls(api_client) -> None:
+    from app.auth import require_html_session
+    from app.main import app
+
+    client, _identity = api_client
+    app.dependency_overrides[require_html_session] = lambda: None
+    anonymous = client.get("/admin/favorites", follow_redirects=False)
+    assert anonymous.status_code == 302
+    assert anonymous.headers["location"] == "/admin/login"
+
+    app.dependency_overrides[require_html_session] = lambda: "tenant-a"
+    page = client.get("/admin/favorites")
+    assert page.status_code == 200
+    assert 'id="favorites-filters"' in page.text
+    assert 'id="favorites-filter-staff"' in page.text
+    assert 'id="favorites-filter-favorite-since"' in page.text
+    assert 'id="favorites-unfavorite-selected"' in page.text
+    assert 'id="favorites-export-selected"' in page.text
+    assert 'data-i18n="favoritesPage.removeOnlyNotice"' in page.text
+    assert 'favorites-page.js' in page.text
+    assert 'console/media-viewer.js' in page.text
+    assert "/admin/favorites" in page.text
