@@ -1,12 +1,18 @@
 /* GH-186: /platform/api-performance — super-admin API performance page.
  * Client-side rendering over the platform-admin read APIs; PC.* helpers
- * from platform-console.js; createElement/textContent only (no innerHTML,
- * matching the other platform pages' XSS discipline).
+ * from platform-console.js; createElement(NSE)/textContent only (no
+ * innerHTML, matching the other platform pages' XSS discipline).
  * All bucket labels are Asia/Shanghai wall time, computed from UTC
  * milliseconds + 8h and read back with UTC getters — deliberately NOT via
  * PC.date() or toISOString() on a shifted-then-unshifted Date, which
  * double-applies the browser's own timezone offset (QA finding 11).
- * Empty stats render as "—" (never 0). */
+ * Empty stats render as "—" (never 0).
+ * Haisu redesign: the first screen is one trend chart (SVG, no external
+ * chart library) with 日趋势/小时趋势 tabs; 采集状态 moved to the page
+ * bottom. Both granularities share the same chart type: bars for request
+ * counts (red segment = errors, left axis) and a line for success p95
+ * (right axis, ms); per-bucket tooltips carry the full stats including
+ * overall/success min-max so the QA extrema distinction survives. */
 (function () {
   'use strict';
   var PC = window.PC;
@@ -24,7 +30,9 @@
   };
   var KIND_TEXT = { normal: '普通响应', stream: '流式响应开始' };
 
-  var state = { page: 1, totalPages: 1 };
+  var state = { page: 1, totalPages: 1, chartTab: 'daily' };
+  var CHART = { W: 960, H: 300, LEFT: 56, RIGHT: 68, TOP: 16, BOTTOM: 32 };
+  var SVG_NS = 'http://www.w3.org/2000/svg';
 
   function msText(value, capped) {
     if (value === null || value === undefined) { return '—'; }
@@ -210,32 +218,158 @@
       + (max === null ? '—' : PC.number(Math.round(max)));
   }
 
-  function seriesRow(point, labeler) {
-    var row = document.createElement('tr');
-    var cells = [
-      labeler(point.bucket),
-      countText(point.requests),
-      countText(point.errors),
-      msText(point.avg_ms),
-      msText(point.p95_ms, point.p95_capped),
-      extremaText(point.min_ms, point.max_ms),
-      extremaText(point.success_min_ms, point.success_max_ms),
-      point.stream_count ? PC.number(point.stream_count) : '—'
-    ];
-    cells.forEach(function (text) {
-      var cell = document.createElement('td');
-      cell.textContent = text;
-      row.appendChild(cell);
-    });
-    return row;
+  // ---------------------------------------------------------------------------
+  // Trend chart (SVG, no external library). Bars = requests with an error
+  // segment (left axis); line = success p95 (right axis). One <title> per
+  // bucket carries the full stats so no information from the retired
+  // per-bucket tables is lost.
+  // ---------------------------------------------------------------------------
+
+  function svgEl(name) { return document.createElementNS(SVG_NS, name); }
+
+  function svgText(x, y, content, anchor, className) {
+    var node = svgEl('text');
+    node.setAttribute('x', x);
+    node.setAttribute('y', y);
+    node.setAttribute('text-anchor', anchor);
+    node.setAttribute('class', className);
+    node.textContent = content;
+    return node;
   }
 
-  function renderSeries(granularity, data, bodyId, emptyLabel) {
-    var body = PC.el(bodyId);
-    PC.clear(body);
-    if (!data.points.length) { PC.emptyRow(body, 8, emptyLabel); return; }
-    var labeler = granularity === 'daily' ? shanghaiDateLabel : shanghaiTimeLabel;
-    data.points.forEach(function (point) { body.appendChild(seriesRow(point, labeler)); });
+  function niceMax(value) {
+    if (!value || value <= 0) { return 1; }
+    var base = Math.pow(10, Math.floor(Math.log(value) / Math.LN10));
+    var steps = [1, 2, 2.5, 5, 10];
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i] * base >= value) { return steps[i] * base; }
+    }
+    return 10 * base;
+  }
+
+  function bucketLabel(granularity, point) {
+    if (granularity === 'daily') { return shanghaiDateLabel(point.bucket); }
+    var parts = shanghaiParts(new Date(point.bucket).getTime());
+    return parts.date + ' ' + parts.time;
+  }
+
+  function bucketTooltip(granularity, point) {
+    var lines = [bucketLabel(granularity, point)];
+    lines.push('请求数 ' + countText(point.requests) + '（错误 ' + countText(point.errors) + '）');
+    lines.push('平均 ' + msText(point.avg_ms));
+    lines.push('成功 p95 ' + msText(point.p95_ms, point.p95_capped));
+    lines.push('整体 min/max ' + extremaText(point.min_ms, point.max_ms));
+    lines.push('成功 min/max ' + extremaText(point.success_min_ms, point.success_max_ms));
+    lines.push('流式 ' + countText(point.stream_count));
+    return lines.join('\n');
+  }
+
+  function renderSeriesChart(granularity, data) {
+    var host = PC.el('apiperf-chart');
+    PC.clear(host);
+    var note = PC.el('apiperf-trend-note');
+    var daily = granularity === 'daily';
+    if (!data.points.length) {
+      var empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = daily ? '该范围内暂无日聚合数据。' : '该日暂无小时聚合数据（超出 720 小时窗口会明确拒绝）。';
+      host.appendChild(empty);
+      note.textContent = '';
+      return;
+    }
+    note.textContent = daily
+      ? '横轴为 Asia/Shanghai 日期；日趋势最多回看 180 天。'
+      : '横轴为 Asia/Shanghai 小时；当前小时为未完成桶（最多落后约 15 分钟），最早保留一天可能是部分覆盖。';
+
+    var points = data.points;
+    var maxRequests = niceMax(Math.max.apply(null, points.map(function (p) { return p.requests || 0; })));
+    var p95Values = points
+      .filter(function (p) { return p.p95_ms !== null && p.p95_ms !== undefined; })
+      .map(function (p) { return p.p95_ms; });
+    var maxP95 = niceMax(p95Values.length ? Math.max.apply(null, p95Values) : 0);
+    var plotW = CHART.W - CHART.LEFT - CHART.RIGHT;
+    var plotH = CHART.H - CHART.TOP - CHART.BOTTOM;
+    var step = plotW / points.length;
+    var bottom = CHART.TOP + plotH;
+
+    var svg = svgEl('svg');
+    svg.setAttribute('viewBox', '0 0 ' + CHART.W + ' ' + CHART.H);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', daily ? '接口日趋势图' : '接口小时趋势图');
+
+    function yRequests(value) { return bottom - (value / maxRequests) * plotH; }
+    function yP95(value) { return bottom - (value / maxP95) * plotH; }
+
+    for (var tick = 0; tick <= 4; tick++) {
+      var reqValue = maxRequests * tick / 4;
+      var y = yRequests(reqValue);
+      if (tick > 0) {
+        var grid = svgEl('line');
+        grid.setAttribute('x1', CHART.LEFT);
+        grid.setAttribute('x2', CHART.W - CHART.RIGHT);
+        grid.setAttribute('y1', y);
+        grid.setAttribute('y2', y);
+        grid.setAttribute('class', 'chart-grid');
+        svg.appendChild(grid);
+      }
+      svg.appendChild(svgText(CHART.LEFT - 8, y + 4, PC.number(Math.round(reqValue)), 'end', 'chart-tick'));
+      var p95Value = maxP95 * tick / 4;
+      svg.appendChild(svgText(CHART.W - CHART.RIGHT + 8, y + 4, PC.number(Math.round(p95Value)) + 'ms', 'start', 'chart-tick'));
+    }
+
+    var labelEvery = Math.ceil(points.length / 12);
+    var linePoints = [];
+    points.forEach(function (point, index) {
+      var bucketX = CHART.LEFT + index * step;
+      var barWidth = Math.max(1, step * 0.68);
+      var barX = bucketX + (step - barWidth) / 2;
+      var centre = bucketX + step / 2;
+      var total = point.requests || 0;
+      var errors = Math.min(point.errors || 0, total);
+      if (total > 0) {
+        var bar = svgEl('rect');
+        bar.setAttribute('x', barX);
+        bar.setAttribute('y', yRequests(total));
+        bar.setAttribute('width', barWidth);
+        bar.setAttribute('height', bottom - yRequests(total));
+        bar.setAttribute('class', 'chart-bar');
+        svg.appendChild(bar);
+        if (errors > 0) {
+          var errorBar = svgEl('rect');
+          errorBar.setAttribute('x', barX);
+          errorBar.setAttribute('y', yRequests(errors));
+          errorBar.setAttribute('width', barWidth);
+          errorBar.setAttribute('height', bottom - yRequests(errors));
+          errorBar.setAttribute('class', 'chart-bar-error');
+          svg.appendChild(errorBar);
+        }
+      }
+      if (point.p95_ms !== null && point.p95_ms !== undefined) {
+        linePoints.push(centre.toFixed(1) + ',' + yP95(point.p95_ms).toFixed(1));
+      }
+      if (index % labelEvery === 0) {
+        var label = bucketLabel(granularity, point);
+        svg.appendChild(svgText(centre, CHART.H - 10, daily ? label.slice(5) : label.slice(11) + ':00', 'middle', 'chart-tick'));
+      }
+      var hover = svgEl('rect');
+      hover.setAttribute('x', bucketX);
+      hover.setAttribute('y', CHART.TOP);
+      hover.setAttribute('width', step);
+      hover.setAttribute('height', plotH);
+      hover.setAttribute('class', 'chart-hover');
+      var title = svgEl('title');
+      title.textContent = bucketTooltip(granularity, point);
+      hover.appendChild(title);
+      svg.appendChild(hover);
+    });
+
+    if (linePoints.length) {
+      var p95Line = svgEl('polyline');
+      p95Line.setAttribute('points', linePoints.join(' '));
+      p95Line.setAttribute('class', 'chart-line');
+      svg.appendChild(p95Line);
+    }
+    host.appendChild(svg);
   }
 
   function loadStatus() {
@@ -258,41 +392,65 @@
     if (PC.el('apiperf-q').value) { params.set('q', PC.el('apiperf-q').value); }
     return PC.request('/api/platform/api-performance/endpoints?' + params.toString()).then(renderEndpoints);
   }
-  function loadDaily() {
+  function loadTrend() {
     var params = new URLSearchParams();
-    params.set('granularity', 'daily');
-    params.set('days', PC.el('apiperf-daily-days').value || '30');
-    if (PC.el('apiperf-daily-method').value) { params.set('method', PC.el('apiperf-daily-method').value.trim().toUpperCase()); }
-    if (PC.el('apiperf-daily-route').value) { params.set('route', PC.el('apiperf-daily-route').value.trim()); }
+    if (state.chartTab === 'daily') {
+      params.set('granularity', 'daily');
+      params.set('days', PC.el('apiperf-daily-days').value || '30');
+    } else {
+      var day = PC.el('apiperf-hourly-date').value;
+      if (!day) {
+        PC.el('apiperf-trend-note').textContent = '';
+        var host = PC.el('apiperf-chart');
+        PC.clear(host);
+        var hint = document.createElement('p');
+        hint.className = 'muted';
+        hint.textContent = '选择日期后查看小时趋势（最近 720 小时内；最早一天可能为部分覆盖）。';
+        host.appendChild(hint);
+        return Promise.resolve();
+      }
+      params.set('granularity', 'hourly');
+      params.set('date', day);
+    }
+    if (PC.el('apiperf-trend-method').value) { params.set('method', PC.el('apiperf-trend-method').value.trim().toUpperCase()); }
+    if (PC.el('apiperf-trend-route').value) { params.set('route', PC.el('apiperf-trend-route').value.trim()); }
     return PC.request('/api/platform/api-performance/series?' + params.toString())
       .then(function (data) {
-        renderSeries('daily', data, 'apiperf-daily-rows', '该范围内暂无日聚合数据。');
-        var warn = PC.el('apiperf-daily-incomplete');
-        if (data.incomplete) { setIncomplete(warn, '数据超出单次查询上限，以上为部分聚合，可能偏小；请缩小天数或按接口过滤。'); }
-        else { warn.hidden = true; }
+        renderSeriesChart(state.chartTab, data);
+        var warn = PC.el('apiperf-trend-incomplete');
+        if (data.incomplete) {
+          setIncomplete(warn, '数据超出单次查询上限，以上为部分聚合，可能偏小；请缩小天数范围或按接口过滤。');
+        } else {
+          warn.hidden = true;
+        }
       })
-      .catch(function (error) { PC.emptyRow(PC.el('apiperf-daily-rows'), 8, error.message); });
+      .catch(function (error) {
+        var host = PC.el('apiperf-chart');
+        PC.clear(host);
+        var failure = document.createElement('p');
+        failure.className = 'muted';
+        failure.textContent = error.message || '加载失败';
+        host.appendChild(failure);
+      });
   }
-  function loadHourly() {
-    var day = PC.el('apiperf-hourly-date').value;
-    var body = PC.el('apiperf-hourly-rows');
-    if (!day) { PC.emptyRow(body, 8, '选择日期后查看小时趋势（最近 720 小时内；最早一天可能为部分覆盖）。'); return Promise.resolve(); }
-    var params = new URLSearchParams();
-    params.set('granularity', 'hourly');
-    params.set('date', day);
-    if (PC.el('apiperf-hourly-method').value) { params.set('method', PC.el('apiperf-hourly-method').value.trim().toUpperCase()); }
-    if (PC.el('apiperf-hourly-route').value) { params.set('route', PC.el('apiperf-hourly-route').value.trim()); }
-    return PC.request('/api/platform/api-performance/series?' + params.toString())
-      .then(function (data) {
-        renderSeries('hourly', data, 'apiperf-hourly-rows', '该日暂无小时聚合数据（超出 720 小时窗口会明确拒绝）。');
-      })
-      .catch(function (error) { PC.emptyRow(body, 8, error.message); });
+
+  function setChartTab(tab) {
+    state.chartTab = tab;
+    var dailyTab = PC.el('apiperf-tab-daily');
+    var hourlyTab = PC.el('apiperf-tab-hourly');
+    dailyTab.classList.toggle('active', tab === 'daily');
+    hourlyTab.classList.toggle('active', tab === 'hourly');
+    dailyTab.setAttribute('aria-selected', tab === 'daily' ? 'true' : 'false');
+    hourlyTab.setAttribute('aria-selected', tab === 'hourly' ? 'true' : 'false');
+    PC.el('apiperf-days-field').hidden = tab !== 'daily';
+    PC.el('apiperf-date-field').hidden = tab !== 'hourly';
+    loadTrend().catch(showError);
   }
 
   function refreshAll() {
     clearError();
     return Promise.all([
-      loadStatus(), loadAnomalies(), loadEndpoints(1), loadDaily(), loadHourly()
+      loadStatus(), loadAnomalies(), loadEndpoints(1), loadTrend()
     ]).catch(showError);
   }
 
@@ -302,6 +460,12 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     initialiseDates();
+    PC.el('apiperf-tab-daily').addEventListener('click', function () { setChartTab('daily'); });
+    PC.el('apiperf-tab-hourly').addEventListener('click', function () { setChartTab('hourly'); });
+    PC.el('apiperf-trend-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      loadTrend().catch(showError);
+    });
     PC.el('apiperf-filters').addEventListener('submit', function (event) {
       event.preventDefault();
       state.page = 1;
@@ -313,8 +477,6 @@
     PC.el('apiperf-page-next').addEventListener('click', function () {
       if (state.page < state.totalPages) { state.page += 1; loadEndpoints(state.page).catch(showError); }
     });
-    PC.el('apiperf-daily-form').addEventListener('submit', function (event) { event.preventDefault(); loadDaily().catch(showError); });
-    PC.el('apiperf-hourly-form').addEventListener('submit', function (event) { event.preventDefault(); loadHourly().catch(showError); });
     PC.wireRefreshStamp(refreshAll);
     refreshAll();
   });
