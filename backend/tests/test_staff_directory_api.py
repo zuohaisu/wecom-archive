@@ -226,3 +226,31 @@ def test_staff_listing_includes_unregistered_non_prefix_participants(client, see
     assert dave["msg_count_30d"] == 1
     # 注册过的外部联系人依然被排除。
     assert "guest_carol" not in ids
+
+
+def test_staff_listing_includes_seats_without_archive_appearance(client, seeded) -> None:
+    """Haisu follow-up (production): a seat is internal staff even before
+    any of its messages are archived — its WeCom identity must be listed
+    (with zero counts) instead of being gated on archive participation."""
+    seeded.execute(
+        text(
+            "INSERT INTO admin_users (id, tenant_id, wecom_user_id, name, role, department)"
+            " VALUES ('seat-new', 'tenant-a', 'staff_newbie', 'Newbie', 'admin', '客服部')"
+        )
+    )
+    seeded.commit()
+    app = _authenticated_app(seeded)
+    try:
+        response = client.get("/api/admin/staff")
+    finally:
+        app.dependency_overrides.clear()
+
+    data = response.json()
+    newbie = next(
+        item for item in data["items"] if item["wecom_userid"] == "staff_newbie"
+    )
+    assert newbie["name"] == "Newbie"
+    assert newbie["has_seat"] is True
+    assert newbie["department"] == "客服部"
+    assert newbie["msg_count_30d"] == 0
+    assert newbie["msg_count_total"] == 0
