@@ -1,4 +1,4 @@
-# ADR-0007: Runtime Edition and Self-Hosted Policy Boundaries
+# ADR-0008: Runtime Edition and Self-Hosted Policy Boundaries
 
 **Status**: Accepted for GH-168 implementation; external activation remains gated
 **Date**: 2026-10-07
@@ -26,9 +26,9 @@ not SSH to either host, so the live value of `APP_EDITION` is unknown. This ADR
 records code behavior and a merge gate, not a claim about current production
 state.
 
-ADR-0003 remains as a historical decision record; its status header now marks
-the hosted-only policy superseded by Discussion #178 and this ADR. ADR-0005
-continues to specify the commercial lifecycle for `cloud`.
+ADR-0003 (hosted-only strategy) has been removed from the tree per the open-source
+boundary decision (GH-203); the hosted-only policy is superseded by Discussion #178,
+this ADR, and ADR-0009. ADR-0005 continues to specify the commercial lifecycle for `cloud`.
 
 ## 2. Decision
 
@@ -152,7 +152,7 @@ continues to specify the commercial lifecycle for `cloud`.
 ## 5. References
 
 - [Discussion #178 — current open-source decisions](https://github.com/zuohaisu/wecom-archive/discussions/178)
-- [ADR-0003 — historical hosted-only strategy](0003-product-strategy-hosted-only.md)
+- [ADR-0009 — open-source strategy (supersedes ADR-0003)](0009-open-source-strategy.md)
 - [ADR-0005 — cloud billing lifecycle and service gates](0005-saas-billing-lifecycle-refunds-and-service-gates.md)
 - [Architecture boundary guard](../../backend/tests/test_architecture_boundary.py)
 - [GH-168 ops investigation](../../tasks/GH-168-ops-investigation.md) (gitignored operational evidence; read from the existing main checkout)

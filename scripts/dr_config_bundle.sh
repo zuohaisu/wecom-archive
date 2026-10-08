@@ -18,8 +18,9 @@
 # This script does NOT touch backup_once.sh's DB/media backup chain, does
 # NOT reuse BACKUP_GPG_PASSPHRASE (independent secret, independent
 # rotation), and does NOT configure Tencent/Mac off-host pull, retention,
-# or a new systemd timer — see docs/operations/2c2g-runbook.md "Recovery
-# config bundle" for the full picture and Ops handoff.
+# or a new systemd timer — see the DR "Recovery config bundle" section in
+# the ops runbook (local ops records, moved out of the tree in GH-203)
+# for the full picture and Ops handoff.
 #
 # ── Recovery-critical inventory (explicit — never a recursive shared/ tar)
 #
@@ -34,7 +35,7 @@
 #
 #   OPTIONAL (included if present, never fail-closed):
 #     shared/private_keys/ — legacy key-path convention seen alongside
-#                             shared/keys/ in docs/operations/2c2g-runbook.md.
+#                             shared/keys/ in the ops runbook (local ops records).
 #     shared/backup.env    — BACKUP_GPG_PASSPHRASE. NOT required: the
 #                             operator already keeps an independent copy in
 #                             KeePassXC. Included anyway, ciphertext-only,

@@ -25,7 +25,7 @@
 支付成功只是资金事实。Tenant、套餐、订阅、权益和企业微信运行状态必须分别有权威事实源，
 不能由前端字段、支付路由或某个环境变量混在一起推断。
 
-本决策延续 ADR-0003 已公开的价格，不重新发明 SKU。真实支付商户凭据仍是生产外部门禁；
+本决策延续早期已公开的定价（原 ADR-0003，现由 ADR-0009 取代），不重新发明 SKU。真实支付商户凭据仍是生产外部门禁；
 它们只允许通过部署环境注入，缺失时支付能力必须显示为未配置并失败关闭。
 
 ## 2. Decision
@@ -192,7 +192,7 @@ RND-416 之前的阶段只注册 `wechat_pay` provider。支付宝当前实现�
 
 ## 5. References
 
-- [ADR-0003：已公开定价与产品策略](0003-product-strategy-hosted-only.md)
+- [ADR-0009：开源策略（取代原 ADR-0003 的托管独占策略）](0009-open-source-strategy.md)
 - [ADR-0005：SaaS 收费生命周期、退款与服务门禁](0005-saas-billing-lifecycle-refunds-and-service-gates.md)
 - [WeCom 授权与回调的通用运维边界](../OPERATIONS.md#wecom-authorization-and-callbacks)
 - [微信支付：Native 支付产品介绍](https://pay.weixin.qq.com/doc/v3/merchant/4012791874)

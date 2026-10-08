@@ -1,8 +1,7 @@
 # Production Scheduled Workload Manifest (GH-104)
 
-**Purpose.** GH-104 closed the gap the 2026-08-28 server baseline
-([server-baseline-2026-08-28.md](server-baseline-2026-08-28.md), PR #103)
-found between three inventories that used to drift independently:
+**Purpose.** GH-104 closed the gap the 2026-08-28 server infrastructure
+baseline (Ops record, PR #103; captured in git history) found between three inventories that used to drift independently:
 
 1. the repository's own `deploy/systemd/*.service|*.timer|*.path` files;
 2. `deploy/systemd/MANAGED_UNITS`, the plain allowlist
@@ -160,9 +159,8 @@ These are two different responsibilities and must not be conflated:
 — until Follow-up B, this script had never been committed to this
 repository (confirmed via `git log --all` — zero history prior to
 capture), a real reproducibility gap this PR closes, not an oversight
-carried forward. It was introduced by the 2026-08-03 RND-261
-domain-cutover runbook
-(`docs/ops/rnd-261-domain-cutover-runbook.md`) as a hand-authored,
+carried forward. It was introduced during the 2026-08-03 production domain cutover
+(runbook since moved out of the tree; see GH-203) as a hand-authored,
 already-field-proven script (41/41 successful runs observed in the 30
 days before capture) that performs `acme.sh` DNS-01 renewal for the
 wildcard domain, binds it to Qiniu's `media.crowntime.cn` (CDN) and

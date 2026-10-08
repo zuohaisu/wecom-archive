@@ -208,10 +208,9 @@ def test_qr_login_redirects_top_window_after_scan_and_login_page_has_i18n(
 
 
 # ---------------------------------------------------------------------------
-# QA-005 — ADMIN_DOMAIN observed in production *with* a scheme prefix
-# (docs/ops/rnd-261-domain-cutover-runbook.md: `ADMIN_DOMAIN=https://
-# qwhhcd.crowntime.cn`, flagged as an anomaly but left unfixed because
-# OAuth wasn't enabled yet). Naively prepending "https://" doubles up into
+# QA-005 — ADMIN_DOMAIN may arrive *with* a scheme prefix (observed as a
+# production misconfiguration during the 2026-08 domain cutover and left
+# unfixed for a time because OAuth wasn't enabled yet). Naively prepending "https://" doubles up into
 # a callback WeCom can't reach — both OAuth entry points share the
 # construction and must both be immune to this input shape.
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@
 | Architecture approved | 架构设计已评审通过 | ✅ 完成 (v4 评审通过后进入实现) |
 | Development complete | 代码/测试/文档已按架构实现完毕 | ✅ 完成 (本次 RND-189 第三轮修复) |
 | Developer acceptance | 独立 Agent/人工在本地环境验收通过 | ⏳ 待重新验收 |
-| Online deployment | 部署到生产服务器 (ali-xy-qw) | ⛔ 未开始 — 依赖 Developer acceptance 通过 |
+| Online deployment | 部署到生产服务器 | ⛔ 未开始 — 依赖 Developer acceptance 通过 |
 | Online acceptance | 生产环境实际续期一次成功 + 验证 | ⛔ 未开始 |
 
 本次修复(RND-189 第三轮)范围: 用官方 `qiniu` Python SDK 替换手写的 QBox HMAC 签名（第二轮验收

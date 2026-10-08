@@ -15,7 +15,7 @@ billing behavior.
 
 The runtime defaults to `selfhost` when `APP_EDITION` is unset; invalid values
 fail closed. The production value is an Ops fact and must not be inferred from
-this source tree. See [ADR-0007](adr/0007-runtime-edition-policies.md) and
+this source tree. See [ADR-0008](adr/0008-runtime-edition-policies.md) and
 [Discussion #178](https://github.com/zuohaisu/wecom-archive/discussions/178)
 for the approved product and edition decisions.
 
@@ -49,7 +49,7 @@ writes, exports, and worker operations.
 
 ## Decision records
 
-- [ADR-0007 — runtime edition and self-hosted policy](adr/0007-runtime-edition-policies.md) is the current edition decision.
+- [ADR-0008 — runtime edition and self-hosted policy](adr/0008-runtime-edition-policies.md) is the current edition decision.
 - [ADR-0005 — cloud billing lifecycle and service gates](adr/0005-saas-billing-lifecycle-refunds-and-service-gates.md) remains the cloud commercial policy.
-- [ADR-0003 — hosted-only strategy](adr/0003-product-strategy-hosted-only.md) is retained as a historical record and is superseded by the current AGPL/self-host decision.
+- [ADR-0009 — open-source strategy](adr/0009-open-source-strategy.md) supersedes ADR-0003 (hosted-only strategy; removed from the tree, recoverable from git history).
 - [CONTRIBUTING.md](../CONTRIBUTING.md) is the public entry point for contribution, validation, safety, and architecture guidance.
