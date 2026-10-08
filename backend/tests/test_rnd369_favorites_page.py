@@ -152,6 +152,45 @@ def test_favorites_page_builds_server_filter_query_and_supported_locales() -> No
     assert output.strip() == "filters=server-side dates=inclusive locales=zh-CN,zh-TW,en translations=complete"
 
 
+def test_favorites_locator_link_preserves_the_conversation_and_message_context() -> None:
+    output = _run(
+        r"""
+(async function () {
+  var favorite = {
+    favorite_id: 'fav-locate', object_type: 'message', object_id: 'msg-target',
+    message_id: 'msg-target', conversation_id: 'room/1', conversation_name: 'Room',
+    conversation_type: 'group', focus_entity_type: 'staff', focus_entity_id: 'staff_1',
+    favorited_at: '2026-04-01T12:00:00Z'
+  };
+  globalThis.fetch = function (url) {
+    if (url === '/api/auth/me') return Promise.resolve({ok: true, json: function () {
+      return Promise.resolve({authenticated: true, role: 'owner'});
+    }});
+    if (url.indexOf('/api/favorites?') === 0) return Promise.resolve({ok: true, json: function () {
+      return Promise.resolve({items: [favorite], total: 1, offset: 0, limit: 50});
+    }});
+    throw new Error('unexpected request: ' + url);
+  };
+  eval(PAGE_SOURCE);
+  await new Promise(function (resolve) { setTimeout(resolve, 10); });
+  var match = elements['favorites-rows'].innerHTML.match(/<a class="btn btn-secondary btn-sm" href="([^"]+)"/);
+  if (!match) throw new Error('favorite row did not render a locate link');
+  var target = new URL(match[1].replace(/&amp;/g, '&'), 'https://synthetic.test');
+  if (target.pathname !== '/admin/conversations'
+      || target.searchParams.get('focus') !== 'msg-target'
+      || target.searchParams.get('conv') !== 'room/1'
+      || target.searchParams.get('convType') !== 'group'
+      || target.searchParams.get('entityId') !== 'staff_1'
+      || target.searchParams.get('entityType') !== 'staff') {
+    throw new Error('favorite locator omitted its target context: ' + target.href);
+  }
+  console.log('favorite-locator=conversation-focus=msg-target type=group entity=staff_1');
+}()).catch(function (error) { console.error(error); process.exitCode = 1; });
+"""
+    )
+    assert output.strip() == "favorite-locator=conversation-focus=msg-target type=group entity=staff_1"
+
+
 def test_favorites_page_preview_batch_remove_and_escape_dynamic_content() -> None:
     output = _run(
         r"""
