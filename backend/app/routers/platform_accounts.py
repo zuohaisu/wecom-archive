@@ -63,7 +63,7 @@ async def platform_settings_page(
 
     if admin is None:
         return RedirectResponse("/platform/login", status_code=302)
-    return _render_platform_page("platform_settings", "账户与安全", admin)
+    return _render_platform_page("platform_settings", "运营账号", admin)
 
 
 @router.get("/platform/settings/operators/new", response_class=HTMLResponse)

@@ -152,43 +152,30 @@ _PROVISIONING_NAV_ITEMS = (
 # soon" state to render.
 PLATFORM_NAV = (
     {
-        "group": "概览",
+        "group": "总览",
         "items": (
             {"id": "dashboard", "label": "运营看板", "path": "/platform"},
         ),
     },
     {
-        "group": "租户",
+        "group": "客户",
         "items": (
-            {"id": "tenants", "label": "租户商业状态", "path": "/platform/tenants"},
-            {"id": "tenant-new", "label": "新建租户", "note": "人工开通", "path": "/platform/tenants/new"},
+            {"id": "tenants", "label": "订阅状态", "path": "/platform/tenants"},
+            {"id": "search", "label": "搜索", "path": "/platform/search"},
+            {"id": "audit", "label": "全局审计", "path": "/platform/audit"},
         ),
     },
     {
-        "group": "计量与资金",
+        "group": "财务",
         "items": (
-            {"id": "usage", "label": "用量与配额", "path": "/platform/usage"},
-            {"id": "ledger", "label": "手工账本", "path": "/platform/ledger"},
+            {"id": "finance-orders", "label": "订单明细", "path": "/platform/finance/orders"},
         ),
     },
     {
         "group": "基础设施",
         "items": (
-            {"id": "infra", "label": "连通性 / 域名 / 渠道", "path": "/platform/infra"},
             {"id": "api-performance", "label": "接口性能", "path": "/platform/api-performance"},
-        ),
-    },
-    {
-        "group": "分析",
-        "items": (
-            {"id": "analytics", "label": "产品使用分析", "path": "/platform/analytics"},
-        ),
-    },
-    {
-        "group": "治理",
-        "items": (
-            {"id": "audit", "label": "全局审计", "path": "/platform/audit"},
-            {"id": "settings", "label": "账户与安全", "path": "/platform/settings"},
+            {"id": "settings", "label": "运营账号", "path": "/platform/settings"},
         ),
     },
 )
@@ -260,7 +247,7 @@ def render_platform_topbar(breadcrumb_current: str) -> str:
         f'<span class="cur">{escape(breadcrumb_current)}</span></div>'
         '<div class="search-input"><span class="ico">⌕</span>'
         '<input class="input" id="platform-search" type="search" '
-        'placeholder="搜索租户名称 / slug / corp_id，回车跳转详情"></div>'
+        'placeholder="搜索客户名称 / slug / corp_id，回车跳转详情"></div>'
         '<div class="topbar-actions"><span class="tz-note" id="platform-last-refresh"></span>'
         '<button class="btn btn-sm" type="button" id="platform-refresh">刷新数据</button></div>'
         '</header>'

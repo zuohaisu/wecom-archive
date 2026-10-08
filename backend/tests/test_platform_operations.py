@@ -804,11 +804,14 @@ def test_all_platform_console_html_routes_reachable(
         "/platform/tenants",
         "/platform/tenants/tenant-active",
         "/platform/tenants/new",
-        "/platform/usage",
-        "/platform/ledger",
-        "/platform/infra",
-        "/platform/analytics",
+        "/platform/search",
         "/platform/audit",
+        # Later shells must join this list: /platform/search shipped a broken
+        # template (unresolvable __I18N_SCRIPT__ token -> 500 on every GET)
+        # precisely because the new pages stopped being added here.
+        "/platform/api-performance",
+        "/platform/finance/orders",
+        "/platform/settings",
     ]
     for route in routes:
         denied = client.get(route, follow_redirects=False)

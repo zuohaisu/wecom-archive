@@ -66,6 +66,26 @@ class ExternalContactListPage(BaseModel):
     available_tags: list[str] = Field(default_factory=list)
 
 
+class RelatedStaffItem(BaseModel):
+    """RND-373: one employee related to an external customer.
+
+    official/derived are reported separately and never blended: an
+    official follow comes from external_contact_follows / the contact
+    owner; "derived" means the archive proves the pair communicated, and
+    must never be presented as an official ownership claim."""
+
+    staff_userid: str
+    display_name: Optional[str] = None
+    admin_status: Optional[str] = None
+    is_official_follow: bool = False
+    is_derived_from_archive: bool = False
+    follow_remark: Optional[str] = None
+    message_count: int = 0
+    first_interaction_at: Optional[str] = None
+    last_interaction_at: Optional[str] = None
+
+
 class ExternalContactDetail(ExternalContactListItem):
     nickname_history: list[ExternalContactNicknameHistoryItem] = Field(default_factory=list)
     conversations: list[ConversationOut]
+    related_staff: list[RelatedStaffItem] = Field(default_factory=list)

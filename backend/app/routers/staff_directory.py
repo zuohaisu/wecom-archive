@@ -31,8 +31,14 @@ from app.auth import get_current_user
 from app.conversation_membership import _collect_archive_participant_ids
 from app.db.models import AdminUser, ArchiveMessage, Contact, ExternalContact
 from app.db.session import get_db
-from app.schemas.staff_directory import StaffDirectoryItem, StaffDirectoryPage
+from app.schemas.staff_directory import (
+    StaffCustomerItem,
+    StaffCustomersPage,
+    StaffDirectoryItem,
+    StaffDirectoryPage,
+)
 from app.services.avatar_sync import internal_avatar_presentations
+from app.services.customer_relations import related_customers_for_staff
 
 router = APIRouter()
 
@@ -168,3 +174,40 @@ def _sent_message_counts(
         # failure must not turn the staff listing into a 500. Counts stay 0.
         return empty
     return counts_30d, counts_total
+
+
+@router.get("/staff/{wecom_userid}/customers", response_model=StaffCustomersPage)
+def list_staff_customers(
+    wecom_userid: str,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    q: Optional[str] = Query(None, max_length=128),
+    auth: Tuple[AdminUser, str] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StaffCustomersPage:
+    """RND-374: the customers one internal staff member has interacted with.
+
+    Read-only, tenant-scoped, sorted by last interaction; the staff
+    account's own status never hides the history (departed staff stay
+    queryable)."""
+    _, tenant_id = auth
+    items, total = related_customers_for_staff(
+        db, tenant_id, wecom_userid, page=page, per_page=per_page, q=q
+    )
+    seat = (
+        db.query(AdminUser)
+        .filter(
+            AdminUser.tenant_id == tenant_id,
+            AdminUser.wecom_user_id == wecom_userid,
+        )
+        .first()
+    )
+    return StaffCustomersPage(
+        total=total,
+        page=page,
+        per_page=per_page,
+        staff_userid=wecom_userid,
+        staff_display_name=seat.name if seat is not None else None,
+        staff_admin_status=seat.status if seat is not None else None,
+        items=[StaffCustomerItem(**item) for item in items],
+    )

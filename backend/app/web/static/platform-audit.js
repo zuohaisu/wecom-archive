@@ -49,7 +49,7 @@
     PC.error('');
     return PC.request('/api/platform/operations/audit-events?' + filterQuery()).then(renderRows).catch(function () {
       state.total = 0;
-      PC.gapRow(PC.el('audit-rows'), 8, '全局审计依赖的跨租户接口尚未交付，暂无数据可展示。租户详情页的「审计」页签仍可查看单租户最近事件。');
+      PC.gapRow(PC.el('audit-rows'), 8, '全局审计依赖的跨客户接口尚未交付，暂无数据可展示。客户详情页的「审计」页签仍可查看单客户最近事件。');
       PC.el('audit-pagination').textContent = '';
       PC.el('previous-page').disabled = true;
       PC.el('next-page').disabled = true;

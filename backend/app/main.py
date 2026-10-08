@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import logging
@@ -23,6 +25,7 @@ from app.routers.ai_support import (
     router as ai_support_router,
 )
 from app.routers.platform_api_performance import router as platform_api_performance_router
+from app.routers.platform_finance import router as platform_finance_router
 from app.routers.public_ai_support import router as public_ai_support_router
 from app.routers.audit import router as audit_router
 from app.routers.avatars import router as avatars_router
@@ -272,6 +275,7 @@ def create_app(edition: str | None = None) -> FastAPI:
         app.include_router(ai_support_platform_router)
         app.include_router(public_ai_support_router)
         app.include_router(platform_api_performance_router)
+        app.include_router(platform_finance_router)
 
     @app.get("/health/live")
     def health_live():

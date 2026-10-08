@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>新建租户 — 平台运营控制台</title>
+<title>新建客户 — 平台运营控制台</title>
 <link rel="icon" href="/api/branding/favicon" sizes="any">
 <link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
 <link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
@@ -17,7 +17,7 @@ __SIDENAV__
 __TOPBAR__
 <main class="page">
   <div class="page-hd">
-    <div><h1>新建租户</h1><p>人工开通兜底流程。仅在自助开通失败或合同直签时使用；创建即写入审计。</p></div>
+    <div><h1>新建客户</h1><p>人工开通兜底流程。仅在自助开通失败或合同直签时使用；创建即写入审计。</p></div>
     <a class="btn" href="/platform/tenants">取消</a>
   </div>
   <div id="error" class="alert alert-danger" role="alert" hidden></div>
@@ -37,7 +37,7 @@ __TOPBAR__
       <div class="card-hd"><h2>第 1 / 4 步 · 基本信息</h2></div>
       <div class="card-bd">
         <div class="form-grid">
-          <div class="field"><label class="field-label">租户名称<span class="req">*</span></label><input class="input" id="w-name" type="text"><p class="field-help">与合同主体一致，展示在租户端与账单上。</p></div>
+          <div class="field"><label class="field-label">客户名称<span class="req">*</span></label><input class="input" id="w-name" type="text"><p class="field-help">与合同主体一致，展示在客户端与账单上。</p></div>
           <div class="field"><label class="field-label">slug<span class="req">*</span></label><input class="input mono" id="w-slug" type="text"><p class="field-help">小写字母、数字与连字符；创建后不可修改。</p></div>
           <div class="field"><label class="field-label">管理员邮箱<span class="req">*</span></label><input class="input" id="w-admin-email" type="email"><p class="field-help">首个后台管理员账号。</p></div>
           <div class="field"><label class="field-label">Owner 邮箱<span class="req">*</span></label><input class="input" id="w-owner-email" type="email"><p class="field-help">接收开通邀请与账单通知。</p></div>
@@ -84,7 +84,7 @@ __TOPBAR__
       </div>
       <div class="card-ft" style="justify-content:flex-end;gap:var(--space-2)">
         <button class="btn" type="button" id="w-step3-back">上一步</button>
-        <button class="btn btn-primary" type="button" id="w-step3-submit">创建租户</button>
+        <button class="btn btn-primary" type="button" id="w-step3-submit">创建客户</button>
       </div>
     </section>
 
@@ -93,11 +93,11 @@ __TOPBAR__
       <div class="card-bd">
         <div class="alert alert-success" style="margin-bottom:var(--space-4)"><span class="alert-ico">✓</span><div id="w-result-summary"></div></div>
         <dl class="kv" id="w-result"></dl>
-        <div class="alert alert-neutral" style="margin-top:var(--space-4)"><span class="alert-ico">i</span><div>建议下一步：运行连通性检查确认凭据可用，然后在租户详情页设置订阅（人工开通默认无订阅）。</div></div>
+        <div class="alert alert-neutral" style="margin-top:var(--space-4)"><span class="alert-ico">i</span><div>建议下一步：运行连通性检查确认凭据可用，然后在客户详情页设置订阅（人工开通默认无订阅）。</div></div>
       </div>
       <div class="card-ft" style="justify-content:flex-end;gap:var(--space-2)">
         <button class="btn" type="button" id="w-run-connectivity">运行连通性检查</button>
-        <a class="btn btn-primary" id="w-goto-tenant" href="#">前往租户详情</a>
+        <a class="btn btn-primary" id="w-goto-tenant" href="#">前往客户详情</a>
       </div>
     </section>
   </div>

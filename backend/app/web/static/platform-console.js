@@ -231,7 +231,7 @@
     if (config.slugConfirm) {
       slugConfirmInput = document.createElement('input'); slugConfirmInput.className = 'input mono'; slugConfirmInput.id = 'platform-modal-slug-confirm';
       slugConfirmInput.placeholder = config.slugConfirm.match;
-      body.appendChild(fieldWrap('确认租户标识', true, slugConfirmInput, '只读/幂等操作仍需简要确认租户身份（接口要求），输入 ' + config.slugConfirm.match + '。'));
+      body.appendChild(fieldWrap('确认客户标识', true, slugConfirmInput, '只读/幂等操作仍需简要确认客户身份（接口要求），输入 ' + config.slugConfirm.match + '。'));
     }
 
     var disclosure = document.createElement('div'); disclosure.className = 'alert alert-neutral';
@@ -267,7 +267,7 @@
       if (!reasonCodeValid(reasonCode)) { modalAlert(body, 'danger', '请选择原因代码。'); return; }
       if (config.noteRequired !== false && !note) { modalAlert(body, 'danger', '请填写原因说明。'); return; }
       if (config.unlock && unlockInput.value !== config.unlock.match) { modalAlert(body, 'danger', '输入的标识不匹配，操作已取消。'); return; }
-      if (config.slugConfirm && slugConfirmInput.value !== config.slugConfirm.match) { modalAlert(body, 'danger', '租户标识不匹配，操作已取消。'); return; }
+      if (config.slugConfirm && slugConfirmInput.value !== config.slugConfirm.match) { modalAlert(body, 'danger', '客户标识不匹配，操作已取消。'); return; }
       submit.disabled = true;
       modalAlert(body, 'neutral', null);
       var confirmation = config.unlock ? unlockInput.value : (config.slugConfirm ? slugConfirmInput.value : undefined);
@@ -330,17 +330,13 @@
   function wireGlobalSearch() {
     var input = el('platform-search');
     if (!input) { return; }
+    // GH-199 follow-up (Haisu): search lives on its own page now — the
+    // topbar box just carries the query over to it.
     input.addEventListener('keydown', function (event) {
       if (event.key !== 'Enter') { return; }
       var q = input.value.trim();
       if (!q) { return; }
-      request('/api/platform/tenants/search?q=' + encodeURIComponent(q)).then(function (result) {
-        var first = result && result.tenants && result.tenants[0];
-        if (first) { window.location.href = '/platform/tenants/' + encodeURIComponent(first.tenant_id); return; }
-        window.location.href = '/platform/tenants?q=' + encodeURIComponent(q);
-      }).catch(function () {
-        window.location.href = '/platform/tenants?q=' + encodeURIComponent(q);
-      });
+      window.location.href = '/platform/search?q=' + encodeURIComponent(q);
     });
   }
 

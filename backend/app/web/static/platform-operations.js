@@ -31,14 +31,14 @@
       return PC.textPair(item.kind + ' · ' + item.severity + ' · ' + item.status, '次数 ' + PC.number(item.occurrence_count) + ' · ' + PC.date(item.last_detected_at));
     }, '暂无支付恢复或对账异常');
     PC.list(PC.el('subscriptions'), data.subscription_distribution, function (item) {
-      return PC.textPair((item.plan_name || '未订阅') + ' · ' + item.status, PC.number(item.tenant_count) + ' 个租户');
+      return PC.textPair((item.plan_name || '未订阅') + ' · ' + item.status, PC.number(item.tenant_count) + ' 个客户');
     }, '暂无订阅数据');
     PC.list(PC.el('quota-risks'), data.storage_quota_risks, function (item) {
       var li = PC.textPair(item.tenant_name, PC.bytes(item.used_bytes) + ' / ' + PC.bytes(item.quota_bytes) + ' · ' + (item.utilization_basis_points / 100).toFixed(2) + '%');
       li.className = item.state === 'over_quota' || item.state === 'at_quota' ? 'quota-danger' : 'quota-warning';
       return li;
-    }, '暂无接近配额的租户');
-    PC.list(PC.el('recent-tenants'), data.recent_tenants, function (item) { return PC.textPair(item.tenant_name, PC.date(item.occurred_at)); }, '暂无租户');
+    }, '暂无接近配额的客户');
+    PC.list(PC.el('recent-tenants'), data.recent_tenants, function (item) { return PC.textPair(item.tenant_name, PC.date(item.occurred_at)); }, '暂无客户');
     var periods = PC.el('revenue-periods');
     PC.clear(periods);
     revenue.periods.forEach(function (item) {
@@ -76,11 +76,6 @@
         'suite_ticket', fresh ? '渠道票据正常' : '票据状态异常',
         (data.age_seconds === null || data.age_seconds === undefined ? 'age 未知' : 'age ' + PC.number(data.age_seconds) + 's') + ' · 不展示票据值');
     }).catch(function (err) { infraGapTile(PC.el('infra-suite-ticket'), 'suite_ticket 状态'); PC.error(err.message || 'suite_ticket 状态加载失败'); });
-    PC.request('/api/platform/operations/connectivity/summary').then(function (data) {
-      var failing = data.fail_count > 0;
-      infraTile(PC.el('infra-connectivity'), failing ? 'danger' : 'success', failing ? (data.fail_count + ' FAIL') : 'OK', '连通性检查',
-        failing ? (data.fail_count + ' 个租户凭据不可用') : '全部租户凭据可用', data.reasons || '—');
-    }).catch(function () { infraGapTile(PC.el('infra-connectivity'), '连通性检查'); });
     PC.request('/api/platform/branding/domain-metrics').then(function (data) {
       var expiring = data.certificates_expiring_30_days_count > 0;
       infraTile(PC.el('infra-domains'), expiring ? 'warning' : 'success', expiring ? (PC.number(data.certificates_expiring_30_days_count) + ' 即将过期') : 'OK', '托管 TLS 域名',
@@ -94,7 +89,7 @@
       PC.list(PC.el('recent-operations'), data.items, function (item) {
         return PC.textPair(item.action + (item.tenant_slug ? '.' + item.tenant_slug : ''), (item.reason_code || '—') + ' · ' + PC.date(item.created_at));
       }, '暂无受控操作');
-    }).catch(function () { PC.empty(PC.el('recent-operations'), '此列表依赖跨租户审计接口，尚未交付。'); });
+    }).catch(function () { PC.empty(PC.el('recent-operations'), '此列表依赖跨客户审计接口，尚未交付。'); });
   }
 
   function loadDashboard() { return PC.request('/api/platform/operations/dashboard').then(renderDashboard); }

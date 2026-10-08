@@ -115,7 +115,7 @@ def test_platform_settings_pages_are_authenticated_and_use_platform_design_syste
     assert 'data-plane="platform"' in page.text
     assert "/web/static/platform-console-orange.css" in page.text
     assert "/web/static/platform-accounts.css" in page.text
-    assert "账户与安全" in page.text
+    assert "运营账号" in page.text
     assert 'href="/platform/settings"' in page.text
     assert 'id="password-form"' in page.text
     assert 'id="operator-rows"' in page.text

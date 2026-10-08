@@ -414,6 +414,12 @@ def test_router_count() -> None:
     # page route on top of the earlier five favorites API operations.
     # GH-186 adds five routes: the /platform/api-performance page shell and
     # four PlatformAdmin-only read APIs (endpoints/series/status/anomalies).
+    # GH-199 removes four platform page shells (usage/ledger/infra/analytics).
+    # GH-84 adds the staff-customer directory API (one route, nested).
+    # GH-199 follow-up adds the /platform/search page shell.
+    # Haisu finance request adds two routes: the /platform/finance/orders
+    # page shell and its PlatformAdmin-only /api/platform/finance/orders
+    # read-only listing API.
     assert route_count == 225
 
 
@@ -424,8 +430,9 @@ def test_selfhost_router_count() -> None:
     route_count = len([route for route in app.routes if hasattr(route, "methods")])
     # GH-168 keeps the non-commercial archive/setup routes in selfhost;
     # GH-179 adds five tenant-scoped favorites API operations. Later mainline
-    # route additions bring the current selfhost total to 145.
-    assert route_count == 145
+    # route additions bring the current selfhost total to 146. GH-84 adds
+    # one staff-customer directory route (present in both editions).
+    assert route_count == 146
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -498,6 +505,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/admin/retention-config",
             "/api/admin/usage",
             "/api/admin/staff",
+            "/api/admin/staff/{wecom_userid}/customers",
             "/api/admin/settings",
             "/api/admin/settings/bootstrap",
             "/api/admin/settings/bootstrap-status",
@@ -573,6 +581,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/api/platform/api-performance/series",
             "/api/platform/api-performance/status",
             "/api/platform/api-performance/anomalies",
+            "/api/platform/finance/orders",
             "/api/platform/branding/domains",
             "/api/platform/branding/domain-metrics",
             "/api/platform/operations/dashboard",
@@ -634,17 +643,15 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/platform/login",
             "/platform/logout",
             "/platform/operations",
+            "/platform/search",
             "/platform/settings",
             "/platform/settings/operators/new",
             "/platform/tenants",
             "/platform/tenants/new",
             "/platform/tenants/{tenant_id}",
-            "/platform/usage",
-            "/platform/ledger",
-            "/platform/infra",
-            "/platform/analytics",
             "/platform/audit",
             "/platform/api-performance",
+            "/platform/finance/orders",
             "/redoc",
         ]
     )
@@ -771,15 +778,19 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/platform/login", frozenset({"POST"}), "None", "HTMLResponse"),
         ("/platform/logout", frozenset({"POST"}), "None", "None"),
         ("/platform/operations", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/search", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/tenants", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/tenants/new", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/tenants/{tenant_id}", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/platform/usage", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/platform/ledger", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/platform/infra", frozenset({"GET"}), "None", "HTMLResponse"),
-        ("/platform/analytics", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/audit", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/api-performance", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/finance/orders", frozenset({"GET"}), "None", "HTMLResponse"),
+        (
+            "/api/platform/finance/orders",
+            frozenset({"GET"}),
+            "FinanceOrderListOut",
+            "None",
+        ),
         (
             "/api/platform/api-performance/endpoints",
             frozenset({"GET"}),
@@ -886,6 +897,12 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/api/admin/usage", frozenset({"GET"}), "UsageAnalyticsOut", "None"),
         ("/api/admin/settings", frozenset({"GET"}), "SettingsGetOut", "None"),
         ("/api/admin/staff", frozenset({"GET"}), "StaffDirectoryPage", "None"),
+        (
+            "/api/admin/staff/{wecom_userid}/customers",
+            frozenset({"GET"}),
+            "StaffCustomersPage",
+            "None",
+        ),
         ("/api/admin/settings", frozenset({"PUT"}), "SettingsUpdateOut", "None"),
         ("/api/admin/settings/bootstrap", frozenset({"POST"}), "dict", "None"),
         ("/api/admin/settings/bootstrap-status", frozenset({"GET"}), "dict", "None"),

@@ -280,8 +280,13 @@ def test_daily_series_and_page_expose_overall_and_success_extrema(platform_clien
     assert point["success_min_ms"] == 10.0 and point["success_max_ms"] == 10.0
 
     page = platform_client.get("/platform/api-performance")
-    assert "<th>整体 min/max</th>" in page.text
-    assert "<th>成功 min/max</th>" in page.text
+    # Haisu redesign: the first screen is the trend chart with 日/小时 tabs;
+    # the extrema detail moved into per-bucket chart tooltips; 采集状态 is
+    # the last section of the page.
+    assert 'id="apiperf-chart"' in page.text
+    assert "日趋势" in page.text
+    assert "小时趋势" in page.text
+    assert page.text.index("apiperf-chart") < page.text.index("apiperf-status-title")
     script = Path(__file__).parents[1] / "app/web/static/platform-api-performance.js"
     assert "extremaText(point.min_ms, point.max_ms)" in script.read_text()
 
@@ -305,7 +310,9 @@ function element() {
   return {
     children: [], textContent: '', hidden: false, disabled: false, value: '',
     addEventListener() {},
-    appendChild(child) { this.children.push(child); }
+    appendChild(child) { this.children.push(child); },
+    setAttribute() {},
+    classList: { toggle() {} }
   };
 }
 const PC = {
@@ -359,16 +366,27 @@ const PC = {
 };
 const document = {
   createElement() { return element(); },
+  createElementNS() { return element(); },
   addEventListener(name, callback) { if (name === 'DOMContentLoaded') onReady = callback; }
 };
 const source = fs.readFileSync(process.argv[1], 'utf8');
 vm.runInNewContext(source, { window: { PC }, document, URLSearchParams, setTimeout, Date, Math });
 onReady();
 setTimeout(() => {
-  const row = PC.el('apiperf-daily-rows').children[0];
-  const values = row.children.map(cell => cell.textContent);
-  assert.equal(values[5], '10 / 2000', 'overall min/max includes the failed 2000ms request');
-  assert.equal(values[6], '10 / 10', 'success min/max remains a separately labelled subset');
+  const chart = PC.el('apiperf-chart').children[0];
+  assert.ok(chart, 'daily trend renders an SVG chart into #apiperf-chart');
+  const titles = [];
+  (function walk(node) {
+    node.children.forEach((child) => {
+      const text = child.children.length === 1 ? child.children[0].textContent : '';
+      if (typeof text === 'string' && text.includes('整体 min/max')) { titles.push(text); }
+      walk(child);
+    });
+  })(chart);
+  assert.equal(titles.length, 1, 'one tooltip per bucket');
+  assert.match(titles[0], /请求数 2（错误 1）/, 'request bar splits errors out of the total');
+  assert.match(titles[0], /整体 min\/max 10 \/ 2000/, 'overall min/max includes the failed 2000ms request');
+  assert.match(titles[0], /成功 min\/max 10 \/ 10/, 'success min/max remains a separately labelled subset');
   assert.match(PC.el('apiperf-coverage').textContent, /过期批次丢弃 7/);
 }, 0);
 """

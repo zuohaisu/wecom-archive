@@ -70,12 +70,9 @@ _PLATFORM_PAGES = {
     # "/platform" itself is registered separately below (operations_page) —
     # it carries a legacy-redirect note and is the one page reachable by
     # its old /platform/operations URL too.
-    "/platform/tenants": ("platform_tenants", "tenants", "租户商业状态"),
+    "/platform/tenants": ("platform_tenants", "tenants", "订阅状态"),
     "/platform/tenants/new": ("platform_tenant_new", "tenant-new", "新建租户"),
-    "/platform/usage": ("platform_usage", "usage", "用量与配额"),
-    "/platform/ledger": ("platform_ledger", "ledger", "手工账本"),
-    "/platform/infra": ("platform_infra", "infra", "连通性 / 域名 / 渠道"),
-    "/platform/analytics": ("platform_analytics", "analytics", "产品使用分析"),
+    "/platform/search": ("platform_search", "search", "搜索"),
     "/platform/audit": ("platform_audit", "audit", "全局审计"),
 }
 
@@ -205,7 +202,7 @@ def tenant_detail_page(
     side nav highlights "tenants" — list and detail share one nav item."""
     if admin is None:
         return RedirectResponse("/platform/login", status_code=302)
-    return _render_platform_page("platform_tenant_detail", "tenants", "租户商业状态", admin)
+    return _render_platform_page("platform_tenant_detail", "tenants", "订阅状态", admin)
 
 
 @router.get(

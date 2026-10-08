@@ -60,7 +60,7 @@
     var dl = PC.el('w-review');
     PC.clear(dl);
     [
-      ['租户名称', values.name], ['slug', values.slug], ['管理员邮箱', values.admin_email],
+      ['客户名称', values.name], ['slug', values.slug], ['管理员邮箱', values.admin_email],
       ['Owner 邮箱', values.owner_email], ['回调域名', values.callback_domain || '（使用平台默认域名）'],
       ['开通原因', REASON_LABEL[values.reason] || values.reason],
       ['corp_id', values.corp_id], ['agent_id', values.agent_id],
@@ -106,7 +106,7 @@
   }
 
   function renderResult(result) {
-    PC.el('w-result-summary').textContent = (result.tenant_name || '租户') + ' 已创建。凭据已加密存储，本页不再展示。';
+    PC.el('w-result-summary').textContent = (result.tenant_name || '客户') + ' 已创建。凭据已加密存储，本页不再展示。';
     var dl = PC.el('w-result');
     PC.clear(dl);
     [
