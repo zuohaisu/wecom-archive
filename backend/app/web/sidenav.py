@@ -163,7 +163,6 @@ PLATFORM_NAV = (
             {"id": "tenants", "label": "订阅状态", "path": "/platform/tenants"},
             {"id": "search", "label": "搜索", "path": "/platform/search"},
             {"id": "audit", "label": "全局审计", "path": "/platform/audit"},
-            {"id": "settings", "label": "账户与安全", "path": "/platform/settings"},
         ),
     },
     {
@@ -176,6 +175,7 @@ PLATFORM_NAV = (
         "group": "基础设施",
         "items": (
             {"id": "api-performance", "label": "接口性能", "path": "/platform/api-performance"},
+            {"id": "settings", "label": "运营账号", "path": "/platform/settings"},
         ),
     },
 )
