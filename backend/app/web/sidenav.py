@@ -12,7 +12,6 @@ NAV = (
         "items": (
             {"id": "dashboard", "key": "nav.dashboard", "path": "/dashboard"},
             {"id": "billing", "key": "nav.billing", "path": "/admin/billing"},
-            {"id": "users", "key": "nav.seats", "path": "/admin/users"},
         ),
     },
     {
@@ -43,6 +42,7 @@ NAV = (
     {
         "group_key": "nav.group.system",
         "items": (
+            {"id": "users", "key": "nav.users", "path": "/admin/users"},
             {"id": "diagnostics", "key": "nav.diagnostics", "path": "/admin/diagnostics/reachability"},
             {"id": "settings", "key": "nav.settings", "path": "/admin/settings"},
         ),
@@ -56,11 +56,28 @@ NAV = (
 )
 
 
+
+_NAV_DRAWER_MARKUP = (
+    # GH-102: ≤900px the shared sidebar becomes a slide-in drawer (see
+    # design-system.css); the hamburger + backdrop live here so every page
+    # that renders the shared sidenav gets the narrow-screen switcher.
+    '<button type="button" class="nav-toggle" id="nav-toggle" aria-label="菜单" '
+    'aria-expanded="false" aria-controls="side-nav" onclick="toggleNav()">☰</button>'
+    '<div class="nav-backdrop" id="nav-backdrop" hidden></div>'
+)
+
+
+def _nav_drawer_markup() -> str:
+    return _NAV_DRAWER_MARKUP
+
+
+
 def render_sidenav(active_id: str, registered_paths: Iterable[str]) -> str:
     """Render the shared sidebar, enabling only registered route paths."""
     paths = frozenset(registered_paths)
     out = [
-        '<nav class="side-nav">',
+        _nav_drawer_markup(),
+        '<nav class="side-nav" id="side-nav">',
         '  <div class="side-nav-brand">',
         '    <img class="side-nav-logo" src="/api/branding/logo" alt="品牌标识" width="24" height="24" onerror="this.onerror=null;this.src=\'/web/static/brand/icon-tile-24.svg\'">',
         '    <div class="side-nav-title" data-i18n="app.subtitle">对话审阅控制台</div>',
@@ -168,7 +185,8 @@ def render_platform_sidenav(active_id: str) -> str:
     ``PLATFORM_NAV`` item id; the tenant-detail page passes ``"tenants"`` so
     the list item stays highlighted while viewing one tenant (Spec §1)."""
     out = [
-        '<nav class="side-nav">',
+        _nav_drawer_markup(),
+        '<nav class="side-nav" id="side-nav">',
         '  <div class="side-nav-brand">',
         '    <img class="side-nav-logo" src="/web/static/brand/icon-tile-24.svg" alt="康冠时代" width="24" height="24">',
         '    <div class="side-nav-title">平台运营</div>',
@@ -238,7 +256,7 @@ def render_platform_topbar(breadcrumb_current: str) -> str:
 def render_provisioning_sidenav(active_id: str) -> str:
     """Render the restricted provisioning-side navigation."""
     out = [
-        '<nav class="side-nav">',
+        '<nav class="side-nav" id="side-nav">',
         '  <div class="side-nav-brand"><img class="side-nav-logo" src="/web/static/brand/icon-tile-24.svg" alt="康冠时代" width="24" height="24"><div class="side-nav-title">组织自助开通</div></div>',
         '  <div class="side-nav-scroll">',
         '    <div class="side-nav-group">开通步骤</div>',

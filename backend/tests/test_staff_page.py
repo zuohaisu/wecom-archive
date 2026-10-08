@@ -101,6 +101,6 @@ def test_users_page_retirement_keys_removed_from_all_locales() -> None:
     assert source.count('"nav.staffSeats"') == 0
     assert source.count('"users.breadcrumbDirectory"') == 0
     assert source.count('"users.messages30"') == 0
-    assert source.count('"nav.seats":') == 3
-    assert source.count('"nav.seats": "Seats"') == 1
+    assert source.count('"nav.users":') == 3
+    assert source.count('"nav.users": "User Management"') == 1
     assert source.count('"nav.staffDirectory":') == 3

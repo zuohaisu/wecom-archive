@@ -330,3 +330,64 @@ Ops 后续负责：把这条命令接到腾讯云和 Mac 各自的调度（cron/
 - [ ] `shared/keys/`、`shared/private_keys/`（如存在）、`shared/certs/` 的实际内容需要 Ops 在生产上核实一遍——本次改动基于文档/代码交叉验证定义了 inventory，未登录生产逐项核对目录实际内容
 - [ ] 一次完整的异地恢复演练（比照 §6 对 DB/媒体做过的那次，这次针对 recovery-config bundle：真实解密 → 真实恢复到一台干净主机 → 真实启动应用）
 - [ ] 告警投递：`dr_config_bundle.sh`/`dr_pull.sh` 失败时的 `notify.sh`/`ALERT_WEBHOOK_URL` 投递路径需要 Ops 验证真的能送达（本次改动只保证失败时调用了 `notify.sh` 并且非零退出，不保证 webhook 已配置——见 §3.3 同样的已知缺口）
+
+## 9. GitHub SSH alias 与 clone 属主约定（GH-177）
+
+> 本节记录 2026-10-07 收尾核查及 GH-177 的只读配置核对结果。只记录已核实事实；本节不授权修改 SSH、systemd 或环境文件配置。SSH 配置行号是核对时的位置，后续编辑可能改变行号。
+
+### 9.1 Git remote 与 SSH host alias
+
+生产和非生产 clone 的 `origin` 均为：
+
+```text
+git@github.com-wecom-archive:zuohaisu/wecom-archive.git
+```
+
+`github.com-wecom-archive` 是各部署用户 `~/.ssh/config` 中的 Host alias，不是应替换为裸 `github.com` 的普通主机名。使用该 alias 才会应用对应部署用户的 SSH 身份配置；不要把 remote 改成 `git@github.com:...`，否则会绕过此 alias 配置。已核对的 stanza 如下（仅记录路径与 SSH 参数，不含私钥内容）：
+
+生产用户 `wecomarchive`，`/home/wecomarchive/.ssh/config`，核对时第 6–10 行：
+
+```sshconfig
+Host github.com-wecom-archive
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/github_repo_deploy
+  IdentitiesOnly yes
+```
+
+非生产用户 `wecomarchive-nonprod`，`/home/wecomarchive-nonprod/.ssh/config`，核对时第 1–6 行：
+
+```sshconfig
+Host github.com-wecom-archive
+  HostName github.com
+  User git
+  IdentityFile /home/wecomarchive-nonprod/.ssh/github_repo_deploy
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+```
+
+非生产 stanza 的 `StrictHostKeyChecking accept-new` 是核对时实际存在的第 6 行，未包含在 GH-177 原先记录的第 1–5 行范围内；此处补记现状，不代表本次变更或建议修改该设置。生产和非生产的 `IdentityFile` 原始写法不同，应按各自用户的配置原样保留。
+
+### 9.2 按 clone 属主执行 Git 操作
+
+- 生产 clone 位于 `/srv/apps/wecom-archive-365/current`，对应部署用户为 `wecomarchive`。
+- 非生产 clone 位于 `/srv/apps/wecom-archive-365-nonprod/current`，属主为 `wecomarchive-nonprod`，目录权限为 `750`。核查时以 `wecomarchive` 身份对该目录执行 Git 操作返回 `rc=128 Permission denied`；操作非生产 clone 时应使用 `wecomarchive-nonprod` 身份，不要复用生产用户。
+
+### 9.3 systemd 实际读取的 EnvironmentFile
+
+| 环境 | 配置来源 | 实际 EnvironmentFile |
+|---|---|---|
+| 生产 | `/etc/systemd/system/wecom-archive-365.service.d/env.conf` drop-in | 生产 clone 内的 `backend/.env`（`/srv/apps/wecom-archive-365/current/backend/.env`） |
+| 非生产 | `wecom-archive-365-nonprod.service` | `/etc/wecom-archive-365/nonprod.env` |
+
+两套单元读取的环境文件位置不同；排查或变更时不要假设它们共用同一个文件。本 GH-177 文档更新未修改任何 unit、drop-in 或环境文件。
+
+### 9.4 旧仓库地址残留扫描与 fetch 核对记录
+
+2026-10-07 的收尾核查记录：
+
+- 在 2 个 systemd unit、drop-in 与关联 EnvironmentFile、`root`/`wecomarchive`/`wecomarchive-nonprod` 三个 crontab、`/etc/sudoers.d/` 的 10 个文件及经降噪后的 17 个备份/部署脚本中，扫描旧仓库名 `wecom-archive-365.git` 和旧 GitHub 地址模式 `github.com*:zuohaisu/wecom-archive-365`，命中均为 **0**。
+- 生产 `backend/.env` 只以脱敏计数方式扫描，上述模式命中 **0**；未记录或公开其中的环境变量值。
+- 非生产 clone 的 `git fetch origin main` 返回 `rc=0`；核查当时 `origin/main` 为 `53ec37f`，与生产 clone 和 GitHub `main` 一致。该 SHA 是当日核查快照，不代表当前 `main`。
+
+以上是有日期的核查记录，不代替未来迁移或改名后的新一轮残留扫描。

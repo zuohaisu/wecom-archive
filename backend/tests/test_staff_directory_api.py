@@ -1,8 +1,10 @@
-"""Internal-staff directory API coverage (Haisu split request).
+"""Internal-staff directory API coverage (Haisu split request + follow-up).
 
-Staff identity follows ``_collect_staff_ids`` (``staff_`` prefix plus
-seat-linked ids seen in the archive); counts mirror the RND-284 sent-only
-rule. Uses a SQLite-compatible hand schema like test_dashboard_api.
+Staff identity is the complement of the authoritative external registry:
+every archive participant is internal staff unless WeCom's external-contact
+sync registered them in ``external_contacts`` — the prefix/seat heuristics
+no longer gate the listing. Counts mirror the RND-284 sent-only rule. Uses
+a SQLite-compatible hand schema like test_dashboard_api.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ CREATE TABLE contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, wecom_userid TEXT N
 CREATE TABLE admin_users (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, wecom_user_id TEXT NOT NULL, name TEXT, avatar_url TEXT, last_login_at TEXT, password_hash TEXT, role TEXT NOT NULL DEFAULT 'admin', status TEXT NOT NULL DEFAULT 'active', email TEXT, phone TEXT, department TEXT, last_active_at TEXT, invite_token TEXT, invited_by TEXT, invite_status TEXT, ui_theme TEXT NOT NULL DEFAULT 'light', ui_locale TEXT NOT NULL DEFAULT 'zh-CN', created_at TEXT, updated_at TEXT);
 CREATE TABLE archive_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, msgid TEXT NOT NULL, seq INTEGER NOT NULL, publickey_ver INTEGER NOT NULL, encrypt_random_key TEXT NOT NULL, encrypt_chat_msg TEXT NOT NULL, decrypt_status TEXT NOT NULL, content_text TEXT, msgtype TEXT, sender TEXT, roomid TEXT, msgtime INTEGER, tenant_id TEXT, created_at TEXT);
 CREATE TABLE archive_message_recipients (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL, receiver_userid TEXT NOT NULL, receiver_type TEXT, tenant_id TEXT, created_at TEXT);
+CREATE TABLE external_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, external_userid TEXT NOT NULL, tenant_id TEXT, name TEXT, position TEXT, corporation_name TEXT, created_at TEXT, updated_at TEXT);
 """
 TENANT_A, TENANT_B = "tenant-a", "tenant-b"
 
@@ -91,6 +94,11 @@ def seeded(db: Session):
     db.execute(
         text("INSERT INTO tenants (id, name, slug) VALUES ('tenant-a','A','a'), ('tenant-b','B','b')")
     )
+    # guest_carol is the only externally registered participant: WeCom's
+    # external-contact sync recorded her, so she stays off the staff page.
+    db.execute(
+        text("INSERT INTO external_contacts (external_userid, tenant_id, name) VALUES ('guest_carol', 'tenant-a', 'Carol')")
+    )
     for userid, name, tenant in (
         ("staff_alice", "Alice", TENANT_A),
         ("staff_bob", "Bob", TENANT_A),
@@ -139,7 +147,7 @@ def test_staff_listing_returns_staff_only_with_readonly_stats(client, seeded) ->
     assert bob["department"] is None
     assert bob["msg_count_30d"] == 1
     assert bob["msg_count_total"] == 1
-    # guest_carol appears in the archive but is not internal staff.
+    # guest_carol appears in the archive but is a registered external contact.
     assert all(item["wecom_userid"] != "guest_carol" for item in data["items"])
     assert "content_text" not in response.text
 
@@ -196,3 +204,71 @@ def test_staff_listing_paginates(client, seeded) -> None:
     assert page1["total"] == 2 and len(page1["items"]) == 1
     assert page1["items"][0]["wecom_userid"] == "staff_alice"
     assert page2["items"][0]["wecom_userid"] == "staff_bob"
+
+
+def test_staff_listing_includes_unregistered_non_prefix_participants(client, seeded) -> None:
+    """Haisu follow-up: EVERY internal staff member who appeared belongs on
+    the page — the staff_ prefix and seat linkage must not gate inclusion.
+    An unregistered participant is internal by default."""
+    _message(seeded, "ops_dave", TENANT_A, 1, "a-dave-1")
+    seeded.commit()
+    app = _authenticated_app(seeded)
+    try:
+        response = client.get("/api/admin/staff")
+    finally:
+        app.dependency_overrides.clear()
+
+    data = response.json()
+    ids = [item["wecom_userid"] for item in data["items"]]
+    assert "ops_dave" in ids
+    dave = next(item for item in data["items"] if item["wecom_userid"] == "ops_dave")
+    assert dave["has_seat"] is False
+    assert dave["msg_count_30d"] == 1
+    # 注册过的外部联系人依然被排除。
+    assert "guest_carol" not in ids
+
+
+def test_staff_listing_includes_seats_without_archive_appearance(client, seeded) -> None:
+    """Haisu follow-up (production): a seat is internal staff even before
+    any of its messages are archived — its WeCom identity must be listed
+    (with zero counts) instead of being gated on archive participation."""
+    seeded.execute(
+        text(
+            "INSERT INTO admin_users (id, tenant_id, wecom_user_id, name, role, department)"
+            " VALUES ('seat-new', 'tenant-a', 'staff_newbie', 'Newbie', 'admin', '客服部')"
+        )
+    )
+    seeded.commit()
+    app = _authenticated_app(seeded)
+    try:
+        response = client.get("/api/admin/staff")
+    finally:
+        app.dependency_overrides.clear()
+
+    data = response.json()
+    newbie = next(
+        item for item in data["items"] if item["wecom_userid"] == "staff_newbie"
+    )
+    assert newbie["name"] == "Newbie"
+    assert newbie["has_seat"] is True
+    assert newbie["department"] == "客服部"
+    assert newbie["msg_count_30d"] == 0
+    assert newbie["msg_count_total"] == 0
+
+
+def test_staff_listing_excludes_opaque_external_id_families(client, seeded) -> None:
+    """GH-101-era production finding: WeCom's archive writes external
+    parties as opaque wma_/wba_/woa_ ids that the external-contact sync
+    never registers — they must not surface as internal staff."""
+    _message(seeded, "wma_unknown_1", TENANT_A, 1, "a-wma-1")
+    _message(seeded, "wba_partner_9", TENANT_A, 1, "a-wba-1")
+    seeded.commit()
+    app = _authenticated_app(seeded)
+    try:
+        response = client.get("/api/admin/staff")
+    finally:
+        app.dependency_overrides.clear()
+
+    ids = [item["wecom_userid"] for item in response.json()["items"]]
+    assert "wma_unknown_1" not in ids
+    assert "wba_partner_9" not in ids

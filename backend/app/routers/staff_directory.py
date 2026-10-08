@@ -2,10 +2,20 @@
 
 Haisu split request: the message statistics that used to ride on the
 console-seat table (users.py) belong to the staff directory, displayed
-read-only. Staff identity follows the product's single source of truth
-(``_collect_staff_ids``: ``staff_``-prefixed archive participants plus
-seat-linked ids seen in the archive). Counts mirror the RND-284 rule:
-messages SENT by the staff id — ids and counts only, never payloads.
+read-only. Haisu follow-up: the directory lists EVERY internal staff
+member who appeared in the archive — not only seat-linked accounts or
+``staff_``-prefixed ids. Internal is therefore the complement of the
+authoritative external registry: an archive participant is internal
+staff unless WeCom's external-contact sync registered them in
+``external_contacts``, and seat-linked identities count as internal
+staff even before any of their messages are archived (Haisu follow-up:
+the deployed directory missed exactly those). The registry is NOT a
+complete census of external parties — WeCom's external-contact sync only
+covers externals owned by configured members, so archive parties with the
+opaque external id families (``wma_``/``wba_``/``woa_`` prefixes) are
+excluded by id shape as well (production: 499 such parties had polluted
+the directory). Counts mirror the RND-284 rule: messages SENT by
+the staff id — ids and counts only, never payloads.
 """
 from __future__ import annotations
 
@@ -13,18 +23,23 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
-from app.conversation_membership import _collect_staff_ids
-from app.db.models import AdminUser, ArchiveMessage, Contact
+from app.conversation_membership import _collect_archive_participant_ids
+from app.db.models import AdminUser, ArchiveMessage, Contact, ExternalContact
 from app.db.session import get_db
 from app.schemas.staff_directory import StaffDirectoryItem, StaffDirectoryPage
 from app.services.avatar_sync import internal_avatar_presentations
 
 router = APIRouter()
+
+# WeCom session-archive external-party id families (opaque, server-assigned).
+# An internal member's userid is enterprise-defined and never carries them.
+EXTERNAL_ID_PREFIXES = ("wma_", "wba_", "woa_")
+
 
 
 @router.get("/staff", response_model=StaffDirectoryPage)
@@ -37,7 +52,26 @@ def list_internal_staff(
 ) -> StaffDirectoryPage:
     """Return the tenant's internal staff with read-only message counts."""
     _, tenant_id = auth
-    staff_ids = _collect_staff_ids(db, tenant_id)
+    participants = _collect_archive_participant_ids(db, tenant_id)
+    tenant_seats = (
+        db.query(AdminUser)
+        .filter(AdminUser.tenant_id == tenant_id)
+        .all()
+    )
+    seat_ids = {row.wecom_user_id for row in tenant_seats if row.wecom_user_id}
+    registered_external = set(
+        db.scalars(
+            select(ExternalContact.external_userid).where(
+                ExternalContact.tenant_id == tenant_id
+            )
+        ).all()
+    )
+    opaque_external = {
+        staff_id
+        for staff_id in (participants | seat_ids)
+        if staff_id.startswith(EXTERNAL_ID_PREFIXES)
+    }
+    staff_ids = (participants | seat_ids) - registered_external - opaque_external
 
     display_rows = (
         db.query(Contact)
@@ -48,11 +82,7 @@ def list_internal_staff(
     )
     contacts_by_id = {row.wecom_userid: row for row in display_rows}
     seats_by_id = {
-        row.wecom_user_id: row
-        for row in db.query(AdminUser)
-        .filter(AdminUser.tenant_id == tenant_id, AdminUser.wecom_user_id.in_(staff_ids))
-        .all()
-        if row.wecom_user_id
+        row.wecom_user_id: row for row in tenant_seats if row.wecom_user_id
     }
 
     filtered_ids = staff_ids
