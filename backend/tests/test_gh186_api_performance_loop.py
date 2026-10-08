@@ -272,7 +272,8 @@ def test_loop_persists_daily_email_intent_and_outcome(db_factory, fast_loop_conf
     whose status reflects the mocked provider outcome."""
     collector = ApiPerformanceCollector(instance_id="loop-test")
     runtime = ApiPerformanceRuntime(collector, fast_loop_config)
-    base = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)
+    # _detect_once re-evaluates against wall time; keep the synthetic window current.
+    base = datetime.now(UTC) - timedelta(minutes=10)
     for minute in range(10):
         for i in range(3):
             collector.record(_slow_obs("/api/slow", base + timedelta(minutes=minute, seconds=i)))
@@ -506,7 +507,8 @@ def test_email_job_failure_isolated_from_loop(db_factory, fast_loop_config):
     factory = BrokenThenWorkingFactory()
     collector = ApiPerformanceCollector(instance_id="isolate")
     runtime = ApiPerformanceRuntime(collector, fast_loop_config)
-    base = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)
+    # _detect_once re-evaluates against wall time; keep the synthetic window current.
+    base = datetime.now(UTC) - timedelta(minutes=10)
     for minute in range(10):
         for i in range(3):
             collector.record(_slow_obs("/api/slow", base + timedelta(minutes=minute, seconds=i)))
