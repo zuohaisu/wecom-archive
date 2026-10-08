@@ -407,11 +407,14 @@ def test_router_count() -> None:
     # account APIs: list, invite, invitation acceptance, and self password
     # rotation. GH-122 removes the customer cancel-intent API.
     # RND-366 adds five tenant-scoped favorites API operations.
+    # RND-369 adds the authenticated unified-favorites page.
     # Haisu split request adds two routes: the /admin/staff directory page
     # shell and its /api/admin/staff read-only listing API.
+    # RND-369 (merged from main) adds the authenticated unified-favorites
+    # page route on top of the earlier five favorites API operations.
     # GH-186 adds five routes: the /platform/api-performance page shell and
     # four PlatformAdmin-only read APIs (endpoints/series/status/anomalies).
-    assert route_count == 224
+    assert route_count == 225
 
 
 def test_routers_are_registered(client: TestClient) -> None:
@@ -438,6 +441,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/admin/provisioning",
             "/admin/provisioning/settings",
             "/admin/media",
+            "/admin/favorites",
             "/admin/messages",
             "/admin/cleanup",
             "/admin/recycle-bin",
@@ -674,6 +678,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/admin/provisioning", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/provisioning/settings", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/media", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/admin/favorites", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/recycle-bin", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/cleanup", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/admin/messages", frozenset({"GET"}), "None", "HTMLResponse"),

@@ -16,7 +16,14 @@ from sqlalchemy.orm import Session
 from app.auth import require_role
 from app.conversation_membership import _direct_conv_id
 from app.db.group_chat_metadata import load_group_chat_display_names
-from app.db.models import AdminUser, ArchiveMessage, ArchiveMessageRecipient, Contact, MediaFile
+from app.db.models import (
+    AdminUser,
+    ArchiveFavorite,
+    ArchiveMessage,
+    ArchiveMessageRecipient,
+    Contact,
+    MediaFile,
+)
 from app.display_names import resolve_person_display_name, resolve_room_display_name
 from app.db.session import get_db
 from app.services.message_deletion import active_message_filter
@@ -54,6 +61,7 @@ def list_media(
     since: Optional[datetime] = Query(None, description="ISO8601 lower bound"),
     until: Optional[datetime] = Query(None, description="ISO8601 upper bound"),
     q: Optional[str] = Query(None, description="Optional file-name/content search"),
+    favorited_only: bool = Query(False, description="Return only active media favorites"),
     sort: Optional[str] = Query("newest", description="newest|oldest|size_desc"),
     offset: int = Query(0, ge=0),
     limit: int = Query(24, ge=1, le=200),
@@ -88,6 +96,18 @@ def list_media(
     )
     if types:
         statement = statement.where(MediaFile.file_type.in_(types))
+    if favorited_only:
+        active_favorite = (
+            select(ArchiveFavorite.id)
+            .where(
+                ArchiveFavorite.tenant_id == tenant_id,
+                ArchiveFavorite.object_type == "media",
+                ArchiveFavorite.media_file_id == MediaFile.id,
+                ArchiveFavorite.canceled_at.is_(None),
+            )
+            .exists()
+        )
+        statement = statement.where(active_favorite)
     if days is not None:
         since = datetime.now(timezone.utc) - timedelta(days=days)
     if since is not None:
@@ -181,4 +201,8 @@ def list_media(
                 "name": _media_label(message.structured_content),
             }
         )
-    return MediaLibraryPage(items=items, total=total, has_more=len(items) == limit)
+    return MediaLibraryPage(
+        items=items,
+        total=total,
+        has_more=offset + len(items) < total,
+    )

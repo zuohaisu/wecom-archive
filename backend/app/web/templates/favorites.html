@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>收藏夹</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="manifest" href="/api/branding/manifest.webmanifest">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/console/media-viewer.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/favorites-page.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__I18N_SCRIPT__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+  <header class="topbar"><div class="breadcrumb"><span data-i18n="media.breadcrumbData">数据</span><span class="sep">/</span><span class="cur" data-i18n="favoritesPage.title">收藏夹</span></div></header>
+  <main class="page favorites-page">
+    <div class="page-hd"><div><h1 data-i18n="favoritesPage.title">收藏夹</h1><p data-i18n="favoritesPage.description">集中管理已收藏的消息与媒体，可按会话、员工和时间筛选。</p></div></div>
+    <form class="favorites-filters" id="favorites-filters">
+      <h2 data-i18n="favoritesPage.filterTitle">筛选收藏</h2>
+      <div class="favorites-filter-grid">
+        <label><span data-i18n="favoritesPage.conversation">会话 ID</span><input class="input" id="favorites-filter-conversation" type="search" maxlength="128" autocomplete="off"></label>
+        <label><span data-i18n="favoritesPage.staff">员工 ID</span><input class="input" id="favorites-filter-staff" type="search" maxlength="64" autocomplete="off"></label>
+        <label><span data-i18n="favoritesPage.contact">外部联系人（姓名或 ID）</span><input class="input" id="favorites-filter-contact" type="search" maxlength="128" autocomplete="off"></label>
+        <label><span data-i18n="favoritesPage.mediaType">内容类型</span><select class="select" id="favorites-filter-media-type"><option value="" data-i18n="favoritesPage.allMediaTypes">全部类型</option><option value="message" data-i18n="favoritesPage.messageType">消息</option><option value="image" data-i18n="media.type.image">图片</option><option value="video" data-i18n="media.type.video">视频</option><option value="voice" data-i18n="media.type.voice">语音</option><option value="file" data-i18n="media.type.file">文件</option></select></label>
+        <label><span data-i18n="favoritesPage.favoritedBy">收藏人（姓名或账号 ID）</span><input class="input" id="favorites-filter-actor" type="search" maxlength="128" autocomplete="off"></label>
+        <label><span data-i18n="favoritesPage.favoriteSince">收藏时间起始</span><input class="input" id="favorites-filter-favorite-since" type="date"></label>
+        <label><span data-i18n="favoritesPage.favoriteUntil">收藏时间结束</span><input class="input" id="favorites-filter-favorite-until" type="date"></label>
+        <label><span data-i18n="favoritesPage.messageSince">消息时间起始</span><input class="input" id="favorites-filter-message-since" type="date"></label>
+        <label><span data-i18n="favoritesPage.messageUntil">消息时间结束</span><input class="input" id="favorites-filter-message-until" type="date"></label>
+      </div>
+      <div class="row gap-3 favorites-filter-actions"><button class="btn btn-primary" type="submit" data-i18n="favoritesPage.applyFilters">应用筛选</button><button class="btn btn-secondary" id="favorites-clear-filters" type="button" data-i18n="favoritesPage.clearFilters">清除筛选</button></div>
+    </form>
+    <p class="field-help favorites-remove-notice" data-i18n="favoritesPage.removeOnlyNotice">取消收藏只移除收藏标记，不会删除原始消息或媒体。</p>
+    <p class="field-help favorites-permission" id="favorites-permission" role="status" aria-live="polite"></p>
+    <div class="favorites-selection hidden" id="favorites-selection" role="region" aria-labelledby="favorites-selected-count">
+      <span class="favorites-selected-count" id="favorites-selected-count" role="status" aria-live="polite" data-i18n="favoritesPage.selectedCount">已选 {n} 项</span>
+      <button class="btn btn-secondary" id="favorites-select-page" type="button" data-i18n="favoritesPage.selectPage">选择本页全部</button>
+      <button class="btn btn-secondary" id="favorites-clear-selection" type="button" data-i18n="favoritesPage.clearSelection">清空选择</button>
+      <button class="btn btn-primary hidden" id="favorites-export-selected" type="button" data-i18n="favoritesPage.exportSelected">用于证据导出</button>
+      <button class="btn btn-secondary" id="favorites-unfavorite-selected" type="button" data-i18n="favoritesPage.unfavoriteSelected">取消所选收藏</button>
+    </div>
+    <p class="field-help favorites-status" id="favorites-status" role="status" aria-live="polite" tabindex="-1"></p>
+    <div class="favorites-error-row"><p class="field-error favorites-status hidden" id="favorites-error" role="alert" tabindex="-1"></p><button class="btn btn-secondary btn-sm hidden" id="favorites-retry" type="button" data-i18n="favoritesPage.retry">重试</button></div>
+    <div class="favorites-table-wrap" id="favorites-table-wrap" aria-busy="false">
+      <table class="favorites-table">
+        <thead><tr>
+          <th scope="col"><span class="sr-only" data-i18n="favoritesPage.selectItem">选择此收藏</span></th>
+          <th scope="col" data-i18n="favoritesPage.statusLabel">当前状态</th>
+          <th scope="col" data-i18n="favoritesPage.conversationLabel">会话</th>
+          <th scope="col" data-i18n="favoritesPage.messagePreviewLabel">消息摘要</th>
+          <th scope="col" data-i18n="favoritesPage.senderLabel">发送者</th>
+          <th scope="col" data-i18n="favoritesPage.favoritedByLabel">收藏人</th>
+          <th scope="col" data-i18n="favoritesPage.favoritedAtLabel">收藏时间</th>
+          <th scope="col" data-i18n="favoritesPage.messageTimeLabel">消息时间</th>
+          <th scope="col"><span class="sr-only" data-i18n="favoritesPage.unfavorite">取消收藏</span></th>
+        </tr></thead>
+        <tbody id="favorites-rows"></tbody>
+      </table>
+    </div>
+    <div class="favorites-empty hidden" id="favorites-empty" data-i18n="favoritesPage.empty">当前筛选条件下没有收藏。</div>
+    <nav class="favorites-pagination" aria-labelledby="favorites-pagination-label">
+      <span class="sr-only" id="favorites-pagination-label" data-i18n="favoritesPage.paginationLabel">分页</span>
+      <span class="muted" id="favorites-results" role="status" aria-live="polite"></span>
+      <div class="row gap-3"><button class="btn btn-secondary" id="favorites-previous" type="button" data-i18n="favoritesPage.previous">上一页</button><button class="btn btn-secondary" id="favorites-next" type="button" data-i18n="favoritesPage.next">下一页</button></div>
+    </nav>
+  </main>
+</div></div>
+<script src="/web/static/console/media-viewer.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/favorites-page.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>

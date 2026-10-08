@@ -30,6 +30,7 @@ from app.conversation_membership import (
 )
 from app.db.group_chat_metadata import load_group_chat_display_names
 from app.db.models import (
+    ArchiveFavorite,
     ArchiveMessage,
     ArchiveMessageRecipient,
     MediaFile,
@@ -668,6 +669,31 @@ def _message_has_recipient(tenant_id: str, userid: str):
     )
 
 
+def _active_favorite_message_filter(tenant_id: str):
+    return exists().where(
+        ArchiveFavorite.tenant_id == tenant_id,
+        ArchiveFavorite.object_type == "message",
+        ArchiveFavorite.archive_message_id == ArchiveMessage.id,
+        ArchiveFavorite.canceled_at.is_(None),
+    )
+
+
+def _favorited_message_ids(db: Session, tenant_id: str, messages: list) -> set[int]:
+    if not messages:
+        return set()
+    return {
+        row[0]
+        for row in db.query(ArchiveFavorite.archive_message_id)
+        .filter(
+            ArchiveFavorite.tenant_id == tenant_id,
+            ArchiveFavorite.object_type == "message",
+            ArchiveFavorite.canceled_at.is_(None),
+            ArchiveFavorite.archive_message_id.in_([message.id for message in messages]),
+        )
+        .all()
+    }
+
+
 def _fast_timeline_page(
     db: Session,
     tenant_id: str,
@@ -677,6 +703,7 @@ def _fast_timeline_page(
     before: Optional[str],
     entity_id: Optional[str],
     conversation_type: Optional[str],
+    favorited_only: bool,
 ):
     """Return a DB-paginated page for unambiguous normal conversations.
 
@@ -687,15 +714,16 @@ def _fast_timeline_page(
     ``None`` and continue through the authoritative compatibility resolver.
     """
     if conversation_type == "group" and not conversation_id.startswith("direct__"):
-        return _page_from_compact_query(
-            db.query(ArchiveMessage.id, func.coalesce(ArchiveMessage.msgtime, 0)).filter(
-                ArchiveMessage.tenant_id == tenant_id,
-                active_message_filter(),
-                ArchiveMessage.roomid == conversation_id,
-            ),
-            limit,
-            before,
+        query = db.query(
+            ArchiveMessage.id, func.coalesce(ArchiveMessage.msgtime, 0)
+        ).filter(
+            ArchiveMessage.tenant_id == tenant_id,
+            active_message_filter(),
+            ArchiveMessage.roomid == conversation_id,
         )
+        if favorited_only:
+            query = query.filter(_active_favorite_message_filter(tenant_id))
+        return _page_from_compact_query(query, limit, before)
 
     if conversation_type != "direct" or not conversation_id.startswith("direct__"):
         return None
@@ -754,6 +782,8 @@ def _fast_timeline_page(
         or_(ArchiveMessage.roomid.is_(None), ArchiveMessage.roomid == ""),
         direct_pair,
     ]
+    if favorited_only:
+        filters.append(_active_favorite_message_filter(tenant_id))
     if entity_id:
         filters.append(
             or_(
@@ -779,6 +809,7 @@ def resolve_timeline_page(
     staff_id: Optional[str] = None,
     contact_id: Optional[str] = None,
     conversation_type: Optional[str] = None,
+    favorited_only: bool = False,
 ) -> ConversationMessagesOut:
     """
     Return a page of the message timeline for a conversation, scoped to the
@@ -837,6 +868,7 @@ def resolve_timeline_page(
         before=before,
         entity_id=entity_id,
         conversation_type=conversation_type,
+        favorited_only=favorited_only,
     )
     if fast_page is not None:
         page_ids, has_older, next_before = fast_page
@@ -845,7 +877,12 @@ def resolve_timeline_page(
         # resolver.  It is intentionally the fallback rather than a second
         # implementation of those legacy semantics.
         compact_messages = _fetch_conversation_messages_compact(
-            db, conversation_id, tenant_id, mode=mode, entity_id=entity_id
+            db,
+            conversation_id,
+            tenant_id,
+            mode=mode,
+            entity_id=entity_id,
+            active_only=favorited_only,
         )
 
         if not compact_messages:
@@ -862,6 +899,10 @@ def resolve_timeline_page(
                     f"conversation resolved to '{resolved_conversation_type}'"
                 ),
             )
+
+        if favorited_only:
+            favorited_ids = _favorited_message_ids(db, tenant_id, compact_messages)
+            compact_messages = [message for message in compact_messages if message.id in favorited_ids]
 
         all_sorted_asc = sorted(compact_messages, key=lambda m: (m.msgtime or 0, m.id))
         if before is not None:

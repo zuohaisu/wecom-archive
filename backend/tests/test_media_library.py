@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import text
 from fastapi.testclient import TestClient
 
 from app.db.models import MediaFile
 from tests.test_reachability_audit import (
     _TENANT_A,
+    _TENANT_B,
     _insert_message,
     _insert_recipient,
     db,  # noqa: F401 - fixture
@@ -118,3 +120,83 @@ def test_media_list_malformed_direct_row_has_visible_nonempty_fallback(client, d
     item = response.json()["items"][0]
     assert item["conversation_id"]
     assert item["session_title"] == "unknown"
+
+
+def test_media_list_favorites_filter_is_server_side_tenant_scoped_and_active(
+    client, db
+):
+    favorite_message = _insert_message(
+        db,
+        msgid="favorite-media-message",
+        msgtype="image",
+        sender="staff-alice",
+        tenant_id=_TENANT_A,
+    )
+    favorite_media = _insert_media(db, favorite_message.id)
+    ordinary_message = _insert_message(
+        db,
+        msgid="ordinary-media-message",
+        msgtype="file",
+        sender="staff-alice",
+        tenant_id=_TENANT_A,
+    )
+    ordinary_media = _insert_media(db, ordinary_message.id)
+    deleted_message = _insert_message(
+        db,
+        msgid="deleted-media-message",
+        msgtype="video",
+        sender="staff-alice",
+        tenant_id=_TENANT_A,
+    )
+    deleted_media = _insert_media(db, deleted_message.id)
+    deleted_message.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+    db.execute(
+        text(
+            "CREATE TABLE archive_favorites ("
+            "id TEXT PRIMARY KEY, tenant_id TEXT, object_type TEXT, "
+            "media_file_id INTEGER, canceled_at DATETIME)"
+        )
+    )
+    db.execute(
+        text(
+            "INSERT INTO archive_favorites "
+            "(id, tenant_id, object_type, media_file_id, canceled_at) "
+            "VALUES (:id, :tenant_id, 'media', :media_file_id, :canceled_at)"
+        ),
+        [
+            {
+                "id": "active-favorite",
+                "tenant_id": _TENANT_A,
+                "media_file_id": favorite_media.id,
+                "canceled_at": None,
+            },
+            {
+                "id": "canceled-favorite",
+                "tenant_id": _TENANT_A,
+                "media_file_id": ordinary_media.id,
+                "canceled_at": datetime.now(timezone.utc),
+            },
+            {
+                "id": "cross-tenant-favorite",
+                "tenant_id": _TENANT_B,
+                "media_file_id": ordinary_media.id,
+                "canceled_at": None,
+            },
+            {
+                "id": "deleted-favorite",
+                "tenant_id": _TENANT_A,
+                "media_file_id": deleted_media.id,
+                "canceled_at": None,
+            },
+        ],
+    )
+    db.commit()
+    _authed()
+
+    response = client.get("/api/admin/media?favorited_only=true")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["has_more"] is False
+    assert [item["id"] for item in response.json()["items"]] == [favorite_media.id]

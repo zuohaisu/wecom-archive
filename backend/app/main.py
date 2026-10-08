@@ -14,6 +14,7 @@ from app.routers.admin_cleanup_page import router as admin_cleanup_page_router
 from app.routers.analytics import router as analytics_router
 from app.routers.admin_contacts_page import router as admin_contacts_page_router
 from app.routers.admin_media_page import router as admin_media_page_router
+from app.routers.admin_favorites_page import router as admin_favorites_page_router
 from app.routers.admin_recycle_bin_page import router as admin_recycle_bin_page_router
 from app.routers.admin_staff_page import router as admin_staff_page_router
 from app.routers.admin_users_page import router as admin_users_page_router
@@ -221,6 +222,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_staff_page_router)
     app.include_router(admin_audit_page_router)
     app.include_router(admin_media_page_router)
+    app.include_router(admin_favorites_page_router)
     app.include_router(admin_recycle_bin_page_router)
     app.include_router(admin_cleanup_page_router)
     app.include_router(admin_contacts_page_router)

@@ -12,6 +12,7 @@ function timelineEntityQueryParams(){
     qs+='&mode=contact&contact_id='+encodeURIComponent(timelineEntityId);
   }
   if(timelineConvType)qs+='&conversation_type='+encodeURIComponent(timelineConvType);
+  if(typeof timelineFavoritesOnly!=='undefined'&&timelineFavoritesOnly)qs+='&favorited_only=true';
   return qs;
 }
 // RND-206 QA fix: captures requestConvId+gen at send time (not at resolve
@@ -37,6 +38,7 @@ function fetchTimelinePage(before, isInitial){
       timelineHasOlder=data.pagination.has_older;
       timelineNextBefore=data.pagination.next_before;
       renderTimeline(isInitial);
+      if(typeof loadTimelineFavoriteStatuses==='function')loadTimelineFavoriteStatuses(data.messages,requestConvId,gen);
       startHistoryObserver();
       // The stats/participant panel can require an aggregate across an
       // entire long conversation.  Start it only after the first message
@@ -88,6 +90,9 @@ function showHistoryRetry(){
   if(el)el.innerHTML=historyRetryHtml();
 }
 function fetchOlderMessages(convId,before){
+  // Every history-page request can replace/extend the loaded selection
+  // scope, whether it came from scroll loading or a search locator.
+  if(typeof clearTimelineFavoriteSelection==='function')clearTimelineFavoriteSelection();
   // RND-206 QA fix: captures the generation token at call time (this is
   // always invoked synchronously from loadOlderAutomatically, right when
   // the request starts, same guarantee as requestConvId below) rather than
@@ -109,6 +114,7 @@ function fetchOlderMessages(convId,before){
     if(timelineConvId!==convId||timelineRequestGen!==gen)return;
     timelineMsgs=data.messages.concat(timelineMsgs);
     timelineHasOlder=data.pagination.has_older;
+    if(typeof loadTimelineFavoriteStatuses==='function')loadTimelineFavoriteStatuses(data.messages,convId,gen);
     timelineNextBefore=data.pagination.next_before;
   });
 }
@@ -267,8 +273,9 @@ function timelineRowHtml(m){
     var checked=deleteSelection[m.msgid]?' checked':' ';
     deleteCheck='<label class="tl-delete-checkbox" aria-hidden="false"><input class="tl-delete-check" type="checkbox" aria-label="'+esc(I18N.t('delete.selectMessage'))+'"'+checked+'onclick="event.stopPropagation();toggleMessageForDelete(&quot;'+esc(m.msgid)+'&quot;)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();event.stopPropagation();toggleMessageForDelete(&quot;'+esc(m.msgid)+'&quot;)}"></label>';
   }
+  var favoriteControls=typeof timelineFavoriteRowHtml==='function'?timelineFavoriteRowHtml(m):'';
   return '<div class="'+rowCls+'" data-msgid="'+esc(m.msgid)+'" data-msgsig="'+esc(timelineSignature([m]))+'" onclick="selectMessageForAudit(&quot;'+esc(m.msgid)+'&quot;)">'
-    +'<div class="tl-meta">'+deleteCheck+senderAvatar+'<span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
+    +'<div class="tl-meta">'+deleteCheck+favoriteControls+senderAvatar+'<span class="'+sc+'">'+esc(senderName)+'</span>'+senderSecondary
     +' <span class="tl-time">'+esc(fmtTime(m.msgtime))+'</span>'+mt+grp+revokedBadge+'</div>'
     +bodyHtml
     +rcpt+auditLine+'</div>';
@@ -286,7 +293,7 @@ function renderTimeline(scrollToBottom){
     +(pendingHistoryError?historyRetryHtml():(timelineHasOlder?'':'<div class="history-status history-end">'+I18N.t('history.noMore')+'</div>'))
     +'</div>';
   html+='<div id="timeline-top-sentinel"></div>';
-  html+='<div class="timeline">';
+  html+='<div class="timeline'+((typeof favoriteMode!=='undefined'&&favoriteMode)?' favorite-selection-mode':'')+'">';
   timelineMsgs.forEach(function(m){
     html+=timelineRowHtml(m);
   });
