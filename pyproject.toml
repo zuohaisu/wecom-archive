@@ -29,3 +29,8 @@ known-first-party = ["app"]
 # to produce this — see docs/ops/media_storage_ops.md and the RND-187
 # fix-round notes for context.
 "backend/tests/*.py" = ["F811"]
+
+[tool.pytest.ini_options]
+markers = [
+    "requires_internal_ops_docs: asserts contracts for private production-operations documents omitted from public snapshots; still runs in the full repository suite",
+]

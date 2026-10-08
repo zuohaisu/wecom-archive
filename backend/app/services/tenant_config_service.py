@@ -24,8 +24,9 @@ from sqlalchemy.orm import Session
 from app.audit import AuditAction, AuditObjectType, write_audit
 from app.crypto import FieldDecryptionError
 from app.config.crypto import mask
+from app.config.resolver import get_config_resolver
 from app.db.models import Tenant, TenantWecomConfig, ThirdPartyOrganizationBinding
-from app.settings import get_wecom_oauth_settings
+from app.settings import APP_EDITION_SELFHOST, get_app_edition, get_wecom_oauth_settings
 from app.services.wecom_callback_crypto import (
     CallbackConfigurationError,
     decode_aes_key,
@@ -115,11 +116,20 @@ def _callback_url() -> str | None:
 def config_snapshot(db: Session, tenant_id: str) -> dict:
     """Read-only view of the tenant's archive config. Never returns plaintext."""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    binding = (
-        db.query(ThirdPartyOrganizationBinding)
-        .filter(ThirdPartyOrganizationBinding.tenant_id == tenant_id)
-        .first()
-    )
+    if get_app_edition() == APP_EDITION_SELFHOST:
+        resolver = get_config_resolver()
+        corp_id = (resolver.resolve(db, "wecom_corp_id") or "").strip()
+        agent_id = (resolver.resolve(db, "wecom_agent_id") or "").strip()
+        binding_source = "runtime_config" if corp_id and agent_id else None
+    else:
+        binding = (
+            db.query(ThirdPartyOrganizationBinding)
+            .filter(ThirdPartyOrganizationBinding.tenant_id == tenant_id)
+            .first()
+        )
+        corp_id = binding.corp_id if binding is not None else None
+        agent_id = binding.agent_id if binding is not None else None
+        binding_source = "third_party_binding" if binding is not None else None
     config = (
         db.query(TenantWecomConfig)
         .filter(TenantWecomConfig.tenant_id == tenant_id)
@@ -127,9 +137,9 @@ def config_snapshot(db: Session, tenant_id: str) -> dict:
     )
     org = {
         "corp_name": tenant.name if tenant is not None else None,
-        "corp_id": binding.corp_id if binding is not None else None,
-        "agent_id": binding.agent_id if binding is not None else None,
-        "source": "third_party_binding" if binding is not None else None,
+        "corp_id": corp_id or None,
+        "agent_id": agent_id or None,
+        "source": binding_source,
     }
     missing: list[str] = []
     fields = {
@@ -252,13 +262,21 @@ def apply_config_updates(db: Session, tenant_id: str, updates: dict) -> dict:
     if errors:
         raise TenantConfigValidationError(errors)
 
-    binding = (
-        db.query(ThirdPartyOrganizationBinding)
-        .filter(ThirdPartyOrganizationBinding.tenant_id == tenant_id)
-        .first()
-    )
-    if binding is None:
-        raise TenantConfigBindingMissingError()
+    if get_app_edition() == APP_EDITION_SELFHOST:
+        resolver = get_config_resolver()
+        corp_id = (resolver.resolve(db, "wecom_corp_id") or "").strip()
+        agent_id = (resolver.resolve(db, "wecom_agent_id") or "").strip()
+        if not corp_id or not agent_id:
+            raise TenantConfigBindingMissingError()
+    else:
+        binding = (
+            db.query(ThirdPartyOrganizationBinding)
+            .filter(ThirdPartyOrganizationBinding.tenant_id == tenant_id)
+            .first()
+        )
+        if binding is None:
+            raise TenantConfigBindingMissingError()
+        corp_id, agent_id = binding.corp_id, binding.agent_id or ""
 
     config = (
         db.query(TenantWecomConfig)
@@ -282,14 +300,21 @@ def apply_config_updates(db: Session, tenant_id: str, updates: dict) -> dict:
         config = TenantWecomConfig(
             id=str(uuid4()),
             tenant_id=tenant_id,
-            corp_id=binding.corp_id,
-            agent_id=binding.agent_id or "",
+            corp_id=corp_id,
+            agent_id=agent_id,
             callback_domain="",
             is_active=True,
         )
         db.add(config)
 
     changed: list[str] = []
+    if get_app_edition() == APP_EDITION_SELFHOST:
+        if config.corp_id != corp_id:
+            config.corp_id = corp_id
+            changed.append("corp_id")
+        if config.agent_id != agent_id:
+            config.agent_id = agent_id
+            changed.append("agent_id")
     if "archive_secret" in cleaned and "private_key" in cleaned:
         config.set_credentials(cleaned["archive_secret"], cleaned["private_key"])
         changed.extend(("archive_secret", "private_key"))

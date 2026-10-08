@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 from typing import Any, Optional, Tuple
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -19,9 +20,10 @@ from app.config.crypto import encrypt_value, mask
 from app.config.resolver import get_config_resolver, invalidate
 from app.config.schema import CONFIG_REGISTRY, ConfigItemSpec
 from app.config.validation import check_domain_format, check_qiniu, check_wecom
-from app.db.models import AdminUser, AppConfigStore
+from app.db.models import AdminUser, AppConfigStore, Tenant
 from app.db.session import get_db
 from app.schemas.settings import SettingsErrorItem, SettingsGetOut, SettingsUpdateIn, SettingsUpdateOut
+from app.settings import APP_EDITION_SELFHOST, get_app_edition
 
 settings_router = APIRouter()
 
@@ -337,6 +339,14 @@ def bootstrap_settings(
             requires_restart=spec.restart_required,
             updated_by=None,
         )
+
+    if get_app_edition() == APP_EDITION_SELFHOST:
+        # A fresh community install has one local tenant before the first
+        # password login and S2 configuration wizard. Never alter an existing
+        # tenant's lifecycle or reuse a different tenant as the default.
+        default_tenant = db.query(Tenant).filter(Tenant.slug == "default").first()
+        if default_tenant is None:
+            db.add(Tenant(id=str(uuid4()), name="Default", slug="default"))
 
     db.commit()
     for key, _value in validated:

@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible defect in wecom-archive.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        For security vulnerabilities, follow [SECURITY.md](https://github.com/zuohaisu/wecom-archive/blob/main/SECURITY.md)
+        and do not open a public issue. Never include credentials, customer
+        information, real archive messages, or production media.
+  - type: checkboxes
+    id: safe-data
+    attributes:
+      label: Safe-to-share information
+      options:
+        - label: I have removed secrets, personal data, and real customer/archive content.
+          required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Deployment type
+      description: Which deployment is affected?
+      options:
+        - Self-hosted
+        - Official cloud
+        - Other
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Include the release or commit if known.
+      placeholder: e.g. v1.0.0 or a commit SHA
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproducible sequence using synthetic data.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Redact secrets, tokens, identifiers, and customer content before attaching.
+    validations:
+      required: false

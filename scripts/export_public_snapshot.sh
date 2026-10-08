@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 #
-# Export the public open-source snapshot from this private repository.
+# Build a local public-review snapshot from this repository.
 #
-# The project ships under a two-repository model (decided 2026-07-27): the
-# private repo keeps every internal artifact — ticket files, agent
-# automation, design sources, roadmaps — so development machines can sync
-# them over git, and the public repo receives only a curated snapshot.
-# This script IS that curation step. Until it existed the two-repo model
-# was a decision with no mechanism behind it.
+# The snapshot is a leak-review and validation artifact used by
+# `make public-verify`; it is not a publishing mechanism or a source/license
+# boundary. First-party application code, including cloud code, remains in the
+# unified AGPL-3.0 repository. The snapshot only includes the paths named in
+# scripts/public_allowlist.txt for this bounded review run.
 #
 # Three stages, in order:
 #   1. COPY      every tracked file matching scripts/public_allowlist.txt
@@ -40,9 +39,11 @@ if [[ ! -f "${ALLOWLIST}" ]]; then
 	exit 1
 fi
 
-# Sanitizer rules, applied in order. Longest patterns first so that
-# archive.crowntime.cn is rewritten before the bare crowntime.cn rule can
-# turn it into archive.example.com's malformed cousin.
+# Sanitizer rules are targeted rewrites, applied in order. The known
+# environment-specific admin hostname below is narrowly sanitized in this
+# review snapshot. This is not a confidentiality claim about crowntime.cn or
+# a suffix rule: public product endpoints and other subdomains are not leaks
+# merely because they share the domain suffix.
 #
 # Deliberately NOT rewritten:
 #   RND-nnnn  1300+ occurrences carrying real design rationale in code
@@ -51,31 +52,30 @@ fi
 #   wecomarchive  a service account name a self-hoster will genuinely
 #             create; replacing it with a placeholder makes the systemd
 #             units worse as reference material.
-#   crowntime.cn  the bare company domain stays. Crowntime's identity is
-#             deliberately public — it is the named vendor of this product
-#             and the host of the managed cloud offering, so rewriting it
-#             to example.com would break the very links the README needs.
-#             Only the operational subdomains below get scrubbed: those
-#             point at a live production instance and are nobody's
-#             business but the operator's.
+#   crowntime.cn  the company identity, product endpoints, and domain are
+#             public; rewriting them wholesale would remove legitimate
+#             attribution and business references. Only the exact admin host
+#             below is rewritten based on its concrete environment-specific
+#             context. Never infer a leak from the suffix alone.
 SANITIZERS=(
 	's|qwhhcd\.crowntime\.cn|archive.example.com|g'
-	's|archive\.crowntime\.cn|archive.example.com|g'
+	's|zuohaisu/wecom-archive-365|your-org/wecom-archive|g'
 	's|zuohaisu/wecom-archive|your-org/wecom-archive|g'
 	's|zuohaisu|your-org|g'
 	's|/srv/apps/wecom-archive-365|/srv/apps/wecom-archive|g'
+	's|wecom-archive-365|wecom-archive|g'
 )
 
 # Patterns that must not survive into the snapshot. A hit here is a bug in
-# the allowlist or the sanitizer, not something to wave through.
+# the allowlist or the sanitizer, not something to wave through. Public
+# company-registration labels are deliberately not blanket-blocked: the
+# approved marketing pages publish the company's ICP/public-security records.
 declare -a GATE_PATTERNS=(
 	'qwhhcd\.crowntime\.cn'
-	'archive\.crowntime\.cn'
 	'/srv/apps/wecom-archive-365'
+	'wecom-archive-365'
 	'zuohaisu'
 	'linear\.app'
-	'粤ICP备'
-	'网安备'
 	'甄宇航'
 )
 
@@ -93,6 +93,7 @@ mkdir -p "${OUT_DIR}"
 
 # ── Stage 1: copy ───────────────────────────────────────────────────
 copied=0
+normalized_paths=0
 while IFS= read -r entry; do
 	entry="${entry%%#*}"
 	entry="$(echo "${entry}" | xargs || true)"
@@ -100,9 +101,18 @@ while IFS= read -r entry; do
 
 	matched=0
 	while IFS= read -r -d '' file; do
-		mkdir -p "${OUT_DIR}/$(dirname "${file}")"
-		cp "${file}" "${OUT_DIR}/${file}"
+		snapshot_path="${file//wecom-archive-365/wecom-archive}"
+		destination="${OUT_DIR}/${snapshot_path}"
+		if [[ -e "${destination}" ]]; then
+			echo "error: snapshot path collision after repository-name normalization: ${snapshot_path}" >&2
+			exit 1
+		fi
+		mkdir -p "$(dirname "${destination}")"
+		cp "${file}" "${destination}"
 		copied=$((copied + 1))
+		if [[ "${snapshot_path}" != "${file}" ]]; then
+			normalized_paths=$((normalized_paths + 1))
+		fi
 		matched=$((matched + 1))
 	done < <(git ls-files -z -- "${entry}")
 
@@ -112,6 +122,9 @@ while IFS= read -r entry; do
 done <"${ALLOWLIST}"
 
 echo "==> Copied ${copied} files"
+if [[ ${normalized_paths} -gt 0 ]]; then
+	echo "==> Normalized ${normalized_paths} legacy repository-name path(s)"
+fi
 
 # ── Stage 2: sanitize ───────────────────────────────────────────────
 # perl rather than sed: GNU and BSD sed disagree on in-place editing, and
@@ -135,6 +148,12 @@ echo "==> Sanitized ${sanitized} files"
 # ── Stage 3: leak gate ──────────────────────────────────────────────
 echo "==> Running leak gate"
 violations=0
+if old_paths="$(find "${OUT_DIR}" -name '*wecom-archive-365*' -print)" && [[ -n "${old_paths}" ]]; then
+	echo ""
+	echo "    LEAK GATE FAILED — legacy repository name in snapshot path:"
+	echo "${old_paths}" | sed "s|${OUT_DIR}/|      |" | head -20
+	violations=$((violations + 1))
+fi
 for pattern in "${GATE_PATTERNS[@]}"; do
 	if hits="$(grep -rIn --binary-files=without-match -E "${pattern}" "${OUT_DIR}" 2>/dev/null)"; then
 		echo ""

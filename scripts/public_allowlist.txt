@@ -1,11 +1,13 @@
-# Public snapshot allowlist — the definitive list of what reaches the
-# open-source repository.
+# Public-review snapshot allowlist — the input paths copied by
+# scripts/export_public_snapshot.sh for local validation.
 #
-# ALLOWLIST, NOT A DENYLIST. This is deliberate. A denylist fails open: add
-# a new internal directory, forget to exclude it, and it ships. This fails
-# closed — anything not named here simply never leaves the private repo.
-# The cost is that a genuinely new public path must be added by hand, which
-# is the trade we want.
+# This controls only the generated snapshot, not the source or license
+# boundary of the unified repository. In particular, backend/app includes
+# both selfhost and cloud code; this list is not a mechanism for withholding
+# either edition's source.
+#
+# ALLOWLIST, NOT A DENYLIST. This is deliberate: only named paths enter the
+# generated snapshot, and a new snapshot path must be added by hand.
 #
 # Each line is a git pathspec (file or directory) resolved against tracked
 # files only, so untracked local scratch files can never leak in.
@@ -22,6 +24,11 @@ backend/alembic.ini
 backend/requirements.txt
 backend/requirements-dev.txt
 
+# ── Community self-host container deployment ────────────────────────
+Dockerfile
+.dockerignore
+docker-compose.yml
+
 # ── Deployment reference ────────────────────────────────────────────
 # Sanitized on export (real hostnames and the private repo's deploy path
 # are rewritten to placeholders — see SANITIZERS in the export script).
@@ -34,6 +41,7 @@ scripts/deploy_preflight.sh
 scripts/backup_once.sh
 scripts/disk_usage_check.sh
 scripts/run_with_escalating_timeout.py
+scripts/assert_scheduled_workloads.sh
 scripts/tests
 
 # ── TLS renewal tooling ─────────────────────────────────────────────
@@ -45,41 +53,56 @@ scripts/tests
 ssl-renew
 
 # ── Documentation ───────────────────────────────────────────────────
-# Only the reference docs. Runbooks, defect post-mortems, research notes,
-# internal process docs, and the AI-collaboration docs stay private.
+# Reference, public product, customer, and self-hosting docs are included.
+# Production operations runbooks, defect post-mortems, research notes,
+# internal process docs, and AI-collaboration docs stay private.
 docs/API.md
 docs/ARCHITECTURE.md
 docs/DATA_MODEL.md
 docs/DEPLOYMENT.md
+docs/OPERATIONS.md
 docs/adr
+docs/kb/public
+docs/kb/customer
+# DEPLOYMENT.md was individually reviewed: publish it as an operator reference;
+# deployment identifiers and source paths are sanitized by the exporter.
 
 # ── Repository root ─────────────────────────────────────────────────
 README.md
 LICENSE
+NOTICE
+# Publish the public site and static demo, not its contributor README (which
+# contains deployment guidance and is explicitly not served by the website).
+static_site/company_homepage/index.html
+static_site/company_homepage/pricing.html
+static_site/company_homepage/style.css
+static_site/company_homepage/site.webmanifest
+static_site/company_homepage/assets
+static_site/company_homepage/brand
+static_site/company_homepage/demo
 SECURITY.md
-CLA.md
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
+# DCO 1.1 and sign-off instructions are included in CONTRIBUTING.md; no CLA is used.
 Makefile
 pyproject.toml
 .gitignore
 .env.example
 
+# ── Community issue and pull-request templates ──────────────────────
+.github/ISSUE_TEMPLATE
+.github/PULL_REQUEST_TEMPLATE.md
+
 # ── CI ──────────────────────────────────────────────────────────────
-# ci.yml + test.yml only. deploy.yml is deliberately absent: it carries
-# the production deploy path, host, and secret names, and a public fork
-# has nothing to deploy to.
+# CI/test workflows plus a manual uptime check whose target is an explicit
+# repository variable. Production deploy.yml remains absent: a public fork
+# has nothing to deploy to and the workflow carries deployment credentials.
 .github/workflows/ci.yml
 .github/workflows/test.yml
+.github/workflows/uptime-check.yml
 
-# ── Awaiting a decision from Haisu ──────────────────────────────────
+# ── Historical OSS planning notes ───────────────────────────────────
 # Uncomment to include. Currently excluded, with the reasoning:
-#
-# static_site/company_homepage
-#   The company site is being rebuilt (Crowntime as the company, this
-#   product as one of its open-source offerings), and a corporate
-#   homepage inside the source repo reads as a marketing funnel rather
-#   than a project. Deploy it separately.
 #
 # docs/CONVERSATION_REVIEW_CONSOLE_PRD.md
 #   Useful for contributors, but needs a read-through first to confirm it
@@ -89,8 +112,6 @@ pyproject.toml
 # backend/app/routers/platform_access.py
 # backend/app/routers/wecom_org_authorization.py
 # backend/app/routers/onboarding.py
-#   The RND-345 self-service org provisioning path. Publishing gives away
-#   the managed-cloud onboarding flow; withholding it means maintaining a
-#   fork. NOTE: these are currently reachable from app.main, so excluding
-#   them requires unregistering their routers or the public app will fail
-#   to import. Product decision, not a mechanical one.
+#   Historical note, superseded by Discussion #178: these cloud routes remain
+#   part of the unified AGPL-3.0 source and are already included by backend/app
+#   above. This snapshot allowlist is not a source-exclusion mechanism.

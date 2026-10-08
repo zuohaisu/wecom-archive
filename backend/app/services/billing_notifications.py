@@ -30,7 +30,7 @@ from app.db.models import (
     Tenant,
 )
 from app.email import email_delivery_ready, send_billing_notification_email
-from app.settings import get_wecom_oauth_settings
+from app.settings import APP_EDITION_CLOUD, get_app_edition, get_wecom_oauth_settings
 
 
 MAX_DELIVERY_ATTEMPTS = 5
@@ -636,6 +636,8 @@ def run_billing_notifications_once(
     limit: int = 20,
     delivery: DeliveryFunction | None = None,
 ) -> BillingNotificationRunSummary:
+    if get_app_edition() != APP_EDITION_CLOUD:
+        raise RuntimeError("billing notifications worker is cloud-only")
     checked_at = _explicit_utc(at)
     scheduled, canceled = plan_billing_notification_intents(db, at=checked_at)
     db.commit()

@@ -30,6 +30,7 @@ from app.sdk import wecom_sdk
 from app.services.entitlements import ANNUAL_PLAN_CODE
 from app.services.media_worker import download_media_candidates
 from app.services.storage_capacity import (
+    StorageCapacityConfigurationError,
     capacity_from_values,
     check_storage_write,
     measure_storage_capacity,
@@ -351,3 +352,107 @@ def test_postgresql_concurrent_writes_cannot_spend_same_remaining_bytes() -> Non
     assert sorted(allowed) == [False, True]
     with factory() as db:
         assert measure_storage_capacity(db, tenant_id, at=NOW).used_bytes == 6
+
+
+def test_selfhost_without_subscription_allows_core_media_write(
+    factory, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("APP_EDITION", "selfhost")
+    monkeypatch.delenv("SELFHOST_STORAGE_LIMIT_BYTES", raising=False)
+    payload = b"#!AMR" + b"community-media"
+    message = ArchiveMessage(
+        id=301,
+        msgid="gh168-selfhost-media",
+        seq=1,
+        publickey_ver=1,
+        encrypt_random_key="k",
+        encrypt_chat_msg="c",
+        decrypt_status="success",
+        msgtype="voice",
+        sdkfileid="gh168-selfhost-sdk",
+        tenant_id="tenant-b",
+    )
+    with factory() as db:
+        db.add(message)
+        db.commit()
+        assert db.query(Subscription).filter_by(tenant_id="tenant-b").first() is None
+
+    fake = FakeWecomSdk()
+    fake.set_media_chunks("gh168-selfhost-sdk", [payload])
+    install_fake_sdk(monkeypatch, fake, wecom_sdk)
+    provider = LocalStorageProvider(tmp_path)
+    with factory() as db:
+        message = db.get(ArchiveMessage, 301)
+        summary = download_media_candidates(
+            db,
+            "tenant-b",
+            "fake-lib",
+            "fake-handle",
+            provider,
+            "local",
+            30,
+            [message],
+            [],
+            enforce_quota=True,
+        )
+        media = db.query(MediaFile).filter_by(sdkfileid="gh168-selfhost-sdk").one()
+        capacity = measure_storage_capacity(db, "tenant-b", at=NOW)
+        assert summary.downloaded == 1 and summary.quota_blocked == 0
+        assert Path(media.local_path).read_bytes() == payload
+        assert capacity.state == "unlimited"
+        assert capacity.subscription_status == "not_applicable"
+        assert capacity.can_accept_new_media is True
+
+
+def test_selfhost_technical_storage_limit_blocks_before_provider_write(
+    factory, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("APP_EDITION", "selfhost")
+    payload = b"#!AMR" + b"limited-community-media"
+    monkeypatch.setenv("SELFHOST_STORAGE_LIMIT_BYTES", str(len(payload) - 1))
+    message = ArchiveMessage(
+        id=302,
+        msgid="gh168-selfhost-limited-media",
+        seq=1,
+        publickey_ver=1,
+        encrypt_random_key="k",
+        encrypt_chat_msg="c",
+        decrypt_status="success",
+        msgtype="voice",
+        sdkfileid="gh168-selfhost-limited-sdk",
+        tenant_id="tenant-b",
+    )
+    with factory() as db:
+        db.add(message)
+        db.commit()
+
+    fake = FakeWecomSdk()
+    fake.set_media_chunks("gh168-selfhost-limited-sdk", [payload])
+    install_fake_sdk(monkeypatch, fake, wecom_sdk)
+    provider = LocalStorageProvider(tmp_path)
+    with factory() as db:
+        message = db.get(ArchiveMessage, 302)
+        summary = download_media_candidates(
+            db,
+            "tenant-b",
+            "fake-lib",
+            "fake-handle",
+            provider,
+            "local",
+            30,
+            [message],
+            [],
+            enforce_quota=True,
+        )
+        assert summary.quota_blocked == 1 and summary.failed == 0
+        assert summary.reason_counts["quota_exceeded"] == 1
+        assert list(Path(tmp_path).rglob("*.amr")) == []
+        assert check_storage_write(db, "tenant-b", len(payload), at=NOW).reason == "quota_exceeded"
+
+
+def test_invalid_selfhost_storage_limit_fails_closed(factory, monkeypatch) -> None:
+    monkeypatch.setenv("APP_EDITION", "selfhost")
+    monkeypatch.setenv("SELFHOST_STORAGE_LIMIT_BYTES", "-1")
+    with factory() as db:
+        with pytest.raises(StorageCapacityConfigurationError):
+            check_storage_write(db, "tenant-b", 1, at=NOW)

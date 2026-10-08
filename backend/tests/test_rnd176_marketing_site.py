@@ -81,6 +81,8 @@ def test_public_pricing_is_only_the_frozen_server_plan() -> None:
         assert "超量单价" not in html or "没有正式发布超量单价" in html
     pricing = _text(PRICING)
     assert "当前没有正式发布超量单价或更大套餐" in pricing
+    assert "云托管版" in pricing
+    assert "自托管版无需购买、试用或订阅" in pricing
     assert "不是免密自动扣款" in pricing
 
 
@@ -90,7 +92,7 @@ def test_capability_and_risk_copy_stays_inside_shipped_boundaries() -> None:
         "不读取或监控员工个人微信",
         "不承诺 100% 防止飞单",
         "不自动认定员工违规",
-        "当前公开版本不承诺业务页面一键导出",
+        "支持受控文本导出和全量媒体 ZIP 导出",
         "不会静默删除已有记录",
     ):
         assert statement in html
@@ -98,6 +100,8 @@ def test_capability_and_risk_copy_stays_inside_shipped_boundaries() -> None:
     assert "可以发现所有私下交易" not in html
     assert "法律证据绝对有效" not in html
     assert "自动识别飞单" not in html
+    assert "均需 Owner 二次确认" in html
+    assert "自托管版没有月度商业导出次数限制" in html
 
 
 def test_visible_faq_matches_faq_schema_and_covers_required_questions() -> None:

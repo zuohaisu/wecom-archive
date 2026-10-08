@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a capability or improvement.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        For security vulnerabilities, follow [SECURITY.md](https://github.com/zuohaisu/wecom-archive/blob/main/SECURITY.md)
+        instead of opening a public issue. Keep proposals free of credentials,
+        customer information, and real archive content.
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Relevant deployment
+      options:
+        - Self-hosted
+        - Official cloud
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe the user need or workflow, without confidential data.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain what you would like the product to do.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include relevant workarounds or other approaches.
+    validations:
+      required: false
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add only public, non-sensitive context.
+    validations:
+      required: false

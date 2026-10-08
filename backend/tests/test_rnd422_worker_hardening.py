@@ -131,6 +131,7 @@ def test_tenant_worker_credential_failures_are_classified_and_redacted(
     assert secret not in out
 
 
+@pytest.mark.requires_internal_ops_docs
 def test_msgtime_runbook_contract_and_formatter_use_epoch_milliseconds() -> None:
     msgtime_ms = int(
         datetime(2026, 8, 27, 12, 34, 56, tzinfo=timezone.utc).timestamp() * 1000

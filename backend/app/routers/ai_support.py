@@ -46,6 +46,7 @@ from app.web import render_template
 from app.web.sidenav import render_sidenav
 
 router = APIRouter()
+platform_router = APIRouter()
 
 # Minimal in-process rate limit (mirrors app.auth's documented "in-memory,
 # single-process, sufficient for single-instance MVP" pattern) — a tenant
@@ -271,7 +272,7 @@ def submit_handoff(
     return HandoffOut(id=handoff.id, status=handoff.status)
 
 
-@router.post("/api/platform/ai/handoffs/{handoff_id}/resolve", response_model=HandoffResolveOut)
+@platform_router.post("/api/platform/ai/handoffs/{handoff_id}/resolve", response_model=HandoffResolveOut)
 def resolve_handoff(
     handoff_id: str,
     payload: HandoffResolveIn,

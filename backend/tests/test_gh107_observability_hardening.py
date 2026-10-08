@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -94,14 +95,16 @@ def test_uptime_workflow_manual_checks_remain_available_while_schedule_is_paused
     # supported verification path and must keep all check/alert wiring intact.
     assert "schedule" not in workflow[True]
     assert "workflow_dispatch" in workflow[True]
-    assert workflow["env"]["PRODUCTION_URL"] == "https://archive.crowntime.cn/"
-    assert workflow["env"]["READINESS_URL"] == "https://archive.crowntime.cn/health/ready"
+    assert workflow["env"]["UPTIME_BASE_URL"] == "${{ vars.UPTIME_BASE_URL }}"
+    assert "archive.crowntime.cn" not in UPTIME_WORKFLOW.read_text(encoding="utf-8")
 
     check_job = workflow["jobs"]["check"]
     assert check_job["runs-on"] == "ubuntu-latest"
     step_text = " ".join(str(step.get("run", "")) for step in check_job["steps"])
-    assert "$PRODUCTION_URL" in step_text
-    assert "$READINESS_URL" in step_text
+    assert "$UPTIME_BASE_URL" in step_text
+    assert "must be an HTTPS base URL" in step_text
+    assert "$base_url/" in step_text
+    assert "$base_url/health/ready" in step_text
     assert "secrets.ALERT_WEBHOOK_URL" in " ".join(
         str(step.get("env", {})) for step in check_job["steps"]
     )
@@ -120,6 +123,7 @@ def test_uptime_workflow_never_echoes_the_webhook_value() -> None:
             assert "$ALERT_WEBHOOK_URL" not in line, line
 
 
+@pytest.mark.requires_internal_ops_docs
 def test_runbook_documents_every_alerted_unit_and_the_uptime_workflow() -> None:
     text = " ".join(RUNBOOK.read_text(encoding="utf-8").split())
 

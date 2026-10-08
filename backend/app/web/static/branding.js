@@ -37,7 +37,11 @@
     node('branding-favicon-state').textContent = data.favicon_configured ? '已配置' : '未上传（使用平台默认）';
     node('branding-domain-state').textContent = data.custom_domain || '未配置';
     node('branding-certificate-state').textContent = data.certificate_status || '未开始';
-    node('branding-upgrade').hidden = !(data.upgrade_required);
+    var upgradeNotice = node('branding-upgrade');
+    upgradeNotice.hidden = !data.upgrade_required;
+    if (!data.upgrade_available) {
+      upgradeNotice.textContent = '自托管版本当前不提供品牌与自有域名功能。';
+    }
     node('branding-domain-input').value = data.custom_domain || '';
 
     var brandingLocked = !data.custom_branding_entitled;
@@ -66,6 +70,13 @@
     });
   }
   function showError(error) {
+    if (state && !state.upgrade_available && (
+      error.message === 'custom_branding_upgrade_required' ||
+      error.message === 'custom_domain_upgrade_required'
+    )) {
+      show('自托管版本当前不提供品牌与自有域名功能。', true);
+      return;
+    }
     var known = {
       custom_branding_upgrade_required: '当前套餐不包含自定义品牌能力，请升级后再试。',
       custom_domain_upgrade_required: '当前套餐不包含自有域名能力，请升级后再试。',

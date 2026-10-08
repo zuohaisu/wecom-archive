@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security policy
+    url: https://github.com/zuohaisu/wecom-archive/blob/main/SECURITY.md
+    about: Report vulnerabilities privately; do not post security details in a public issue.
+  - name: Community discussions
+    url: https://github.com/zuohaisu/wecom-archive/discussions
+    about: Ask questions or discuss an idea with the community.

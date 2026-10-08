@@ -2,10 +2,9 @@
 
 ``media_files`` plus normalised archive messages remain the durable task
 source. This module only checks for newly actionable media after a completed
-archive run and touches one coalescing systemd-path signal. The path unit starts
-the *existing* ``download_wecom_media_once.py`` worker in its own service
-cgroup; this module never downloads bytes, initialises the SDK, or implements
-a second media pipeline.
+archive run and touches one coalescing signal. A systemd path unit or the
+self-host container scheduler may consume it; this module never downloads
+bytes, initialises the SDK, or implements a second media pipeline.
 """
 from __future__ import annotations
 
@@ -118,8 +117,8 @@ def _pending_media_check(tenant_id: str) -> PendingMediaCheck:
 
 
 def _signal_media_worker() -> bool:
-    """Touch one coalescing, identifier-free signal consumed by systemd.path."""
-    path = _DEFAULT_SIGNAL_PATH
+    """Touch one coalescing signal consumed by the configured worker runner."""
+    path = os.environ.get("MEDIA_EVENT_SIGNAL_PATH", "").strip() or _DEFAULT_SIGNAL_PATH
     try:
         directory = os.path.dirname(path)
         if directory:
@@ -158,8 +157,8 @@ def dispatch_media_worker(
     """Request a non-blocking generic media-worker run after archive commit.
 
     The signal carries no task data and cannot grow: it is one mtime update.
-    The systemd path unit starts the existing generic media CLI, which owns
-    candidate selection, the media lock, retry state, SDK lifecycle, and
+    The configured worker runner starts the existing generic media CLI, which
+    owns candidate selection, the media lock, retry state, SDK lifecycle, and
     persistence. This read-only preflight prevents no-media archive runs from
     emitting a meaningless worker wake-up. A caller that already resolved a
     tenant passes ``tenant_id``; missing tenant context fails closed rather

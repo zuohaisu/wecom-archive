@@ -1,9 +1,13 @@
-# Development guide
+# Historical Development Guide
 
-Internal engineering guide for Crowntime WeCom Archive. This is a proprietary,
-hosted-only product — see [LICENSE](../LICENSE) and
-[ADR-0003](adr/0003-product-strategy-hosted-only.md). There is no external
-contribution process; this document is for the people who work on it.
+> **Superseded:** This internal guide predates the AGPL-3.0 and self-hosted
+> decisions. Its hosted-only and “no external contribution process” statements
+> are historical, not current. See [CONTRIBUTING.md](../CONTRIBUTING.md) for
+> today's contributor workflow and [ADR-0007](adr/0007-runtime-edition-policies.md)
+> for the current runtime policy.
+
+This page remains for historical engineering notes; do not use its old
+product-boundary statements as current policy.
 
 ## Setting up
 
@@ -59,11 +63,11 @@ into one commit.
 Merging deployable paths to `main` triggers the CD-only production workflow
 ([`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)). CD deploys
 the exact merged `main` SHA and retains migration, readiness, serialization,
-and rollback gates, but it does not repeat the complete CI suite. The sole
-maintainer must therefore require a pull request and green CI, keep the branch
-up to date, and never push directly to `main`. The current private-repository
-plan does not enforce those settings; enable platform branch protection before
-adding another maintainer.
+and rollback gates, but it does not repeat the complete CI suite. Require a
+pull request and green CI, keep the branch up to date, and never push directly
+to `main`. Branch-protection settings are managed in GitHub, outside this
+repository; verify them against [the binding repository rules](../AGENTS.md)
+before changing merge policy or maintainers.
 Documentation/task-only merges still pass PR CI but are excluded from CD by the
 workflow's `paths-ignore` list.
 
@@ -92,9 +96,9 @@ workflow's `paths-ignore` list.
   `backend/app/assets/i18n.js`. A new string needs all three.
 - **Database changes need an Alembic migration**, and CI runs `alembic check`
   to catch a model that has drifted from its migrations.
-- **Archive private keys are the highest-severity asset in this system.** As a
-  hosted service we hold every customer's decryption key. Never let key
-  material reach logs, backups, error payloads, or plaintext database columns.
+- **Archive private keys are the highest-severity asset in this system.** The
+  application handles tenant decryption keys. Never let key material reach
+  logs, backups, error payloads, or plaintext database columns.
   See [key-hosting-and-tenant-isolation.md](key-hosting-and-tenant-isolation.md).
 
 ## Reporting bugs

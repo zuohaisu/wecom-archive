@@ -27,9 +27,12 @@ from sqlalchemy.orm import Session
 from app.config.resolver import resolve as resolve_config
 from app.db.models import ReachabilityFinding, SyncState, Tenant, TenantWecomConfig
 from app.services.ai_tools.registry import ToolContext, ToolScope, ToolSpec, register
-from app.services.entitlements import get_subscription_summary
-from app.services.storage_capacity import capacity_from_values
-from app.services.usageservice import sum_downloaded_storage
+from app.services.service_access import (
+    INTERACTIVE,
+    WORKER_MEDIA,
+    tenant_service_allows,
+)
+from app.services.storage_capacity import read_storage_capacity
 
 # Pages this tool will echo back verbatim. Kept as an independent, small
 # allowlist rather than importing app.web.sidenav.NAV — that module can
@@ -107,7 +110,7 @@ def tenant_service_status_handler(db: Session, context: ToolContext) -> dict:
         return {"lifecycle_status": "unknown", "is_active": False}
     return {
         "lifecycle_status": tenant.lifecycle_status,
-        "is_active": tenant.lifecycle_status == "active",
+        "is_active": tenant_service_allows(tenant.lifecycle_status, INTERACTIVE),
     }
 
 
@@ -153,32 +156,23 @@ def sync_status_summary_handler(db: Session, context: ToolContext) -> dict:
 
 
 def storage_quota_summary_handler(db: Session, context: ToolContext) -> dict:
-    # Deliberately NOT app.services.storage_capacity.measure_storage_capacity:
-    # that function upserts today's TenantStorageDaily rollup as a side
-    # effect (a real write), which a read-only diagnostic tool must never
-    # trigger. capacity_from_values is the same classification logic with
-    # no database access at all; the two read calls that feed it
-    # (sum_downloaded_storage, get_subscription_summary) are pure reads.
+    # Use the same edition-aware capacity policy as media writes, but through
+    # its read-only entry point so diagnostics never write TenantStorageDaily.
     now = datetime.now(timezone.utc)
-    used_bytes = sum_downloaded_storage(db, context.tenant_id)
-    subscription = get_subscription_summary(db, context.tenant_id, at=now)
-    entitled = subscription is not None and subscription.is_entitled
-    snapshot = capacity_from_values(
-        tenant_id=context.tenant_id,
-        quota_bytes=subscription.storage_quota_bytes if entitled and subscription else 0,
-        used_bytes=used_bytes,
-        measured_at=now,
-        plan_code=subscription.plan_code if subscription else None,
-        subscription_status=subscription.effective_status if subscription else "not_subscribed",
-        entitled=entitled,
+    snapshot = read_storage_capacity(db, context.tenant_id, at=now)
+    lifecycle_status = db.scalar(
+        select(Tenant.lifecycle_status).where(Tenant.id == context.tenant_id)
     )
+    service_allows_media = tenant_service_allows(lifecycle_status, WORKER_MEDIA)
     return {
         "quota_bytes": snapshot.quota_bytes,
         "used_bytes": snapshot.used_bytes,
         "remaining_bytes": snapshot.remaining_bytes,
         "utilization_basis_points": snapshot.utilization_basis_points,
         "usage_status": snapshot.usage_status,
-        "can_accept_new_media": snapshot.can_accept_new_media,
+        "can_accept_new_media": (
+            snapshot.can_accept_new_media and service_allows_media
+        ),
     }
 
 
