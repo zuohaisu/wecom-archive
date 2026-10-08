@@ -42,7 +42,7 @@ def test_users_page_uses_registered_active_users_sidenav_link() -> None:
         client.app.dependency_overrides.clear()
         client.close()
 
-    assert 'href="/admin/users" data-i18n="nav.staffSeats" aria-current="page"' in response.text
+    assert 'href="/admin/users" data-i18n="nav.seats" aria-current="page"' in response.text
     assert 'data-nav-id="users"' not in response.text
 
 
@@ -51,9 +51,22 @@ def test_users_page_fetches_real_api_and_exposes_all_user_fields() -> None:
 
     assert 'class="toolbar toolbar-compact"' in source
     assert "fetch('/api/admin/users?'" in source
-    for field in ("user.role", "user.status", "user.last_active_at", "user.msg_count_30d"):
+    for field in ("user.role", "user.status", "user.last_active_at"):
         assert field in source
     assert "mock" not in source.lower()
+
+
+def test_users_page_carries_no_message_statistics_or_directory_leftovers() -> None:
+    """Haisu split: the seats page keeps account management only; message
+    statistics moved to the internal-staff directory page, and the page now
+    lives under the 总览 group instead of 通讯录."""
+    source = _TEMPLATE.read_text(encoding="utf-8")
+
+    assert "msg_count_30d" not in source
+    assert "users.messages30" not in source
+    assert "users.breadcrumbDirectory" not in source
+    assert 'data-i18n="nav.group.overview"' in source
+    assert "fetch('/api/admin/staff'" not in source
 
 
 def test_users_page_operations_call_existing_user_management_endpoints() -> None:

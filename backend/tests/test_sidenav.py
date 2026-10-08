@@ -31,12 +31,13 @@ def test_design_system_is_a_new_copy_of_the_design_source() -> None:
 
 def test_navigation_includes_shared_data_export_page() -> None:
     items = [item for group in NAV for item in group["items"]]
-    assert len(items) == 15
+    assert len(items) == 16
     assert any(item["id"] == "exports" and item["path"] == "/admin/exports" for item in items)
     assert any(item["id"] == "favorites" and item["path"] == "/admin/favorites" for item in items)
     assert {item["id"] for item in items} == {
         "dashboard",
         "billing",
+        "users",
         "review",
         "search",
         "messages",
@@ -45,7 +46,7 @@ def test_navigation_includes_shared_data_export_page() -> None:
         "media",
         "favorites",
         "exports",
-        "users",
+        "staff",
         "contacts",
         "diagnostics",
         "settings",
@@ -58,6 +59,23 @@ def test_navigation_includes_shared_data_export_page() -> None:
     assert dashboard["path"] == "/dashboard"
     assert "analytics" not in {item["id"] for item in items}
     assert "sync" not in {item["id"] for item in items}
+
+
+def test_split_places_seats_under_overview_and_staff_under_directory() -> None:
+    """Haisu split: 座席 rides the 总览 group; 内部员工 sits beside 外部联系人."""
+    groups = {group["group_key"]: [item["id"] for item in group["items"]] for group in NAV}
+    assert groups["nav.group.overview"] == ["dashboard", "billing", "users"]
+    assert groups["nav.group.directory"] == ["staff", "contacts"]
+
+    seats = next(
+        item for item in NAV[0]["items"] if item["id"] == "users"
+    )
+    assert seats == {"id": "users", "key": "nav.seats", "path": "/admin/users"}
+    staff = next(
+        item for group in NAV if group["group_key"] == "nav.group.directory"
+        for item in group["items"] if item["id"] == "staff"
+    )
+    assert staff == {"id": "staff", "key": "nav.staffDirectory", "path": "/admin/staff"}
 
 
 def test_diagnostics_navigation_uses_the_archive_health_localization_key() -> None:
@@ -74,7 +92,7 @@ def test_registered_path_changes_users_from_disabled_to_link_without_config_chan
     enabled = render_sidenav("review", {"/admin/conversations", "/admin/users"})
 
     assert 'data-nav-id="users" aria-disabled="true"' in disabled
-    assert '<a class="side-nav-item" href="/admin/users" data-i18n="nav.staffSeats"></a>' in enabled
+    assert '<a class="side-nav-item" href="/admin/users" data-i18n="nav.seats"></a>' in enabled
     assert 'data-nav-id="users"' not in enabled
 
 

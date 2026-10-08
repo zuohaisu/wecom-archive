@@ -331,5 +331,14 @@ def submit_user_feedback(
         tenant_id=tenant_id,
         admin_user_id=user.id,
     )
-    notify_new_feedback(feedback_id=feedback.id, tenant_id=tenant_id, feedback_type=feedback.feedback_type)
+    notify_new_feedback(
+        feedback_id=feedback.id,
+        tenant_id=tenant_id,
+        feedback_type=feedback.feedback_type,
+        body=feedback.body,
+        contact=feedback.contact,
+        submitter=getattr(user, "email", None) or getattr(user, "name", None),
+        page_id=feedback.page_id,
+        product_version=feedback.product_version,
+    )
     return UserFeedbackOut(id=feedback.id, status=feedback.status)

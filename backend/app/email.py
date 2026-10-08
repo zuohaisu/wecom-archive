@@ -202,6 +202,23 @@ def send_password_reset_email(
     return _send_transactional_email(to_email, subject, body)
 
 
+FEEDBACK_INBOX_EMAIL = "hs@crowntime.cn"
+
+
+def send_feedback_email(subject: str, body: str, *, operation_id: str) -> bool:
+    """Deliver one product-feedback submission to the fixed owner inbox.
+
+    Feedback content is user-written free text destined for a human reader:
+    it travels only in the body, never the subject or headers. Each
+    submission is a distinct event, so `operation_id` (the feedback id)
+    makes provider-side retries idempotent without suppressing intentional
+    resends.
+    """
+    return _send_transactional_email(
+        FEEDBACK_INBOX_EMAIL, subject, body, operation_id=operation_id
+    )
+
+
 def send_invite_email(
     to_email: str, accept_link: str, locale: str = "zh-CN",
     *, operation_id: str | None = None,
