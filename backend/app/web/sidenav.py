@@ -152,7 +152,7 @@ _PROVISIONING_NAV_ITEMS = (
 # soon" state to render.
 PLATFORM_NAV = (
     {
-        "group": "概览",
+        "group": "总览",
         "items": (
             {"id": "dashboard", "label": "运营看板", "path": "/platform"},
         ),
