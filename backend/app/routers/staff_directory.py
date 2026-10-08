@@ -7,7 +7,9 @@ member who appeared in the archive — not only seat-linked accounts or
 ``staff_``-prefixed ids. Internal is therefore the complement of the
 authoritative external registry: an archive participant is internal
 staff unless WeCom's external-contact sync registered them in
-``external_contacts``. Counts mirror the RND-284 rule: messages SENT by
+``external_contacts``, and seat-linked identities count as internal
+staff even before any of their messages are archived (Haisu follow-up:
+the deployed directory missed exactly those). Counts mirror the RND-284 rule: messages SENT by
 the staff id — ids and counts only, never payloads.
 """
 from __future__ import annotations
@@ -41,6 +43,12 @@ def list_internal_staff(
     """Return the tenant's internal staff with read-only message counts."""
     _, tenant_id = auth
     participants = _collect_archive_participant_ids(db, tenant_id)
+    tenant_seats = (
+        db.query(AdminUser)
+        .filter(AdminUser.tenant_id == tenant_id)
+        .all()
+    )
+    seat_ids = {row.wecom_user_id for row in tenant_seats if row.wecom_user_id}
     registered_external = set(
         db.scalars(
             select(ExternalContact.external_userid).where(
@@ -48,7 +56,7 @@ def list_internal_staff(
             )
         ).all()
     )
-    staff_ids = participants - registered_external
+    staff_ids = (participants | seat_ids) - registered_external
 
     display_rows = (
         db.query(Contact)
@@ -59,11 +67,7 @@ def list_internal_staff(
     )
     contacts_by_id = {row.wecom_userid: row for row in display_rows}
     seats_by_id = {
-        row.wecom_user_id: row
-        for row in db.query(AdminUser)
-        .filter(AdminUser.tenant_id == tenant_id, AdminUser.wecom_user_id.in_(staff_ids))
-        .all()
-        if row.wecom_user_id
+        row.wecom_user_id: row for row in tenant_seats if row.wecom_user_id
     }
 
     filtered_ids = staff_ids
