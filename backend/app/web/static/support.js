@@ -277,13 +277,13 @@
     fetch('/api/ai/support/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      // GH-102 follow-up (Haisu): the diagnostics consent checkbox is gone —
+      // submissions carry only the feedback itself, no page/version/runtime
+      // attachments.
       body: JSON.stringify({
         feedback_type: node('feedback-type').value,
         body: body,
-        contact: node('feedback-contact').value || null,
-        page_id: document.body.getAttribute('data-page-id') || null,
-        include_diagnostics: node('feedback-include-diagnostics').checked,
-        browser_info: navigator.userAgent
+        contact: node('feedback-contact').value || null
       })
     })
       .then(function (r) {
