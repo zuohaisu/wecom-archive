@@ -9,7 +9,12 @@ authoritative external registry: an archive participant is internal
 staff unless WeCom's external-contact sync registered them in
 ``external_contacts``, and seat-linked identities count as internal
 staff even before any of their messages are archived (Haisu follow-up:
-the deployed directory missed exactly those). Counts mirror the RND-284 rule: messages SENT by
+the deployed directory missed exactly those). The registry is NOT a
+complete census of external parties — WeCom's external-contact sync only
+covers externals owned by configured members, so archive parties with the
+opaque external id families (``wma_``/``wba_``/``woa_`` prefixes) are
+excluded by id shape as well (production: 499 such parties had polluted
+the directory). Counts mirror the RND-284 rule: messages SENT by
 the staff id — ids and counts only, never payloads.
 """
 from __future__ import annotations
@@ -30,6 +35,11 @@ from app.schemas.staff_directory import StaffDirectoryItem, StaffDirectoryPage
 from app.services.avatar_sync import internal_avatar_presentations
 
 router = APIRouter()
+
+# WeCom session-archive external-party id families (opaque, server-assigned).
+# An internal member's userid is enterprise-defined and never carries them.
+EXTERNAL_ID_PREFIXES = ("wma_", "wba_", "woa_")
+
 
 
 @router.get("/staff", response_model=StaffDirectoryPage)
@@ -56,7 +66,12 @@ def list_internal_staff(
             )
         ).all()
     )
-    staff_ids = (participants | seat_ids) - registered_external
+    opaque_external = {
+        staff_id
+        for staff_id in (participants | seat_ids)
+        if staff_id.startswith(EXTERNAL_ID_PREFIXES)
+    }
+    staff_ids = (participants | seat_ids) - registered_external - opaque_external
 
     display_rows = (
         db.query(Contact)
