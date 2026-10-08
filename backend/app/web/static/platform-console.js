@@ -330,17 +330,13 @@
   function wireGlobalSearch() {
     var input = el('platform-search');
     if (!input) { return; }
+    // GH-199 follow-up (Haisu): search lives on its own page now — the
+    // topbar box just carries the query over to it.
     input.addEventListener('keydown', function (event) {
       if (event.key !== 'Enter') { return; }
       var q = input.value.trim();
       if (!q) { return; }
-      request('/api/platform/tenants/search?q=' + encodeURIComponent(q)).then(function (result) {
-        var first = result && result.tenants && result.tenants[0];
-        if (first) { window.location.href = '/platform/tenants/' + encodeURIComponent(first.tenant_id); return; }
-        window.location.href = '/platform/tenants?q=' + encodeURIComponent(q);
-      }).catch(function () {
-        window.location.href = '/platform/tenants?q=' + encodeURIComponent(q);
-      });
+      window.location.href = '/platform/search?q=' + encodeURIComponent(q);
     });
   }
 

@@ -36,6 +36,7 @@ from app.db.models import (
     Subscription,
     SubscriptionActivation,
     Tenant,
+    TenantWecomConfig,
 )
 from app.services.billing_lifecycle import (
     BillingLifecycleError,
@@ -776,11 +777,25 @@ def list_tenants(
     ends_to: datetime | None = None,
     sort: str = "created_desc",
     at: datetime | None = None,
+    q: str | None = None,
 ) -> dict:
     now = _as_utc(at or datetime.now(timezone.utc))
     statement = select(Tenant).outerjoin(
         Subscription, Subscription.tenant_id == Tenant.id
     )
+    if q is not None and q.strip():
+        needle = f"%{q.strip()}%"
+        statement = statement.where(
+            or_(
+                Tenant.name.ilike(needle),
+                Tenant.slug.ilike(needle),
+                Tenant.id.in_(
+                    select(TenantWecomConfig.tenant_id).where(
+                        TenantWecomConfig.corp_id.ilike(needle)
+                    )
+                ),
+            )
+        )
     if lifecycle_status is not None:
         if lifecycle_status not in {"provisioning", "active", "frozen", "suspended"}:
             raise PlatformOperationsValidationError("invalid lifecycle filter")

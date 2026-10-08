@@ -161,6 +161,7 @@ PLATFORM_NAV = (
         "group": "租户",
         "items": (
             {"id": "tenants", "label": "订阅状态", "path": "/platform/tenants"},
+            {"id": "search", "label": "搜索", "path": "/platform/search"},
         ),
     },
     {

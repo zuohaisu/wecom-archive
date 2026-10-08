@@ -72,6 +72,7 @@ _PLATFORM_PAGES = {
     # its old /platform/operations URL too.
     "/platform/tenants": ("platform_tenants", "tenants", "订阅状态"),
     "/platform/tenants/new": ("platform_tenant_new", "tenant-new", "新建租户"),
+    "/platform/search": ("platform_search", "search", "搜索"),
     "/platform/audit": ("platform_audit", "audit", "全局审计"),
 }
 

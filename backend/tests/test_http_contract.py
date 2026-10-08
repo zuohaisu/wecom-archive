@@ -416,7 +416,8 @@ def test_router_count() -> None:
     # four PlatformAdmin-only read APIs (endpoints/series/status/anomalies).
     # GH-199 removes four platform page shells (usage/ledger/infra/analytics).
     # GH-84 adds the staff-customer directory API (one route, nested).
-    assert route_count == 222
+    # GH-199 follow-up adds the /platform/search page shell.
+    assert route_count == 223
 
 
 def test_selfhost_router_count() -> None:
@@ -638,6 +639,7 @@ def test_routers_are_registered(client: TestClient) -> None:
             "/platform/login",
             "/platform/logout",
             "/platform/operations",
+            "/platform/search",
             "/platform/settings",
             "/platform/settings/operators/new",
             "/platform/tenants",
@@ -771,6 +773,7 @@ def test_route_snapshot_with_real_model_names() -> None:
         ("/platform/login", frozenset({"POST"}), "None", "HTMLResponse"),
         ("/platform/logout", frozenset({"POST"}), "None", "None"),
         ("/platform/operations", frozenset({"GET"}), "None", "HTMLResponse"),
+        ("/platform/search", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/tenants", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/tenants/new", frozenset({"GET"}), "None", "HTMLResponse"),
         ("/platform/tenants/{tenant_id}", frozenset({"GET"}), "None", "HTMLResponse"),
