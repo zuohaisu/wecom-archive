@@ -78,12 +78,16 @@ def get_contact_avatar(
     ):
         raise _not_found()
 
-    version = (
-        int(profile.avatar_synced_at.timestamp() * 1_000_000)
-        if profile.avatar_synced_at
-        else 0
-    )
-    etag = f'"avatar-{identity_type}-{profile.id}-{version}"'
+    # Copy every value used below before ending the shared read transaction.
+    # SQLAlchemy expires ORM state on rollback, so no profile attribute may be
+    # accessed once the storage call starts.
+    profile_id = profile.id
+    synced_at = profile.avatar_synced_at
+    storage_backend = profile.avatar_storage_backend
+    storage_ref = profile.avatar_storage_ref
+    content_type = profile.avatar_content_type
+    version = int(synced_at.timestamp() * 1_000_000) if synced_at else 0
+    etag = f'"avatar-{identity_type}-{profile_id}-{version}"'
     cache_headers = {
         # Always revalidate: a suspended account, tenant change, or deleted
         # contact must be re-authorized before a private browser cache is used.
@@ -94,10 +98,15 @@ def get_contact_avatar(
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=cache_headers)
 
+    # FastAPI caches the shared get_db dependency within this request, so
+    # require_role/get_current_user and this route use the same Session. The
+    # profile lookup has completed; roll back its read transaction now to
+    # return that connection before any potentially slow object-store access.
+    db.rollback()
     try:
-        content = get_media_storage_provider_for_backend(
-            profile.avatar_storage_backend
-        ).read_bytes(profile.avatar_storage_ref)
+        content = get_media_storage_provider_for_backend(storage_backend).read_bytes(
+            storage_ref
+        )
     except (
         MediaObjectNotFound,
         MediaStorageConfigurationError,
@@ -114,11 +123,11 @@ def get_contact_avatar(
         "image/png": ".png",
         "image/gif": ".gif",
         "image/webp": ".webp",
-    }[profile.avatar_content_type]
+    }[content_type]
     if len(content) > 2 * 1024 * 1024 or detect_image_type_from_bytes(content) != expected_suffix:
         raise _not_found()
     return Response(
         content=content,
-        media_type=profile.avatar_content_type,
+        media_type=content_type,
         headers=cache_headers,
     )
