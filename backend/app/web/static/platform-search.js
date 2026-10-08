@@ -78,8 +78,13 @@
     if (event.key === 'Enter') { event.preventDefault(); runSearch(); }
   });
 
+  /* The standard platform topbar's 刷新数据 button re-fetches the tenant
+     list; guarded so the page still works if platform-console.js is absent. */
+  if (window.PC && typeof PC.wireRefreshStamp === 'function') { PC.wireRefreshStamp(load); }
+
   var params = new URLSearchParams(window.location.search);
   var initialQ = params.get('q');
   if (initialQ) { input.value = initialQ; }
   runSearch();
+  load();
 }());
