@@ -73,3 +73,7 @@
   .filter-actions .btn{flex:1}
   .tenant-detail{padding:var(--space-3)}
 }
+
+/* GH-186 接口性能页：延迟红/绿（Haisu）——绿=p95<1000ms 无需处理，红=延迟严重。 */
+.latency-green{color:var(--color-success-fg)}
+.latency-red{color:var(--color-danger-fg)}

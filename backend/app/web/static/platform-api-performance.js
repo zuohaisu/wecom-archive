@@ -138,23 +138,37 @@
   function endpointRow(endpoint) {
     var row = document.createElement('tr');
     var stats = endpoint.stats;
+    /* Haisu: 只用红/绿表达延迟——绿色 p95 < 1000ms（无需处理），
+       红色 p95 >= 1000ms（延迟严重；阈值与「持续异常接口」判定一致）。 */
+    var SLOW_P95_MS = 1000;
+    function latencyClass(ms) {
+      if (ms === null || ms === undefined) { return ''; }
+      return ms >= SLOW_P95_MS ? 'latency-red' : 'latency-green';
+    }
+    var avgCell = document.createElement('td');
+    avgCell.textContent = msText(stats.avg_ms);
+    avgCell.className = latencyClass(stats.avg_ms);
+    var p95Cell = document.createElement('td');
+    p95Cell.textContent = msText(stats.p95_ms, stats.p95_capped);
+    p95Cell.className = latencyClass(stats.p95_ms);
     var cells = [
-      '[' + endpoint.method + '] ' + endpoint.route + (endpoint.registered ? '' : '（已下线，保留历史）'),
-      countText(stats.requests),
-      rateText(stats.error_rate),
-      msText(stats.avg_ms),
-      msText(stats.p95_ms, stats.p95_capped),
-      (stats.success_min_ms === null ? '—' : PC.number(Math.round(stats.success_min_ms)))
+      { text: '[' + endpoint.method + '] ' + endpoint.route + (endpoint.registered ? '' : '（已下线，保留历史）') },
+      { text: countText(stats.requests) },
+      { text: rateText(stats.error_rate) },
+      { node: avgCell },
+      { node: p95Cell },
+      { text: (stats.success_min_ms === null ? '—' : PC.number(Math.round(stats.success_min_ms)))
         + ' / '
-        + (stats.success_max_ms === null ? '—' : PC.number(Math.round(stats.success_max_ms))),
-      countText(stats.cancelled),
-      stats.stream_count ? (PC.number(stats.stream_count) + (stats.stream_errors ? ('（错误 ' + PC.number(stats.stream_errors) + '）') : '')) : '—',
-      endpoint.has_samples ? (stats.hist_available ? '充足' : '样本不足') : '无样本'
+        + (stats.success_max_ms === null ? '—' : PC.number(Math.round(stats.success_max_ms))) },
+      { text: countText(stats.cancelled) },
+      { text: stats.stream_count ? (PC.number(stats.stream_count) + (stats.stream_errors ? ('（错误 ' + PC.number(stats.stream_errors) + '）') : '')) : '—' },
+      { text: endpoint.has_samples ? (stats.hist_available ? '充足' : '样本不足') : '无样本' }
     ];
-    cells.forEach(function (text) {
-      var cell = document.createElement('td');
-      cell.textContent = text;
-      row.appendChild(cell);
+    cells.forEach(function (cell) {
+      if (cell.node) { row.appendChild(cell.node); return; }
+      var td = document.createElement('td');
+      td.textContent = cell.text;
+      row.appendChild(td);
     });
     return row;
   }
