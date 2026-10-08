@@ -80,8 +80,8 @@ def test_public_contribution_entrypoints_use_the_current_edition_contract() -> N
     readme = _read("README.md")
     contributing = _read("CONTRIBUTING.md")
     architecture = _read("docs/ARCHITECTURE.md")
-    adr_0003 = _read("docs/adr/0003-product-strategy-hosted-only.md")
-    adr_0007 = _read("docs/adr/0007-runtime-edition-policies.md")
+    adr_0008 = _read("docs/adr/0008-runtime-edition-policies.md")
+    adr_0009 = _read("docs/adr/0009-open-source-strategy.md")
 
     assert "[CONTRIBUTING.md](CONTRIBUTING.md)" in readme
     assert "[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)" in contributing
@@ -90,9 +90,15 @@ def test_public_contribution_entrypoints_use_the_current_edition_contract() -> N
     assert "../AGENTS.md" not in architecture
     assert (ROOT / "CONTRIBUTING.md").is_file()
     assert "AGPL-3.0" in architecture
-    assert "ADR-0007" in architecture
-    assert "Superseded" in adr_0003.splitlines()[2]
-    assert "adr-0003 remains as a historical decision record" in adr_0007.lower()
+    assert "ADR-0008" in architecture
+    assert "ADR-0009" in architecture
+    # GH-203: the hosted-only strategy ADR is removed from the tree and
+    # superseded by ADR-0009 (recoverable from git history, not tracked).
+    assert not (ROOT / "docs/adr/0003-product-strategy-hosted-only.md").exists()
+    assert "supersedes adr-0003" in adr_0009.lower()
+    assert "adr-0003" in adr_0008.lower()
+    assert "0003-product-strategy-hosted-only" not in architecture
+    assert "0003-product-strategy-hosted-only" not in adr_0008
 
     # These private historical guides are excluded from the public snapshot;
     # check their supersession notices in the full source checkout when present.
@@ -101,4 +107,4 @@ def test_public_contribution_entrypoints_use_the_current_edition_contract() -> N
         if source.is_file():
             text = source.read_text(encoding="utf-8").lower()
             assert "superseded" in text
-            assert "adr-0007" in text or "contributing.md" in text
+            assert "adr-0008" in text or "contributing.md" in text

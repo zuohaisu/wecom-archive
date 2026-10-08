@@ -5,8 +5,8 @@ wildcard TLS renewal implementation was captured after 41/41 observed
 successful runs in the 30 days before capture. GH-123 deliberately changes
 only its previously-unimplemented failure reporting and alerting behavior;
 the production-proven successful path and its wildcard/domain topology remain
-unchanged. The original flow was introduced by the 2026-08-03 RND-261
-domain-cutover ([docs/ops/rnd-261-domain-cutover-runbook.md](../ops/rnd-261-domain-cutover-runbook.md)).
+unchanged. The original flow was field-proven during the 2026-08-03 production
+domain cutover (runbook since moved out of the tree; see GH-203).
 
 This document distinguishes the captured successful flow from GH-123's
 explicit failure policy. It is not a proposal to redesign certificate

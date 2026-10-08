@@ -6,7 +6,7 @@
 ## 前置条件
 
 ### 服务器
-- 阿里云 ECS (ali-xy-qw), Alibaba Cloud Linux 3
+- 阿里云 ECS（生产主机，别名见本地运维记录），Alibaba Cloud Linux 3
 - 用户: `wecomarchive`
 - 应用已部署在 `/srv/apps/wecom-archive-365/current/`
 
@@ -33,7 +33,7 @@ make ssl-verify-systemd   # 优先用 Docker 里的 systemd-analyze verify
 
 ```bash
 # SSH 到服务器, 以 wecomarchive 用户执行
-ssh ali-xy-qw
+ssh <production-host>
 sudo su - wecomarchive
 
 # 安装 acme.sh

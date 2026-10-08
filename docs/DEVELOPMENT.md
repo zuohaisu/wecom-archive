@@ -3,7 +3,7 @@
 > **Superseded:** This internal guide predates the AGPL-3.0 and self-hosted
 > decisions. Its hosted-only and “no external contribution process” statements
 > are historical, not current. See [CONTRIBUTING.md](../CONTRIBUTING.md) for
-> today's contributor workflow and [ADR-0007](adr/0007-runtime-edition-policies.md)
+> today's contributor workflow and [ADR-0008](adr/0008-runtime-edition-policies.md)
 > for the current runtime policy.
 
 This page remains for historical engineering notes; do not use its old

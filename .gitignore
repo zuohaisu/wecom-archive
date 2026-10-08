@@ -280,3 +280,7 @@ tasks/
 
 # Local agent-tool state (untracked since GH-201)
 .hermes/
+
+# Local-only operational originals (GH-203): production fingerprints stay out of the repo.
+# Recover any archived original from git history: git show <sha>:<old-path>
+private-ops/

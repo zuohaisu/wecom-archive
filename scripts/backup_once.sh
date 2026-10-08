@@ -12,8 +12,8 @@
 # (STORAGE_LOCAL_PATH), which is the one copy that exists nowhere else.
 #
 # A single local backup directory is NOT a complete disaster-recovery
-# plan — see docs/operations/2c2g-runbook.md, "Backup scope and what this
-# does NOT cover".
+# plan — see the DR design notes in docs/operations/backup-and-recovery.md
+# and the ops runbook ("Backup scope and what this does NOT cover").
 #
 # ── Required env ────────────────────────────────────────────────────────
 #   DATABASE_URL           PostgreSQL connection string (same one the app uses)

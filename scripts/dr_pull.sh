@@ -22,7 +22,7 @@
 # script deliberately does not touch them — see backup_once.sh's own
 # header for why that script is not being refactored as part of #105.
 # Pulling those is a plain `rsync`/`ssh` operation Ops can run directly
-# (see docs/operations/2c2g-runbook.md).
+# (procedure documented in the ops runbook, local ops records).
 #
 # ── Design ──────────────────────────────────────────────────────────────
 #   remote artifact → local staging (rsync) → sha256 verify →
@@ -41,7 +41,7 @@
 # ── Required env ────────────────────────────────────────────────────────
 #   PULL_SOURCE      rsync source spec for the producer's bundle
 #                    directory, e.g.
-#                    "wecomarchive@ali-xy-qw:/srv/apps/wecom-archive-365/shared/dr_bundles/"
+#                    "<deploy-user>@<production-host>:/srv/apps/wecom-archive-365/shared/dr_bundles/"
 #                    (trailing slash matters — rsync copies CONTENTS of
 #                    this directory, not the directory itself). May also
 #                    be a local path for a destination that mounts

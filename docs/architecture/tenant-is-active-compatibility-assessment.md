@@ -18,7 +18,7 @@ requires `active` lifecycle plus an active `TenantWecomConfig`.
 
 The Ops evidence recorded in GitHub #94 (2026-10-07) reports:
 
-- ECS: `ali-xy-qw`; deployed application commit: `53ec37f` (identified as
+- ECS: the production host (alias withheld per GH-203); deployed application commit: `53ec37f` (identified as
   `origin/main` at inspection time).
 - PostgreSQL 16.15; Alembic revision `0073`.
 - One tenant total; `(active, true)`: 1; all other
@@ -69,9 +69,9 @@ does not authorize that cutover.
   Their references preserve the original schema and migration history; they are
   not live runtime decisions. Historical migration tests retain legacy-schema
   fixtures only where they test those old revisions.
-- `docs/research/wecom_employee_login_tenant_saas_foundation.md` and archived
-  planner/roadmap documents under `deliverables/archive/` retain historical
-  schema or planning examples. They are not current model/runtime contracts.
+- Historical research and planning documents retain historical schema or
+  planning examples (most have since moved out of the tree; see GH-203).
+  They are not current model/runtime contracts.
 - Forward migration `0075` checks every stored pair against the canonical map
   (`active → true`; `provisioning`, `frozen`, `suspended → false`) and aborts on
   any mismatch before dropping the column. It never rewrites lifecycle state.
