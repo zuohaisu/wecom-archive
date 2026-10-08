@@ -108,7 +108,7 @@ POST 的 JSON payload:
 ```json
 {
   "domain": "media.example.com",
-  "hostname": "ali-xy-qw",
+  "hostname": "<production-host>",
   "failed_stage": "qiniu_upload",
   "timestamp": "2026-07-10T12:00:00Z",
   "error_summary": "Qiniu upload failed — HTTP 401 ..."
