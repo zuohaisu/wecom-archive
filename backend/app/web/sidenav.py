@@ -167,6 +167,12 @@ PLATFORM_NAV = (
         ),
     },
     {
+        "group": "财务",
+        "items": (
+            {"id": "finance-orders", "label": "订单明细", "path": "/platform/finance/orders"},
+        ),
+    },
+    {
         "group": "基础设施",
         "items": (
             {"id": "api-performance", "label": "接口性能", "path": "/platform/api-performance"},

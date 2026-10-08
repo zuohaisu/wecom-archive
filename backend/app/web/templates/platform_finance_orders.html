@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-plane="platform">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>订单明细 — 平台运营控制台</title>
+<link rel="icon" href="/api/branding/favicon" sizes="any">
+<link rel="stylesheet" href="/web/static/design-system.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-operations.css?v=__STATIC_VERSION__">
+<link rel="stylesheet" href="/web/static/platform-console-orange.css?v=__STATIC_VERSION__">
+</head>
+<body>
+__ADMIN_BAR__
+<div class="shell">
+__SIDENAV__
+<div class="main">
+__TOPBAR__
+<main class="page">
+  <div class="page-hd">
+    <div><h1>订单明细</h1><p>支付渠道确认的入账订单与退款订单流水，只读展示。手工账本单独统计，不并入本页。</p></div>
+  </div>
+  <div id="error" class="alert alert-danger" role="alert" hidden></div>
+
+  <section class="card" aria-labelledby="fin-summary-title">
+    <div class="card-hd"><div><h2 id="fin-summary-title">资金概览（当前筛选范围）</h2></div><span id="fin-refreshed" class="muted"></span></div>
+    <div class="card-bd">
+      <div class="metric-grid" aria-label="财务概览">
+        <article class="card metric"><span>渠道确认入账</span><strong id="fin-receipt">—</strong><small id="fin-receipt-count">—</small></article>
+        <article class="card metric"><span>渠道成功退款</span><strong id="fin-refund">—</strong><small id="fin-refund-count">—</small></article>
+        <article class="card metric"><span>净收入（入账 − 退款）</span><strong id="fin-net">—</strong><small>仅渠道确认口径，不含手工账本</small></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="fin-list-title">
+    <div class="card-hd"><div><h2 id="fin-list-title">订单列表</h2><p class="muted">入账含待支付/已关闭等中间状态，金额汇总只计渠道确认口径。</p></div></div>
+    <form id="fin-filters" class="filter-grid">
+      <label>类型<select id="fin-kind">
+        <option value="all">全部类型</option>
+        <option value="receipt">入账</option>
+        <option value="refund">退款</option>
+      </select></label>
+      <label>状态<select id="fin-status"><option value="">全部状态</option></select></label>
+      <label>客户名称 / slug<input id="fin-q" type="search" maxlength="200" placeholder="例如 某某科技"></label>
+      <div class="filter-actions"><button class="btn btn-primary" type="submit">应用</button></div>
+    </form>
+    <div class="card-bd table-wrap">
+      <table>
+        <thead><tr>
+          <th>类型</th><th>客户</th><th>说明</th><th class="num">金额</th><th>状态</th><th>渠道</th><th>时间（UTC+8）</th>
+        </tr></thead>
+        <tbody id="fin-rows"></tbody>
+      </table>
+    </div>
+    <div class="card-bd">
+      <span class="muted" id="fin-total">—</span>
+      <span class="muted" id="fin-page-info">—</span>
+      <button class="btn btn-sm" type="button" id="fin-page-prev">上一页</button>
+      <button class="btn btn-sm" type="button" id="fin-page-next">下一页</button>
+    </div>
+  </section>
+</main>
+</div>
+</div>
+<script src="/web/static/platform-console.js?v=__STATIC_VERSION__"></script>
+<script src="/web/static/platform-finance-orders.js?v=__STATIC_VERSION__"></script>
+</body>
+</html>
