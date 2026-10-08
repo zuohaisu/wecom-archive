@@ -1,1 +1,0 @@
-FastAPI + SQLAlchemy (PostgreSQL) + Alembic for ORM/migrations; Pytest for testing; Jinja2 templates and vanilla JS/CSS for the embedded admin console; Qiniu SDK for cloud media storage alongside local filesystem fallback.

@@ -1,1 +1,0 @@
-Requires the `DATABASE_URL` environment variable to be set before any engine creation; `schema_check.py` locates `alembic.ini` and `alembic/` relative to the backend root directory and is consumed by both HTTP readiness endpoints and the `scripts/verify_alembic_head.py` CLI.

@@ -1,1 +1,0 @@
-Alembic-based PostgreSQL schema migrations for the WeCom archive service, managing versioned DDL changes across tables for messages, media, contacts, tenants, and message revocations.

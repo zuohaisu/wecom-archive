@@ -1,1 +1,0 @@
-No build or test commands are defined within this module; routers are registered by mounting each router's `APIRouter` instance at the application root. Environment variables required include `WECOM_CORP_ID`, `WECOM_AGENT_ID`, `WECOM_OAUTH_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, and `WECOM_CALLBACK_*` keys depending on which router is exercised.

@@ -1,1 +1,0 @@
-Central repository for architecture docs, ADRs, research notes, runbooks, design specifications, and the standalone company homepage static site used for ICP beian registration.

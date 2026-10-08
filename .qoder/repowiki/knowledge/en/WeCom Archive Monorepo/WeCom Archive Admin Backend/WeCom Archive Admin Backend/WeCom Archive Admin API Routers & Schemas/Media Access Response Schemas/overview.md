@@ -1,1 +1,0 @@
-Pydantic response models defining the public API shapes for media access descriptors, separating top-level single-media and nested mixed/chatrecord media contracts.
