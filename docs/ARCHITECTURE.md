@@ -1,36 +1,55 @@
-# Architecture Index — Crowntime WeCom Archive
+# Architecture — wecom-archive
 
-> **Current architecture source:** [Current Architecture Map](architecture/current-state.md)
-> and the [Runtime Architecture Debt Register](architecture/runtime-debt.md).
->
-> This index supersedes the former internal-only/single-tenant architecture
-> overview. It does not change runtime behavior.
+> This is the current repository-backed architecture summary. It describes
+> source and policy, not live production configuration.
 
-## Start here
+## Product and license boundary
 
-1. Read [Current Architecture Map](architecture/current-state.md) for the
-   hosted multi-tenant product boundary, identity/tenant model, WeCom callback
-   separation, archive runtime modes, authority map, contradiction inventory,
-   and documentation hierarchy.
-2. Read [Runtime Architecture Debt Register](architecture/runtime-debt.md)
-   before changing a compatibility path. `TRANSITIONAL` paths require their
-   listed retirement evidence and separate approval; they are not cleanup.
-3. Use executable sources—models, services, routers, worker scripts,
-   migrations, tests, `.env.example`, deployment scripts, and unit manifests—
-   to resolve implementation questions. When prose conflicts with executable
-   behavior, the executable source wins and the prose needs correction.
+All first-party source—including cloud and self-hosted behavior—lives in this
+repository under AGPL-3.0. `APP_EDITION` selects runtime policy; it is not a
+source-code or license boundary. The self-hosted edition avoids SaaS purchase,
+trial, subscription-expiry, and commercial quota dependencies while retaining
+tenant isolation, authentication, authorization, audit, encryption, and
+fail-closed behavior. The cloud edition retains its commercial lifecycle and
+billing behavior.
 
-## Related authoritative documents
+The runtime defaults to `selfhost` when `APP_EDITION` is unset; invalid values
+fail closed. The production value is an Ops fact and must not be inferred from
+this source tree. See [ADR-0007](adr/0007-runtime-edition-policies.md) and
+[Discussion #178](https://github.com/zuohaisu/wecom-archive/discussions/178)
+for the approved product and edition decisions.
 
-| Concern | Source |
-| --- | --- |
-| Contribution, safety, architecture-boundary, ticket, and validation rules | [`AGENTS.md`](../AGENTS.md) |
-| Environment-variable contract | [`.env.example`](../.env.example) |
-| Deployment asset ownership and CD behavior | [`DEPLOYMENT.md`](DEPLOYMENT.md) |
-| WeCom integration and credential handling | [`kb/customer/wecom-integration.md`](kb/customer/wecom-integration.md) |
-| Non-production isolation | [`OPERATIONS.md#non-production-isolation`](OPERATIONS.md#non-production-isolation) |
-| Product strategy | [`adr/0003-product-strategy-hosted-only.md`](adr/0003-product-strategy-hosted-only.md) |
-| Billing, refund, and service lifecycle decisions | [`adr/0004-annual-plan-wechat-pay-gates.md`](adr/0004-annual-plan-wechat-pay-gates.md), [`adr/0005-saas-billing-lifecycle-refunds-and-service-gates.md`](adr/0005-saas-billing-lifecycle-refunds-and-service-gates.md), and [`adr/0006-alipay-pc-page-pay.md`](adr/0006-alipay-pc-page-pay.md) |
+## Component boundaries
 
-GitHub Issues are the active issue-management system. Historical Linear links
-or RND identifiers are provenance, not active workflow instructions.
+The intended dependency direction is:
+
+```text
+composition root (app/main.py) → routers → services/domain → database
+```
+
+The composition root wires routers and process policy. Business routes belong
+in `backend/app/routers/`; domain workflows belong in services; persistence
+belongs in `backend/app/db/`. Services must not import routers, and routers
+must not import the composition root. The executable authority for these rules
+is [`backend/tests/test_architecture_boundary.py`](../backend/tests/test_architecture_boundary.py).
+
+## Tenant and service boundaries
+
+A tenant-scoped authenticated session determines tenant identity; request data
+must not select another tenant. Tenant lifecycle and edition policy are
+separate: self-hosted `frozen` projections do not disable ordinary service,
+while `suspended`, missing identity, unknown lifecycle state, invalid
+credentials, and failed authorization remain fail-closed. Do not mutate a
+persisted lifecycle state to simulate an edition policy.
+
+Secrets and archive content are untrusted/sensitive data. Keep credentials
+outside version control, use synthetic fixtures, and validate external values
+at adapter boundaries. Preserve auditability and tenant scope for data reads,
+writes, exports, and worker operations.
+
+## Decision records
+
+- [ADR-0007 — runtime edition and self-hosted policy](adr/0007-runtime-edition-policies.md) is the current edition decision.
+- [ADR-0005 — cloud billing lifecycle and service gates](adr/0005-saas-billing-lifecycle-refunds-and-service-gates.md) remains the cloud commercial policy.
+- [ADR-0003 — hosted-only strategy](adr/0003-product-strategy-hosted-only.md) is retained as a historical record and is superseded by the current AGPL/self-host decision.
+- [`AGENTS.md`](../AGENTS.md) contains the binding contribution, validation, safety, and architecture rules.

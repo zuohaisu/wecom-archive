@@ -26,9 +26,9 @@ not SSH to either host, so the live value of `APP_EDITION` is unknown. This ADR
 records code behavior and a merge gate, not a claim about current production
 state.
 
-ADR-0003's hosted-only strategy remains historical and is not rewritten here;
-its supersession is recorded separately under GH-170. ADR-0005 continues to
-specify the commercial lifecycle for `cloud`.
+ADR-0003 remains as a historical decision record; its status header now marks
+the hosted-only policy superseded by Discussion #178 and this ADR. ADR-0005
+continues to specify the commercial lifecycle for `cloud`.
 
 ## 2. Decision
 

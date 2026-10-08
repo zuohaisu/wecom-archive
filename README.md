@@ -235,9 +235,8 @@ included or redistributed by this project.
 
 ## Development
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the development setup, the
-acceptance chain a pull request has to pass, and the codebase invariants worth
-knowing before you change anything.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, contribution
+workflow, validation chain, and current codebase boundaries.
 
 Security issues follow [SECURITY.md](SECURITY.md) and must never be filed in a
 normal issue.

@@ -1,6 +1,12 @@
-# Current Architecture Map
+# Historical Architecture Map
 
-> **Status:** authoritative repository-backed architecture map (GitHub #92, 2026-08-28).
+> **Superseded:** This GH-92 snapshot predates the AGPL-3.0 and self-hosted
+> decisions. Its private/proprietary and hosted-only product-boundary claims
+> are not current. Use [the current architecture summary](../ARCHITECTURE.md)
+> and [ADR-0007](../adr/0007-runtime-edition-policies.md) instead. This file
+> remains only as a historical record; it is not an active product contract.
+
+> **Status:** historical GH-92 snapshot (2026-08-28); the original architecture authority is superseded by `docs/ARCHITECTURE.md` and ADR-0007.
 >
 > This document describes what the checked-in code, configuration contract, and
 > active GitHub Issues prove. It does **not** claim a live production fact that
