@@ -82,7 +82,11 @@ __TOPBAR__
     <div class="card-bd">
       <span class="muted" id="apiperf-site-summary">—</span>
       <span class="muted" id="apiperf-pagination"></span>
+      <span class="muted" id="apiperf-page-info"></span>
+      <button class="btn btn-sm" type="button" id="apiperf-page-prev">上一页</button>
+      <button class="btn btn-sm" type="button" id="apiperf-page-next">下一页</button>
     </div>
+    <div class="card-bd"><p class="muted" id="apiperf-list-incomplete" hidden></p></div>
   </section>
 
   <div class="platform-grid">
@@ -96,10 +100,11 @@ __TOPBAR__
       </form>
       <div class="card-bd table-wrap">
         <table>
-          <thead><tr><th>日期（Asia/Shanghai）</th><th>请求数</th><th>错误数</th><th>平均耗时</th><th>成功 p95</th><th>流式</th></tr></thead>
+          <thead><tr><th>日期（Asia/Shanghai）</th><th>请求数</th><th>错误数</th><th>平均耗时</th><th>成功 p95</th><th>成功 min/max</th><th>流式</th></tr></thead>
           <tbody id="apiperf-daily-rows"></tbody>
         </table>
       </div>
+      <div class="card-bd"><p class="muted" id="apiperf-daily-incomplete" hidden></p></div>
       <div class="card-bd"><p class="muted">第 31–180 天的小时明细已按 720 小时保留策略过期，仅日趋势可用。</p></div>
     </section>
     <section class="card" aria-labelledby="apiperf-hourly-title">
@@ -112,11 +117,11 @@ __TOPBAR__
       </form>
       <div class="card-bd table-wrap">
         <table>
-          <thead><tr><th>小时（Asia/Shanghai）</th><th>请求数</th><th>错误数</th><th>平均耗时</th><th>成功 p95</th><th>流式</th></tr></thead>
+          <thead><tr><th>小时（Asia/Shanghai）</th><th>请求数</th><th>错误数</th><th>平均耗时</th><th>成功 p95</th><th>成功 min/max</th><th>流式</th></tr></thead>
           <tbody id="apiperf-hourly-rows"></tbody>
         </table>
       </div>
-      <div class="card-bd"><p class="muted" id="apiperf-hourly-note">当前小时为未完成桶：显示已落库值，最多落后约 15 分钟。</p></div>
+      <div class="card-bd"><p class="muted" id="apiperf-hourly-note">当前小时为未完成桶：显示已落库值，最多落后约 15 分钟。最早保留一天可能是部分覆盖（其早期小时已过期）。</p></div>
     </section>
   </div>
 </main>

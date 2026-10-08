@@ -78,16 +78,28 @@ class SlowEndpointDetector:
             if sample.key.traffic_class != "business":
                 continue
             for kind in (ALERT_KIND_NORMAL, ALERT_KIND_STREAM):
+                state_key = (sample.key, kind)
+                # Present in this pass (even if insufficient/healthy):
+                # only ABSENT keys lose their streak in the prune below.
+                seen.add(state_key)
                 outcome = self._evaluate_one(sample, kind, now)
                 if outcome is not None:
-                    state_key = (sample.key, kind)
-                    seen.add(state_key)
                     self._active[state_key] = outcome
+                else:
+                    # Present and healthy (or insufficient) this pass: no
+                    # active anomaly may linger from earlier evaluations.
+                    self._active.pop(state_key, None)
+        # A "sustained" claim must never bridge a gap without evidence:
+        # every state key ABSENT from this evaluation pass (empty or
+        # aged-out window, not just deactivated anomalies) loses its
+        # streak and its first-detected timestamp.
+        for state_key in list(self._streaks.keys()):
+            if state_key not in seen:
+                del self._streaks[state_key]
+                self._first_met.pop(state_key, None)
         for state_key in list(self._active.keys()):
             if state_key not in seen:
                 del self._active[state_key]
-                self._streaks.pop(state_key, None)
-                self._first_met.pop(state_key, None)
         return sorted(self._active.values(), key=lambda a: (a.key.route, a.kind))
 
     def _evaluate_one(self, sample: WindowSample, kind: str, now: datetime) -> Optional[Anomaly]:

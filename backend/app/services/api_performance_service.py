@@ -2,11 +2,15 @@
 short-window detection/email loop, and bounded retention cleanup.
 
 One asyncio task per app instance, started by the composition root's
-lifespan. Every DB touch happens here (never on the request path) and
-every failure is bounded: in-memory increments survive a failed flush and
-retry under the SAME batch id; a graceful shutdown attempts one
-time-boxed final flush; a crash simply loses the unflushed window, which
-the status page reports as a possible gap.
+lifespan. Every DB touch runs in a worker THREAD via run_in_executor --
+never on the event loop -- so a slow or lock-waiting database cannot
+stall request handling. The telemetry writer uses its own tiny engine
+with real server-side statement/lock timeouts, isolated from the request
+pool. Every failure is bounded: in-memory increments survive a failed
+flush and retry under the SAME batch id (inside the dedup retention
+window); a graceful shutdown attempts one time-boxed final flush; a
+crash simply loses the unflushed window, which the status page reports
+as a possible gap.
 """
 
 from __future__ import annotations
@@ -18,9 +22,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
-from app.db.session import Session, get_engine
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
 from app.email import send_api_performance_alert_email
-from app.services.api_performance_collector import ApiPerformanceCollector, ApiPerformanceConfig
+from app.services.api_performance_collector import (
+    ApiPerformanceCollector,
+    ApiPerformanceConfig,
+)
 from app.services.api_performance_detector import (
     EMAIL_UNCONFIGURED,
     SlowEndpointDetector,
@@ -31,25 +40,97 @@ from app.services.api_performance_store import (
     flush_deltas,
     run_retention,
 )
+from app.settings import get_database_settings
 
 logger = logging.getLogger(__name__)
 
 _RETENTION_INTERVAL_SECONDS = 6 * 3600
 _FINAL_FLUSH_TIMEOUT_SECONDS = 5.0
 _MAX_BACKOFF_SECONDS = 900.0
+# Real server-side bounds for the telemetry writer: a stuck flush must
+# release the worker thread (and the loop awaiting it) instead of hanging
+# on an ambient default. SQLite (tests) skips these options.
+_TELEMETRY_STATEMENT_TIMEOUT_MS = 10000
+_TELEMETRY_LOCK_TIMEOUT_MS = 5000
+
+_engine = None
 
 
 def default_session_factory():
-    return Session(get_engine())
+    """Session factory for the telemetry background loop, on a dedicated
+    small engine with server-enforced statement/lock timeouts.
+
+    Deliberately separate from app.db.session's request engine: the flush
+    is a low-frequency background writer and must neither contend for the
+    request pool nor inherit its unbounded statement duration."""
+    global _engine
+    if _engine is None:
+        url = get_database_settings().database_url.strip()
+        if not url:
+            raise RuntimeError("DATABASE_URL environment variable is not set")
+        kwargs = dict(pool_size=1, max_overflow=1, pool_pre_ping=True)
+        if url.startswith("postgresql"):
+            kwargs["connect_args"] = {
+                "options": (
+                    f"-c statement_timeout={_TELEMETRY_STATEMENT_TIMEOUT_MS}"
+                    f" -c lock_timeout={_TELEMETRY_LOCK_TIMEOUT_MS}"
+                )
+            }
+        _engine = create_engine(url, **kwargs)
+    return Session(_engine)
 
 
 def default_send_fn(to_email: str, subject: str, body: str, *, operation_id: str) -> bool:
     return send_api_performance_alert_email(to_email, subject, body, operation_id=operation_id)
 
 
+def _flush_job(session_factory: Callable, batch_id: str, instance_id: str, deltas: list, config: ApiPerformanceConfig) -> str:
+    """Blocking flush transaction; runs in a worker thread. Retention
+    bounds are passed so increments for already-expired buckets are
+    rejected (late retries must not resurrect cleaned-up rows)."""
+    with session_factory() as session:  # type: ignore[operator]
+        return flush_deltas(
+            session,
+            batch_id,
+            instance_id,
+            deltas,
+            now=datetime.now(timezone.utc),
+            retention_hours=config.retention_hours,
+            retention_days=config.retention_days,
+        )
+
+
+def _cleanup_job(session_factory: Callable, config: ApiPerformanceConfig) -> dict:
+    """Blocking retention cleanup; runs in a worker thread."""
+    with session_factory() as session:  # type: ignore[operator]
+        return run_retention(
+            session,
+            now=datetime.now(timezone.utc),
+            retention_hours=config.retention_hours,
+            retention_days=config.retention_days,
+            batch_retention_hours=config.batch_retention_hours,
+        )
+
+
+def _alert_email_job(runtime, anomalies, now, session_factory, send_fn) -> str:
+    """Blocking email quota/send job; runs in a worker thread. Persist-
+    before-send and the daily quota live inside maybe_send_daily_alert."""
+    with session_factory() as session:  # type: ignore[operator]
+        return maybe_send_daily_alert(
+            session,
+            anomalies,
+            config=runtime.config,
+            collector=runtime.collector,
+            now=now,
+            send_fn=send_fn,
+        )
+
+
 @dataclass
 class AlertEmailStatus:
-    """Honest, page-displayable email state; never fabricated."""
+    """Honest, page-displayable email state; never fabricated. The
+    authoritative per-day state is the persisted alert row (the status
+    API reads it); this field tracks this process's own transitions."""
 
     status: str = "not_attempted"
     updated_at: Optional[datetime] = None
@@ -119,7 +200,9 @@ async def run_background_loop(
     finally:
         # Graceful shutdown: one time-boxed final flush, but only when this
         # process actually observed traffic -- an idle app must not touch
-        # the DB at all.
+        # the DB at all. The job runs off-loop with server-side timeouts;
+        # if it outlives this wait the exit joins the worker thread,
+        # bounded by the statement timeout.
         if runtime.collector.total_observations > 0:
             try:
                 await asyncio.wait_for(
@@ -134,10 +217,14 @@ async def _flush_once(runtime: ApiPerformanceRuntime, session_factory: Callable,
     if now_mono < runtime._next_flush_mono and not final:
         return
     batch_id, deltas = runtime.collector.drain_deltas()
+    loop = asyncio.get_running_loop()
     outcome: str
     try:
-        with session_factory() as session:  # type: ignore[operator]
-            outcome = flush_deltas(session, batch_id, runtime.collector.instance_id, deltas)
+        # The whole transaction runs in a worker thread: a slow or
+        # lock-waiting DB must never block the event loop.
+        outcome = await loop.run_in_executor(
+            None, _flush_job, session_factory, batch_id, runtime.collector.instance_id, deltas, runtime.config
+        )
         runtime.collector.mark_flushed(batch_id, outcome)
         runtime._flush_backoff_seconds = 60.0
         runtime._next_flush_mono = time.monotonic() + runtime.config.flush_interval_seconds
@@ -165,46 +252,36 @@ async def _detect_once(runtime: ApiPerformanceRuntime, session_factory: Callable
         return
     now = datetime.now(timezone.utc)
     loop = asyncio.get_running_loop()
-    status = await loop.run_in_executor(
-        None,
-        _alert_email_job,
-        runtime,
-        anomalies,
-        now,
-        session_factory,
-        send_fn,
-    )
-    runtime.email.status = status
-    runtime.email.updated_at = datetime.now(timezone.utc)
-    runtime.email.anomaly_count = len(anomalies)
-
-
-def _alert_email_job(runtime, anomalies, now, session_factory, send_fn) -> str:
-    # Runs in the default executor: the provider call is blocking by design
-    # (one bounded attempt inside app.email). Persist-before-send and the
-    # daily quota live inside maybe_send_daily_alert.
-    with session_factory() as session:  # type: ignore[operator]
-        return maybe_send_daily_alert(
-            session,
+    try:
+        status = await loop.run_in_executor(
+            None,
+            _alert_email_job,
+            runtime,
             anomalies,
-            config=runtime.config,
-            collector=runtime.collector,
-            now=now,
-            send_fn=send_fn,
+            now,
+            session_factory,
+            send_fn,
         )
+    except Exception as error:  # noqa: BLE001 - a quota/DB failure inside the
+        # email job must never kill the telemetry loop (QA finding 2): the
+        # daily intent stays unclaimed and the next evaluation retries.
+        logger.warning("api performance alert job outcome=error error_type=%s", type(error).__name__)
+        runtime.email.status = "job_failed"
+        runtime.email.updated_at = datetime.now(timezone.utc)
+        return
+    # Only real send outcomes update the in-process status. The persisted
+    # per-day row (read by the status API) stays authoritative;
+    # ``already_claimed`` must never overwrite an earlier result.
+    if status != "already_claimed":
+        runtime.email.status = status
+        runtime.email.updated_at = datetime.now(timezone.utc)
+        runtime.email.anomaly_count = len(anomalies)
 
 
 async def _cleanup_once(runtime: ApiPerformanceRuntime, session_factory: Callable) -> None:
-    config = runtime.config
+    loop = asyncio.get_running_loop()
     try:
-        with session_factory() as session:  # type: ignore[operator]
-            deleted = run_retention(
-                session,
-                now=datetime.now(timezone.utc),
-                retention_hours=config.retention_hours,
-                retention_days=config.retention_days,
-                batch_retention_hours=config.batch_retention_hours,
-            )
+        deleted = await loop.run_in_executor(None, _cleanup_job, session_factory, runtime.config)
         runtime.last_retention = deleted
         runtime.last_retention_at = datetime.now(timezone.utc)
     except Exception as error:  # noqa: BLE001 - cleanup retries next cycle

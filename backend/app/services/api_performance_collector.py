@@ -178,6 +178,7 @@ class ApiPerformanceConfig:
     retention_hours: int = 720
     retention_days: int = 180
     batch_retention_hours: int = 48
+    batch_retry_hours: int = 24
     detection_enabled: bool = True
     detection_interval_seconds: int = 60
     window_minutes: int = 5
@@ -199,6 +200,7 @@ class ApiPerformanceConfig:
             retention_hours=_parse_int(s.api_perf_retention_hours, "API_PERF_RETENTION_HOURS", 24, 8760, 720),
             retention_days=_parse_int(s.api_perf_retention_days, "API_PERF_RETENTION_DAYS", 7, 3650, 180),
             batch_retention_hours=_parse_int(s.api_perf_batch_retention_hours, "API_PERF_BATCH_RETENTION_HOURS", 2, 336, 48),
+            batch_retry_hours=_parse_int(s.api_perf_batch_retry_hours, "API_PERF_BATCH_RETRY_HOURS", 1, 336, 24),
             detection_enabled=_parse_bool(s.api_perf_detection_enabled, "API_PERF_DETECTION_ENABLED", default=True),
             detection_interval_seconds=_parse_int(s.api_perf_detection_interval_seconds, "API_PERF_DETECTION_INTERVAL_SECONDS", 15, 3600, 60),
             window_minutes=_parse_int(s.api_perf_window_minutes, "API_PERF_WINDOW_MINUTES", 1, 15, 5),
@@ -213,6 +215,13 @@ class ApiPerformanceConfig:
         )
         if config.sustained_minutes > config.window_minutes * 60:
             raise ValueError("API_PERF_SUSTAINED_MINUTES cannot exceed the window span in minutes")
+        if config.batch_retry_hours > config.batch_retention_hours - 2:
+            # The dedup row must always outlive the retry window, or a
+            # late retry could replay an already-committed batch.
+            raise ValueError(
+                "API_PERF_BATCH_RETRY_HOURS must stay at least 2 hours below "
+                "API_PERF_BATCH_RETENTION_HOURS (dedup retention covers retries)"
+            )
         return config
 
     def override_for(self, route_template: str) -> Optional[RouteOverride]:
@@ -415,9 +424,19 @@ class ApiPerformanceCollector:
     locked sections are bounded dict/list arithmetic so the event loop is
     never blocked meaningfully."""
 
-    def __init__(self, *, instance_id: Optional[str] = None, now: Optional[datetime] = None) -> None:
+    def __init__(
+        self,
+        *,
+        instance_id: Optional[str] = None,
+        now: Optional[datetime] = None,
+        retry_deadline_seconds: float = 24 * 3600.0,
+    ) -> None:
         self.instance_id = instance_id or uuid.uuid4().hex
         self.started_at = now or datetime.now(timezone.utc)
+        # A frozen batch may only be retried while its dedup row is still
+        # retained (48h). The retry deadline must stay safely inside that
+        # window; past it the batch is dropped and the loss is counted.
+        self.retry_deadline_seconds = retry_deadline_seconds
         self._lock = threading.RLock()
         self._routes: "OrderedDict[str, Set[str]]" = OrderedDict()
         # (method, route, traffic_class) -> OrderedDict[bucket_key -> [live, snapshot]]
@@ -425,10 +444,11 @@ class ApiPerformanceCollector:
         self._days: Dict[EndpointKey, "OrderedDict[date, List[Accumulator]]"] = {}
         self._pending: List[BucketDelta] = []
         self._windows: Dict[Tuple[str, str], "OrderedDict[int, List[MinuteWindow]]"] = {}
-        self._pending_batch: Optional[Tuple[str, List[BucketDelta]]] = None
+        self._pending_batch: Optional[Tuple[str, List[BucketDelta], int, float]] = None
         # Honest diagnostics: anything dropped is counted, never hidden.
         self.dropped_late_observations = 0
         self.dropped_pending_overflow = 0
+        self.dropped_stale_batch_observations = 0
         self.total_observations = 0
         self.flush_seq = 0
         self.last_flush_at: Optional[datetime] = None
@@ -498,6 +518,15 @@ class ApiPerformanceCollector:
                 # pending delta carries everything not yet persisted. An
                 # already-fully-flushed bucket is simply released.
                 evicted_delta = _delta_of(evicted_acc, evicted_snapshot)
+                if evicted_delta is not None and self._pending_batch is not None:
+                    # A frozen batch may already carry part of this bucket's
+                    # increments (drained before this eviction). Re-emitting
+                    # them would DOUBLE count once the batch is confirmed --
+                    # subtract the frozen portion (QA finding 6, double-count
+                    # direction).
+                    frozen = self._frozen_delta_for(key, granularity, evicted_key)
+                    if frozen is not None:
+                        evicted_delta = _subtract_frozen_delta(evicted_delta, frozen, evicted_acc)
                 if evicted_delta is not None:
                     self._pending.append(BucketDelta(
                         key=key,
@@ -520,7 +549,12 @@ class ApiPerformanceCollector:
         )
 
     def _record_window(self, observation: Observation, minute_key: int) -> None:
-        if observation.status_class != CLASS_2XX or observation.duration_us is None:
+        """Detection windows sample LATENCY only, with an explicit basis:
+        normal windows hold successful (2xx) response durations; stream
+        windows hold the time-to-response-start of streams that started
+        successfully. Failed streams (mid-stream error/disconnect) are
+        counted in the aggregates but are not latency samples."""
+        if observation.status_class != CLASS_2XX:
             return
         key = (observation.method, observation.route)
         windows = self._windows.get(key)
@@ -533,9 +567,19 @@ class ApiPerformanceCollector:
                 windows.popitem(last=False)
             entry = [MinuteWindow(), MinuteWindow()]
             windows[minute_key] = entry
-        window = entry[1] if observation.is_stream else entry[0]
+        success_window, stream_window = entry
+        if observation.is_stream:
+            if observation.stream_error or observation.stream_ttfb_us is None:
+                return
+            window = stream_window
+            value_us = observation.stream_ttfb_us
+        else:
+            if observation.duration_us is None:
+                return
+            window = success_window
+            value_us = observation.duration_us
         window.count += 1
-        window.hist[hist_index_for(observation.duration_us)] += 1
+        window.hist[hist_index_for(value_us)] += 1
 
     # ------------------------------------------------------------------
     # Flush support
@@ -548,11 +592,14 @@ class ApiPerformanceCollector:
         caller confirms the flush outcome -- a retry after an unknown
         commit result reuses the same id and the same deltas, so DB-side
         dedup makes double-apply impossible. Call ``mark_flushed`` with
-        the outcome; only a committed result advances the snapshots.
-        """
+        the outcome; only a committed result advances the snapshots. The
+        batch freezes exactly the pending prefix present at drain time:
+        buckets rotated LATER belong to a future batch and must survive
+        this batch's confirmation."""
         with self._lock:
             if self._pending_batch is not None:
-                return self._pending_batch
+                batch_id, deltas, _prefix, _since = self._pending_batch
+                return batch_id, deltas
             deltas: List[BucketDelta] = []
             for key, buckets in self._hours.items():
                 for bucket_key, (acc, snapshot) in buckets.items():
@@ -570,37 +617,70 @@ class ApiPerformanceCollector:
                             key=key, granularity=GRANULARITY_DAILY,
                             bucket_start=daily_bucket_start(bucket_day), bucket_date=bucket_day, acc=delta,
                         ))
+            pending_prefix = len(self._pending)
             deltas.extend(self._pending)
             self.flush_seq += 1
             batch_id = f"{self.instance_id}:{self.flush_seq}"
-            self._pending_batch = (batch_id, deltas)
+            self._pending_batch = (batch_id, deltas, pending_prefix, time.monotonic())
             return batch_id, deltas
 
     def mark_flushed(self, batch_id: str, result: str, *, at: Optional[datetime] = None) -> None:
         """Record a flush outcome. ``applied``/``already_applied`` are both
         terminal (the increments are in the DB exactly once): snapshots
-        advance and rotated buckets are released. Anything else KEEPS the
-        pending batch so the next drain reuses the same batch id and the
-        same deltas -- a retry after an unknown commit result must never
-        mint a new identity, or DB-side dedup could not stop a double
-        apply. New observations observed meanwhile simply land in the
-        following batch."""
+        advance and ONLY this batch's pending prefix is released -- later
+        rotations stay queued for the next batch. Anything else keeps the
+        batch for retry under the same id; past the retry deadline the
+        batch is dropped with a counted, honest loss (a dedup row can no
+        longer protect a replay)."""
         at = at or datetime.now(timezone.utc)
         with self._lock:
             if self._pending_batch is None or self._pending_batch[0] != batch_id:
                 return
-            _, deltas = self._pending_batch
+            _, deltas, pending_prefix, first_attempt = self._pending_batch
             self.last_flush_at = at
             self.last_flush_result = result
             if result in ("applied", "already_applied"):
                 self.consecutive_flush_errors = 0
                 self.last_persist_error = ""
                 self._advance_snapshots(deltas)
-                self._pending.clear()
+                del self._pending[:pending_prefix]
+                self._pending_batch = None
+            elif time.monotonic() - first_attempt > self.retry_deadline_seconds:
+                # Give up on the whole batch: advance the live snapshots so
+                # the abandoned increments are never re-emitted under a new
+                # id (the old dedup row may or may not exist -- either way
+                # replaying is unsafe), release the frozen pending prefix,
+                # and count the loss honestly.
+                dropped = sum(
+                    delta.acc.request_count
+                    for delta in deltas
+                    if delta.granularity == GRANULARITY_HOURLY
+                )
+                self.dropped_stale_batch_observations += dropped
+                self.consecutive_flush_errors += 1
+                self.last_persist_error = f"stale_batch:{result}"
+                logger.warning(
+                    "api performance flush batch dropped after retry deadline "
+                    "observations=%d result=%s",
+                    dropped, result,
+                )
+                self._advance_snapshots(deltas)
+                del self._pending[:pending_prefix]
                 self._pending_batch = None
             else:
                 self.consecutive_flush_errors += 1
                 self.last_persist_error = result
+
+    def _frozen_delta_for(self, key: EndpointKey, granularity: str, bucket_key) -> Optional[Accumulator]:
+        """The delta this bucket contributes to the currently frozen batch,
+        if any."""
+        if self._pending_batch is None:
+            return None
+        bucket_start = bucket_key if granularity == GRANULARITY_HOURLY else daily_bucket_start(bucket_key)
+        for delta in self._pending_batch[1]:
+            if delta.key == key and delta.granularity == granularity and delta.bucket_start == bucket_start:
+                return delta.acc
+        return None
 
     def _advance_snapshots(self, deltas: List[BucketDelta]) -> None:
         by_key = {
@@ -630,6 +710,7 @@ class ApiPerformanceCollector:
                 "pending_rotated_buckets": len(self._pending),
                 "dropped_late_observations": self.dropped_late_observations,
                 "dropped_pending_overflow": self.dropped_pending_overflow,
+                "dropped_stale_batch_observations": self.dropped_stale_batch_observations,
                 "flush_seq": self.flush_seq,
                 "last_flush_at": self.last_flush_at,
                 "last_flush_result": self.last_flush_result,
@@ -747,6 +828,43 @@ def _advance_snapshot(snapshot: Accumulator, delta: Accumulator) -> None:
     snapshot.stream_error_count += delta.stream_error_count
     snapshot.stream_duration_sum_us += delta.stream_duration_sum_us
     snapshot.stream_ttfb_sum_us += delta.stream_ttfb_sum_us
+
+
+def _subtract_frozen_delta(delta: Accumulator, frozen: Accumulator, acc: Accumulator) -> Optional[Accumulator]:
+    """delta := delta - frozen, for a bucket evicted while its frozen
+    batch is still in flight. Scalar fields subtract exactly; min/max are
+    not subtractable, so the remainder re-carries the bucket's current
+    extremes (the same conservative semantics as a live-bucket delta)."""
+    remainder = Accumulator()
+    remainder.request_count = delta.request_count - frozen.request_count
+    remainder.class_counts = {
+        cls: delta.class_counts.get(cls, 0) - frozen.class_counts.get(cls, 0)
+        for cls in set(delta.class_counts) | set(frozen.class_counts)
+        if delta.class_counts.get(cls, 0) - frozen.class_counts.get(cls, 0) != 0
+    }
+    remainder.completed_count = delta.completed_count - frozen.completed_count
+    remainder.duration_sum_us = delta.duration_sum_us - frozen.duration_sum_us
+    remainder.success_count = delta.success_count - frozen.success_count
+    remainder.success_duration_sum_us = delta.success_duration_sum_us - frozen.success_duration_sum_us
+    remainder.hist = [a - b for a, b in zip(delta.hist, frozen.hist)]
+    remainder.stream_count = delta.stream_count - frozen.stream_count
+    remainder.stream_error_count = delta.stream_error_count - frozen.stream_error_count
+    remainder.stream_duration_sum_us = delta.stream_duration_sum_us - frozen.stream_duration_sum_us
+    remainder.stream_ttfb_sum_us = delta.stream_ttfb_sum_us - frozen.stream_ttfb_sum_us
+    if remainder.completed_count > 0:
+        remainder.duration_min_us = acc.duration_min_us
+        remainder.duration_max_us = acc.duration_max_us
+    if remainder.success_count > 0:
+        remainder.success_min_us = acc.success_min_us
+        remainder.success_max_us = acc.success_max_us
+    if remainder.stream_count > 0:
+        remainder.stream_min_us = acc.stream_min_us
+        remainder.stream_max_us = acc.stream_max_us
+        remainder.stream_ttfb_min_us = acc.stream_ttfb_min_us
+        remainder.stream_ttfb_max_us = acc.stream_ttfb_max_us
+    if _is_empty(remainder):
+        return None
+    return remainder
 
 
 class ApiPerformanceMiddleware:
@@ -875,10 +993,17 @@ class _RequestTracker:
                 headers = message.get("headers") or []
                 content_type = _header_value(headers, b"content-type").split(";", 1)[0].strip().lower()
                 tracker.is_stream = content_type == _STREAM_CONTENT_TYPE
+                await send(message)
             elif message_type == "http.response.body" and not message.get("more_body", False):
+                # The response is only complete once the FINAL chunk has
+                # actually been handed to the server: recording before the
+                # send would (a) miss the time the final send blocks and
+                # (b) count a response whose final send fails as success.
+                await send(message)
                 tracker.completed = True
                 tracker._record(duration_us=tracker._elapsed_us())
-            await send(message)
+            else:
+                await send(message)
 
         return _send
 
@@ -886,9 +1011,22 @@ class _RequestTracker:
         if self.recorded or self.completed:
             return
         if self.response_started:
-            # A stream that ended without an explicit final empty body
-            # chunk: count it as a completed stream ending at return.
-            self._record(duration_us=self._elapsed_us())
+            if self.disconnected:
+                # The client went away mid-response; the app noticed and
+                # returned. A truncated stream is a stream error; a
+                # truncated normal response is a cancellation.
+                if self.is_stream:
+                    self._record(duration_us=self._elapsed_us(), stream_error=True)
+                else:
+                    self._record_cancelled()
+            elif self.is_stream:
+                # A stream that ended without an explicit final empty body
+                # chunk: count it as a completed stream ending at return.
+                self._record(duration_us=self._elapsed_us())
+            else:
+                # A normal response that started but never completed its
+                # body: a server bug; never disguise it as success.
+                self._record_failure(CLASS_EXCEPTION)
         elif self.disconnected:
             self._record_cancelled()
         else:
@@ -901,19 +1039,26 @@ class _RequestTracker:
             # A failure after the response completed (e.g. a background
             # task raising post-send) is outside request latency.
             return
-        if self.response_started:
+        if self.response_started and self.is_stream:
             # Mid-stream failure after HTTP 200: stream error, counted
             # separately, never in the normal latency ranking.
             self._record(duration_us=self._elapsed_us(), stream_error=True)
+        elif self.response_started:
+            # Headers (even 2xx) went out but the body never completed:
+            # an incomplete response, classified as a server exception --
+            # never a success sample.
+            self._record_failure(CLASS_EXCEPTION)
         else:
             self._record_failure(CLASS_EXCEPTION)
 
     def on_cancelled(self) -> None:
         if self.recorded:
             return
-        if self.response_started:
+        if self.response_started and self.is_stream:
             self._record(duration_us=self._elapsed_us(), stream_error=True)
         else:
+            # Cancelled before completion (with or without headers):
+            # counted, never a success/latency sample.
             self._record_cancelled()
 
     def _record(self, *, duration_us: int, stream_error: bool = False) -> None:

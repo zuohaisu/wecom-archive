@@ -312,3 +312,63 @@ def test_alert_state_check_constraint_via_models(db):
     with pytest.raises(sqlalchemy.exc.IntegrityError):
         db.commit()
     db.rollback()
+
+
+# ---------------------------------------------------------------------------
+# QA fix regressions: stream window uses time-to-response-start of
+# successful starts only; streaks cannot bridge evidence gaps
+# ---------------------------------------------------------------------------
+
+
+def test_stream_window_samples_ttfb_and_excludes_failed_streams(fast_config):
+    """A fast-starting long-lived stream is normal and must NOT alert on
+    its stream duration; failed streams are not latency samples."""
+    collector = ApiPerformanceCollector()
+    base = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)
+    for minute in range(10):
+        at = base + timedelta(minutes=minute)
+        for i in range(3):
+            # Fast start (10ms), 60s stream duration, successful stream.
+            collector.record(Observation(
+                method="GET", route="/api/sse", traffic_class="business",
+                status_class="2xx", duration_us=60_000_000, is_stream=True,
+                stream_error=False, stream_ttfb_us=10_000,
+                completed_at=at + timedelta(seconds=i),
+            ))
+            # A failed stream with the same fast start: excluded from the
+            # detection window entirely.
+            collector.record(Observation(
+                method="GET", route="/api/sse", traffic_class="business",
+                status_class="2xx", duration_us=30_000_000, is_stream=True,
+                stream_error=True, stream_ttfb_us=10_000,
+                completed_at=at + timedelta(seconds=30 + i),
+            ))
+    detector = SlowEndpointDetector(fast_config)
+    now = base + timedelta(minutes=8)
+    anomalies = []
+    for _step in range(4):
+        anomalies = detector.evaluate(collector, now=now)
+        now += timedelta(seconds=60)
+    assert anomalies == [], "fast-start streams must not alert on stream duration"
+
+
+def test_streak_cannot_bridge_a_window_gap(fast_config):
+    """Slow at 10:00, empty at 10:10, slow again at 10:20+: the sustained
+    counter must restart; no anomaly may claim continuity (QA finding 5)."""
+    collector = ApiPerformanceCollector()
+    detector = SlowEndpointDetector(fast_config)
+    _feed(collector, "/api/gap", minutes=5)  # 10:00-10:04
+    detector.evaluate(collector, now=datetime(2026, 10, 8, 10, 1, tzinfo=UTC))
+    assert detector._streaks, "precondition: streak recorded"
+    # Window fully aged out with no new traffic.
+    detector.evaluate(collector, now=datetime(2026, 10, 8, 10, 10, tzinfo=UTC))
+    assert detector._streaks == {}, "an empty window must clear accumulated streaks"
+    assert detector.current_anomalies() == []
+    # Fresh slow traffic: the sustained clock restarts from zero.
+    _feed(collector, "/api/gap", minutes=5, base=datetime(2026, 10, 8, 10, 20, tzinfo=UTC))
+    anomalies = detector.evaluate(collector, now=datetime(2026, 10, 8, 10, 21, tzinfo=UTC))
+    assert anomalies == [], "one fresh evaluation is not sustained"
+    if detector._streaks:
+        first_met = next(iter(detector._first_met.values()))
+        assert first_met == datetime(2026, 10, 8, 10, 21, tzinfo=UTC), \
+            "first detection time must restart after the gap"

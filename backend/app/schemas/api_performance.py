@@ -51,6 +51,7 @@ class EndpointListOut(BaseModel):
     page_size: int
     endpoints: List[EndpointSummaryOut]
     site: EndpointStatsOut
+    incomplete: bool = False  # query hit the bounded row cap; aggregates may be partial
 
 
 class SeriesPointOut(BaseModel):
@@ -65,6 +66,8 @@ class SeriesPointOut(BaseModel):
     min_ms: Optional[float] = None
     max_ms: Optional[float] = None
     avg_success_ms: Optional[float] = None
+    success_min_ms: Optional[float] = None
+    success_max_ms: Optional[float] = None
     stream_count: int = 0
     stream_errors: int = 0
     endpoints_merged: int = 0
@@ -78,6 +81,7 @@ class SeriesOut(BaseModel):
     site_wide: bool = False
     timezone: str = "Asia/Shanghai"
     points: List[SeriesPointOut]
+    incomplete: bool = False  # query hit the bounded row cap; aggregates may be partial
 
 
 class AnomalyOut(BaseModel):

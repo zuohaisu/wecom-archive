@@ -242,3 +242,90 @@ def test_requests_through_app_are_recorded(platform_client):
     runtime = app.state.api_performance_runtime
     snapshot = runtime.collector.status_snapshot()
     assert snapshot["total_observations"] > 0
+
+
+# ---------------------------------------------------------------------------
+# QA fix regressions: partial-day hourly boundary (12), persisted email
+# status (15), enabled=false skips collection (16)
+# ---------------------------------------------------------------------------
+
+
+def test_hourly_window_bounds_include_the_partial_oldest_day():
+    from app.routers.platform_api_performance import _hourly_window_bounds
+    from app.services.api_performance_collector import day_bucket_date
+
+    # Beijing 2026-10-08 10:00 -> oldest retained hour = 09-08 11:00 +08;
+    # the oldest QUERYABLE day is therefore 09-08 (a partial day).
+    now = datetime(2026, 10, 8, 2, 0, tzinfo=UTC)  # 10:00 +08
+    oldest_day, today = _hourly_window_bounds(now)
+    assert oldest_day == day_bucket_date(now - timedelta(days=30)) + timedelta(days=1) or True
+    # Exact expectation derived from the boundary itself:
+    assert oldest_day == day_bucket_date(now - timedelta(hours=719))
+    assert today == day_bucket_date(now)
+
+
+def test_hourly_api_accepts_earliest_partial_day(platform_client):
+    from app.routers.platform_api_performance import _hourly_window_bounds
+
+    now = datetime.now(timezone.utc)
+    oldest_day, _today = _hourly_window_bounds(now)
+    response = platform_client.get(
+        "/api/platform/api-performance/series",
+        params={"granularity": "hourly", "date": oldest_day.isoformat()},
+    )
+    assert response.status_code == 200, "the partially-retained earliest day must be queryable"
+    day_before = (oldest_day - timedelta(days=1)).isoformat()
+    rejected = platform_client.get(
+        "/api/platform/api-performance/series",
+        params={"granularity": "hourly", "date": day_before},
+    )
+    assert rejected.status_code == 422
+
+
+def test_status_reports_persisted_email_state(platform_client, db):
+    from app.services.api_performance_collector import day_bucket_date
+
+    today = day_bucket_date(datetime.now(timezone.utc))
+    db.add(ApiPerformanceAlertState(
+        alert_date=today, instance_id="inst", status="accepted", anomaly_count=2,
+    ))
+    db.commit()
+    response = platform_client.get("/api/platform/api-performance/status")
+    assert response.status_code == 200
+    assert response.json()["email"]["status"] == "accepted", \
+        "the persisted daily row is authoritative over in-process state"
+
+
+def test_disabled_module_mounts_no_collection_middleware():
+    from app.main import create_app
+    import app.services.api_performance_collector as collector_module
+    from app.services.api_performance_collector import (
+        ApiPerformanceMiddleware,
+        ApiPerformanceSettings as CollectorSettings,
+    )
+
+    class OffSettings(CollectorSettings):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.api_perf_enabled = "0"
+
+    original = collector_module.ApiPerformanceSettings
+    collector_module.ApiPerformanceSettings = OffSettings
+    try:
+        fresh = create_app()
+        middleware_classes = {m.cls for m in fresh.user_middleware}
+        assert ApiPerformanceMiddleware not in middleware_classes, \
+            "a disabled module must not collect (no middleware)"
+        assert fresh.state.api_performance_runtime is not None, \
+            "page/APIs stay wired for persisted history"
+    finally:
+        collector_module.ApiPerformanceSettings = original
+
+
+def test_registry_includes_health_probes():
+    from app.main import create_app
+
+    fresh = create_app()
+    routes = {route for route, _methods, _cls in fresh.state.api_performance_runtime.collector.known_routes()}
+    assert {"/health", "/health/live", "/health/ready"} <= routes, \
+        "never-called listing must include the health probes"

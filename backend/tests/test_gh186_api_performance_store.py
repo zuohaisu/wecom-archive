@@ -23,6 +23,8 @@ from app.db.models import (
 from app.services.api_performance_collector import (
     HIST_SIZE,
     ApiPerformanceCollector,
+    BucketDelta,
+    EndpointKey,
     Observation,
 )
 from app.services.api_performance_store import (
@@ -210,10 +212,11 @@ def test_daily_trend_survives_hourly_cleanup(db: Session):
     db.expire_all()
     survivor = db.query(ApiPerformanceEndpointDaily).one()
     assert survivor.bucket_date == day and survivor.request_count == 7
-    points = query_bucket_series(
+    points, truncated = query_bucket_series(
         db, ApiPerformanceEndpointDaily,
         since=day - timedelta(days=1), until=day + timedelta(days=1),
     )
+    assert truncated is False
     assert len(points) == 1 and points[0]["stats"].request_count == 7
 
 
@@ -231,7 +234,7 @@ def test_summaries_include_registered_no_sample_and_retired_routes(db: Session):
     collector2 = ApiPerformanceCollector()
     collector2.register_route("/api/live", {"GET"})
     collector2.register_route("/api/never-called", {"GET"})
-    summaries = query_endpoint_summaries(
+    summaries, _truncated = query_endpoint_summaries(
         db, collector2,
         since_hour=datetime(2026, 10, 8, 10, 0, tzinfo=UTC),
         until_hour=datetime(2026, 10, 8, 11, 0, tzinfo=UTC),
@@ -241,7 +244,7 @@ def test_summaries_include_registered_no_sample_and_retired_routes(db: Session):
     assert by_route["/api/live"]["registered"] is True
     assert by_route["/api/never-called"]["stats"].request_count == 0, "no-sample route still listed"
     # A route with rows but no longer registered = retired; history kept.
-    summaries_full = query_endpoint_summaries(
+    summaries_full, _truncated = query_endpoint_summaries(
         db, ApiPerformanceCollector(),
         since_hour=datetime(2026, 10, 8, 10, 0, tzinfo=UTC),
         until_hour=datetime(2026, 10, 8, 11, 0, tzinfo=UTC),
@@ -255,7 +258,7 @@ def test_site_wide_series_merges_endpoints_weighted(db: Session):
     collector.record(_collector_obs(100_000, route="/api/a"))
     collector.record(_collector_obs(300_000, route="/api/b"))
     flush_deltas(db, "b1", collector.instance_id, _drain_hourly(collector))
-    points = query_bucket_series(
+    points, _truncated = query_bucket_series(
         db, ApiPerformanceEndpointHourly,
         since=datetime(2026, 10, 8, 10, 0, tzinfo=UTC),
         until=datetime(2026, 10, 8, 11, 0, tzinfo=UTC),
@@ -283,7 +286,7 @@ def test_hist_version_mixed_rows_make_p95_unavailable(db: Session):
         stats_version=1, hist_version=99, hist=[1] + [0] * (HIST_SIZE - 1),
     ))
     db.commit()
-    points = query_bucket_series(
+    points, _truncated = query_bucket_series(
         db, ApiPerformanceEndpointHourly,
         since=datetime(2026, 10, 8, 0, tzinfo=UTC),
         until=datetime(2026, 10, 9, 0, tzinfo=UTC),
@@ -296,7 +299,7 @@ def test_hist_version_mixed_rows_make_p95_unavailable(db: Session):
         merged.hist = [a + b for a, b in zip(merged.hist, stats.hist)]
     # Direct cross-version addition is forbidden: the merged-series helper
     # must report unavailability instead.
-    summary = query_endpoint_summaries(
+    summary, _truncated = query_endpoint_summaries(
         db, ApiPerformanceCollector(),
         since_hour=datetime(2026, 10, 8, 0, 0, tzinfo=UTC),
         until_hour=datetime(2026, 10, 9, 0, 0, tzinfo=UTC),
@@ -315,11 +318,11 @@ def test_query_row_cap_bounds_fetch(db: Session):
             request_count=1, class_counts={}, stats_version=1, hist_version=1,
         ))
     db.commit()
-    rows = query_endpoint_rows(
+    rows, truncated = query_endpoint_rows(
         db, ApiPerformanceEndpointHourly,
         since=now - timedelta(hours=48), until=now + timedelta(hours=1),
     )
-    assert len(rows) == 20
+    assert len(rows) == 20 and truncated is False
 
 
 def test_coverage_reports_persisted_bounds(db: Session):
@@ -354,7 +357,7 @@ def test_rows_without_success_do_not_poison_merged_p95(db: Session):
         hist=[0, 0, 0, 0, 20] + [0] * (HIST_SIZE - 5),
     ))
     db.commit()
-    points = query_bucket_series(
+    points, _truncated = query_bucket_series(
         db, ApiPerformanceEndpointHourly,
         since=datetime(2026, 10, 8, 0, tzinfo=UTC),
         until=datetime(2026, 10, 9, 0, tzinfo=UTC),
@@ -365,3 +368,134 @@ def test_rows_without_success_do_not_poison_merged_p95(db: Session):
     assert stats.hist is not None and stats.hist_unavailable is False
     p95, capped = stats.p95_estimate()
     assert p95 == 250 * 1000 and capped is False
+
+
+# ---------------------------------------------------------------------------
+# QA fix regressions: error-then-success hist init, truncation flag,
+# per-method no-sample listing, retention boundaries, late-batch rejection
+# ---------------------------------------------------------------------------
+
+
+def test_error_then_success_bucket_keeps_p95(db: Session):
+    """A bucket written first with only 5xx and later with its first 2xx
+    must initialise the histogram, not poison it (QA finding 8)."""
+    bucket = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)
+    collector = ApiPerformanceCollector(instance_id="i8")
+    collector.record(Observation(
+        method="GET", route="/api/then-ok", traffic_class="business",
+        status_class="5xx", duration_us=200_000, is_stream=False,
+        stream_error=False, stream_ttfb_us=None,
+        completed_at=bucket + timedelta(minutes=5),
+    ))
+    hourly = _drain_hourly(collector)
+    flush_deltas(db, "b-err", "i8", hourly)
+    collector.record(Observation(
+        method="GET", route="/api/then-ok", traffic_class="business",
+        status_class="2xx", duration_us=100_000, is_stream=False,
+        stream_error=False, stream_ttfb_us=None,
+        completed_at=bucket + timedelta(minutes=6),
+    ))
+    hourly2 = _drain_hourly(collector)
+    flush_deltas(db, "b-ok", "i8", hourly2)
+
+    row = db.query(ApiPerformanceEndpointHourly).one()
+    assert row.request_count == 2 and row.success_count == 1
+    assert row.hist_version == 1, "first success must initialise the histogram"
+    assert row.hist is not None and sum(row.hist) == 1
+
+
+def test_query_truncation_is_reported(db: Session):
+    now = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
+    for index in range(11):
+        db.add(ApiPerformanceEndpointHourly(
+            method="GET", route=f"/api/t{index}", traffic_class="business",
+            bucket_start=now - timedelta(hours=index),
+            request_count=1, class_counts={}, stats_version=1, hist_version=1,
+        ))
+    db.commit()
+    rows, truncated = query_endpoint_rows(
+        db, ApiPerformanceEndpointHourly,
+        since=now - timedelta(hours=48), until=now + timedelta(hours=1), limit=10,
+    )
+    assert len(rows) == 10 and truncated is True
+
+
+def test_no_sample_listing_covers_every_registered_method(db: Session):
+    """One template registered for GET+POST contributes TWO no-sample
+    entries; the traffic filter is applied downstream (QA finding 13)."""
+    collector = ApiPerformanceCollector()
+    collector.register_route("/synthetic/shared", {"GET", "POST"})
+    summaries, _truncated = query_endpoint_summaries(
+        db, collector,
+        since_hour=datetime(2026, 10, 8, 10, 0, tzinfo=UTC),
+        until_hour=datetime(2026, 10, 8, 11, 0, tzinfo=UTC),
+    )
+    shared = sorted(s["method"] for s in summaries if s["route"] == "/synthetic/shared")
+    assert shared == ["GET", "POST"]
+
+
+def test_retention_uses_beijing_day_and_exact_hour_boundary(db: Session):
+    now = datetime(2026, 10, 8, 18, 0, tzinfo=UTC)  # 10-09 02:00 Asia/Shanghai
+    # Exactly the 721st hour bucket (start == now - 720h): deleted.
+    db.add(ApiPerformanceEndpointHourly(
+        method="GET", route="/api/h721", traffic_class="business",
+        bucket_start=now - timedelta(hours=720),
+        request_count=1, class_counts={}, stats_version=1, hist_version=1,
+    ))
+    # One hour newer: kept.
+    db.add(ApiPerformanceEndpointHourly(
+        method="GET", route="/api/h720", traffic_class="business",
+        bucket_start=now - timedelta(hours=719),
+        request_count=1, class_counts={}, stats_version=1, hist_version=1,
+    ))
+    # Daily cutoff: day_bucket_date(now - 180d) = 2026-04-12 (Shanghai);
+    # 2026-04-11 must go, 2026-04-12 stays.
+    from app.services.api_performance_collector import day_bucket_date
+
+    cutoff_day = day_bucket_date(now - timedelta(days=180))
+    db.add(ApiPerformanceEndpointDaily(
+        method="GET", route="/api/d-old", traffic_class="business",
+        bucket_date=cutoff_day - timedelta(days=1),
+        request_count=1, class_counts={}, stats_version=1, hist_version=1,
+    ))
+    db.add(ApiPerformanceEndpointDaily(
+        method="GET", route="/api/d-edge", traffic_class="business",
+        bucket_date=cutoff_day,
+        request_count=1, class_counts={}, stats_version=1, hist_version=1,
+    ))
+    db.commit()
+    deleted = run_retention(db, now=now, retention_hours=720, retention_days=180, batch_retention_hours=48)
+    assert deleted["hourly"] == 1 and deleted["daily"] == 1
+    assert {r.route for r in db.query(ApiPerformanceEndpointHourly).all()} == {"/api/h720"}
+    assert {r.route for r in db.query(ApiPerformanceEndpointDaily).all()} == {"/api/d-edge"}
+
+
+def test_late_batch_cannot_resurrect_expired_rows(db: Session):
+    now = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
+    expired_hour = now - timedelta(hours=800)
+    delta_hourly = BucketDelta(
+        key=EndpointKey("GET", "/api/expired", "business"), granularity="hourly",
+        bucket_start=expired_hour, bucket_date=None,
+        acc=ObservationAccumulator(request_count=3),
+    )
+    delta_daily = BucketDelta(
+        key=EndpointKey("GET", "/api/expired", "business"), granularity="daily",
+        bucket_start=daily_bucket_start_for(expired_hour.date()), bucket_date=expired_hour.date(),
+        acc=ObservationAccumulator(request_count=3),
+    )
+    outcome = flush_deltas(db, "late:1", "late", [delta_hourly, delta_daily], now=now, retention_hours=720, retention_days=180)
+    assert outcome == FLUSH_APPLIED
+    assert db.query(ApiPerformanceEndpointHourly).count() == 0, "expired hour rejected"
+    assert db.query(ApiPerformanceEndpointDaily).count() == 1, "still-valid day survives"
+
+
+def ObservationAccumulator(**kwargs):
+    from app.services.api_performance_collector import Accumulator
+
+    return Accumulator(**kwargs)
+
+
+def daily_bucket_start_for(day):
+    from app.services.api_performance_collector import daily_bucket_start
+
+    return daily_bucket_start(day)

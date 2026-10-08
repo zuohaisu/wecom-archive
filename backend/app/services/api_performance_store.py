@@ -30,9 +30,9 @@ from app.services.api_performance_collector import (
     HIST_SIZE,
     HIST_VERSION,
     STATS_VERSION,
-    TRAFFIC_BUSINESS,
     ApiPerformanceCollector,
     BucketDelta,
+    day_bucket_date,
     estimate_p95_us,
 )
 
@@ -57,11 +57,36 @@ class FlushConflictError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
-def flush_deltas(db: Session, batch_id: str, instance_id: str, deltas: List[BucketDelta]) -> str:
+def flush_deltas(
+    db: Session,
+    batch_id: str,
+    instance_id: str,
+    deltas: List[BucketDelta],
+    *,
+    now: Optional[datetime] = None,
+    retention_hours: Optional[int] = None,
+    retention_days: Optional[int] = None,
+) -> str:
     """Apply one flush batch atomically. Returns FLUSH_APPLIED or
     FLUSH_ALREADY_APPLIED; raises FlushConflictError on a row race (retry
     with the same batch id resolves it) and lets DB errors propagate so
-    the caller records the failure and retries the same batch later."""
+    the caller records the failure and retries the same batch later.
+
+    When retention bounds are provided, increments for already-expired
+    buckets are rejected -- a late retry must not resurrect rows cleanup
+    already removed. Rejection is per delta: an expired hour never
+    suppresses its still-valid daily counterpart."""
+    if now is not None and retention_hours is not None and retention_days is not None:
+        hourly_cutoff = now - timedelta(hours=retention_hours)
+        daily_cutoff = day_bucket_date(now - timedelta(days=retention_days))
+        kept: List[BucketDelta] = []
+        for delta in deltas:
+            if delta.granularity == "hourly" and delta.bucket_start <= hourly_cutoff:
+                continue
+            if delta.granularity == "daily" and delta.bucket_date is not None and delta.bucket_date < daily_cutoff:
+                continue
+            kept.append(delta)
+        deltas = kept
     try:
         db.add(ApiPerformanceFlushBatch(
             batch_id=batch_id,
@@ -174,7 +199,13 @@ def _merge_delta(db: Session, model, delta: BucketDelta) -> None:
     row.stream_ttfb_max_us = _max_us(row.stream_ttfb_max_us, acc.stream_ttfb_max_us)
     if acc.success_count:
         existing_hist = row.hist
-        if row.hist_version == HIST_VERSION and isinstance(existing_hist, list) and len(existing_hist) == HIST_SIZE:
+        if row.hist_version == 0 or not isinstance(existing_hist, list) or not existing_hist:
+            # The row existed with errors only and never had a histogram:
+            # initialise it with this delta's layout instead of poisoning
+            # the bucket (an error-only past is not a version conflict).
+            row.hist = list(acc.hist)
+            row.hist_version = HIST_VERSION
+        elif row.hist_version == HIST_VERSION and len(existing_hist) == HIST_SIZE:
             row.hist = [a + b for a, b in zip(existing_hist, acc.hist)]
         else:
             # Bucket-boundary layouts differ (or the row was already
@@ -216,13 +247,20 @@ def run_retention(
 ) -> Dict[str, int]:
     """Bounded, chunked cleanup of THIS module's rows only. Runs on the
     flush loop's cadence regardless of request traffic; late batch retries
-    never resurrect expired buckets (rows are gone)."""
+    never resurrect expired buckets (rows are gone, and the flush rejects
+    expired increments anyway).
+
+    Boundaries: hourly rows are deleted when their Asia/Shanghai hour
+    start is at or before ``now - retention_hours`` (exactly 720 full
+    hour buckets stay on an hour boundary); daily rows use the Asia/
+    Shanghai natural date of ``now - retention_days`` (bucket_date is a
+    Shanghai day, so the cutoff must be too)."""
     deleted = {"hourly": 0, "daily": 0, "batches": 0}
     hourly_cutoff = now - timedelta(hours=retention_hours)
-    daily_cutoff = (now - timedelta(days=retention_days)).date()
+    daily_cutoff = day_bucket_date(now - timedelta(days=retention_days))
     batch_cutoff = now - timedelta(hours=batch_retention_hours)
     deleted["hourly"] = _delete_in_chunks(
-        db, ApiPerformanceEndpointHourly, ApiPerformanceEndpointHourly.bucket_start < hourly_cutoff
+        db, ApiPerformanceEndpointHourly, ApiPerformanceEndpointHourly.bucket_start <= hourly_cutoff
     )
     deleted["daily"] = _delete_in_chunks(
         db, ApiPerformanceEndpointDaily, ApiPerformanceEndpointDaily.bucket_date < daily_cutoff
@@ -407,17 +445,24 @@ def query_endpoint_rows(
     until,
     method: Optional[str] = None,
     route: Optional[str] = None,
-) -> List:
+    limit: int = _QUERY_ROW_CAP,
+) -> Tuple[List, bool]:
     """Rows for a half-open [since, until) bucket range, hard-capped so a
     pathological query can never scan unbounded. ``since``/``until`` are
-    datetimes for the hourly table and dates for the daily table."""
+    datetimes for the hourly table and dates for the daily table.
+
+    Returns (rows, truncated). ``truncated`` is True when the logical
+    range had more rows than the cap -- callers must surface it instead
+    of presenting silently incomplete aggregates."""
     bucket_column = model.bucket_start if hasattr(model, "bucket_start") else model.bucket_date
     query = db.query(model).filter(bucket_column >= since, bucket_column < until)
     if method:
         query = query.filter(model.method == method)
     if route:
         query = query.filter(model.route == route)
-    return query.limit(_QUERY_ROW_CAP).all()
+    rows = query.limit(limit + 1).all()
+    truncated = len(rows) > limit
+    return rows[:limit], truncated
 
 
 def query_endpoint_summaries(
@@ -426,11 +471,17 @@ def query_endpoint_summaries(
     *,
     since_hour: datetime,
     until_hour: datetime,
-) -> List[Dict]:
+    limit: int = _QUERY_ROW_CAP,
+) -> Tuple[List[Dict], bool]:
     """Endpoint-level rollup over an hourly window, merged with the route
-    registry: never-called routes show as no-sample, retired routes keep
-    their history and are flagged."""
-    rows = query_endpoint_rows(db, ApiPerformanceEndpointHourly, since=since_hour, until=until_hour)
+    registry: never-called (method, template) pairs show as no-sample,
+    retired routes keep their history and are flagged.
+
+    The identity is the (method, template) PAIR: one template registered
+    for several methods contributes one no-sample entry per method."""
+    rows, truncated = query_endpoint_rows(
+        db, ApiPerformanceEndpointHourly, since=since_hour, until=until_hour, limit=limit
+    )
     grouped: Dict[Tuple[str, str, str], List] = {}
     for row in rows:
         grouped.setdefault((row.method, row.route, row.traffic_class), []).append(row)
@@ -448,21 +499,21 @@ def query_endpoint_summaries(
             "stats": stats,
             "bucket_count": len(bucket_rows),
         })
-    for _reg_methods, reg_route, reg_class in [
-        (methods, route, cls) for route, methods, cls in collector.known_routes()
-    ]:
-        if reg_class == TRAFFIC_BUSINESS and not any(
-            s["route"] == reg_route for s in summaries
-        ):
-            summaries.append({
-                "method": next(iter(_reg_methods), "-"),
-                "route": reg_route,
-                "traffic_class": reg_class,
-                "registered": True,
-                "stats": MergedStats(),
-                "bucket_count": 0,
-            })
-    return summaries
+    present = {(s["method"], s["route"], s["traffic_class"]) for s in summaries}
+    for reg_route, reg_methods, reg_class in collector.known_routes():
+        for reg_method in reg_methods:
+            identity = (reg_method, reg_route, reg_class)
+            if identity not in present:
+                summaries.append({
+                    "method": reg_method,
+                    "route": reg_route,
+                    "traffic_class": reg_class,
+                    "registered": True,
+                    "stats": MergedStats(),
+                    "bucket_count": 0,
+                })
+                present.add(identity)
+    return summaries, truncated
 
 
 def query_bucket_series(
@@ -474,11 +525,14 @@ def query_bucket_series(
     method: Optional[str] = None,
     route: Optional[str] = None,
     traffic_class: Optional[str] = None,
-) -> List[Dict]:
+    limit: int = _QUERY_ROW_CAP,
+) -> Tuple[List[Dict], bool]:
     """Per-bucket merged series; ``route=None`` merges ALL endpoints into
     a site-wide weighted aggregate per bucket (sum counts, sum durations,
-    merge histograms)."""
-    rows = query_endpoint_rows(db, model, since=since, until=until, method=method, route=route)
+    merge histograms). Returns (points, truncated)."""
+    rows, truncated = query_endpoint_rows(
+        db, model, since=since, until=until, method=method, route=route, limit=limit
+    )
     if traffic_class is not None:
         rows = [row for row in rows if row.traffic_class == traffic_class]
     has_hour_key = hasattr(model, "bucket_start")
@@ -495,7 +549,7 @@ def query_bucket_series(
             "stats": stats,
             "endpoint_count": len(grouped[bucket_key]),
         })
-    return points
+    return points, truncated
 
 
 def query_coverage(db: Session) -> Dict[str, Dict[str, Optional[datetime]]]:

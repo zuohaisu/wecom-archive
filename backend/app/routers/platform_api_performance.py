@@ -43,6 +43,7 @@ from app.services.api_performance_collector import (
 from app.services.api_performance_service import ApiPerformanceRuntime
 from app.services.api_performance_store import (
     MergedStats,
+    daily_alert_status,
     query_bucket_series,
     query_coverage,
     query_endpoint_summaries,
@@ -228,7 +229,9 @@ def api_performance_endpoints(
     now = datetime.now(timezone.utc)
     until_hour = hour_bucket_start(now) + timedelta(hours=1)
     since_hour = until_hour - timedelta(hours=window_hours)
-    summaries = query_endpoint_summaries(db, runtime.collector, since_hour=since_hour, until_hour=until_hour)
+    summaries, truncated = query_endpoint_summaries(
+        db, runtime.collector, since_hour=since_hour, until_hour=until_hour
+    )
     if method:
         summaries = [s for s in summaries if s["method"] == method]
     if traffic is not None:
@@ -269,6 +272,7 @@ def api_performance_endpoints(
         page_size=page_size,
         endpoints=endpoints,
         site=_stats_out(_merged_site(summaries)),
+        incomplete=truncated,
     )
 
 
@@ -277,6 +281,15 @@ def _parse_bucket_day(raw: str):
         return datetime.strptime(raw, "%Y-%m-%d").date()
     except ValueError as error:
         raise HTTPException(status_code=422, detail="invalid_date_filter") from error
+
+
+def _hourly_window_bounds(now: datetime):
+    """Earliest still-retained Shanghai DAY for hourly queries, derived
+    from the real 720-hour boundary -- not from 'today minus 29 whole
+    days'. The earliest day is usually PARTIAL (its early hours have
+    expired); the page states that instead of rejecting the day."""
+    oldest_retained_hour = hour_bucket_start(now) - timedelta(hours=_HOURLY_RETENTION_HOURS - 1)
+    return day_bucket_date(oldest_retained_hour), day_bucket_date(now)
 
 
 @router.get("/api/platform/api-performance/series", response_model=SeriesOut)
@@ -299,34 +312,34 @@ def api_performance_series(
         today = day_bucket_date(now)
         since = today - timedelta(days=days - 1)
         until = today + timedelta(days=1)
-        points = [
-            _point_out(point)
-            for point in query_bucket_series(
-                db, ApiPerformanceEndpointDaily, since=since, until=until,
-                method=method, route=route, traffic_class=traffic,
-            )
-        ]
-        return SeriesOut(granularity="daily", method=method, route=route, site_wide=route is None, points=points)
+        points, truncated = query_bucket_series(
+            db, ApiPerformanceEndpointDaily, since=since, until=until,
+            method=method, route=route, traffic_class=traffic,
+        )
+        return SeriesOut(
+            granularity="daily", method=method, route=route, site_wide=route is None,
+            points=[_point_out(point) for point in points], incomplete=truncated,
+        )
     if granularity != "hourly":
         raise HTTPException(status_code=422, detail="invalid_granularity")
     if not date_str:
         raise HTTPException(status_code=422, detail="date_required_for_hourly")
     bucket_day = _parse_bucket_day(date_str)
-    now_shanghai_day = day_bucket_date(now)
-    oldest_day = day_bucket_date(now) - timedelta(days=(_HOURLY_RETENTION_HOURS // 24) - 1)
-    if bucket_day > now_shanghai_day or bucket_day < oldest_day:
-        # Days 31-180 have no hourly detail left (720h retention); the
-        # daily series is the honest view for them.
+    oldest_day, today = _hourly_window_bounds(now)
+    if bucket_day > today or bucket_day < oldest_day:
+        # Days before the 720h boundary have no hourly detail left; the
+        # daily series is the honest view for them. The boundary day
+        # itself is allowed (it is a partial day -- stated on the page).
         raise HTTPException(status_code=422, detail="hourly_detail_out_of_window")
     day_start = daily_bucket_start(bucket_day)
-    points = [
-        _point_out(point)
-        for point in query_bucket_series(
-            db, ApiPerformanceEndpointHourly, since=day_start, until=day_start + timedelta(days=1),
-            method=method, route=route, traffic_class=traffic,
-        )
-    ]
-    return SeriesOut(granularity="hourly", method=method, route=route, site_wide=route is None, points=points)
+    points, truncated = query_bucket_series(
+        db, ApiPerformanceEndpointHourly, since=day_start, until=day_start + timedelta(days=1),
+        method=method, route=route, traffic_class=traffic,
+    )
+    return SeriesOut(
+        granularity="hourly", method=method, route=route, site_wide=route is None,
+        points=[_point_out(point) for point in points], incomplete=truncated,
+    )
 
 
 def _point_out(point: dict) -> SeriesPointOut:
@@ -343,6 +356,8 @@ def _point_out(point: dict) -> SeriesPointOut:
         min_ms=_ms(stats.duration_min_us),
         max_ms=_ms(stats.duration_max_us),
         avg_success_ms=_ms(stats.avg_success_us),
+        success_min_ms=_ms(stats.success_min_us),
+        success_max_ms=_ms(stats.success_max_us),
         stream_count=stats.stream_count,
         stream_errors=stats.stream_error_count,
         endpoints_merged=point["endpoint_count"],
@@ -381,6 +396,16 @@ def api_performance_status(
     anomalies = runtime.detector.current_anomalies() if runtime.detector else []
     hourly_coverage = coverage["hourly"]
     daily_coverage = coverage["daily"]
+    # The persisted per-day alert row is the authoritative quota state:
+    # it survives restarts and must not be re-derived from the current
+    # in-process anomalies (QA finding 15).
+    email_status = runtime.email.status
+    try:
+        persisted_alert = daily_alert_status(db, day_bucket_date(datetime.now(timezone.utc)))
+    except Exception:  # noqa: BLE001 - status must render while the DB is degraded
+        persisted_alert = None
+    if persisted_alert is not None:
+        email_status = persisted_alert.status
     return ApiPerformanceStatusOut(
         enabled=config.enabled,
         generated_at=datetime.now(timezone.utc),
@@ -413,7 +438,7 @@ def api_performance_status(
             anomaly_count=len(anomalies),
         ),
         email=EmailStatusOut(
-            status=runtime.email.status,
+            status=email_status,
             updated_at=runtime.email.updated_at,
             configured=bool(config.alert_email),
         ),

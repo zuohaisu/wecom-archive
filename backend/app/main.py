@@ -179,11 +179,17 @@ def create_app() -> FastAPI:
     # and fails loudly on bad values; each app instance owns its collector
     # (no shared global registry).
     api_perf_config = ApiPerformanceConfig.from_settings()
-    api_perf_collector = ApiPerformanceCollector()
+    api_perf_collector = ApiPerformanceCollector(
+        retry_deadline_seconds=api_perf_config.batch_retry_hours * 3600,
+    )
     api_perf_runtime = ApiPerformanceRuntime(api_perf_collector, api_perf_config)
     app = FastAPI(title="Crowntime WeCom Archive", lifespan=_api_performance_lifespan)
     app.state.api_performance_runtime = api_perf_runtime
-    app.add_middleware(ApiPerformanceMiddleware, collector=api_perf_collector)
+    if api_perf_config.enabled:
+        # A disabled module must not collect either: no middleware, no
+        # in-memory state growth. The page/APIs stay up and report the
+        # persisted DB history with enabled=false.
+        app.add_middleware(ApiPerformanceMiddleware, collector=api_perf_collector)
     # RND-187: guarantees Cache-Control: no-store on every response (success or
     # error, any status code) for the media access descriptor endpoint — see
     # MediaAccessNoStoreMiddleware's docstring for why this must be a
@@ -240,10 +246,6 @@ def create_app() -> FastAPI:
     app.include_router(public_ai_support_router)
     app.include_router(platform_api_performance_router)
 
-    # GH-186: the registry must see the complete route table, so it is
-    # captured after every include_router above.
-    api_perf_collector.register_app_routes(app.routes)
-
     @app.get("/health/live")
     def health_live():
         """Liveness only: the process can respond to HTTP at all. Does not
@@ -285,6 +287,12 @@ def create_app() -> FastAPI:
         _VersionedStaticFiles(directory=str(_STATIC_DIR), check_dir=False),
         name="web-static",
     )
+
+    # GH-186: the registry must see the COMPLETE route table -- including
+    # the health probes defined above and everything registered by the
+    # include_router calls -- so the never-called listing is not missing
+    # entries. Captured here, at the very end of assembly.
+    api_perf_collector.register_app_routes(app.routes)
 
     return app
 

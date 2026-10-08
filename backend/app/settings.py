@@ -252,6 +252,7 @@ class ApiPerformanceSettings(BaseSettings):
     api_perf_retention_hours: str = "720"
     api_perf_retention_days: str = "180"
     api_perf_batch_retention_hours: str = "48"
+    api_perf_batch_retry_hours: str = "24"
     api_perf_detection_enabled: str = "true"
     api_perf_detection_interval_seconds: str = "60"
     api_perf_window_minutes: str = "5"

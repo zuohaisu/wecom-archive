@@ -476,3 +476,209 @@ def test_config_route_overrides_are_bounded_and_applied():
     entries = ",".join('{"route": "/r%d"}' % i for i in range(21))
     with pytest.raises(ValueError):
         ApiPerformanceConfig.from_settings(ApiPerformanceSettings(api_perf_route_overrides="[" + entries + "]"))
+
+
+# ---------------------------------------------------------------------------
+# QA fix regressions: completion-after-final-send, partial responses,
+# stale-batch deadline, and batch-prefix preservation
+# ---------------------------------------------------------------------------
+
+
+def _run_raw_send(app, *, method="GET", path="/api/x", route=None, send_impl=None, disconnect=False):
+    """Like _run but lets the test control the innermost send callable and
+    simulate a client disconnect on receive."""
+    async def scenario():
+        scope = {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": [],
+            "query_string": b"",
+        }
+        if route is not None:
+            scope["_test_route"] = route
+
+        async def receive():
+            if disconnect:
+                return {"type": "http.disconnect"}
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            if send_impl is not None:
+                await send_impl(message)
+
+        await app(scope, receive, send)
+
+    return asyncio.run(scenario())
+
+
+def test_final_send_failure_is_never_a_success_sample():
+    collector = ApiPerformanceCollector()
+
+    async def failing_final(message):
+        if message.get("type") == "http.response.body" and not message.get("more_body", False):
+            raise OSError("synthetic socket closed")
+
+    with pytest.raises(OSError):
+        _run_raw_send(
+            ApiPerformanceMiddleware(_FakeApp(), collector),
+            path="/api/x", route=_FakeRoute("/api/x"), send_impl=failing_final,
+        )
+    _batch, deltas = collector.drain_deltas()
+    counts = {}
+    for delta in deltas:
+        if delta.granularity != "hourly":
+            continue
+        for cls, count in delta.acc.class_counts.items():
+            counts[cls] = counts.get(cls, 0) + count
+    assert counts.get(CLASS_2XX) is None, "a response whose final send failed is not a success"
+    assert counts.get(CLASS_EXCEPTION) == 1
+
+
+def test_final_send_duration_is_included():
+    collector = ApiPerformanceCollector()
+
+    async def slow_final(message):
+        if message.get("type") == "http.response.body" and not message.get("more_body", False):
+            time.sleep(0.06)
+
+    _run_raw_send(
+        ApiPerformanceMiddleware(_FakeApp(), collector),
+        path="/api/x", route=_FakeRoute("/api/x"), send_impl=slow_final,
+    )
+    _batch, deltas = collector.drain_deltas()
+    recorded = max(
+        (d.acc.duration_max_us or 0) for d in deltas if d.granularity == "hourly"
+    )
+    assert recorded >= 55_000, "the blocked final send must be inside the measured duration"
+
+
+def test_json_200_then_exception_is_not_a_success_sample():
+    collector = ApiPerformanceCollector()
+
+    class _PartialJsonApp(_FakeApp):
+        async def __call__(self, scope, receive, send):
+            if "_test_route" in scope:
+                scope["route"] = scope.pop("_test_route")
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/json")],
+            })
+            raise RuntimeError("boom after headers")
+
+    with pytest.raises(RuntimeError):
+        _run_raw_send(
+            ApiPerformanceMiddleware(_PartialJsonApp(), collector),
+            path="/api/x", route=_FakeRoute("/api/x"),
+        )
+    _batch, deltas = collector.drain_deltas()
+    counts = {}
+    for delta in deltas:
+        if delta.granularity != "hourly":
+            continue
+        for cls, count in delta.acc.class_counts.items():
+            counts[cls] = counts.get(cls, 0) + count
+    assert counts.get(CLASS_EXCEPTION) == 1
+    assert counts.get(CLASS_2XX) is None
+
+
+def test_json_200_then_cancel_is_cancelled_not_success():
+    collector = ApiPerformanceCollector()
+
+    class _PartialCancelApp(_FakeApp):
+        async def __call__(self, scope, receive, send):
+            if "_test_route" in scope:
+                scope["route"] = scope.pop("_test_route")
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/json")],
+            })
+            raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        _run_raw_send(
+            ApiPerformanceMiddleware(_PartialCancelApp(), collector),
+            path="/api/x", route=_FakeRoute("/api/x"),
+        )
+    _batch, deltas = collector.drain_deltas()
+    assert any(
+        d.acc.class_counts.get(CLASS_CANCELLED) == 1
+        for d in deltas if d.granularity == "hourly"
+    )
+
+
+def test_sse_disconnect_return_is_a_stream_error():
+    collector = ApiPerformanceCollector()
+
+    class _TruncatedSseApp(_FakeApp):
+        async def __call__(self, scope, receive, send):
+            if "_test_route" in scope:
+                scope["route"] = scope.pop("_test_route")
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/event-stream")],
+            })
+            await send({"type": "http.response.body", "body": b"data: x\n\n", "more_body": True})
+            # Client disconnects; the generator polls receive, sees it, and
+            # returns without ever sending the final more_body=False chunk.
+            await receive()
+
+    _run_raw_send(
+        ApiPerformanceMiddleware(_TruncatedSseApp(), collector),
+        path="/api/sse", route=_FakeRoute("/api/sse"), disconnect=True,
+    )
+    _batch, deltas = collector.drain_deltas()
+    stream = [d for d in deltas if d.granularity == "hourly" and d.acc.stream_count == 1]
+    assert stream and stream[0].acc.stream_error_count == 1, \
+        "a disconnected stream must not count as a normal completion"
+
+
+def test_batch_confirmation_only_releases_its_own_pending_prefix():
+    collector = ApiPerformanceCollector()
+    collector.record(_obs(duration_us=100_000))
+    batch_id, deltas = collector.drain_deltas()
+    collector.mark_flushed(batch_id, "error:OperationalError")
+    # Traffic continues and old buckets rotate WHILE the first batch is frozen.
+    base = datetime(2026, 10, 1, 0, tzinfo=UTC)
+    for hour_offset in range(6):
+        collector.record(_obs(duration_us=50_000, completed_at=base + timedelta(hours=hour_offset)))
+    _retry_id, _retry_deltas = collector.drain_deltas()  # same frozen batch
+    collector.mark_flushed(batch_id, "applied")
+    assert collector.dropped_pending_overflow == 0
+    assert collector.dropped_stale_batch_observations == 0
+    # The later rotations survive their batch's confirmation.
+    _next_id, next_deltas = collector.drain_deltas()
+    hourly_total = sum(d.acc.request_count for d in next_deltas if d.granularity == "hourly")
+    daily_total = sum(d.acc.request_count for d in next_deltas if d.granularity == "daily")
+    assert hourly_total == 6, "increments rotated after the frozen batch must not be dropped"
+    assert daily_total == 6
+
+
+def test_batch_retry_deadline_drops_with_counted_loss():
+    collector = ApiPerformanceCollector(retry_deadline_seconds=0.05)
+    collector.record(_obs(duration_us=100_000))
+    batch_id, deltas = collector.drain_deltas()
+    assert sum(d.acc.request_count for d in deltas if d.granularity == "hourly") == 1
+    time.sleep(0.08)
+    collector.mark_flushed(batch_id, "error:OperationalError")
+    assert collector.dropped_stale_batch_observations == 1
+    assert collector._pending_batch is None
+    # A brand-new batch is minted afterwards; the lost data is not replayed.
+    _new_id, new_deltas = collector.drain_deltas()
+    assert sum(d.acc.request_count for d in new_deltas if d.granularity == "hourly") == 0
+
+
+def test_batch_retry_deadline_config_is_bounded_by_dedup_retention():
+    with pytest.raises(ValueError):
+        ApiPerformanceConfig.from_settings(ApiPerformanceSettings(
+            api_perf_batch_retention_hours="48",
+            api_perf_batch_retry_hours="48",
+        ))
+    config = ApiPerformanceConfig.from_settings(ApiPerformanceSettings(
+        api_perf_batch_retention_hours="48",
+        api_perf_batch_retry_hours="24",
+    ))
+    assert config.batch_retry_hours == 24
