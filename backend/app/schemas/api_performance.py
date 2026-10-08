@@ -146,6 +146,7 @@ class ApiPerformanceStatusOut(BaseModel):
     total_observations: int = 0
     dropped_late_observations: int = 0
     dropped_pending_overflow: int = 0
+    dropped_stale_batch_observations: int = 0
     in_memory_hour_buckets: int = 0
     in_memory_day_buckets: int = 0
     flush: FlushStatusOut

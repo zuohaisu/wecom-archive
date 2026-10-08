@@ -140,8 +140,21 @@ def test_status_reports_honest_defaults(db):
             assert any("15 分钟" in note for note in data["notes"])
             assert data["email"]["configured"] is False
             assert data["coverage"]["hourly_rows"] == 0
+            assert data["dropped_stale_batch_observations"] == 0
     finally:
         fresh.dependency_overrides.clear()
+
+
+def test_status_exposes_stale_batch_losses(platform_client):
+    collector = app.state.api_performance_runtime.collector
+    previous = collector.dropped_stale_batch_observations
+    collector.dropped_stale_batch_observations = 7
+    try:
+        response = platform_client.get("/api/platform/api-performance/status")
+        assert response.status_code == 200
+        assert response.json()["dropped_stale_batch_observations"] == 7
+    finally:
+        collector.dropped_stale_batch_observations = previous
 
 
 def test_endpoints_lists_registered_routes_without_samples(platform_client):
@@ -223,6 +236,126 @@ def test_series_hourly_within_window_ok(platform_client):
         assert point["requests"] >= 0
 
 
+def test_daily_series_and_page_expose_overall_and_success_extrema(platform_client, db):
+    from pathlib import Path
+    from app.services.api_performance_collector import HIST_SIZE, day_bucket_date
+
+    today = day_bucket_date(datetime.now(timezone.utc))
+    db.add(ApiPerformanceEndpointDaily(
+        method="GET", route="/api/extrema", traffic_class="business",
+        bucket_date=today, request_count=2, completed_count=2,
+        duration_sum_us=2_010_000, duration_min_us=10_000, duration_max_us=2_000_000,
+        class_counts={"2xx": 1, "5xx": 1}, success_count=1,
+        success_duration_sum_us=10_000, success_min_us=10_000, success_max_us=10_000,
+        hist_version=1, hist=[1] + [0] * (HIST_SIZE - 1), stats_version=1,
+    ))
+    db.commit()
+
+    response = platform_client.get(
+        "/api/platform/api-performance/series",
+        params={"granularity": "daily", "days": 1, "route": "/api/extrema"},
+    )
+    assert response.status_code == 200
+    point = response.json()["points"][0]
+    assert point["min_ms"] == 10.0 and point["max_ms"] == 2000.0
+    assert point["success_min_ms"] == 10.0 and point["success_max_ms"] == 10.0
+
+    page = platform_client.get("/platform/api-performance")
+    assert "<th>整体 min/max</th>" in page.text
+    assert "<th>成功 min/max</th>" in page.text
+    script = Path(__file__).parents[1] / "app/web/static/platform-api-performance.js"
+    assert "extremaText(point.min_ms, point.max_ms)" in script.read_text()
+
+
+def test_daily_series_renderer_shows_overall_and_success_extrema():
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js unavailable; frontend rendering is validated by make build when installed")
+    script_path = Path(__file__).parents[1] / "app/web/static/platform-api-performance.js"
+    harness = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const elements = new Map();
+let onReady;
+function element() {
+  return {
+    children: [], textContent: '', hidden: false, disabled: false, value: '',
+    addEventListener() {},
+    appendChild(child) { this.children.push(child); }
+  };
+}
+const PC = {
+  el(id) {
+    if (!elements.has(id)) {
+      const node = element();
+      const values = {
+        'apiperf-window-hours': '24', 'apiperf-traffic': 'business',
+        'apiperf-sort': 'requests', 'apiperf-daily-days': '30',
+        'apiperf-hourly-date': '2026-10-08'
+      };
+      if (Object.prototype.hasOwnProperty.call(values, id)) node.value = values[id];
+      elements.set(id, node);
+    }
+    return elements.get(id);
+  },
+  number(value) { return String(value); },
+  clear(node) { node.children = []; node.textContent = ''; },
+  emptyRow(node, _columns, label) {
+    const row = element();
+    row.textContent = label;
+    node.appendChild(row);
+  },
+  wireRefreshStamp() {},
+  request(url) {
+    if (url.includes('/status')) return Promise.resolve({
+      enabled: true, total_observations: 0, dropped_late_observations: 0,
+      dropped_pending_overflow: 0, dropped_stale_batch_observations: 7,
+      flush: { consecutive_flush_errors: 0, last_flush_result: 'never', last_flush_at: null },
+      detection: { enabled: false, anomaly_count: 0, window_minutes: 5, p95_threshold_ms: 1000 },
+      email: { status: 'unconfigured' },
+      coverage: { hourly_rows: 0, daily_rows: 0 }, notes: [],
+      generated_at: '2026-10-08T00:00:00Z'
+    });
+    if (url.includes('/anomalies')) return Promise.resolve({ anomalies: [], detection_enabled: false });
+    if (url.includes('/endpoints?')) return Promise.resolve({
+      endpoints: [], site: { requests: 0, error_rate: null, avg_ms: null,
+        p95_ms: null, p95_capped: false, hist_available: false },
+      page: 1, page_size: 50, total: 0, window_hours: 24, incomplete: false
+    });
+    const params = new URLSearchParams(url.split('?')[1]);
+    const daily = params.get('granularity') === 'daily';
+    return Promise.resolve({
+      points: daily ? [{ bucket: '2026-10-08', requests: 2, errors: 1,
+        avg_ms: 1005, p95_ms: 2000, p95_capped: false,
+        min_ms: 10, max_ms: 2000, success_min_ms: 10,
+        success_max_ms: 10, stream_count: 0 }] : [],
+      incomplete: false
+    });
+  }
+};
+const document = {
+  createElement() { return element(); },
+  addEventListener(name, callback) { if (name === 'DOMContentLoaded') onReady = callback; }
+};
+const source = fs.readFileSync(process.argv[1], 'utf8');
+vm.runInNewContext(source, { window: { PC }, document, URLSearchParams, setTimeout, Date, Math });
+onReady();
+setTimeout(() => {
+  const row = PC.el('apiperf-daily-rows').children[0];
+  const values = row.children.map(cell => cell.textContent);
+  assert.equal(values[5], '10 / 2000', 'overall min/max includes the failed 2000ms request');
+  assert.equal(values[6], '10 / 10', 'success min/max remains a separately labelled subset');
+  assert.match(PC.el('apiperf-coverage').textContent, /过期批次丢弃 7/);
+}, 0);
+"""
+    subprocess.run([node, "-e", harness, str(script_path)], check=True, capture_output=True, text=True)
+
+
 def test_anomalies_reports_empty_not_healthy(platform_client):
     response = platform_client.get("/api/platform/api-performance/anomalies")
     assert response.status_code == 200
@@ -258,7 +391,6 @@ def test_hourly_window_bounds_include_the_partial_oldest_day():
     # the oldest QUERYABLE day is therefore 09-08 (a partial day).
     now = datetime(2026, 10, 8, 2, 0, tzinfo=UTC)  # 10:00 +08
     oldest_day, today = _hourly_window_bounds(now)
-    assert oldest_day == day_bucket_date(now - timedelta(days=30)) + timedelta(days=1) or True
     # Exact expectation derived from the boundary itself:
     assert oldest_day == day_bucket_date(now - timedelta(hours=719))
     assert today == day_bucket_date(now)

@@ -190,6 +190,12 @@
     }
   }
 
+  function extremaText(min, max) {
+    return (min === null ? '—' : PC.number(Math.round(min)))
+      + ' / '
+      + (max === null ? '—' : PC.number(Math.round(max)));
+  }
+
   function seriesRow(point, labeler) {
     var row = document.createElement('tr');
     var cells = [
@@ -198,9 +204,8 @@
       countText(point.errors),
       msText(point.avg_ms),
       msText(point.p95_ms, point.p95_capped),
-      (point.success_min_ms === null ? '—' : PC.number(Math.round(point.success_min_ms)))
-        + ' / '
-        + (point.success_max_ms === null ? '—' : PC.number(Math.round(point.success_max_ms))),
+      extremaText(point.min_ms, point.max_ms),
+      extremaText(point.success_min_ms, point.success_max_ms),
       point.stream_count ? PC.number(point.stream_count) : '—'
     ];
     cells.forEach(function (text) {
@@ -214,7 +219,7 @@
   function renderSeries(granularity, data, bodyId, emptyLabel) {
     var body = PC.el(bodyId);
     PC.clear(body);
-    if (!data.points.length) { PC.emptyRow(body, 7, emptyLabel); return; }
+    if (!data.points.length) { PC.emptyRow(body, 8, emptyLabel); return; }
     var labeler = granularity === 'daily' ? shanghaiDateLabel : shanghaiTimeLabel;
     data.points.forEach(function (point) { body.appendChild(seriesRow(point, labeler)); });
   }
@@ -252,12 +257,12 @@
         if (data.incomplete) { setIncomplete(warn, '数据超出单次查询上限，以上为部分聚合，可能偏小；请缩小天数或按接口过滤。'); }
         else { warn.hidden = true; }
       })
-      .catch(function (error) { PC.emptyRow(PC.el('apiperf-daily-rows'), 7, error.message); });
+      .catch(function (error) { PC.emptyRow(PC.el('apiperf-daily-rows'), 8, error.message); });
   }
   function loadHourly() {
     var day = PC.el('apiperf-hourly-date').value;
     var body = PC.el('apiperf-hourly-rows');
-    if (!day) { PC.emptyRow(body, 7, '选择日期后查看小时趋势（最近 720 小时内；最早一天可能为部分覆盖）。'); return Promise.resolve(); }
+    if (!day) { PC.emptyRow(body, 8, '选择日期后查看小时趋势（最近 720 小时内；最早一天可能为部分覆盖）。'); return Promise.resolve(); }
     var params = new URLSearchParams();
     params.set('granularity', 'hourly');
     params.set('date', day);
@@ -267,7 +272,7 @@
       .then(function (data) {
         renderSeries('hourly', data, 'apiperf-hourly-rows', '该日暂无小时聚合数据（超出 720 小时窗口会明确拒绝）。');
       })
-      .catch(function (error) { PC.emptyRow(body, 7, error.message); });
+      .catch(function (error) { PC.emptyRow(body, 8, error.message); });
   }
 
   function refreshAll() {

@@ -682,3 +682,119 @@ def test_batch_retry_deadline_config_is_bounded_by_dedup_retention():
         api_perf_batch_retry_hours="24",
     ))
     assert config.batch_retry_hours == 24
+
+
+def test_unknown_success_batch_expires_before_it_can_be_retried(monkeypatch):
+    from app.services import api_performance_collector as collector_module
+
+    monotonic = [1000.0]
+    monkeypatch.setattr(collector_module.time, "monotonic", lambda: monotonic[0])
+    collector = ApiPerformanceCollector(retry_deadline_seconds=24 * 3600)
+    collector.record(_obs(duration_us=100_000))
+    old_id, old_deltas = collector.drain_deltas()
+    assert sum(d.acc.request_count for d in old_deltas if d.granularity == "hourly") == 1
+
+    # Model a successful DB commit whose acknowledgement was lost, then
+    # let the dedup record expire before the next attempt.
+    monotonic[0] += 49 * 3600
+    retry_id, retry_deltas = collector.drain_deltas()
+
+    assert retry_id != old_id, "an expired batch identity must never be replayed"
+    assert sum(d.acc.request_count for d in retry_deltas if d.granularity == "hourly") == 0
+    assert collector.status_snapshot()["dropped_stale_batch_observations"] == 1
+
+
+def test_overflow_during_frozen_batch_confirmation_preserves_active_queue_head():
+    collector = ApiPerformanceCollector()
+    base = datetime(2026, 1, 1, 0, tzinfo=UTC)
+    for hour_offset in range(4):
+        collector.record(_obs(duration_us=100_000, completed_at=base + timedelta(hours=hour_offset)))
+    batch_id, _frozen_deltas = collector.drain_deltas()
+
+    # Use the production 4096-item queue cap. More than half a year of
+    # synthetic hourly buckets forces actual pending-queue overflow.
+    for hour_offset in range(4, 5004):
+        collector.record(_obs(duration_us=100_000, completed_at=base + timedelta(hours=hour_offset)))
+    assert collector.dropped_pending_overflow > 0
+    surviving_head = next(
+        delta for delta in collector._pending if delta.granularity == "hourly"
+    )
+
+    collector.mark_flushed(batch_id, "applied")
+    _next_id, next_deltas = collector.drain_deltas()
+    assert any(
+        delta.granularity == "hourly"
+        and delta.bucket_start == surviving_head.bucket_start
+        and delta.acc.request_count == surviving_head.acc.request_count
+        for delta in next_deltas
+    ), "confirming the frozen batch must not remove a later queue item"
+
+
+def test_final_body_send_after_disconnect_is_cancelled_for_normal_responses():
+    collector = ApiPerformanceCollector()
+
+    class _DisconnectBeforeFinalApp(_FakeApp):
+        async def __call__(self, scope, receive, send):
+            if "_test_route" in scope:
+                scope["route"] = scope.pop("_test_route")
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/json")],
+            })
+            await send({"type": "http.response.body", "body": b"{", "more_body": True})
+            await receive()
+            await send({"type": "http.response.body", "body": b"}", "more_body": False})
+
+    _run_raw_send(
+        ApiPerformanceMiddleware(_DisconnectBeforeFinalApp(), collector),
+        path="/api/partial", route=_FakeRoute("/api/partial"), disconnect=True,
+    )
+    _batch, deltas = collector.drain_deltas()
+    hourly = [delta for delta in deltas if delta.granularity == "hourly"]
+    assert sum(delta.acc.class_counts.get(CLASS_CANCELLED, 0) for delta in hourly) == 1
+    assert sum(delta.acc.class_counts.get(CLASS_2XX, 0) for delta in hourly) == 0
+
+
+def test_starlette_sse_final_empty_body_after_disconnect_is_a_stream_error():
+    from starlette.requests import Request
+    from starlette.responses import StreamingResponse
+
+    collector = ApiPerformanceCollector()
+
+    async def stream_app(scope, receive, send):
+        scope["route"] = _FakeRoute("/api/sse")
+        request = Request(scope, receive)
+
+        async def events():
+            yield b"data: event\\n\\n"
+            if await request.is_disconnected():
+                return
+
+        response = StreamingResponse(events(), media_type="text/event-stream")
+        await response(scope, receive, send)
+
+    async def scenario():
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "method": "GET",
+            "path": "/api/sse",
+            "headers": [],
+            "query_string": b"",
+        }
+
+        async def receive():
+            return {"type": "http.disconnect"}
+
+        async def send(_message):
+            return None
+
+        await ApiPerformanceMiddleware(stream_app, collector)(scope, receive, send)
+
+    asyncio.run(scenario())
+    _batch, deltas = collector.drain_deltas()
+    stream = [d for d in deltas if d.granularity == "hourly" and d.acc.stream_count]
+    assert len(stream) == 1
+    assert stream[0].acc.stream_error_count == 1
+    assert stream[0].acc.success_count == 0

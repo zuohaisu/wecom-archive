@@ -412,6 +412,7 @@ def api_performance_status(
         total_observations=snapshot["total_observations"],
         dropped_late_observations=snapshot["dropped_late_observations"],
         dropped_pending_overflow=snapshot["dropped_pending_overflow"],
+        dropped_stale_batch_observations=snapshot["dropped_stale_batch_observations"],
         in_memory_hour_buckets=snapshot["in_memory_hour_buckets"],
         in_memory_day_buckets=snapshot["in_memory_day_buckets"],
         flush=FlushStatusOut(

@@ -11,6 +11,7 @@ and the increments are never applied twice.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -52,6 +53,20 @@ class FlushConflictError(RuntimeError):
     The batch is left unapplied; the collector retries the same batch id."""
 
 
+class JobDeadlineExceeded(TimeoutError):
+    """A telemetry DB transaction exceeded its wall-clock job budget."""
+
+
+def _check_job_deadline(deadline: Optional[float]) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise JobDeadlineExceeded("api performance DB job deadline exceeded")
+
+
+def _daily_retention_cutoff(now: datetime, retention_days: int) -> date:
+    """Oldest kept Shanghai day when retention includes today."""
+    return day_bucket_date(now) - timedelta(days=retention_days - 1)
+
+
 # ---------------------------------------------------------------------------
 # Flush
 # ---------------------------------------------------------------------------
@@ -66,6 +81,7 @@ def flush_deltas(
     now: Optional[datetime] = None,
     retention_hours: Optional[int] = None,
     retention_days: Optional[int] = None,
+    job_deadline_monotonic: Optional[float] = None,
 ) -> str:
     """Apply one flush batch atomically. Returns FLUSH_APPLIED or
     FLUSH_ALREADY_APPLIED; raises FlushConflictError on a row race (retry
@@ -78,7 +94,7 @@ def flush_deltas(
     suppresses its still-valid daily counterpart."""
     if now is not None and retention_hours is not None and retention_days is not None:
         hourly_cutoff = now - timedelta(hours=retention_hours)
-        daily_cutoff = day_bucket_date(now - timedelta(days=retention_days))
+        daily_cutoff = _daily_retention_cutoff(now, retention_days)
         kept: List[BucketDelta] = []
         for delta in deltas:
             if delta.granularity == "hourly" and delta.bucket_start <= hourly_cutoff:
@@ -87,12 +103,14 @@ def flush_deltas(
                 continue
             kept.append(delta)
         deltas = kept
+    _check_job_deadline(job_deadline_monotonic)
     try:
         db.add(ApiPerformanceFlushBatch(
             batch_id=batch_id,
             instance_id=instance_id[:64],
             flush_seq=_seq_of(batch_id),
         ))
+        _check_job_deadline(job_deadline_monotonic)
         db.flush()
     except IntegrityError:
         # The batch id already exists: a previous attempt committed. The
@@ -101,12 +119,14 @@ def flush_deltas(
         return FLUSH_ALREADY_APPLIED
 
     for delta in deltas:
+        _check_job_deadline(job_deadline_monotonic)
         if not _delta_has_content(delta):
             continue
         if delta.granularity == "hourly":
-            _merge_delta(db, ApiPerformanceEndpointHourly, delta)
+            _merge_delta(db, ApiPerformanceEndpointHourly, delta, job_deadline_monotonic)
         else:
-            _merge_delta(db, ApiPerformanceEndpointDaily, delta)
+            _merge_delta(db, ApiPerformanceEndpointDaily, delta, job_deadline_monotonic)
+    _check_job_deadline(job_deadline_monotonic)
     db.commit()
     return FLUSH_APPLIED
 
@@ -129,7 +149,13 @@ def _delta_has_content(delta: BucketDelta) -> bool:
     )
 
 
-def _merge_delta(db: Session, model, delta: BucketDelta) -> None:
+def _merge_delta(
+    db: Session,
+    model,
+    delta: BucketDelta,
+    job_deadline_monotonic: Optional[float] = None,
+) -> None:
+    _check_job_deadline(job_deadline_monotonic)
     acc = delta.acc
     if model is ApiPerformanceEndpointHourly:
         match = {"method": delta.key.method, "route": delta.key.route, "bucket_start": delta.bucket_start}
@@ -166,6 +192,7 @@ def _merge_delta(db: Session, model, delta: BucketDelta) -> None:
         )
         db.add(row)
         try:
+            _check_job_deadline(job_deadline_monotonic)
             db.flush()
         except IntegrityError as error:
             # Another writer created this (endpoint, bucket) row between
@@ -176,6 +203,9 @@ def _merge_delta(db: Session, model, delta: BucketDelta) -> None:
             raise FlushConflictError(str(error)) from error
         return
 
+    existing_success_count = row.success_count
+    existing_hist = row.hist
+    existing_hist_version = row.hist_version
     row.request_count += acc.request_count
     for cls, count in acc.class_counts.items():
         merged = dict(row.class_counts or {})
@@ -198,21 +228,25 @@ def _merge_delta(db: Session, model, delta: BucketDelta) -> None:
     row.stream_ttfb_min_us = _min_us(row.stream_ttfb_min_us, acc.stream_ttfb_min_us)
     row.stream_ttfb_max_us = _max_us(row.stream_ttfb_max_us, acc.stream_ttfb_max_us)
     if acc.success_count:
-        existing_hist = row.hist
-        if row.hist_version == 0 or not isinstance(existing_hist, list) or not existing_hist:
-            # The row existed with errors only and never had a histogram:
-            # initialise it with this delta's layout instead of poisoning
-            # the bucket (an error-only past is not a version conflict).
+        if existing_success_count == 0 and existing_hist_version == 0:
+            # Only an error-only row with no historical success samples
+            # can be safely initialised. A mixed/unknown version stays
+            # unavailable even if its histogram is None or malformed.
             row.hist = list(acc.hist)
             row.hist_version = HIST_VERSION
-        elif row.hist_version == HIST_VERSION and len(existing_hist) == HIST_SIZE:
+        elif (
+            existing_hist_version == HIST_VERSION
+            and isinstance(existing_hist, list)
+            and len(existing_hist) == HIST_SIZE
+        ):
             row.hist = [a + b for a, b in zip(existing_hist, acc.hist)]
         else:
             # Bucket-boundary layouts differ (or the row was already
-            # mixed): histograms must never be added across versions.
-            # Scalars above are boundary-independent and stay merged.
+            # mixed/unknown): never expose a partial histogram as if it
+            # represented the row's full success population.
             row.hist = None
             row.hist_version = _HIST_MIXED_VERSION
+    _check_job_deadline(job_deadline_monotonic)
     db.flush()
 
 
@@ -244,6 +278,7 @@ def run_retention(
     retention_hours: int,
     retention_days: int,
     batch_retention_hours: int,
+    job_deadline_monotonic: Optional[float] = None,
 ) -> Dict[str, int]:
     """Bounded, chunked cleanup of THIS module's rows only. Runs on the
     flush loop's cadence regardless of request traffic; late batch retries
@@ -252,37 +287,50 @@ def run_retention(
 
     Boundaries: hourly rows are deleted when their Asia/Shanghai hour
     start is at or before ``now - retention_hours`` (exactly 720 full
-    hour buckets stay on an hour boundary); daily rows use the Asia/
-    Shanghai natural date of ``now - retention_days`` (bucket_date is a
-    Shanghai day, so the cutoff must be too)."""
+    hour buckets stay on an hour boundary); daily rows keep the current
+    Shanghai date plus the prior ``retention_days - 1`` dates, with the
+    same inclusive cutoff used to reject late daily deltas."""
     deleted = {"hourly": 0, "daily": 0, "batches": 0}
     hourly_cutoff = now - timedelta(hours=retention_hours)
-    daily_cutoff = day_bucket_date(now - timedelta(days=retention_days))
+    daily_cutoff = _daily_retention_cutoff(now, retention_days)
     batch_cutoff = now - timedelta(hours=batch_retention_hours)
     deleted["hourly"] = _delete_in_chunks(
-        db, ApiPerformanceEndpointHourly, ApiPerformanceEndpointHourly.bucket_start <= hourly_cutoff
+        db, ApiPerformanceEndpointHourly, ApiPerformanceEndpointHourly.bucket_start <= hourly_cutoff,
+        job_deadline_monotonic=job_deadline_monotonic,
     )
     deleted["daily"] = _delete_in_chunks(
-        db, ApiPerformanceEndpointDaily, ApiPerformanceEndpointDaily.bucket_date < daily_cutoff
+        db, ApiPerformanceEndpointDaily, ApiPerformanceEndpointDaily.bucket_date < daily_cutoff,
+        job_deadline_monotonic=job_deadline_monotonic,
     )
     deleted["batches"] = _delete_in_chunks(
-        db, ApiPerformanceFlushBatch, ApiPerformanceFlushBatch.created_at < batch_cutoff
+        db, ApiPerformanceFlushBatch, ApiPerformanceFlushBatch.created_at < batch_cutoff,
+        job_deadline_monotonic=job_deadline_monotonic,
     )
+    _check_job_deadline(job_deadline_monotonic)
     db.commit()
     return deleted
 
 
-def _delete_in_chunks(db: Session, model, criterion) -> int:
+def _delete_in_chunks(
+    db: Session,
+    model,
+    criterion,
+    *,
+    job_deadline_monotonic: Optional[float] = None,
+) -> int:
     pk = model.__table__.primary_key.columns[0]
     total = 0
     for _round in range(_MAX_DELETE_ROUNDS):
+        _check_job_deadline(job_deadline_monotonic)
         ids = [
             row_id
             for (row_id,) in db.query(pk).filter(criterion).limit(_DELETE_CHUNK).all()
         ]
         if not ids:
             break
+        _check_job_deadline(job_deadline_monotonic)
         db.query(model).filter(pk.in_(ids)).delete(synchronize_session=False)
+        _check_job_deadline(job_deadline_monotonic)
         db.flush()
         total += len(ids)
     return total

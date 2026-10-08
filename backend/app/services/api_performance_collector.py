@@ -408,6 +408,14 @@ class BucketDelta:
 
 
 @dataclass
+class _FrozenBatch:
+    batch_id: str
+    deltas: List[BucketDelta]
+    pending_deltas: List[BucketDelta]
+    first_attempt_mono: float
+
+
+@dataclass
 class WindowSample:
     """Merged recent-minute observations for one endpoint (detector input)."""
 
@@ -442,9 +450,12 @@ class ApiPerformanceCollector:
         # (method, route, traffic_class) -> OrderedDict[bucket_key -> [live, snapshot]]
         self._hours: Dict[EndpointKey, "OrderedDict[datetime, List[Accumulator]]"] = {}
         self._days: Dict[EndpointKey, "OrderedDict[date, List[Accumulator]]"] = {}
+        # `_pending` is the active overflow-bounded queue. Draining moves
+        # its current entries into the frozen batch, so later overflow can
+        # never shift an index used to confirm an earlier batch.
         self._pending: List[BucketDelta] = []
         self._windows: Dict[Tuple[str, str], "OrderedDict[int, List[MinuteWindow]]"] = {}
-        self._pending_batch: Optional[Tuple[str, List[BucketDelta], int, float]] = None
+        self._pending_batch: Optional[_FrozenBatch] = None
         # Honest diagnostics: anything dropped is counted, never hidden.
         self.dropped_late_observations = 0
         self.dropped_pending_overflow = 0
@@ -586,20 +597,21 @@ class ApiPerformanceCollector:
     # ------------------------------------------------------------------
 
     def drain_deltas(self) -> Tuple[str, List[BucketDelta]]:
-        """Compute this flush cycle's increments and rotate the snapshots.
+        """Freeze increments for one flush attempt and rotate the snapshots.
 
-        Returns (batch_id, deltas). The batch id stays stable until the
-        caller confirms the flush outcome -- a retry after an unknown
-        commit result reuses the same id and the same deltas, so DB-side
-        dedup makes double-apply impossible. Call ``mark_flushed`` with
-        the outcome; only a committed result advances the snapshots. The
-        batch freezes exactly the pending prefix present at drain time:
-        buckets rotated LATER belong to a future batch and must survive
-        this batch's confirmation."""
+        The batch id and deltas remain stable until confirmation, so a
+        retry after an unknown commit result uses the DB dedup identity.
+        Active rotated buckets are moved into the frozen batch rather than
+        kept in an index-addressed prefix: later queue overflow cannot make
+        confirmation delete unrelated increments. An expired batch is
+        conservatively abandoned before it can be submitted again; callers
+        must ensure no older DB job is still in flight before draining."""
         with self._lock:
             if self._pending_batch is not None:
-                batch_id, deltas, _prefix, _since = self._pending_batch
-                return batch_id, deltas
+                if self._batch_expired(self._pending_batch):
+                    self._drop_stale_batch(self._pending_batch, "retry_deadline")
+                else:
+                    return self._pending_batch.batch_id, self._pending_batch.deltas
             deltas: List[BucketDelta] = []
             for key, buckets in self._hours.items():
                 for bucket_key, (acc, snapshot) in buckets.items():
@@ -617,11 +629,17 @@ class ApiPerformanceCollector:
                             key=key, granularity=GRANULARITY_DAILY,
                             bucket_start=daily_bucket_start(bucket_day), bucket_date=bucket_day, acc=delta,
                         ))
-            pending_prefix = len(self._pending)
-            deltas.extend(self._pending)
+            frozen_pending = self._pending
+            self._pending = []
+            deltas.extend(frozen_pending)
             self.flush_seq += 1
             batch_id = f"{self.instance_id}:{self.flush_seq}"
-            self._pending_batch = (batch_id, deltas, pending_prefix, time.monotonic())
+            self._pending_batch = _FrozenBatch(
+                batch_id=batch_id,
+                deltas=deltas,
+                pending_deltas=frozen_pending,
+                first_attempt_mono=time.monotonic(),
+            )
             return batch_id, deltas
 
     def mark_flushed(self, batch_id: str, result: str, *, at: Optional[datetime] = None) -> None:
@@ -634,50 +652,61 @@ class ApiPerformanceCollector:
         longer protect a replay)."""
         at = at or datetime.now(timezone.utc)
         with self._lock:
-            if self._pending_batch is None or self._pending_batch[0] != batch_id:
+            if self._pending_batch is None or self._pending_batch.batch_id != batch_id:
                 return
-            _, deltas, pending_prefix, first_attempt = self._pending_batch
+            batch = self._pending_batch
             self.last_flush_at = at
             self.last_flush_result = result
             if result in ("applied", "already_applied"):
                 self.consecutive_flush_errors = 0
                 self.last_persist_error = ""
-                self._advance_snapshots(deltas)
-                del self._pending[:pending_prefix]
+                self._advance_snapshots(batch.deltas)
                 self._pending_batch = None
-            elif time.monotonic() - first_attempt > self.retry_deadline_seconds:
-                # Give up on the whole batch: advance the live snapshots so
-                # the abandoned increments are never re-emitted under a new
-                # id (the old dedup row may or may not exist -- either way
-                # replaying is unsafe), release the frozen pending prefix,
-                # and count the loss honestly.
-                dropped = sum(
-                    delta.acc.request_count
-                    for delta in deltas
-                    if delta.granularity == GRANULARITY_HOURLY
-                )
-                self.dropped_stale_batch_observations += dropped
-                self.consecutive_flush_errors += 1
-                self.last_persist_error = f"stale_batch:{result}"
-                logger.warning(
-                    "api performance flush batch dropped after retry deadline "
-                    "observations=%d result=%s",
-                    dropped, result,
-                )
-                self._advance_snapshots(deltas)
-                del self._pending[:pending_prefix]
-                self._pending_batch = None
+            elif self._batch_expired(batch):
+                self._drop_stale_batch(batch, result, at=at)
             else:
                 self.consecutive_flush_errors += 1
                 self.last_persist_error = result
 
+    def _batch_expired(self, batch: _FrozenBatch) -> bool:
+        return time.monotonic() - batch.first_attempt_mono >= self.retry_deadline_seconds
+
+    def _drop_stale_batch(
+        self,
+        batch: _FrozenBatch,
+        result: str,
+        *,
+        at: Optional[datetime] = None,
+    ) -> None:
+        """Abandon an expired batch without ever replaying its identity."""
+        if self._pending_batch is not batch:
+            return
+        dropped = sum(
+            delta.acc.request_count
+            for delta in batch.deltas
+            if delta.granularity == GRANULARITY_HOURLY
+        )
+        self.dropped_stale_batch_observations += dropped
+        self.consecutive_flush_errors += 1
+        self.last_flush_at = at or datetime.now(timezone.utc)
+        self.last_flush_result = "stale_batch_expired"
+        self.last_persist_error = f"stale_batch:{result}"
+        logger.warning(
+            "api performance flush batch dropped after retry deadline "
+            "observations=%d result=%s",
+            dropped, result,
+        )
+        self._advance_snapshots(batch.deltas)
+        self._pending_batch = None
+
     def _frozen_delta_for(self, key: EndpointKey, granularity: str, bucket_key) -> Optional[Accumulator]:
         """The delta this bucket contributes to the currently frozen batch,
         if any."""
-        if self._pending_batch is None:
+        batch = self._pending_batch
+        if batch is None:
             return None
         bucket_start = bucket_key if granularity == GRANULARITY_HOURLY else daily_bucket_start(bucket_key)
-        for delta in self._pending_batch[1]:
+        for delta in batch.deltas:
             if delta.key == key and delta.granularity == granularity and delta.bucket_start == bucket_start:
                 return delta.acc
         return None
@@ -707,7 +736,9 @@ class ApiPerformanceCollector:
                 "total_observations": self.total_observations,
                 "in_memory_hour_buckets": sum(len(b) for b in self._hours.values()),
                 "in_memory_day_buckets": sum(len(b) for b in self._days.values()),
-                "pending_rotated_buckets": len(self._pending),
+                "pending_rotated_buckets": len(self._pending) + (
+                    len(self._pending_batch.pending_deltas) if self._pending_batch else 0
+                ),
                 "dropped_late_observations": self.dropped_late_observations,
                 "dropped_pending_overflow": self.dropped_pending_overflow,
                 "dropped_stale_batch_observations": self.dropped_stale_batch_observations,
@@ -1000,8 +1031,18 @@ class _RequestTracker:
                 # send would (a) miss the time the final send blocks and
                 # (b) count a response whose final send fails as success.
                 await send(message)
-                tracker.completed = True
-                tracker._record(duration_us=tracker._elapsed_us())
+                if tracker.disconnected:
+                    # Starlette may successfully send its terminal empty
+                    # body after Request.is_disconnected() already observed
+                    # a dead client. A successful ASGI send does not undo
+                    # that evidence of a truncated response.
+                    if tracker.is_stream:
+                        tracker._record(duration_us=tracker._elapsed_us(), stream_error=True)
+                    else:
+                        tracker._record_cancelled()
+                else:
+                    tracker.completed = True
+                    tracker._record(duration_us=tracker._elapsed_us())
             else:
                 await send(message)
 

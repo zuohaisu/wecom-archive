@@ -5,6 +5,7 @@ read-side queries. Runs on in-memory SQLite (JSONB compiled to JSON)."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import time
 
 import pytest
 from sqlalchemy import create_engine
@@ -30,6 +31,7 @@ from app.services.api_performance_collector import (
 from app.services.api_performance_store import (
     FLUSH_ALREADY_APPLIED,
     FLUSH_APPLIED,
+    JobDeadlineExceeded,
     flush_deltas,
     query_bucket_series,
     query_coverage,
@@ -133,6 +135,15 @@ def test_same_batch_id_is_applied_exactly_once(db: Session):
     assert row.request_count == 1, "dedup must prevent double apply"
     assert row.duration_sum_us == 100_000
     assert db.query(ApiPerformanceFlushBatch).count() == 1
+
+
+def test_flush_rejects_a_job_that_has_exceeded_its_full_deadline(db: Session):
+    with pytest.raises(JobDeadlineExceeded):
+        flush_deltas(
+            db, "expired-deadline:1", "expired-deadline", [],
+            job_deadline_monotonic=time.monotonic() - 1,
+        )
+    assert db.query(ApiPerformanceFlushBatch).count() == 0
 
 
 def test_empty_deltas_skip_rows_but_batch_row_lands(db: Session):
@@ -404,6 +415,37 @@ def test_error_then_success_bucket_keeps_p95(db: Session):
     assert row.hist is not None and sum(row.hist) == 1
 
 
+def test_success_increment_cannot_restore_a_mixed_version_histogram(db: Session):
+    bucket = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)
+    db.add(ApiPerformanceEndpointHourly(
+        method="GET", route="/api/mixed-existing", traffic_class="business",
+        bucket_start=bucket, request_count=3, success_count=3,
+        completed_count=3, duration_sum_us=300_000,
+        success_duration_sum_us=300_000, class_counts={"2xx": 3},
+        stats_version=1, hist_version=-1, hist=None,
+    ))
+    db.commit()
+
+    collector = ApiPerformanceCollector(instance_id="mixed-restoration")
+    collector.record(_collector_obs(
+        100_000, completed_at=bucket + timedelta(minutes=1), route="/api/mixed-existing",
+    ))
+    hourly = _drain_hourly(collector)
+    flush_deltas(db, "mixed-restoration:1", "mixed-restoration", hourly)
+
+    db.expire_all()
+    row = db.query(ApiPerformanceEndpointHourly).one()
+    assert row.request_count == 4 and row.success_count == 4
+    assert row.hist_version == -1 and row.hist is None
+    points, _truncated = query_bucket_series(
+        db, ApiPerformanceEndpointHourly,
+        since=bucket, until=bucket + timedelta(hours=1), route="/api/mixed-existing",
+    )
+    stats = points[0]["stats"]
+    assert stats.hist is None and stats.hist_unavailable is True
+    assert stats.p95_estimate() == (None, False)
+
+
 def test_query_truncation_is_reported(db: Session):
     now = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
     for index in range(11):
@@ -448,11 +490,11 @@ def test_retention_uses_beijing_day_and_exact_hour_boundary(db: Session):
         bucket_start=now - timedelta(hours=719),
         request_count=1, class_counts={}, stats_version=1, hist_version=1,
     ))
-    # Daily cutoff: day_bucket_date(now - 180d) = 2026-04-12 (Shanghai);
-    # 2026-04-11 must go, 2026-04-12 stays.
+    # Keep today plus the prior 179 Shanghai calendar days: with today
+    # 2026-10-09, 2026-04-13 is the oldest retained day.
     from app.services.api_performance_collector import day_bucket_date
 
-    cutoff_day = day_bucket_date(now - timedelta(days=180))
+    cutoff_day = day_bucket_date(now) - timedelta(days=179)
     db.add(ApiPerformanceEndpointDaily(
         method="GET", route="/api/d-old", traffic_class="business",
         bucket_date=cutoff_day - timedelta(days=1),
@@ -487,6 +529,30 @@ def test_late_batch_cannot_resurrect_expired_rows(db: Session):
     assert outcome == FLUSH_APPLIED
     assert db.query(ApiPerformanceEndpointHourly).count() == 0, "expired hour rejected"
     assert db.query(ApiPerformanceEndpointDaily).count() == 1, "still-valid day survives"
+
+
+def test_late_daily_flush_uses_the_same_180_day_calendar_boundary(db: Session):
+    now = datetime(2026, 10, 8, 18, 0, tzinfo=UTC)  # Shanghai 2026-10-09
+    oldest_day = datetime(2026, 10, 9).date() - timedelta(days=179)
+    expired = BucketDelta(
+        key=EndpointKey("GET", "/api/expired-day", "business"), granularity="daily",
+        bucket_start=daily_bucket_start_for(oldest_day - timedelta(days=1)),
+        bucket_date=oldest_day - timedelta(days=1),
+        acc=ObservationAccumulator(request_count=1),
+    )
+    retained = BucketDelta(
+        key=EndpointKey("GET", "/api/retained-day", "business"), granularity="daily",
+        bucket_start=daily_bucket_start_for(oldest_day), bucket_date=oldest_day,
+        acc=ObservationAccumulator(request_count=1),
+    )
+
+    outcome = flush_deltas(
+        db, "daily-boundary:1", "daily-boundary", [expired, retained],
+        now=now, retention_hours=720, retention_days=180,
+    )
+
+    assert outcome == FLUSH_APPLIED
+    assert {row.route for row in db.query(ApiPerformanceEndpointDaily).all()} == {"/api/retained-day"}
 
 
 def ObservationAccumulator(**kwargs):
