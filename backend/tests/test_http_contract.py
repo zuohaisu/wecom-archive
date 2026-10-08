@@ -417,6 +417,17 @@ def test_router_count() -> None:
     assert route_count == 225
 
 
+def test_selfhost_router_count() -> None:
+    from app.main import create_app
+
+    app = create_app(edition="selfhost")
+    route_count = len([route for route in app.routes if hasattr(route, "methods")])
+    # GH-168 keeps the non-commercial archive/setup routes in selfhost;
+    # GH-179 adds five tenant-scoped favorites API operations. Later mainline
+    # route additions bring the current selfhost total to 145.
+    assert route_count == 145
+
+
 def test_routers_are_registered(client: TestClient) -> None:
     from app.main import app
 

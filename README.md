@@ -1,4 +1,4 @@
-# Crowntime WeCom Archive
+# wecom-archive
 
 A complete archive and review console for WeCom conversation data — not an
 SDK wrapper. It retrieves archive records through the WeCom Conversation
@@ -6,19 +6,21 @@ Archive API, decrypts and stores them, and gives authorized administrators a
 full web-based review console with search, media access, export approval, and
 audit logging.
 
-Crowntime WeCom Archive is a proprietary product of 深圳康冠时代科技有限公司
-(Crowntime), **operated as a hosted service**. It is not open source, and no
-self-hosting or on-premises license is offered. This repository is private and
-its contents are confidential.
+## 项目定位 / Project positioning
 
-> **This README is internal documentation.** The setup instructions below are
-> for developing and operating the service ourselves, not a customer-facing
-> installation guide. For the product strategy behind that, see
-> [ADR-0003](docs/adr/0003-product-strategy-hosted-only.md) and the
-> [first-10-customers roadmap](deliverables/roadmap-first-10-customers-2026-08-07.md).
+**中文：** `wecom-archive` 是由康冠时代（深圳康冠时代科技有限公司，Crowntime）
+发布的开源企业微信会话存档项目。基于 AGPL-3.0 的自部署版本完整可用，不依赖康冠时代
+官方云服务；康冠时代官方云版提供托管与运维便利。自部署版与云版使用同一代码库，云版代码
+不会从本仓库中排除。
 
-> This is an independent project. “WeCom” and “企业微信” are trademarks of
-> Tencent and are used here only to describe compatibility. This software is
+**English:** `wecom-archive` is an open-source WeCom conversation-archive project
+published by Crowntime (康冠时代), Shenzhen Crowntime Technology Co., Ltd. Its
+AGPL-3.0 self-hosted edition is complete and usable without depending on the
+official cloud service. The official Crowntime cloud edition offers managed
+hosting and operational convenience. Both editions use this unified codebase;
+cloud-specific source is not withheld from this repository.
+
+> “WeCom” and “企业微信” are Tencent trademarks. This independent project is
 > not affiliated with or endorsed by Tencent.
 
 ## Features
@@ -48,6 +50,79 @@ reference. See [contact-avatar privacy and update behavior](docs/contact-avatars
 for the controlled profile-image contract.
 
 ## Quick start
+
+### Five-minute self-host quickstart / 五分钟自部署
+
+**English:** This Compose path is for a complete self-hosted installation. It
+uses PostgreSQL 16, applies migrations, starts the web app, and runs the
+self-host worker schedule. It does not require the official cloud service or a
+paid cloud subscription.
+
+**中文：** Compose 路径用于完整自部署，包含 PostgreSQL 16、自动数据库迁移、Web
+应用和自部署 worker 调度；不依赖康冠时代官方云服务，也不要求云版订阅。
+
+**Prerequisites / 前置条件:** Docker Engine with the Docker Compose v2 plugin;
+a Linux host compatible with the Tencent WeCom C SDK; a WeCom organization
+with Conversation Archive enabled; and the SDK obtained directly from Tencent
+under its terms. The SDK is proprietary and is not included in this repository
+or image. Real WeCom callbacks also require a public HTTPS endpoint and an
+operator-managed reverse proxy; Compose binds the app to localhost and does not
+install DNS, TLS, or a proxy.
+
+1. **Create local configuration / 创建本地配置.** Copy the example and set a
+   URL-safe database password (hex works), plus two distinct Fernet keys:
+   `FIELD_ENCRYPTION_KEY` and `SETTINGS_ENCRYPTION_KEY`.
+
+   ```bash
+   cp .env.example .env
+   openssl rand -hex 32
+   openssl rand -base64 32 | tr '+/' '-_'  # generate one Fernet key; run twice
+   ```
+
+   Paste the outputs into the corresponding values in `.env`. The Compose
+   stack overrides the local `DATABASE_URL` host with its private `db` service.
+
+2. **Provide the SDK and start the stack / 放置 SDK 并启动.** Put Tencent's
+   `libWeWorkFinanceSdk_C.so` at the path shown below, then start the services.
+   The migration service must succeed before web and worker start.
+
+   ```bash
+   mkdir -p backend/vendor/wecom_sdk
+   # Copy the SDK library to backend/vendor/wecom_sdk/libWeWorkFinanceSdk_C.so
+   docker compose up -d --build
+   docker compose ps
+   ```
+
+3. **Initialize and configure / 初始化并配置.** Open
+   `http://127.0.0.1:8035/admin/settings/init` and create the local
+   administrator. The example uses `AUTH_MODE=password`, so sign in at
+   `/admin/login` with that account; global WeCom OAuth settings are optional
+   for this local login. Then open
+   `http://127.0.0.1:8035/admin/provisioning/settings` (the S2 setup wizard) to
+   enter and test the tenant-scoped archive credentials.
+
+4. **Run the first sync / 执行首次同步.** With a test organization and SDK
+   configured, run the existing one-shot worker and then refresh the review
+   console:
+
+   ```bash
+   docker compose exec worker python scripts/run_archive_worker_once.py
+   docker compose logs --tail=100 worker
+   ```
+
+   The first archived message appears after WeCom returns an eligible record;
+   message availability and WeCom-side permissions are external prerequisites.
+   Email is not required for sync; configure your own SMTP transport in `.env`
+   if you want outbound notifications.
+
+The app port is bound to `127.0.0.1` by default. Before enabling remote access
+or WeCom callbacks, set `ADMIN_DOMAIN` to the public hostname, set
+`APP_ENV=production`, and place an operator-managed TLS reverse proxy in front
+of the app; Compose does not provision DNS, certificates, or a proxy.
+`docker compose down` preserves the named database and media volumes; **do not
+use `docker compose down -v` unless you intend to delete that data**. The
+Compose worker runs only self-host jobs; cloud billing/payment jobs and
+deferred destructive cleanup/purge jobs are not started.
 
 ### Prerequisites
 
@@ -149,16 +224,19 @@ it from Tencent, place it outside version control (the ignored
 
 ## License
 
-Proprietary and confidential — see [LICENSE](LICENSE). All rights reserved by
-深圳康冠时代科技有限公司. Third-party components, including Tencent's WeCom SDK
-and the open-source dependencies in the requirements files, remain subject to
-their own terms.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+
+This project is licensed under the GNU Affero General Public License, version
+3.0 (AGPL-3.0); see [LICENSE](LICENSE) for the full license text and
+[NOTICE](NOTICE) for project attribution and trademark information. The
+project's own core and cloud code use the same license. Third-party components
+remain subject to their own terms; Tencent's proprietary WeCom SDK is not
+included or redistributed by this project.
 
 ## Development
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the development setup, the
-acceptance chain a pull request has to pass, and the codebase invariants worth
-knowing before you change anything.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, contribution
+workflow, validation chain, and current codebase boundaries.
 
 Security issues follow [SECURITY.md](SECURITY.md) and must never be filed in a
 normal issue.

@@ -81,6 +81,24 @@ def platform_client(client):
 # ---------------------------------------------------------------------------
 
 
+def test_api_performance_telemetry_is_cloud_only():
+    from app.main import create_app
+    from app.services.api_performance_collector import ApiPerformanceMiddleware
+
+    cloud = create_app(edition="cloud")
+    selfhost = create_app(edition="selfhost")
+    cloud_paths = {route.path for route in cloud.routes if hasattr(route, "path")}
+    selfhost_paths = {route.path for route in selfhost.routes if hasattr(route, "path")}
+
+    assert "/platform/api-performance" in cloud_paths
+    assert "/api/platform/api-performance/status" in cloud_paths
+    assert "/platform/api-performance" not in selfhost_paths
+    assert "/api/platform/api-performance/status" not in selfhost_paths
+    assert cloud.state.api_performance_runtime is not None
+    assert selfhost.state.api_performance_runtime is None
+    assert ApiPerformanceMiddleware not in {middleware.cls for middleware in selfhost.user_middleware}
+
+
 @pytest.mark.parametrize(
     "path",
     [

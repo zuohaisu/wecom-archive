@@ -90,7 +90,9 @@ done <"$MANAGED_UNITS_FILE"
 # ── Extracts the repo-relative script/entrypoint path(s) an ExecStart=
 # line references, resolved against $DEPLOY_DIR, so a required unit's
 # real entrypoint can be proven to exist without hardcoding a per-job
-# path list here. Deliberately ignores the venv interpreter itself
+# path list here. The deployed checkout root may vary; paths are mapped
+# relative to the conventional `/current/` checkout marker. Deliberately
+# ignores the venv interpreter itself
 # (.venv/bin/python is created at deploy time, never committed) and any
 # word that is not a .py/.sh script — a `python -m module:app` invocation
 # has no on-disk script target to check. A relative ExecStart word (the
@@ -103,12 +105,15 @@ _execstart_targets() {
     line="${line#ExecStart=}"
     wd=$(grep -E '^WorkingDirectory=' "$service_file" | head -1)
     wd="${wd#WorkingDirectory=}"
-    wd_rel="${wd#/srv/apps/wecom-archive-365/current/}"
-    wd_rel="${wd_rel%/}"
+    wd_rel=""
+    if [[ "$wd" == */current/* ]]; then
+        wd_rel="${wd#*/current/}"
+        wd_rel="${wd_rel%/}"
+    fi
     for word in $line; do
         case "$word" in
-            /srv/apps/wecom-archive-365/current/*.py | /srv/apps/wecom-archive-365/current/*.sh)
-                echo "${word#/srv/apps/wecom-archive-365/current/}"
+            */current/*.py | */current/*.sh)
+                echo "${word#*/current/}"
                 ;;
             *.py | *.sh)
                 if [ -n "$wd_rel" ] && [ "$wd_rel" != "$wd" ]; then

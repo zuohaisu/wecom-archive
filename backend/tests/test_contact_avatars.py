@@ -12,6 +12,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.db.models import AdminUser, Contact, ExternalContact
+from app.media_storage import (
+    MediaObjectNotFound,
+    MediaStorageConfigurationError,
+    MediaStorageOperationError,
+    MediaStorageUnavailable,
+)
 from app.services import avatar_sync
 from app.wecom_contacts import MemberProfile
 
@@ -175,6 +181,9 @@ def test_avatar_endpoint_fails_closed_for_cross_tenant_and_disabled_users(
     )
     avatar_db.add_all([source, other])
     avatar_db.flush()
+    # The route ends its read transaction before external storage I/O, so the
+    # HTTP fixture's rows must already be committed like production data.
+    avatar_db.commit()
     storage.data[source.avatar_storage_ref] = b"\xff\xd8\xffimage-a"
     storage.data[other.avatar_storage_ref] = b"\xff\xd8\xffimage-b"
 
@@ -211,6 +220,153 @@ def test_avatar_endpoint_fails_closed_for_cross_tenant_and_disabled_users(
             assert client.get(f"/api/admin/avatars/internal/{source.id}").status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    "storage_error",
+    [
+        MediaObjectNotFound("synthetic missing object"),
+        MediaStorageUnavailable("synthetic provider outage"),
+        MediaStorageUnavailable("synthetic timeout"),
+        MediaStorageConfigurationError("synthetic configuration error"),
+        MediaStorageOperationError("synthetic operation error"),
+        TimeoutError("synthetic read timeout"),
+    ],
+)
+def test_avatar_storage_errors_keep_the_uniform_404_fallback(
+    avatar_db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    storage_error: Exception,
+) -> None:
+    from app.auth import get_current_user
+    from app.db.session import get_db
+    from app.main import app
+    from app.routers import avatars as avatar_router
+
+    profile = Contact(
+        tenant_id="tenant-a",
+        wecom_userid="synthetic-staff",
+        avatar_storage_backend="qiniu_kodo",
+        avatar_storage_ref="synthetic/private-object.jpg",
+        avatar_content_type="image/jpeg",
+        avatar_status="ready",
+    )
+    avatar_db.add(profile)
+    avatar_db.commit()
+    profile_id = profile.id
+
+    class _ErrorStorage:
+        def read_bytes(self, _storage_ref: str) -> bytes:
+            raise storage_error
+
+    monkeypatch.setattr(
+        avatar_router, "get_media_storage_provider_for_backend", lambda _backend: _ErrorStorage()
+    )
+
+    def override_db():
+        yield avatar_db
+
+    app.dependency_overrides[get_current_user] = lambda: (SimpleNamespace(role="admin"), "tenant-a")
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(f"/api/admin/avatars/internal/{profile_id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not found"}
+    assert "synthetic" not in response.text
+
+
+def test_external_avatar_endpoint_serves_cached_image(
+    avatar_db: Session, storage: _MemoryStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.auth import get_current_user
+    from app.db.session import get_db
+    from app.main import app
+    from app.routers import avatars as avatar_router
+
+    profile = ExternalContact(
+        tenant_id="tenant-a",
+        external_userid="synthetic-customer",
+        avatar_storage_backend="local",
+        avatar_storage_ref="tenants/tenant-a/avatars/external.jpg",
+        avatar_content_type="image/jpeg",
+        avatar_status="ready",
+        avatar_synced_at=datetime.now(timezone.utc),
+    )
+    avatar_db.add(profile)
+    avatar_db.commit()
+    profile_id = profile.id
+    storage.data[profile.avatar_storage_ref] = b"\xff\xd8\xffexternal-image"
+    monkeypatch.setattr(
+        avatar_router, "get_media_storage_provider_for_backend", lambda _backend: storage
+    )
+
+    def override_db():
+        yield avatar_db
+
+    app.dependency_overrides[get_current_user] = lambda: (SimpleNamespace(role="admin"), "tenant-a")
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(f"/api/admin/avatars/external/{profile_id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.content == b"\xff\xd8\xffexternal-image"
+    assert response.headers["content-type"] == "image/jpeg"
+
+
+@pytest.mark.parametrize(
+    "image_bytes",
+    [
+        pytest.param(b"not an image", id="invalid-signature"),
+        pytest.param(b"\xff\xd8\xff" + b"x" * (2 * 1024 * 1024), id="over-size"),
+    ],
+)
+def test_avatar_endpoint_rejects_invalid_or_oversized_image_bytes(
+    avatar_db: Session,
+    storage: _MemoryStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    image_bytes: bytes,
+) -> None:
+    from app.auth import get_current_user
+    from app.db.session import get_db
+    from app.main import app
+    from app.routers import avatars as avatar_router
+
+    profile = Contact(
+        tenant_id="tenant-a",
+        wecom_userid="synthetic-staff",
+        avatar_storage_backend="local",
+        avatar_storage_ref="tenants/tenant-a/avatars/invalid.jpg",
+        avatar_content_type="image/jpeg",
+        avatar_status="ready",
+    )
+    avatar_db.add(profile)
+    avatar_db.commit()
+    profile_id = profile.id
+    storage.data[profile.avatar_storage_ref] = image_bytes
+    monkeypatch.setattr(
+        avatar_router, "get_media_storage_provider_for_backend", lambda _backend: storage
+    )
+
+    def override_db():
+        yield avatar_db
+
+    app.dependency_overrides[get_current_user] = lambda: (SimpleNamespace(role="admin"), "tenant-a")
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(f"/api/admin/avatars/internal/{profile_id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not found"}
 
 
 def test_member_profile_reads_avatar_but_not_a_browser_url(monkeypatch: pytest.MonkeyPatch) -> None:

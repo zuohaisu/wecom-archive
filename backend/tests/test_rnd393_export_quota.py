@@ -81,6 +81,25 @@ def test_asia_shanghai_natural_month_resets_at_exact_boundary(db: Session) -> No
     assert summary.resets_at.isoformat() == "2026-10-01T00:00:00+08:00"
 
 
+def test_selfhost_exports_do_not_apply_monthly_commercial_limits(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APP_EDITION", "selfhost")
+
+    for expected_used in range(1, 13):
+        bucket = consume_export_quota(db, "tenant-a", "text", at=AUGUST)
+        assert bucket.used == expected_used
+        assert bucket.limit is None and bucket.remaining is None
+    for expected_used in range(1, 4):
+        bucket = consume_export_quota(db, "tenant-a", "media_zip", at=AUGUST)
+        assert bucket.used == expected_used
+        assert bucket.limit is None and bucket.remaining is None
+
+    summary = get_export_quota_summary(db, "tenant-a", at=AUGUST)
+    assert summary.text.limit is None and summary.text.remaining is None
+    assert summary.media_zip.limit is None and summary.media_zip.remaining is None
+
+
 def test_quota_consumption_is_rollback_safe_and_takes_tenant_row_lock(
     db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:

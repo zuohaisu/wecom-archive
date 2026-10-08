@@ -161,32 +161,30 @@ test:
 verify: lint-diff typecheck build test
 	@echo "verify: OK"
 
-## Build the public open-source snapshot into build/public-snapshot.
+## Build a local public-review snapshot into build/public-snapshot.
 ##
-## This repository ships under a two-repository model: everything internal
-## (ticket files, agent automation, design sources, roadmaps) stays
-## here, and only the paths named in scripts/public_allowlist.txt reach the
-## public repo. The export script copies that allowlist, rewrites real
-## hostnames and deploy paths to placeholders, then runs a leak gate that
-## aborts on anything that must never ship.
+## The snapshot is a leak-review and validation artifact. Its allowlist
+## controls only the generated snapshot, not the source or license boundary
+## of this unified repository. The exporter rewrites exact operational
+## values and runs a fail-closed leak gate; it does not publish anything.
 ##
 ## Writes a directory and nothing else — it never commits or pushes.
-## Review the result by hand before publishing it.
+## Review the result by hand; external publishing requires separate approval.
 public-snapshot:
 	./scripts/export_public_snapshot.sh
 	@echo "public-snapshot: OK"
 
 ## Prove the exported snapshot is a working repository, not just a
-## well-filtered pile of files: import the app and run its whole test
-## suite from inside build/public-snapshot. Catches an allowlist that
-## dropped something the code or the tests actually need — the failure
-## mode that would otherwise surface as red CI on the public repo's very
-## first push.
+## well-filtered pile of files: import the app and run its public-compatible
+## tests from inside build/public-snapshot. Internal operational-document
+## contract tests remain in the unfiltered full `make verify` suite and are
+## deselected here only because their private source documents are absent.
+## This catches an allowlist that dropped public code or test dependencies.
 public-verify: public-snapshot
 	cd build/public-snapshot/backend && \
 		DATABASE_URL='sqlite:///:memory:' $(BACKEND_PY) -c \
 			"from app.main import app; assert len(app.routes) > 0"
-	cd build/public-snapshot/backend && $(BACKEND_PY) -m pytest tests -q -p no:warnings
+	cd build/public-snapshot/backend && PATH="$(dir $(BACKEND_PY)):$$PATH" $(BACKEND_PY) -m pytest tests -q -p no:warnings -m 'not requires_internal_ops_docs'
 	@echo "public-verify: OK"
 
 ## Shellcheck + shfmt over every ssl-renew script, plus a Python syntax

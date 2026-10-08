@@ -34,6 +34,34 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
+APP_EDITION_SELFHOST = "selfhost"
+APP_EDITION_CLOUD = "cloud"
+APP_EDITIONS = frozenset({APP_EDITION_SELFHOST, APP_EDITION_CLOUD})
+
+
+class RuntimeEditionSettings(BaseSettings):
+    """Process-wide product mode and optional self-host technical limits."""
+
+    app_edition: str = APP_EDITION_SELFHOST
+    selfhost_storage_limit_bytes: str = "0"
+
+
+def get_runtime_edition_settings() -> RuntimeEditionSettings:
+    return RuntimeEditionSettings()
+
+
+def resolve_app_edition(value: str | None = None) -> str:
+    """Resolve a known edition, defaulting to selfhost and rejecting typos."""
+    selected = get_runtime_edition_settings().app_edition if value is None else value
+    if selected not in APP_EDITIONS:
+        raise ValueError("APP_EDITION must be exactly 'selfhost' or 'cloud'")
+    return selected
+
+
+def get_app_edition() -> str:
+    return resolve_app_edition()
+
+
 class DatabaseSettings(BaseSettings):
     database_url: str = ""
 

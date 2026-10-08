@@ -20,8 +20,8 @@ Versioned in this repository:
 | Checkout ownership-transition preflight (GH-121) | `scripts/deploy_preflight.sh` | Read-only target-tree versus untracked-working-tree collision check, used by CD before checkout and by direct/manual deploys |
 | Revision verification | `backend/scripts/verify_alembic_head.py` | Non-interactive DB-revision-vs-repo-head check used by the deploy script and independently testable |
 | Deploy integration tests | `scripts/tests/deploy_server.bats` | Mocked end-to-end coverage of the deploy script's ordering and rollback behavior |
-| Deploy sudoers capability model (GH-133) | [operations/deploy-sudoers.md](operations/deploy-sudoers.md) | Capability matrix, ffmpeg host-prerequisite decision, systemd wildcard scoping decision, and the production sudoers migration runbook — the source of truth for what root capability the deploy user needs and why |
-| Scheduled-workload manifest (GH-104) | `deploy/systemd/WORKLOAD_MANIFEST` | The one authoritative classification (required/deferred/manual-oneshot/deprecated/static-helper/template/out-of-scope) for every unit below; `MANAGED_UNITS` is a mechanical view of it — see [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md) |
+| Deploy sudoers capability model (GH-133) | `scripts/deploy_server.sh` | The script documents the host capabilities used by this deployment. Production-specific sudoers rules and migration steps are not included; adapt permissions to your own host using [least-privilege guidance](OPERATIONS.md#least-privilege-deployment) |
+| Scheduled-workload manifest (GH-104) | [`deploy/systemd/WORKLOAD_MANIFEST`](../deploy/systemd/WORKLOAD_MANIFEST) | The authoritative classification (required/deferred/manual-oneshot/deprecated/static-helper/template/out-of-scope) for every unit below; `MANAGED_UNITS` is a mechanical view of it |
 | Scheduled-workload assertion (GH-104) | `scripts/assert_scheduled_workloads.sh` (+ `scripts/tests/assert_scheduled_workloads.bats`) | Repo-mode: manifest/MANAGED_UNITS/ExecStart consistency (CI-safe). `--server` mode: real installed/enabled/active state — run on the host post-deploy |
 | Worker unit | `deploy/systemd/wecom-archive-worker.service` | One-shot sync + decrypt |
 | Worker timer | `deploy/systemd/wecom-archive-worker.timer` | Callback-primary archive reconciliation every 30 minutes by default (`:00`, `:30`) |
@@ -43,15 +43,15 @@ Versioned in this repository:
 | AI KB gap report unit/timer | `deploy/systemd/wecom-ai-kb-gap-report.{service,timer}` | Weekly (Mon 06:00) Markdown candidate-improvement report under `docs/ai/reports/` — never creates, changes, or closes GitHub Issues (RND-359) |
 | AI retention sweep unit/timer | `deploy/systemd/wecom-ai-retention-sweep.{service,timer}` | Daily (03:30) deletes AI chat sessions/messages past `AI_RETENTION_DAYS` (default 90) (RND-359) |
 | Backup unit/timer | `deploy/systemd/wecom-backup.{service,timer}` | Daily (03:17) encrypted DB + media backup (RND-193); listed in `MANAGED_UNITS` as of GH-104 — cadence/retention/encryption unchanged |
-| Recovery-config bundle (GH-105) | `scripts/dr_config_bundle.sh` (+ `scripts/tests/dr_config_bundle.bats`) | Encrypts the explicit recovery-critical config/key inventory (`backend/.env`, `shared/keys/`, ...) not covered by `backup_once.sh` into a checksummed, versioned `.tar.gz.gpg` bundle. Independent `RECOVERY_PASSPHRASE`, not wired to a systemd timer by this change — see [operations/2c2g-runbook.md §8](operations/2c2g-runbook.md) |
-| DR destination-side pull/verify (GH-105) | `scripts/dr_pull.sh` (+ `scripts/tests/dr_pull.bats`) | Optional helper for the Tencent/Mac off-host destinations: rsync-pulls `dr_config_bundle.sh` artifacts, verifies checksum before promoting, never overwrites a previous known-good copy on mismatch. Not wired to any schedule by this change — Ops decides cadence/destination |
+| Recovery-config bundle (GH-105) | Internal recovery helper, not included in this snapshot | Use the [generic backup and recovery guidance](OPERATIONS.md#backup-and-recovery) to design an encrypted recovery process for your own environment |
+| DR destination-side pull/verify (GH-105) | Internal recovery helper, not included in this snapshot | Configure independent off-host backup storage and verification appropriate to your deployment; this snapshot does not provide or configure a destination |
 | Disk/resource usage check unit/timer | `deploy/systemd/wecom-disk-usage-check.{service,timer}` | Every 15 minutes (`:9/15`) capacity/webhook alerting (RND-193); listed in `MANAGED_UNITS` as of GH-104, cadence unchanged |
-| Job-failure alert unit (templated) | `deploy/systemd/wecom-job-failure-alert@.service` | `OnFailure=` target for the seven critical one-shot units below; POSTs through the existing `notify.sh`/`ALERT_WEBHOOK_URL` contract (GH-107, see [operations/alerting.md](operations/alerting.md)) |
-| Wildcard SSL renewal unit/timer (GH-104 Follow-up B) | `deploy/systemd/qiniu-ssl-renew-wildcard.{service,timer}`, `ssl-renew/renew-wildcard.sh` | Daily 00:15 (+15min random delay) `*.crowntime.cn` renewal, captured from the already-proven production implementation; see [operations/wildcard-ssl-renewal.md](operations/wildcard-ssl-renewal.md) |
+| Job-failure alert unit (templated) | `deploy/systemd/wecom-job-failure-alert@.service` | `OnFailure=` target for critical one-shot units; POSTs through the `ALERT_WEBHOOK_URL` contract (GH-107; see [generic alerting guidance](OPERATIONS.md#alerts-and-uptime)) |
+| Wildcard SSL renewal unit/timer (GH-104 Follow-up B) | `deploy/systemd/qiniu-ssl-renew-wildcard.{service,timer}`, `ssl-renew/renew-wildcard.sh` | A provider-specific wildcard renewal example; the domain, provider credentials, and host installation steps must be replaced for your environment. See [TLS guidance](OPERATIONS.md#tls-and-provider-specific-tooling) |
 | GitHub Actions CI | `.github/workflows/ci.yml` + `.github/workflows/test.yml` | Required PR/merge-queue compile, migration, schema-drift, script-safety, and test gates |
-| GitHub Actions CD | `.github/workflows/deploy.yml` | Deploys the merged `main` SHA without repeating the full CI suite (see §7) |
-| GitHub Actions external uptime check | `.github/workflows/uptime-check.yml` | Runs outside the production ECS on a 10-minute schedule; checks the public endpoint and `/health/ready` and alerts on failure (GH-107, see [operations/alerting.md](operations/alerting.md)) |
-| Controlled non-production deployment | `.github/workflows/deploy-nonprod.yml`, `scripts/deploy_nonprod.sh`, `deploy/systemd/wecom-archive-365-nonprod.service` | Manually deploys an exact `main` SHA only to the isolated staging instance; see [operations/nonproduction-deployment.md](operations/nonproduction-deployment.md) |
+| Hosted GitHub Actions CD | Internal workflow, not included in this snapshot | Hosted deployments use a separate controlled workflow; self-hosters should use their own reviewed release process (see [least-privilege deployment guidance](OPERATIONS.md#least-privilege-deployment)) |
+| GitHub Actions external uptime check | `.github/workflows/uptime-check.yml` | Manual-only workflow; checks the HTTPS base URL configured through the `UPTIME_BASE_URL` repository variable, then `/health/ready`, and alerts on failure (GH-107). Forks have no production URL default. |
+| Controlled non-production deployment | Hosted staging workflow and host-specific assets (not included in this snapshot) | The internal staging procedure is not distributed. For your own installation, use a separately isolated non-production environment; see [isolation guidance](OPERATIONS.md#non-production-isolation) |
 
 Not versioned in this repository:
 
@@ -60,10 +60,54 @@ Not versioned in this repository:
 | Main web service unit (`wecom-archive-365.service`) | Operator-managed |
 | Reverse proxy config (Nginx / equivalent) | Operator-managed |
 | TLS certificates | Operator-managed |
-| `STATIC_SITE_DIR_NAME` env var | Operator-set in `backend/.env`; must match the `root` in the operator-managed Nginx config for the static homepage (see `static_site/company_homepage/README.md`), or step 8 below silently syncs to a directory Nginx never serves |
-| `qiniu-telegram-relay.service` | Deprecated stale server artifact, never versioned here; see [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#telegram-relay) |
+| `STATIC_SITE_DIR_NAME` env var | Operator-set in `backend/.env`; it must match the static webroot configured in your reverse proxy, or step 8 below may sync to a directory the proxy never serves; see [static-site guidance](OPERATIONS.md#static-site) |
+| `qiniu-telegram-relay.service` | Deprecated stale server artifact, never versioned here; see the included [`WORKLOAD_MANIFEST`](../deploy/systemd/WORKLOAD_MANIFEST) |
 
 ---
+
+## Self-hosted Docker Compose path
+
+The community self-host path is a single-host Docker Compose stack described
+in the [README quickstart](../README.md#quick-start).
+`docker-compose.yml` starts PostgreSQL 16, a one-shot Alembic migration,
+the FastAPI web service, and a separate self-host worker container. The
+Compose configuration forces `APP_EDITION=selfhost`, exposes only the web
+port (bound to `127.0.0.1` by default), keeps PostgreSQL private to the
+Compose network, and persists PostgreSQL data and local media in named
+volumes. It does not contain cloud payment services, a Docker socket mount,
+reverse-proxy/TLS setup, backup automation, or deployment to a hosted
+infrastructure.
+
+The worker uses the standard-library
+`backend/scripts/run_selfhost_worker_scheduler.py` to invoke existing
+one-shot commands. This was chosen over an Ofelia-style Docker scheduler so
+the worker does not need the host's privileged Docker socket or an additional
+scheduler image. Each job runs serially with a bounded fallback interval;
+callback-triggered archive work still uses the existing web-to-worker path.
+The shared run volume carries only coalescing media/contact signal files, which
+the scheduler polls for prompt work. The fallback intervals are five minutes
+for archive reconciliation and export jobs, 15 minutes for external-contact
+refresh, 30 minutes for media reconciliation, and daily/hourly for the optional
+contact, AI-index, and retention jobs. Cloud billing/payment, internal AI eval
+reports, backups/TLS renewal, and deferred destructive cleanup/purge jobs are
+not scheduled in this self-host stack.
+
+Before starting the stack, configure the database password and both Fernet
+keys in the root `.env` file, and provide Tencent's separately licensed
+WeCom SDK at `backend/vendor/wecom_sdk/libWeWorkFinanceSdk_C.so`. Email is not
+required for archive sync; configure your own SMTP transport for notifications.
+The image build deliberately excludes the SDK directory and all `.env` files. Real
+WeCom callbacks require an operator-managed public HTTPS endpoint and reverse
+proxy; the Compose stack itself remains bound to localhost. Before exposing it,
+set `APP_ENV=production` and `ADMIN_DOMAIN` to the public hostname and configure
+the proxy/TLS separately. `docker compose down` preserves named volumes.
+`docker compose down -v` deletes the database and local media and must be
+treated as destructive.
+
+**Production reference:** The host bootstrap, web-service, and systemd worker
+sections below document the existing operator-managed deployment path. They
+remain in place and are not modified or replaced by the community Compose
+stack.
 
 ## 2. Local / New-Server Bootstrap
 
@@ -96,9 +140,9 @@ existing `media_files` row has `storage_backend=qiniu_kodo` (for reads) —
 local-only deployments never need `QINIU_*` configured. See
 `.env.example` for the required variables (`QINIU_ACCESS_KEY`,
 `QINIU_SECRET_KEY`, `QINIU_BUCKET`, `QINIU_DOMAIN` — must be a full
-`https://` URL) and
-[research/rnd_174_qiniu_kodo_provider.md](research/rnd_174_qiniu_kodo_provider.md)
-for the per-row storage model and rollback behavior.
+`https://` URL). The per-row storage model and provider boundary are described
+in [object-storage guidance](OPERATIONS.md#object-storage); choose and configure
+a provider appropriate to your deployment.
 
 ---
 
@@ -189,11 +233,10 @@ Health endpoints (RND-227):
 
 ## 5. Worker / Timer Installation
 
-See [operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md)
+See the [versioned workload manifest](../deploy/systemd/WORKLOAD_MANIFEST)
 for the canonical classification (required / deferred / manual-oneshot /
-deprecated / static-helper / template / out-of-scope) of every unit below,
-and `deploy/systemd/WORKLOAD_MANIFEST` for its machine-checkable form
-(GH-104). `MANAGED_UNITS`, described next, is a mechanical view of that
+deprecated / static-helper / template / out-of-scope) of every unit below
+(GH-104); `MANAGED_UNITS`, described next, is a mechanical view of that
 manifest's `auto_install=true` rows.
 
 **Units listed in `deploy/systemd/MANAGED_UNITS` are now installed and
@@ -205,8 +248,7 @@ actually installed on the host, because CD only ever restarted the main
 app service; installing a new systemd unit had always been this separate,
 easy-to-forget manual step. It needs a one-time sudoers grant (see the
 "Server (sudo) Prerequisites" comment at the top of `deploy_server.sh`,
-and [operations/deploy-sudoers.md](operations/deploy-sudoers.md) for why
-that grant is a `wecom-*` wildcard rather than a per-unit exact list) —
+and the [least-privilege deployment guidance](OPERATIONS.md#least-privilege-deployment) —
 without it, step 10 logs a WARN per unit and the deploy still succeeds, it
 just does not self-heal the missing unit. Only add a unit to
 `MANAGED_UNITS` when you want it kept in sync and enabled automatically on
@@ -236,9 +278,8 @@ installs and enables all five automatically; no manual `cp`/
 `enable --now` step is needed for either once the step-10 sudoers grant
 exists. Do not use a manual `cp`/`enable` workflow for these units;
 production deployment, reload, enable/restart, and verification remain
-separately approved operations. See
-[operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md)
-for why the `.path` is the primary trigger and the `.timer` is a
+separately approved operations. The [workload manifest](../deploy/systemd/WORKLOAD_MANIFEST)
+classifies these triggers; the `.path` is primary and the `.timer` is a
 retry/recovery fallback only, never the other way around.
 
 The five-minute archive timer continues to sync/decrypt messages; it no longer
@@ -256,8 +297,8 @@ sudo systemctl status wecom-archive-reachability-check.timer --no-pager
 ```
 
 It is a best-effort diagnostic: its failure never changes a successful archive
-worker's outcome. See [reachability_automation_runbook.md](reachability_automation_runbook.md)
-for manual invocation, journal inspection, lock behavior, and rollback. To
+worker's outcome. For generic invocation and diagnostics guidance, see
+[worker diagnostics](OPERATIONS.md#worker-diagnostics). To
 roll back, an operator disables this timer before reverting the corresponding
 code and reviewed migration.
 
@@ -272,17 +313,17 @@ step-10 sudoers grant exists):
   sync also overwrites any stale server copy still polling every 5
   minutes without `--retry`/`--trigger-source timer`.
 
-See
-[operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md)
-for why these two triggers cannot create duplicate media records.
+See the [workload manifest](../deploy/systemd/WORKLOAD_MANIFEST) for the
+versioned trigger classification; the path signal and timer are deliberately
+separate primary and recovery mechanisms.
 
 Export generation and seven-day cleanup (RND-360; GH-104: listed in
 `MANAGED_UNITS`, no manual `cp`/`enable` step needed):
 
 Before this unit is deployed/updated, apply Alembic migrations through `0050`, set a
 public HTTPS `ADMIN_DOMAIN`, and configure transactional email (`EMAIL_PROVIDER=resend`,
-`RESEND_API_KEY`, and a verified `EMAIL_FROM` under `mail.crowntime.cn`; see
-`docs/operations/transactional-email.md` for controlled cutover and rollback).
+`RESEND_API_KEY`, and a verified `EMAIL_FROM` for your sending domain; see
+[mail configuration guidance](OPERATIONS.md#email-and-cloud-only-operations)).
 Export requests are rejected when either the requesting Owner email or email transport is not
 configured. `EXPORT_JOB_BATCH_SIZE` defaults to `1` and is capped at `5`; keep
 it at `1` on the supported 2C2G host. Full-media ZIP jobs require the Qiniu
@@ -299,8 +340,8 @@ RND-360 incident mitigation. The effective worker environment must select
 local final ZIP. This is a manual Ops step: `scripts/deploy_server.sh` step 10
 only synchronizes the base `wecom-export-jobs.service` file content — it
 never touches a `wecom-export-jobs.service.d/*.conf` drop-in layered on top,
-so a stale override survives a GH-104 deploy unless removed explicitly. See
-[operations/scheduled-workload-manifest.md](operations/scheduled-workload-manifest.md#export-jobs-storage).
+so a stale override survives a GH-104 deploy unless removed explicitly. See the [workload manifest](../deploy/systemd/WORKLOAD_MANIFEST)
+for the deployment classification.
 
 Payment and billing runtime (GH-106): the lifecycle, notification, WeChat
 recovery, and WeChat T+1 reconciliation service/timer pairs are all listed in
@@ -320,7 +361,9 @@ requires a public HTTPS `ADMIN_DOMAIN`, configured transactional email, and a va
 
 The canonical state machines, bounded retries/leases/idempotency guarantees,
 production aggregate assessment, successful-run evidence, and disable/rollback
-procedure are in [operations/payment-billing-runtime.md](operations/payment-billing-runtime.md).
+procedure is an internal production runbook and is not distributed. The
+public [billing architecture decision](adr/0005-saas-billing-lifecycle-refunds-and-service-gates.md)
+records the lifecycle boundaries.
 Do not put payment credentials, order references, customer data, or raw
 provider payloads in deployment evidence.
 
@@ -330,13 +373,14 @@ RND-343 defaults are intentionally staggered: archive reconciliation at
 worker is the low-latency primary path; after a successful archive commit it
 non-blockingly touches a coalescing systemd-path signal only if pending media
 exists. That path starts the existing generic media worker in its own service.
-The two versioned 5-minute rollback drop-ins and the backup-first
-operator procedure are documented in the runbooks below.
+The rollback drop-ins and backup-first operator procedure are deployment-specific
+and are not included in this snapshot; use the [generic backup and recovery
+guidance](OPERATIONS.md#backup-and-recovery) when designing your own procedure.
 
-Detailed operational behavior lives in:
-
-- [wecom_archive_worker_runbook.md](wecom_archive_worker_runbook.md)
-- [wecom_archive_media_download_runbook.md](wecom_archive_media_download_runbook.md)
+Company-specific worker runbooks are not included in this snapshot. For
+self-hosted installations, use the versioned unit files and
+[generic worker guidance](OPERATIONS.md#background-workers); do not copy
+another operator's service overrides or incident procedures.
 
 ---
 
@@ -444,8 +488,9 @@ failure. An operator must:
    `git reset --hard`, or a forced checkout); and
 4. retry the standard CD workflow.
 
-The wildcard SSL migration has additional service-safety and canonical-hash
-steps in [its dedicated adoption runbook](operations/wildcard-ssl-renewal.md#one-time-server-only--tracked-adoption-gh-126).
+The wildcard SSL migration has additional host-specific adoption steps that
+are not included. See the [generic TLS guidance](OPERATIONS.md#tls-and-provider-specific-tooling)
+and adapt the versioned unit and script to your own provider and domain.
 
 **Why the checkout happens in the workflow, not only in
 `deploy_server.sh`.** A self-pulling deploy script has an inherent
@@ -713,9 +758,8 @@ treated the rename's own exit status as irrelevant, which could report
   using the old shape while still tolerating it, (2) once that's been
   running safely, ship a separate migration that removes the old shape.
   Any genuinely destructive migration requires manual operator approval
-  and a manual runbook (see `docs/rnd-207-migration-runbook.md` for the
-  shape such a runbook takes) — it must not rely on this script's
-  automatic rollback as a safety net.
+  and a deployment-specific manual runbook — it must not rely on this script's
+automatic rollback as a safety net.
 - General database-downgrade tooling (a reusable `alembic downgrade`
   automation, point-in-time restore, etc.) is explicitly **out of
   scope** for RND-227. If a migration ever does need undoing, that is a
@@ -794,9 +838,9 @@ never receives application runtime secrets. The non-production service loads
 only its protected host EnvironmentFile and fails before startup if its
 ownership, `0600` mode, isolation marker or safety policy is wrong.
 
-Follow [operations/nonproduction-deployment.md](operations/nonproduction-deployment.md)
-for the fixed resource names, allowed configuration channel, GitHub Environment
-rules, initial setup, validation and rollback. Do not use production
+Follow the [non-production isolation guidance](OPERATIONS.md#non-production-isolation)
+when designing your own test environment. The hosted staging resource names,
+credentials, and deployment procedure are not included. Do not use production
 `deploy.yml`, production `.env`, production workers, or production credentials
 as a shortcut for this verification.
 
@@ -823,18 +867,17 @@ These are documentation truths, not hidden assumptions:
 - standard deployment's `systemctl enable --now` sudoers grant is
   documented as scoped to `wecom-*.timer`/`wecom-*.path` only —
   `qiniu-ssl-renew-wildcard.timer` (GH-104 Follow-up B) needs one
-  additional, exact (non-glob) sudoers line before its first automated
-  enable can succeed; see [operations/wildcard-ssl-renewal.md](operations/wildcard-ssl-renewal.md)
-  and this repository's GH-104 Follow-up B PR for the precise grant. The
+  host-specific permissions before its first automated enable can succeed.
+  Follow the [least-privilege guidance](OPERATIONS.md#least-privilege-deployment)
+  rather than copying another deployment's grant. The
   deploy degrades to a non-fatal WARN for this one unit until that grant
   exists, identical to any other unit's missing-sudoers behavior
-- GH-105 (`scripts/dr_config_bundle.sh` + `scripts/dr_pull.sh`) is repo
-  CAPABILITY only — no off-host destination is actually configured yet.
-  Until Ops stands up the Tencent Cloud Singapore and local-Mac pull
-  destinations, there is still no real off-host copy of either the
-  encrypted DB/media backup or the recovery-config bundle; see
-  [operations/2c2g-runbook.md §8.7](operations/2c2g-runbook.md) for the
-  Ops handoff checklist
+- The GH-105 recovery helpers are not included in this snapshot, and no
+  off-host destination is configured by this repository. Operators must
+  arrange and verify independent copies of encrypted database/media backups
+  and recovery configuration. See the
+  [generic backup and recovery guidance](OPERATIONS.md#backup-and-recovery)
+  and configure an off-host destination for your own deployment.
 
 Keep this document honest if that boundary changes.
 

@@ -18,7 +18,10 @@ from app.routers.admin_favorites_page import router as admin_favorites_page_rout
 from app.routers.admin_recycle_bin_page import router as admin_recycle_bin_page_router
 from app.routers.admin_staff_page import router as admin_staff_page_router
 from app.routers.admin_users_page import router as admin_users_page_router
-from app.routers.ai_support import router as ai_support_router
+from app.routers.ai_support import (
+    platform_router as ai_support_platform_router,
+    router as ai_support_router,
+)
 from app.routers.platform_api_performance import router as platform_api_performance_router
 from app.routers.public_ai_support import router as public_ai_support_router
 from app.routers.audit import router as audit_router
@@ -44,8 +47,14 @@ from app.routers.platform_access import router as platform_access_router
 from app.routers.platform_accounts import router as platform_accounts_router
 from app.routers.platform_auth import router as platform_auth_router
 from app.routers.platform_operations import router as platform_operations_router
-from app.routers.product_analytics import router as product_analytics_router
-from app.routers.provisioning import router as provisioning_router
+from app.routers.product_analytics import (
+    platform_router as product_analytics_platform_router,
+    router as product_analytics_router,
+)
+from app.routers.provisioning import (
+    cloud_activation_router,
+    router as provisioning_router,
+)
 from app.routers.reachability_audit import router as reachability_audit_router
 from app.routers.reachability_checks import router as reachability_checks_router
 from app.routers.reachability_findings import router as reachability_findings_router
@@ -69,6 +78,7 @@ from app.services.api_performance_collector import (
 from app.services.api_performance_service import ApiPerformanceRuntime, run_background_loop
 from app.services.branding import BrandingHostMiddleware
 from app.services.wechat_pay import validate_wechat_pay_configuration_if_configured
+from app.settings import APP_EDITION_CLOUD, resolve_app_edition
 
 logger = logging.getLogger(__name__)
 
@@ -169,28 +179,33 @@ async def _api_performance_lifespan(app: FastAPI):
                 loop_task.cancel()
 
 
-def create_app() -> FastAPI:
-    """Composition root: builds and returns a fresh, fully-wired FastAPI
-    instance. Kept as a factory (RND-223) rather than a module-level side
-    effect so tests/tooling can construct an independent app instance; the
-    module-level `app` below is what `uvicorn app.main:app` actually serves."""
-    validate_wechat_pay_configuration_if_configured()
-    validate_alipay_configuration_if_enabled()
-    # GH-186: per-instance telemetry. Construction validates configuration
-    # and fails loudly on bad values; each app instance owns its collector
-    # (no shared global registry).
-    api_perf_config = ApiPerformanceConfig.from_settings()
-    api_perf_collector = ApiPerformanceCollector(
-        retry_deadline_seconds=api_perf_config.batch_retry_hours * 3600,
-    )
-    api_perf_runtime = ApiPerformanceRuntime(api_perf_collector, api_perf_config)
+def create_app(edition: str | None = None) -> FastAPI:
+    """Build a fresh app for the validated process edition.
+
+    Production resolves APP_EDITION once at composition time; an unset value
+    selects selfhost. Tests may pass an explicit edition to verify both route
+    contracts without mutating process state.
+    """
+    selected_edition = resolve_app_edition(edition)
+    if selected_edition == APP_EDITION_CLOUD:
+        validate_wechat_pay_configuration_if_configured()
+        validate_alipay_configuration_if_enabled()
     app = FastAPI(title="Crowntime WeCom Archive", lifespan=_api_performance_lifespan)
-    app.state.api_performance_runtime = api_perf_runtime
-    if api_perf_config.enabled:
-        # A disabled module must not collect either: no middleware, no
-        # in-memory state growth. The page/APIs stay up and report the
-        # persisted DB history with enabled=false.
-        app.add_middleware(ApiPerformanceMiddleware, collector=api_perf_collector)
+    app.state.edition = selected_edition
+    app.state.api_performance_runtime = None
+    api_perf_collector = None
+    if selected_edition == APP_EDITION_CLOUD:
+        # GH-186: cloud-only per-instance telemetry. Construction validates
+        # configuration and fails loudly; each app instance owns its collector.
+        api_perf_config = ApiPerformanceConfig.from_settings()
+        api_perf_collector = ApiPerformanceCollector(
+            retry_deadline_seconds=api_perf_config.batch_retry_hours * 3600,
+        )
+        app.state.api_performance_runtime = ApiPerformanceRuntime(api_perf_collector, api_perf_config)
+        if api_perf_config.enabled:
+            # A disabled module keeps the page/API wired for persisted history
+            # without collecting or growing in-memory state.
+            app.add_middleware(ApiPerformanceMiddleware, collector=api_perf_collector)
     # RND-187: guarantees Cache-Control: no-store on every response (success or
     # error, any status code) for the media access descriptor endpoint — see
     # MediaAccessNoStoreMiddleware's docstring for why this must be a
@@ -199,7 +214,8 @@ def create_app() -> FastAPI:
     app.add_middleware(BrandingHostMiddleware)
     app.include_router(auth_router)
     app.include_router(branding_router)
-    app.include_router(billing_router)
+    if selected_edition == APP_EDITION_CLOUD:
+        app.include_router(billing_router)
     app.include_router(conversations_router)
     app.include_router(media_router)
     app.include_router(reachability_audit_router)
@@ -216,8 +232,9 @@ def create_app() -> FastAPI:
     app.include_router(media_library_router, prefix="/api/admin")
     app.include_router(external_contacts_router, prefix="/api/admin")
     app.include_router(wecom_events_router)
-    app.include_router(wecom_org_authorization_router)
-    app.include_router(wecom_provider_instructions_router)
+    if selected_edition == APP_EDITION_CLOUD:
+        app.include_router(wecom_org_authorization_router)
+        app.include_router(wecom_provider_instructions_router)
     app.include_router(admin_users_page_router)
     app.include_router(admin_staff_page_router)
     app.include_router(admin_audit_page_router)
@@ -235,18 +252,26 @@ def create_app() -> FastAPI:
     app.include_router(export_audit_router)
     app.include_router(exports_router)
     app.include_router(retention_router, prefix="/api/admin")
-    app.include_router(refunds_router)
+    if selected_edition == APP_EDITION_CLOUD:
+        app.include_router(refunds_router)
     app.include_router(onboarding_router)
-    app.include_router(platform_router, prefix="/api/platform")
-    app.include_router(platform_access_router, prefix="/api/platform")
-    app.include_router(platform_accounts_router)
-    app.include_router(platform_auth_router)
-    app.include_router(platform_operations_router)
+    if selected_edition == APP_EDITION_CLOUD:
+        app.include_router(platform_router, prefix="/api/platform")
+        app.include_router(platform_access_router, prefix="/api/platform")
+        app.include_router(platform_accounts_router)
+        app.include_router(platform_auth_router)
+        app.include_router(platform_operations_router)
     app.include_router(product_analytics_router)
+    if selected_edition == APP_EDITION_CLOUD:
+        app.include_router(product_analytics_platform_router)
     app.include_router(provisioning_router)
+    if selected_edition == APP_EDITION_CLOUD:
+        app.include_router(cloud_activation_router)
     app.include_router(ai_support_router)
-    app.include_router(public_ai_support_router)
-    app.include_router(platform_api_performance_router)
+    if selected_edition == APP_EDITION_CLOUD:
+        app.include_router(ai_support_platform_router)
+        app.include_router(public_ai_support_router)
+        app.include_router(platform_api_performance_router)
 
     @app.get("/health/live")
     def health_live():
@@ -290,11 +315,11 @@ def create_app() -> FastAPI:
         name="web-static",
     )
 
-    # GH-186: the registry must see the COMPLETE route table -- including
-    # the health probes defined above and everything registered by the
-    # include_router calls -- so the never-called listing is not missing
-    # entries. Captured here, at the very end of assembly.
-    api_perf_collector.register_app_routes(app.routes)
+    # GH-186: the cloud registry must see the COMPLETE route table --
+    # including health probes and all included routers -- so the never-called
+    # listing is complete. Selfhost does not construct telemetry or its routes.
+    if api_perf_collector is not None:
+        api_perf_collector.register_app_routes(app.routes)
 
     return app
 

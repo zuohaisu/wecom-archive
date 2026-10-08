@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,7 @@ from app.services.archive_worker_trigger import (
     ArchiveWorkerDispatch,
     dispatch_archive_worker,
 )
+from app.settings import APP_EDITION_SELFHOST, get_app_edition
 from app.services.tenant_activation import (
     activate_tenant,
     activation_status,
@@ -38,6 +39,7 @@ from app.web import render_template
 from app.web.sidenav import render_provisioning_sidenav
 
 router = APIRouter()
+cloud_activation_router = APIRouter()
 
 
 class ProvisioningConfigUpdateIn(BaseModel):
@@ -53,10 +55,12 @@ class ProvisioningConfigUpdateIn(BaseModel):
     callback_encoding_aes_key: Optional[str] = None
 
 
-@router.get("/admin/provisioning", response_class=HTMLResponse)
+@router.get("/admin/provisioning", response_class=HTMLResponse, response_model=None)
 def provisioning_waiting(
     _context: tuple[AdminUser, Tenant] = Depends(get_provisioning_user),
-) -> HTMLResponse:
+) -> HTMLResponse | RedirectResponse:
+    if get_app_edition() == APP_EDITION_SELFHOST:
+        return RedirectResponse("/admin/provisioning/settings", status_code=302)
     return HTMLResponse(
         render_template(
             "provisioning",
@@ -88,6 +92,18 @@ def provisioning_status(
     machine (RND-388).  ``activate`` appears in allowed_actions only when the
     gates already passed and the tenant is waiting for promotion."""
     _user, tenant = context
+    if get_app_edition() == APP_EDITION_SELFHOST:
+        return {
+            "lifecycle_status": tenant.lifecycle_status,
+            "archive_enabled": tenant.lifecycle_status in {"active", "frozen"},
+            "activation": {
+                "state": "active",
+                "gate_results": {},
+                "safe_error_code": None,
+                "revision": 0,
+            },
+            "allowed_actions": ["view_status", "view_settings"],
+        }
     snapshot = activation_status(db, tenant.id)
     allowed_actions = ["view_status", "purchase_plan", "view_settings"]
     if snapshot.state == "ready":
@@ -134,10 +150,10 @@ def put_provisioning_config(
         raise HTTPException(
             status_code=409, detail="organization_binding_missing"
         ) from error
-    # Auto-activation trigger: configuration may now be complete. Best-effort
-    # and detached; the tenant row lock serializes concurrent attempts and a
-    # later payment notify or manual retry re-evaluates anyway.
-    spawn_activation_worker(db.get_bind(), tenant.id, actor="self_service")
+    # Cloud-only trial activation; selfhost uses the same tenant-scoped S2
+    # wizard without creating or mutating subscription state.
+    if get_app_edition() != APP_EDITION_SELFHOST:
+        spawn_activation_worker(db.get_bind(), tenant.id, actor="self_service")
     return result
 
 
@@ -149,15 +165,14 @@ def test_provisioning_config(
     """Run local credential checks and a real WeCom connectivity probe."""
     _user, tenant = context
     result = test_config(db, tenant.id)
-    # Auto-activation trigger: a successful probe means gates may now pass.
-    # Best-effort and detached — the response is never held hostage by the
-    # evaluation, and a concurrent save/payment is serialized by the tenant
-    # row lock inside activate_tenant.
-    spawn_activation_worker(db.get_bind(), tenant.id, actor="self_service")
+    # A successful cloud probe may trigger trial activation. Selfhost only
+    # receives the credential-check result; it has no activation state.
+    if get_app_edition() != APP_EDITION_SELFHOST:
+        spawn_activation_worker(db.get_bind(), tenant.id, actor="self_service")
     return result
 
 
-@router.post("/api/provisioning/activate")
+@cloud_activation_router.post("/api/provisioning/activate")
 def activate_provisioning_tenant(
     context: tuple[AdminUser, Tenant] = Depends(get_provisioning_user),
     db: Session = Depends(get_db),

@@ -6,15 +6,14 @@ function loadCurrentUser(){
     currentUserId=d.id||null;
     currentUserRole=d.role||null;
     if(typeof updateTimelineFavoriteRole==='function')updateTimelineFavoriteRole(currentUserRole);
-    // RND-402: the server projects the authoritative tenant lifecycle so
-    // the console never renders a wall of 403s for a frozen/suspended
-    // tenant. A frozen Owner is routed to the billing/renewal surface
-    // (the recovery path); anything else non-active goes back to login.
-    // Older servers without the projection leave the field undefined and
-    // keep the previous behavior.
+    // RND-402: the server projects the authoritative tenant lifecycle. Cloud
+    // sends a frozen Owner to billing; in selfhost frozen is a stale
+    // commercial projection, but manual suspension and unknown states stay
+    // closed. Older servers without this projection keep the prior behavior.
     if(d.lifecycle_status!==undefined&&d.lifecycle_status!=='active'){
-      if(d.lifecycle_status==='frozen'){window.location.href='/admin/billing';return;}
-      window.location.href='/admin/login';return;
+      if(d.lifecycle_status==='frozen'){
+        if(d.edition!=='selfhost'){window.location.href='/admin/billing';return;}
+      }else{window.location.href='/admin/login';return;}
     }
     // RND-297: server preferences take precedence; I18N/theme localStorage
     // remains the fallback until an authenticated preference is available.

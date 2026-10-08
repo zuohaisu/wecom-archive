@@ -194,8 +194,11 @@ def load_manifest(
         seen_ids[source_id] = index
 
         if check_files_exist and not (root / raw["path"]).is_file():
-            issues.append(f"manifest[{index}] ({source_id}): path does not exist: {raw['path']}")
-            continue
+            # Forbidden entries are denylist metadata, never read or indexed.
+            # Their source may intentionally be absent from a public snapshot.
+            if raw["access_level"] != AccessLevel.FORBIDDEN.value:
+                issues.append(f"manifest[{index}] ({source_id}): path does not exist: {raw['path']}")
+                continue
 
         entries.append(
             ManifestEntry(

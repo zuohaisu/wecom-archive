@@ -52,6 +52,7 @@ class BrandingStatusOut(BaseModel):
     custom_branding_entitled: bool
     custom_domain_entitled: bool
     upgrade_required: bool
+    upgrade_available: bool
     logo_configured: bool
     favicon_configured: bool
     custom_domain: Optional[str]

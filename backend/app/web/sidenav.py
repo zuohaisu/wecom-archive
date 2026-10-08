@@ -4,6 +4,8 @@ from __future__ import annotations
 from html import escape
 from typing import Iterable
 
+from app.settings import APP_EDITION_SELFHOST, get_app_edition
+
 # One navigation configuration for every admin page. ``path`` determines
 # whether an item is available.
 NAV = (
@@ -75,6 +77,7 @@ def _nav_drawer_markup() -> str:
 def render_sidenav(active_id: str, registered_paths: Iterable[str]) -> str:
     """Render the shared sidebar, enabling only registered route paths."""
     paths = frozenset(registered_paths)
+    selfhost = get_app_edition() == APP_EDITION_SELFHOST
     out = [
         _nav_drawer_markup(),
         '<nav class="side-nav" id="side-nav">',
@@ -87,6 +90,8 @@ def render_sidenav(active_id: str, registered_paths: Iterable[str]) -> str:
     for group in NAV:
         out.append(f'    <div class="side-nav-group" data-i18n="{escape(group["group_key"], quote=True)}"></div>')
         for item in group["items"]:
+            if selfhost and item["id"] == "billing":
+                continue
             item_id = escape(item["id"], quote=True)
             key = escape(item["key"], quote=True)
             path = item["path"]
@@ -103,6 +108,15 @@ def render_sidenav(active_id: str, registered_paths: Iterable[str]) -> str:
                     f'aria-disabled="true"><span data-i18n="{key}"></span>'
                     '<em data-i18n="nav.comingSoon">即将推出</em></span>'
                 )
+        if (
+            group["group_key"] == "nav.group.system"
+            and selfhost
+            and "/admin/provisioning/settings" in paths
+        ):
+            out.append(
+                '    <a class="side-nav-item" href="/admin/provisioning/settings" '
+                'data-i18n="nav.archiveConfig"></a>'
+            )
     out.extend(
         (
             '  </div>',
@@ -254,14 +268,25 @@ def render_platform_topbar(breadcrumb_current: str) -> str:
 
 
 def render_provisioning_sidenav(active_id: str) -> str:
-    """Render the restricted provisioning-side navigation."""
+    """Render the cloud activation or local archive-configuration navigation."""
+    selfhost = get_app_edition() == APP_EDITION_SELFHOST
+    items = (
+        (
+            ("dashboard", "/dashboard", "回到控制台"),
+            ("settings", "/admin/provisioning/settings", "会话存档配置"),
+        )
+        if selfhost
+        else _PROVISIONING_NAV_ITEMS
+    )
+    title = "本地会话存档配置" if selfhost else "组织自助开通"
+    group_title = "本地配置" if selfhost else "开通步骤"
     out = [
         '<nav class="side-nav" id="side-nav">',
-        '  <div class="side-nav-brand"><img class="side-nav-logo" src="/web/static/brand/icon-tile-24.svg" alt="康冠时代" width="24" height="24"><div class="side-nav-title">组织自助开通</div></div>',
+        f'  <div class="side-nav-brand"><img class="side-nav-logo" src="/web/static/brand/icon-tile-24.svg" alt="康冠时代" width="24" height="24"><div class="side-nav-title">{title}</div></div>',
         '  <div class="side-nav-scroll">',
-        '    <div class="side-nav-group">开通步骤</div>',
+        f'    <div class="side-nav-group">{group_title}</div>',
     ]
-    for item_id, href, label in _PROVISIONING_NAV_ITEMS:
+    for item_id, href, label in items:
         active = " active" if item_id == active_id else ""
         current = ' aria-current="page"' if item_id == active_id else ""
         out.append(

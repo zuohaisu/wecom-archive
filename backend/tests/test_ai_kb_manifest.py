@@ -142,6 +142,23 @@ def test_missing_file_rejected_when_check_files_exist(tmp_path: Path) -> None:
     assert any("does not exist" in issue for issue in exc_info.value.issues)
 
 
+def test_missing_forbidden_source_is_allowed_for_denylist_metadata(tmp_path: Path) -> None:
+    forbidden_entry = dict(_VALID_ENTRY)
+    forbidden_entry.update(
+        source_id="forbidden-doc",
+        topic_id="forbidden-doc",
+        access_level="forbidden",
+        path="private/internal-runbook.md",
+    )
+    manifest_path = _write_manifest(tmp_path, [forbidden_entry])
+
+    entries = load_manifest(manifest_path, check_files_exist=True)
+
+    assert len(entries) == 1
+    assert entries[0].access_level == AccessLevel.FORBIDDEN
+    assert entries[0].path == "private/internal-runbook.md"
+
+
 def test_all_issues_reported_not_just_first(tmp_path: Path) -> None:
     bad_entry_one = dict(_VALID_ENTRY)
     bad_entry_one["access_level"] = "external"

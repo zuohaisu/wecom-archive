@@ -19,6 +19,8 @@ from app.crypto import (
     is_encrypted,
 )
 from app.db.models import Tenant, TenantWecomConfig
+from app.services.service_access import WORKER_SYNC, tenant_service_denial
+from app.settings import APP_EDITION_SELFHOST, get_app_edition
 
 TENANT_CONFIG_UNAVAILABLE = "tenant_config_unavailable"
 TENANT_CREDENTIALS_MISSING_FIELDS = "tenant_credentials_missing_fields"
@@ -46,10 +48,26 @@ class TenantArchiveCredentials:
     publickey_version: int | None
 
 
-def active_tenant_ids(db: Session) -> list[str]:
-    """Live tenant ids in a stable order, including rows missing a config.
+def _worker_tenant_criteria():
+    # GH-94 retired Tenant.is_active; lifecycle_status is the sole authority.
+    # Selfhost may continue core archive work for commercially frozen tenants,
+    # while cloud workers remain limited to active tenants.
+    allowed_statuses = (
+        ("active", "frozen")
+        if get_app_edition() == APP_EDITION_SELFHOST
+        else ("active",)
+    )
+    return (Tenant.lifecycle_status.in_(allowed_statuses),)
 
-    Worker loops use this alongside ``active_tenant_configs`` so an active
+
+def _tenant_is_worker_active(tenant: Tenant) -> bool:
+    return tenant_service_denial(tenant.lifecycle_status, WORKER_SYNC) is None
+
+
+def active_tenant_ids(db: Session) -> list[str]:
+    """Worker-eligible tenant ids in stable order, including missing configs.
+
+    Worker loops use this alongside ``active_tenant_configs`` so an eligible
     tenant without configuration is observed as a fail-closed per-tenant
     failure instead of being silently omitted from reconciliation.
     """
@@ -57,7 +75,7 @@ def active_tenant_ids(db: Session) -> list[str]:
         tenant_id
         for (tenant_id,) in (
             db.query(Tenant.id)
-            .filter(Tenant.lifecycle_status == "active")
+            .filter(*_worker_tenant_criteria())
             .order_by(Tenant.created_at)
             .all()
         )
@@ -65,17 +83,18 @@ def active_tenant_ids(db: Session) -> list[str]:
 
 
 def active_tenant_configs(db: Session) -> list[TenantWecomConfig]:
-    """Active, non-provisioning tenant config rows in stable creation order.
+    """Eligible tenant config rows in stable creation order.
 
-    Only fully live tenants archive: ``lifecycle_status == 'active'`` gates
-    the per-tenant loop, and the config row itself must be active. Provisioning
-    tenants are excluded until activation promotes them.
+    Cloud workers accept only active tenants. Selfhost workers also accept a
+    commercially frozen tenant, while suspended, provisioning, and unknown
+    lifecycle states remain excluded. The tenant config row itself must be
+    active.
     """
     return (
         db.query(TenantWecomConfig)
         .join(Tenant, Tenant.id == TenantWecomConfig.tenant_id)
         .filter(
-            Tenant.lifecycle_status == "active",
+            *_worker_tenant_criteria(),
             TenantWecomConfig.is_active.is_(True),
         )
         .order_by(TenantWecomConfig.created_at)
@@ -131,9 +150,9 @@ def credentials_for_active_config(config: TenantWecomConfig) -> TenantArchiveCre
 def resolve_tenant_archive_credentials(
     db: Session, tenant_id: str
 ) -> TenantArchiveCredentials:
-    """Resolve one explicitly targeted active tenant's archive credentials.
+    """Resolve one explicitly targeted serviceable tenant's archive credentials.
 
-    A missing or non-active tenant, missing config, or inactive config is
+    A missing or non-serviceable tenant, missing config, or inactive config is
     deliberately one safe operational category. The returned values must only
     be passed to the SDK/child environment and never to logs or API responses.
     """
@@ -145,7 +164,7 @@ def resolve_tenant_archive_credentials(
     )
     if (
         tenant is None
-        or tenant.lifecycle_status != "active"
+        or not _tenant_is_worker_active(tenant)
         or config is None
         or not config.is_active
     ):

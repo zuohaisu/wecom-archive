@@ -194,7 +194,7 @@ RND-416 之前的阶段只注册 `wechat_pay` provider。支付宝当前实现�
 
 - [ADR-0003：已公开定价与产品策略](0003-product-strategy-hosted-only.md)
 - [ADR-0005：SaaS 收费生命周期、退款与服务门禁](0005-saas-billing-lifecycle-refunds-and-service-gates.md)
-- [企业微信第三方企业授权运维说明](../operations/wecom-third-party-authorization.md)
+- [WeCom 授权与回调的通用运维边界](../OPERATIONS.md#wecom-authorization-and-callbacks)
 - [微信支付：Native 支付产品介绍](https://pay.weixin.qq.com/doc/v3/merchant/4012791874)
 - [微信支付：支付确认页可选择零钱或银行卡](https://pay.weixin.qq.com/doc/v3/merchant/4012062524)
 - [微信支付：Native 下单](https://pay.weixin.qq.com/doc/v3/merchant/4012791877)

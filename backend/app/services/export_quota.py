@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import ExportMonthlyUsage, Tenant
+from app.settings import APP_EDITION_SELFHOST, get_app_edition
 
 
 EXPORT_LIMITS: dict[str, int] = {"text": 10, "media_zip": 1}
@@ -40,9 +41,9 @@ class ExportQuotaTenantNotFound(ExportQuotaError):
 @dataclass(frozen=True)
 class ExportQuotaBucket:
     export_type: str
-    limit: int
+    limit: int | None
     used: int
-    remaining: int
+    remaining: int | None
     period_start: date
     resets_at: datetime
 
@@ -79,13 +80,17 @@ def _bucket(
     period_start: date,
     resets_at: datetime,
 ) -> ExportQuotaBucket:
-    limit = EXPORT_LIMITS[export_type]
+    limit = (
+        None
+        if get_app_edition() == APP_EDITION_SELFHOST
+        else EXPORT_LIMITS[export_type]
+    )
     normalized_used = max(0, int(used))
     return ExportQuotaBucket(
         export_type=export_type,
         limit=limit,
         used=normalized_used,
-        remaining=max(0, limit - normalized_used),
+        remaining=None if limit is None else max(0, limit - normalized_used),
         period_start=period_start,
         resets_at=resets_at,
     )
@@ -148,7 +153,7 @@ def consume_export_quota(
     )
     used = int(usage.used_count) if usage is not None else 0
     current = _bucket(export_type, used, period_start, resets_at)
-    if current.remaining <= 0:
+    if current.remaining is not None and current.remaining <= 0:
         raise ExportQuotaExceeded(current)
 
     if usage is None:

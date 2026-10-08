@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.settings import APP_EDITION_CLOUD, get_app_edition  # noqa: E402
 from app.services.payment_recovery import (  # noqa: E402
     RECONCILIATION_BATCH_LIMIT,
     RECOVERY_BATCH_LIMIT,
@@ -27,6 +28,14 @@ def _mode(argv: list[str]) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        edition = get_app_edition()
+    except ValueError:
+        print("[FAIL] payment_recovery invalid_edition", flush=True)
+        return 1
+    if edition != APP_EDITION_CLOUD:
+        print("[INFO] payment_recovery skipped selfhost edition", flush=True)
+        return 0
     selected = _mode(argv or sys.argv)
     if selected is None:
         print("[FAIL] payment_recovery invalid_mode", flush=True)

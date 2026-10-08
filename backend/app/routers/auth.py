@@ -74,8 +74,11 @@ from app.schemas.auth import (
 )
 from app.session_lifecycle import cleanup_expired_sessions
 from app.services import product_analytics
+from app.services.service_access import INTERACTIVE, tenant_service_denial
 from app.schemas.product_analytics import LANGUAGE_CHANGED, LOGIN_FAILED, LOGIN_SUCCEEDED
 from app.settings import (
+    APP_EDITION_CLOUD,
+    get_app_edition,
     get_auth_settings,
     get_email_settings,
     get_self_service_trial_settings,
@@ -148,7 +151,10 @@ _QR_LOAD_TIMEOUT_SECONDS = 15
 # already fail closed on their own when unconfigured, and RND-353 owns
 # their separate controlled production rollout. Deployment config is the
 # only thing that flips this on, once non-prod E2E has passed.
-def _trial_entry_enabled() -> bool:
+def _trial_entry_enabled(edition: str | None = None) -> bool:
+    selected_edition = get_app_edition() if edition is None else edition
+    if selected_edition != APP_EDITION_CLOUD:
+        return False
     value = get_self_service_trial_settings().self_service_trial_entry_enabled
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -302,6 +308,7 @@ def _login_page(
     mode: str = "wecom",
     error: Optional[str] = None,
     organization_action: str = "",
+    edition: str | None = None,
 ) -> str:
     """Builds the mode-specific body injected into templates/login.html via
     render_template — the shell (design-system stylesheet, aside marketing
@@ -324,7 +331,7 @@ def _login_page(
         )
 
     qr_section = _wecom_qr_section() if _wecom_qr_configured() else ""
-    trial_section = _trial_entry_section() if _trial_entry_enabled() else ""
+    trial_section = _trial_entry_section() if _trial_entry_enabled(edition) else ""
 
     if mode == "password":
         login_body = f"""\
@@ -416,7 +423,7 @@ def product_entry(request: Request, db: Session = Depends(get_db)) -> RedirectRe
         # RND-402: a billing-frozen tenant's Owner belongs on the renewal
         # surface, not on the (now gated) business console.
         lifecycle = _session_tenant_lifecycle(request, db)
-        if lifecycle == "frozen":
+        if lifecycle == "frozen" and request.app.state.edition == APP_EDITION_CLOUD:
             return RedirectResponse("/admin/billing", status_code=302)
         return RedirectResponse("/dashboard", status_code=302)
     return RedirectResponse(url=request.app.url_path_for("admin_login_page"), status_code=302)
@@ -482,7 +489,9 @@ def admin_login_page(
                 .scalar()
             )
             if tenant_status == "frozen":
-                return RedirectResponse("/admin/billing", status_code=302)
+                if request.app.state.edition == APP_EDITION_CLOUD:
+                    return RedirectResponse("/admin/billing", status_code=302)
+                return RedirectResponse("/dashboard", status_code=302)
             if tenant_status == "active":
                 return RedirectResponse("/dashboard", status_code=302)
         if session and session.session_scope == "provisioning":
@@ -513,6 +522,7 @@ def admin_login_page(
             mode=mode,
             error=safe_error,
             organization_action=organization_action,
+            edition=request.app.state.edition,
         )
     )
 
@@ -570,18 +580,22 @@ def password_forgot(body: _ForgotBody, db: Session = Depends(get_db)):
     from app.email import send_password_reset_email
 
     submitted = (body.email or "").strip().lower()
-    user = (
-        db.query(AdminUser)
+    candidate = (
+        db.query(AdminUser, Tenant.lifecycle_status)
         .join(Tenant, Tenant.id == AdminUser.tenant_id)
         .filter(
             Tenant.slug == "default",
-            Tenant.lifecycle_status == "active",
             func.lower(AdminUser.email) == submitted,
             AdminUser.status == "active",
             AdminUser.password_hash.isnot(None),
         )
         .first()
     )
+    user = None
+    if candidate is not None:
+        candidate_user, lifecycle_status = candidate
+        if tenant_service_denial(lifecycle_status, INTERACTIVE) is None:
+            user = candidate_user
     if user is not None and user.email:
         raw_token = create_password_reset_token(db, user, _password_reset_ttl_hours())
         write_audit(
@@ -1071,10 +1085,7 @@ def _wecom_callback_base(admin_domain: str) -> str:
     against.
 
     RND-321 QA-005: ADMIN_DOMAIN is documented (.env.example) as a bare
-    host, but production's actual value has been observed *with* a scheme
-    already on it (docs/ops/rnd-261-domain-cutover-runbook.md flagged
-    `ADMIN_DOMAIN=https://qwhhcd.crowntime.cn` as a live anomaly, left
-    unfixed because OAuth wasn't enabled yet — RND-321 is what enables it).
+    host, but deployments may provide a URL with its scheme already present.
     Naively prepending "https://" in that case double-schemes the callback
     into "https://https://...", which WeCom cannot reach; the failure
     surfaces far from here (a dead callback) and is hard to trace back to
@@ -1685,6 +1696,7 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
             "theme": user.ui_theme or DEFAULT_THEME,
             "locale": user.ui_locale or DEFAULT_LOCALE,
             "lifecycle_status": lifecycle_status,
+            "edition": request.app.state.edition,
         }
     )
 
