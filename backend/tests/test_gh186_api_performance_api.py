@@ -107,6 +107,7 @@ def test_page_renders_for_platform_admin(platform_client):
     assert response.status_code == 200
     body = response.text
     assert "接口性能" in body
+    assert 'data-theme="light"' in body, "platform page must follow the theme bootstrap contract"
     assert 'href="/platform/api-performance"' in body  # sidenav entry
 
 

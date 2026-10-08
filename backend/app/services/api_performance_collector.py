@@ -374,6 +374,58 @@ def _accumulate_into(target: Accumulator, source: Accumulator) -> Accumulator:
     return target
 
 
+@dataclass
+class _BucketIntervalExtrema:
+    """Exact min/max for observations since the last batch freeze.
+
+    Cumulative bucket extrema cannot be differenced. This small companion
+    is rotated into each frozen delta so abandoned batches cannot pollute
+    extrema from later observations.
+    """
+
+    duration_min_us: Optional[int] = None
+    duration_max_us: Optional[int] = None
+    success_min_us: Optional[int] = None
+    success_max_us: Optional[int] = None
+    stream_min_us: Optional[int] = None
+    stream_max_us: Optional[int] = None
+    stream_ttfb_min_us: Optional[int] = None
+    stream_ttfb_max_us: Optional[int] = None
+
+    def _include(self, metric: str, value: Optional[int]) -> None:
+        if value is None:
+            return
+        minimum_name = f"{metric}_min_us"
+        maximum_name = f"{metric}_max_us"
+        minimum = getattr(self, minimum_name)
+        maximum = getattr(self, maximum_name)
+        setattr(self, minimum_name, value if minimum is None else min(minimum, value))
+        setattr(self, maximum_name, value if maximum is None else max(maximum, value))
+
+    def observe(
+        self,
+        *,
+        status_class: str,
+        duration_us: Optional[int],
+        is_stream: bool,
+        stream_ttfb_us: Optional[int],
+    ) -> None:
+        if is_stream:
+            self._include("stream", duration_us)
+            self._include("stream_ttfb", stream_ttfb_us)
+            return
+        self._include("duration", duration_us)
+        if status_class == CLASS_2XX:
+            self._include("success", duration_us)
+
+
+@dataclass
+class _BucketState:
+    acc: Accumulator = field(default_factory=Accumulator)
+    snapshot: Accumulator = field(default_factory=Accumulator)
+    interval_extrema: _BucketIntervalExtrema = field(default_factory=_BucketIntervalExtrema)
+
+
 @dataclass(frozen=True)
 class EndpointKey:
     method: str
@@ -447,9 +499,9 @@ class ApiPerformanceCollector:
         self.retry_deadline_seconds = retry_deadline_seconds
         self._lock = threading.RLock()
         self._routes: "OrderedDict[str, Set[str]]" = OrderedDict()
-        # (method, route, traffic_class) -> OrderedDict[bucket_key -> [live, snapshot]]
-        self._hours: Dict[EndpointKey, "OrderedDict[datetime, List[Accumulator]]"] = {}
-        self._days: Dict[EndpointKey, "OrderedDict[date, List[Accumulator]]"] = {}
+        # (method, route, traffic_class) -> bucket key -> cumulative state + interval extrema
+        self._hours: Dict[EndpointKey, "OrderedDict[datetime, _BucketState]"] = {}
+        self._days: Dict[EndpointKey, "OrderedDict[date, _BucketState]"] = {}
         # `_pending` is the active overflow-bounded queue. Draining moves
         # its current entries into the frozen batch, so later overflow can
         # never shift an index used to confirm an earlier batch.
@@ -509,7 +561,7 @@ class ApiPerformanceCollector:
 
     def _record_bucket(
         self,
-        table: Dict[EndpointKey, "OrderedDict[Any, List[Accumulator]]"],
+        table: Dict[EndpointKey, "OrderedDict[Any, _BucketState]"],
         key: EndpointKey,
         bucket_key: Any,
         bucket_date: Optional[date],
@@ -524,11 +576,13 @@ class ApiPerformanceCollector:
         entry = buckets.get(bucket_key)
         if entry is None:
             if len(buckets) >= keep:
-                evicted_key, (evicted_acc, evicted_snapshot) = buckets.popitem(last=False)
+                evicted_key, evicted_state = buckets.popitem(last=False)
                 # The evicted bucket's snapshot dies with the entry; the
                 # pending delta carries everything not yet persisted. An
                 # already-fully-flushed bucket is simply released.
-                evicted_delta = _delta_of(evicted_acc, evicted_snapshot)
+                evicted_delta = _delta_of(
+                    evicted_state.acc, evicted_state.snapshot, evicted_state.interval_extrema,
+                )
                 if evicted_delta is not None and self._pending_batch is not None:
                     # A frozen batch may already carry part of this bucket's
                     # increments (drained before this eviction). Re-emitting
@@ -537,7 +591,9 @@ class ApiPerformanceCollector:
                     # direction).
                     frozen = self._frozen_delta_for(key, granularity, evicted_key)
                     if frozen is not None:
-                        evicted_delta = _subtract_frozen_delta(evicted_delta, frozen, evicted_acc)
+                        evicted_delta = _subtract_frozen_delta(
+                            evicted_delta, frozen, evicted_state.interval_extrema,
+                        )
                 if evicted_delta is not None:
                     self._pending.append(BucketDelta(
                         key=key,
@@ -549,13 +605,19 @@ class ApiPerformanceCollector:
                 if len(self._pending) > _PENDING_CAP:
                     self._pending.pop(0)
                     self.dropped_pending_overflow += 1
-            entry = [Accumulator(), Accumulator()]
+            entry = _BucketState()
             buckets[bucket_key] = entry
-        entry[0].observe(
+        entry.acc.observe(
             status_class=observation.status_class,
             duration_us=observation.duration_us,
             is_stream=observation.is_stream,
             stream_error=observation.stream_error,
+            stream_ttfb_us=observation.stream_ttfb_us,
+        )
+        entry.interval_extrema.observe(
+            status_class=observation.status_class,
+            duration_us=observation.duration_us,
+            is_stream=observation.is_stream,
             stream_ttfb_us=observation.stream_ttfb_us,
         )
 
@@ -614,16 +676,18 @@ class ApiPerformanceCollector:
                     return self._pending_batch.batch_id, self._pending_batch.deltas
             deltas: List[BucketDelta] = []
             for key, buckets in self._hours.items():
-                for bucket_key, (acc, snapshot) in buckets.items():
-                    delta = _delta_of(acc, snapshot)
+                for bucket_key, state in buckets.items():
+                    delta = _delta_of(state.acc, state.snapshot, state.interval_extrema)
+                    state.interval_extrema = _BucketIntervalExtrema()
                     if delta is not None:
                         deltas.append(BucketDelta(
                             key=key, granularity=GRANULARITY_HOURLY,
                             bucket_start=bucket_key, bucket_date=None, acc=delta,
                         ))
             for key, buckets in self._days.items():
-                for bucket_day, (acc, snapshot) in buckets.items():
-                    delta = _delta_of(acc, snapshot)
+                for bucket_day, state in buckets.items():
+                    delta = _delta_of(state.acc, state.snapshot, state.interval_extrema)
+                    state.interval_extrema = _BucketIntervalExtrema()
                     if delta is not None:
                         deltas.append(BucketDelta(
                             key=key, granularity=GRANULARITY_DAILY,
@@ -718,11 +782,11 @@ class ApiPerformanceCollector:
         }
         for table, granularity in ((self._hours, GRANULARITY_HOURLY), (self._days, GRANULARITY_DAILY)):
             for key, buckets in table.items():
-                for bucket_key, (acc, snapshot) in buckets.items():
+                for bucket_key, state in buckets.items():
                     bucket_start = bucket_key if granularity == GRANULARITY_HOURLY else daily_bucket_start(bucket_key)
                     delta = by_key.get((key, granularity, bucket_start))
                     if delta is not None:
-                        _advance_snapshot(snapshot, delta)
+                        _advance_snapshot(state.snapshot, delta)
 
     # ------------------------------------------------------------------
     # Read side (status page, detector)
@@ -797,7 +861,11 @@ class MinuteWindow:
         self.hist = [0] * HIST_SIZE
 
 
-def _delta_of(acc: Accumulator, snapshot: Accumulator) -> Optional[Accumulator]:
+def _delta_of(
+    acc: Accumulator,
+    snapshot: Accumulator,
+    interval_extrema: _BucketIntervalExtrema,
+) -> Optional[Accumulator]:
     delta = Accumulator()
     delta.request_count = acc.request_count - snapshot.request_count
     delta.class_counts = {
@@ -814,20 +882,19 @@ def _delta_of(acc: Accumulator, snapshot: Accumulator) -> Optional[Accumulator]:
     delta.stream_error_count = acc.stream_error_count - snapshot.stream_error_count
     delta.stream_duration_sum_us = acc.stream_duration_sum_us - snapshot.stream_duration_sum_us
     delta.stream_ttfb_sum_us = acc.stream_ttfb_sum_us - snapshot.stream_ttfb_sum_us
-    # Interval min/max are maintained in-interval: a delta carries the
-    # bucket's current extremes only when this flush actually observed
-    # completions of the respective kind.
+    # Min/max are not subtractable from cumulative snapshots. Use the
+    # exact extrema collected since the preceding freeze instead.
     if delta.completed_count > 0:
-        delta.duration_min_us = acc.duration_min_us
-        delta.duration_max_us = acc.duration_max_us
+        delta.duration_min_us = interval_extrema.duration_min_us
+        delta.duration_max_us = interval_extrema.duration_max_us
     if delta.success_count > 0:
-        delta.success_min_us = acc.success_min_us
-        delta.success_max_us = acc.success_max_us
+        delta.success_min_us = interval_extrema.success_min_us
+        delta.success_max_us = interval_extrema.success_max_us
     if delta.stream_count > 0:
-        delta.stream_min_us = acc.stream_min_us
-        delta.stream_max_us = acc.stream_max_us
-        delta.stream_ttfb_min_us = acc.stream_ttfb_min_us
-        delta.stream_ttfb_max_us = acc.stream_ttfb_max_us
+        delta.stream_min_us = interval_extrema.stream_min_us
+        delta.stream_max_us = interval_extrema.stream_max_us
+        delta.stream_ttfb_min_us = interval_extrema.stream_ttfb_min_us
+        delta.stream_ttfb_max_us = interval_extrema.stream_ttfb_max_us
     if _is_empty(delta):
         return None
     return delta
@@ -861,11 +928,17 @@ def _advance_snapshot(snapshot: Accumulator, delta: Accumulator) -> None:
     snapshot.stream_ttfb_sum_us += delta.stream_ttfb_sum_us
 
 
-def _subtract_frozen_delta(delta: Accumulator, frozen: Accumulator, acc: Accumulator) -> Optional[Accumulator]:
-    """delta := delta - frozen, for a bucket evicted while its frozen
-    batch is still in flight. Scalar fields subtract exactly; min/max are
-    not subtractable, so the remainder re-carries the bucket's current
-    extremes (the same conservative semantics as a live-bucket delta)."""
+def _subtract_frozen_delta(
+    delta: Accumulator,
+    frozen: Accumulator,
+    interval_extrema: _BucketIntervalExtrema,
+) -> Optional[Accumulator]:
+    """Remove a frozen batch's scalars from a bucket evicted in flight.
+
+    The delta's extrema already describe only the post-freeze active
+    interval; copying those values avoids reintroducing cumulative extrema
+    from the abandoned/frozen portion.
+    """
     remainder = Accumulator()
     remainder.request_count = delta.request_count - frozen.request_count
     remainder.class_counts = {
@@ -883,16 +956,16 @@ def _subtract_frozen_delta(delta: Accumulator, frozen: Accumulator, acc: Accumul
     remainder.stream_duration_sum_us = delta.stream_duration_sum_us - frozen.stream_duration_sum_us
     remainder.stream_ttfb_sum_us = delta.stream_ttfb_sum_us - frozen.stream_ttfb_sum_us
     if remainder.completed_count > 0:
-        remainder.duration_min_us = acc.duration_min_us
-        remainder.duration_max_us = acc.duration_max_us
+        remainder.duration_min_us = interval_extrema.duration_min_us
+        remainder.duration_max_us = interval_extrema.duration_max_us
     if remainder.success_count > 0:
-        remainder.success_min_us = acc.success_min_us
-        remainder.success_max_us = acc.success_max_us
+        remainder.success_min_us = interval_extrema.success_min_us
+        remainder.success_max_us = interval_extrema.success_max_us
     if remainder.stream_count > 0:
-        remainder.stream_min_us = acc.stream_min_us
-        remainder.stream_max_us = acc.stream_max_us
-        remainder.stream_ttfb_min_us = acc.stream_ttfb_min_us
-        remainder.stream_ttfb_max_us = acc.stream_ttfb_max_us
+        remainder.stream_min_us = interval_extrema.stream_min_us
+        remainder.stream_max_us = interval_extrema.stream_max_us
+        remainder.stream_ttfb_min_us = interval_extrema.stream_ttfb_min_us
+        remainder.stream_ttfb_max_us = interval_extrema.stream_ttfb_max_us
     if _is_empty(remainder):
         return None
     return remainder

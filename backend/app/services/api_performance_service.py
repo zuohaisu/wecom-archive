@@ -201,8 +201,32 @@ def _due_delay(next_mono: float) -> float:
     return max(next_mono - time.monotonic(), 0.05)
 
 
-def _submit_worker(runtime: ApiPerformanceRuntime, loop, function: Callable, *args):
-    future = loop.run_in_executor(None, function, *args)
+def _submit_worker(
+    runtime: ApiPerformanceRuntime,
+    loop,
+    function: Callable,
+    *args,
+    owns_default_engine: bool = False,
+):
+    # The loop can be cancelled while a job is still queued in the executor.
+    # Give every such job its own engine reference before submission, then
+    # release it from the worker itself only after the callable really ends.
+    if owns_default_engine:
+        _acquire_default_engine_lifecycle()
+
+    def _run_owned():
+        try:
+            return function(*args)
+        finally:
+            if owns_default_engine:
+                _release_default_engine_lifecycle()
+
+    try:
+        future = loop.run_in_executor(None, _run_owned)
+    except BaseException:
+        if owns_default_engine:
+            _release_default_engine_lifecycle()
+        raise
     runtime._worker_jobs.add(future)
 
     def _forget(completed):
@@ -316,6 +340,7 @@ async def _flush_once(runtime: ApiPerformanceRuntime, session_factory: Callable,
         future = _submit_worker(
             runtime, loop, _flush_job, session_factory, batch_id,
             runtime.collector.instance_id, deltas, runtime.config,
+            owns_default_engine=session_factory is default_session_factory,
         )
         runtime._flush_job_future = future
         runtime._flush_job_batch_id = batch_id
@@ -356,6 +381,7 @@ async def _detect_once(runtime: ApiPerformanceRuntime, session_factory: Callable
         future = _submit_worker(
             runtime, loop, _alert_email_job,
             runtime, anomalies, now, session_factory, send_fn,
+            owns_default_engine=session_factory is default_session_factory,
         )
         status = await asyncio.shield(future)
     except Exception as error:  # noqa: BLE001 - a quota/DB failure inside the
@@ -377,7 +403,10 @@ async def _detect_once(runtime: ApiPerformanceRuntime, session_factory: Callable
 async def _cleanup_once(runtime: ApiPerformanceRuntime, session_factory: Callable) -> None:
     loop = asyncio.get_running_loop()
     try:
-        future = _submit_worker(runtime, loop, _cleanup_job, session_factory, runtime.config)
+        future = _submit_worker(
+            runtime, loop, _cleanup_job, session_factory, runtime.config,
+            owns_default_engine=session_factory is default_session_factory,
+        )
         deleted = await asyncio.shield(future)
         runtime.last_retention = deleted
         runtime.last_retention_at = datetime.now(timezone.utc)

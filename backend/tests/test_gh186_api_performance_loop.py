@@ -168,6 +168,105 @@ def test_default_session_factory_serializes_engine_init_and_disposes_on_release(
     assert service._engine is None
 
 
+def test_queued_worker_holds_engine_owner_until_its_actual_completion(monkeypatch, fast_loop_config):
+    from concurrent.futures import ThreadPoolExecutor
+
+    import app.services.api_performance_service as service
+
+    engine = create_engine("sqlite://", poolclass=StaticPool)
+    disposed = []
+    original_dispose = engine.dispose
+
+    def dispose(*args, **kwargs):
+        disposed.append(True)
+        original_dispose(*args, **kwargs)
+
+    engine.dispose = dispose
+    monkeypatch.setattr(service, "_engine", engine)
+    monkeypatch.setattr(service, "_engine_users", 0)
+    monkeypatch.setattr(service, "_FINAL_FLUSH_TIMEOUT_SECONDS", 0.01)
+    runtime = ApiPerformanceRuntime(ApiPerformanceCollector(), fast_loop_config)
+    runtime.collector.record(Observation(
+        method="GET", route="/api/queued-shutdown", traffic_class="business",
+        status_class="2xx", duration_us=10_000, is_stream=False,
+        stream_error=False, stream_ttfb_us=None,
+        completed_at=datetime.now(UTC),
+    ))
+    blocker_started = threading.Event()
+    release_blocker = threading.Event()
+    worker_started = threading.Event()
+    join_started = []
+
+    def block_executor():
+        blocker_started.set()
+        assert release_blocker.wait(timeout=3.0)
+
+    def queued_db_job(*_args):
+        worker_started.set()
+        return FLUSH_APPLIED
+
+    original_join = service._join_worker_jobs
+
+    async def observed_join(owner):
+        join_started[0].set()
+        await original_join(owner)
+
+    monkeypatch.setattr(service, "_flush_job", queued_db_job)
+    monkeypatch.setattr(service, "_join_worker_jobs", observed_join)
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        join_started.append(asyncio.Event())
+        executor = ThreadPoolExecutor(max_workers=1)
+        loop.set_default_executor(executor)
+        blocker = loop.run_in_executor(None, block_executor)
+        loop_task = None
+        try:
+            deadline = loop.time() + 2.0
+            while not blocker_started.is_set() and loop.time() < deadline:
+                await asyncio.sleep(0.01)
+            assert blocker_started.is_set()
+
+            loop_task = asyncio.create_task(
+                service.run_background_loop(runtime, session_factory=service.default_session_factory),
+            )
+            deadline = loop.time() + 2.0
+            while runtime.stop_event is None and loop.time() < deadline:
+                await asyncio.sleep(0.01)
+            assert runtime.stop_event is not None
+            runtime.stop_event.set()
+            await asyncio.wait_for(join_started[0].wait(), timeout=2.0)
+            assert len(runtime._worker_jobs) == 1
+            assert not worker_started.is_set(), "the DB worker remains queued behind the blocker"
+            assert service._engine_users == 2  # loop + queued worker
+
+            loop_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop_task
+            assert service._engine_users == 1
+            assert service._engine is engine and disposed == []
+
+            release_blocker.set()
+            await blocker
+            worker = next(iter(runtime._worker_jobs))
+            await asyncio.shield(worker)
+            await asyncio.sleep(0)  # allow the future's done callback to run
+        finally:
+            release_blocker.set()
+            if loop_task is not None and not loop_task.done():
+                loop_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await loop_task
+            if not blocker.done():
+                await blocker
+
+    asyncio.run(scenario())
+    assert worker_started.is_set()
+    assert service._engine_users == 0
+    assert service._engine is None
+    assert disposed == [True], "the last worker disposes the engine after it really finishes"
+
+
 def test_loop_persists_daily_email_intent_and_outcome(db_factory, fast_loop_config):
     """A sustained anomaly inside the loop ends with exactly one alert row
     whose status reflects the mocked provider outcome."""

@@ -415,6 +415,86 @@ def test_error_then_success_bucket_keeps_p95(db: Session):
     assert row.hist is not None and sum(row.hist) == 1
 
 
+@pytest.mark.parametrize(
+    ("is_stream", "evict_bucket"),
+    [(False, False), (False, True), (True, False), (True, True)],
+)
+def test_abandoned_batch_extrema_do_not_leak_into_later_flush(
+    db: Session, monkeypatch, is_stream: bool, evict_bucket: bool,
+):
+    from app.services import api_performance_collector as collector_module
+    from app.services.api_performance_collector import day_bucket_date, hour_bucket_start
+
+    monotonic = [1000.0]
+    monkeypatch.setattr(collector_module.time, "monotonic", lambda: monotonic[0])
+    collector = ApiPerformanceCollector(
+        instance_id=f"extrema-{is_stream}-{evict_bucket}", retry_deadline_seconds=10,
+    )
+    bucket = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)
+
+    def record(duration_us, completed_at, stream_ttfb_us=None):
+        collector.record(Observation(
+            method="GET", route="/api/stale-extrema", traffic_class="business",
+            status_class="2xx", duration_us=duration_us, is_stream=is_stream,
+            stream_error=False, stream_ttfb_us=stream_ttfb_us,
+            completed_at=completed_at,
+        ))
+
+    record(10_000, bucket, 1_000 if is_stream else None)
+    abandoned_id, _abandoned = collector.drain_deltas()
+    record(200_000, bucket + timedelta(seconds=1), 30_000 if is_stream else None)
+    if evict_bucket:
+        for hour in range(1, 4):
+            record(
+                200_000 + hour * 100_000,
+                bucket + timedelta(hours=hour),
+                30_000 + hour * 10_000 if is_stream else None,
+            )
+
+    monotonic[0] += 11
+    collector.mark_flushed(abandoned_id, "error:OperationalError")
+    retry_id, retry_deltas = collector.drain_deltas()
+    assert retry_id != abandoned_id
+    assert flush_deltas(db, retry_id, collector.instance_id, retry_deltas) == FLUSH_APPLIED
+    collector.mark_flushed(retry_id, FLUSH_APPLIED)
+
+    hourly = db.query(ApiPerformanceEndpointHourly).filter_by(
+        method="GET", route="/api/stale-extrema", bucket_start=hour_bucket_start(bucket),
+    ).one()
+    assert hourly.request_count == 1
+    if is_stream:
+        assert hourly.stream_min_us == 200_000
+        assert hourly.stream_max_us == 200_000
+        assert hourly.stream_ttfb_min_us == 30_000
+        assert hourly.stream_ttfb_max_us == 30_000
+    else:
+        assert hourly.duration_sum_us == 200_000
+        assert hourly.duration_min_us == 200_000
+        assert hourly.duration_max_us == 200_000
+        assert hourly.success_min_us == 200_000
+        assert hourly.success_max_us == 200_000
+        assert hourly.hist is not None and sum(hourly.hist) == 1
+
+    daily = db.query(ApiPerformanceEndpointDaily).filter_by(
+        method="GET", route="/api/stale-extrema", bucket_date=day_bucket_date(bucket),
+    ).one()
+    expected_count = 4 if evict_bucket else 1
+    expected_max = 500_000 if evict_bucket else 200_000
+    assert daily.request_count == expected_count
+    if is_stream:
+        assert daily.stream_count == expected_count
+        assert daily.stream_min_us == 200_000
+        assert daily.stream_max_us == expected_max
+        assert daily.stream_ttfb_min_us == 30_000
+        assert daily.stream_ttfb_max_us == (60_000 if evict_bucket else 30_000)
+    else:
+        assert daily.duration_min_us == 200_000
+        assert daily.duration_max_us == expected_max
+        assert daily.success_min_us == 200_000
+        assert daily.success_max_us == expected_max
+        assert daily.hist is not None and sum(daily.hist) == expected_count
+
+
 def test_success_increment_cannot_restore_a_mixed_version_histogram(db: Session):
     bucket = datetime(2026, 10, 8, 10, 0, tzinfo=UTC)
     db.add(ApiPerformanceEndpointHourly(

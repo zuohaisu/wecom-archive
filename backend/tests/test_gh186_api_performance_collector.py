@@ -320,11 +320,10 @@ def test_interval_min_max_maintained_in_interval():
     collector.record(_obs(duration_us=100_000))
     _batch, deltas2 = collector.drain_deltas()
     hourly2 = [d for d in deltas2 if d.granularity == "hourly"]
-    # The delta carries the bucket's CURRENT extremes: min reflects the new
-    # 100ms observation; max is still the bucket's 500ms. The store's
-    # min/max merge keeps the interval semantics over cycles.
+    # Each delta carries only the exact extrema observed since the prior
+    # freeze; the store merges these interval extrema into the bucket total.
     assert hourly2 and all(d.acc.duration_min_us == 100_000 for d in hourly2)
-    assert all(d.acc.duration_max_us == 500_000 for d in hourly2)
+    assert all(d.acc.duration_max_us == 100_000 for d in hourly2)
 
 
 def test_cross_hour_and_midnight_buckets_keep_observation_time():
