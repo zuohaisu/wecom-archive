@@ -20,6 +20,15 @@ body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Micros
 .search-bar input::placeholder{color:#a6adb8}
 .search-bar .ico{position:absolute;left:.55rem;color:#a6adb8;font-size:.85rem;pointer-events:none}
 .search-bar .enter-hint{position:absolute;right:.5rem;font-size:.66rem;color:#a6adb8;border:1px solid var(--color-border-strong);border-radius:3px;padding:0 .3rem;pointer-events:none}
+.spin-ring{display:none;position:absolute;left:.55rem;top:50%;transform:translateY(-50%);width:.85rem;height:.85rem;border:2px solid var(--color-border-strong);border-top-color:var(--color-primary);border-radius:50%;pointer-events:none;box-sizing:border-box}
+form.busy .spin-ring{display:block}
+form.busy .ico{display:none}
+.search-loading{display:none;align-items:center;gap:.35rem;font-size:.8rem;color:var(--color-text-3);white-space:nowrap}
+.search-loading .spin-dot{width:.85rem;height:.85rem;border:2px solid var(--color-border-strong);border-top-color:var(--color-primary);border-radius:50%;animation:searchspin .8s linear infinite;flex-shrink:0}
+@keyframes searchspin{to{transform:rotate(360deg)}}
+.state-landing form .spin-ring{position:static;transform:none;margin-right:-.3rem}
+.state-landing form.busy .spin-ring{display:block}
+.state-landing form.busy .ico{display:none}
 .results-page{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .results-header{display:flex;align-items:center;gap:1rem;padding:.7rem 1.25rem;background:var(--color-surface);border-bottom:1px solid var(--color-border);flex-shrink:0}
 .query-heading{font-size:1.05rem;font-weight:600;display:flex;align-items:baseline;gap:.6rem;min-width:0;flex:1;overflow:hidden}
@@ -63,7 +72,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'PingFang SC','Micros
 .sk-line.short{width:40%}
 .sk-line.mid{width:70%}
 @keyframes sk{0%{background-position:100% 0}100%{background-position:-100% 0}}
-@media (prefers-reduced-motion: reduce){.sk-line{animation:none}}
+@media (prefers-reduced-motion: reduce){.sk-line{animation:none}.search-loading .spin-dot{animation:none}}
 .filter-bar{position:sticky;top:0;z-index:5;background:var(--color-surface);border-bottom:1px solid var(--color-border);padding:.55rem 1.25rem;display:flex;flex-direction:column;gap:.5rem;flex-shrink:0}
 .filter-triggers{display:flex;gap:.5rem;flex-wrap:wrap}
 .filter-group{position:relative}
@@ -97,7 +106,7 @@ __SIDENAV__
   <div class="breadcrumb"><span data-i18n="nav.group.review">审阅</span><span class="sep">/</span><span class="cur" data-i18n="nav.globalSearch">全局搜索</span></div>
   <div class="search-bar">
     <form id="searchForm" onsubmit="return doTopSearch(event)">
-      <span class="ico">🔍</span>
+      <span class="ico">🔍</span><span class="spin-ring"></span>
       <input type="text" id="topSearch" placeholder="搜索联系人或聊天内容…" autocomplete="off">
       <span class="enter-hint">↵ 结果页</span>
     </form>
@@ -108,6 +117,7 @@ __SIDENAV__
     <div class="query-heading">
       <span id="qLabel"></span>
       <span class="count" id="resultCount"></span>
+      <span class="search-loading" id="searchLoading"><span class="spin-dot"></span><span data-i18n="search.loading">搜索中…</span></span>
     </div>
     <div class="sort-control">
       <button type="button" class="btn btn-sm" id="export-search-results" onclick="exportSearchResults()" data-i18n="exports.openSearchResults" disabled>导出当前结果</button>
@@ -143,7 +153,7 @@ __SIDENAV__
     <div class="state state-landing" id="stateLanding" style="display:none">
       <div class="landing-title" data-i18n="search.landing.title">搜索聊天记录</div>
       <form id="midSearchForm" onsubmit="return doMidSearch(event)">
-        <span class="ico">🔍</span>
+        <span class="ico">🔍</span><span class="spin-ring"></span>
         <input type="text" id="midSearch" placeholder="搜索联系人或聊天内容…" autocomplete="off">
         <button type="submit" data-i18n="search.landing.button">搜索</button>
       </form>
