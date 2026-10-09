@@ -96,12 +96,17 @@ approved test data. Keep its database, credentials, storage, webhook endpoints,
 and service identity separate from production. The hosted staging workflow and
 its host-specific resource names are not included in this snapshot.
 
-## Static site
+## Company website boundary
 
-The public marketing pages and static demo are under
-[`static_site/company_homepage/`](../static_site/company_homepage/index.html).
-Configure your own webroot and reverse-proxy document root consistently; the
-company's deployment directory and Nginx configuration are not included.
+The company marketing website and synthetic product demo are maintained and
+published independently in `zuohaisu/crowntime-website` (a private repository).
+They are not part of this product repository or its deployment pipeline.
+Product and non-production deployments must not write to the website webroot.
+
+WeCom domain-verification files are operator-managed infrastructure, separate
+from both application releases and website releases. Preserve their URLs and
+contents when configuring your reverse proxy. TLS renewal remains a separate
+shared infrastructure concern.
 
 ## Object storage
 

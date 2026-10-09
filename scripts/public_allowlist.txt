@@ -71,15 +71,6 @@ docs/kb/customer
 README.md
 LICENSE
 NOTICE
-# Publish the public site and static demo, not its contributor README (which
-# contains deployment guidance and is explicitly not served by the website).
-static_site/company_homepage/index.html
-static_site/company_homepage/pricing.html
-static_site/company_homepage/style.css
-static_site/company_homepage/site.webmanifest
-static_site/company_homepage/assets
-static_site/company_homepage/brand
-static_site/company_homepage/demo
 SECURITY.md
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md

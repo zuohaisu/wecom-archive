@@ -34,7 +34,7 @@
 #       ─────────────────────────────
 #       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service
 #
-#   Step 10 (sync deploy/systemd/MANAGED_UNITS) additionally needs, but
+#   Step 9 (sync deploy/systemd/MANAGED_UNITS) additionally needs, but
 #   degrades gracefully with a WARN (never fails the deploy) if these are
 #   absent — see that step's comment below:
 #       wecomarchive ALL=(root) NOPASSWD: \
@@ -79,10 +79,8 @@
 #   `sudo cp -a` fell through to the password lecture and killed the deploy.
 #   Treat sudoers matching as EXACT: changing a flag, the trailing slash, or
 #   the argument count silently changes whether the whitelist applies. Prefer
-#   solutions that need no new binary and no new sudo grant — see step 9's
-#   static-homepage copy for the worked example (`sudo -n` probing + graceful
-#   WARN degradation, never a bare `sudo` that can block on a TTY-less SSH
-#   session).
+#   solutions that need no new binary and no new sudo grant; use -n for
+#   non-interactive sudo so a missing grant fails without a password prompt.
 #
 # ── First-Time Server Setup ────────────────────────────────────────────────
 #   1. Install git, python3, python3-venv, pip, curl, and ffmpeg as root/
@@ -165,9 +163,8 @@
 #   - Never prints DATABASE_URL, its password, or a full connection
 #     string; captured command output is redacted before printing as
 #     defense in depth.
-#   - Deploys the static homepage only after the backend is confirmed
-#     healthy, so a successful static copy can never mask a backend
-#     deploy failure.
+#   - Does not publish the company website (GH-208); its independent
+#     release pipeline owns website files and rollback.
 #   - Exits non-zero on any failure — the workflow will report it.
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -220,7 +217,7 @@ FLOCK_BIN="${FLOCK_BIN:-flock}"
 MV_BIN="${MV_BIN:-mv}"
 FFMPEG_BIN="${FFMPEG_BIN:-ffmpeg}"
 
-# Step 10 (sync deploy/systemd/MANAGED_UNITS) target directory — overridable
+# Step 9 (sync deploy/systemd/MANAGED_UNITS) target directory — overridable
 # so tests never write to a real /etc/systemd/system.
 SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
@@ -322,7 +319,7 @@ _redact() {
 # The application still owns all other settings through its service manager;
 # this deploy path needs only the database URL, the platform hostname
 # (ADMIN_DOMAIN — the Host the internal readiness probe must present in
-# production, GH-161) and public/static destinations.
+# production, GH-161) and the public readiness destination.
 # Malformed non-assignment lines are ignored with their line numbers only so
 # neither secrets nor raw configuration values enter the deploy log.
 _load_deploy_environment() {
@@ -369,10 +366,6 @@ _load_deploy_environment() {
                     PUBLIC_HEALTH)
                         PUBLIC_HEALTH="$value"
                         export PUBLIC_HEALTH
-                        ;;
-                    STATIC_SITE_DIR_NAME)
-                        STATIC_SITE_DIR_NAME="$value"
-                        export STATIC_SITE_DIR_NAME
                         ;;
                 esac
                 ;;
@@ -433,74 +426,6 @@ _check_ffmpeg() {
     return 1
 }
 
-# _publish_static_dir <src_dir> <dst_dir> — mirror <src_dir>'s contents
-# into <dst_dir>, trying the least-privileged route that works and
-# returning non-zero (silently) if none does. Used by step 9 to push the
-# company homepage into Nginx's webroot.
-#
-# Why the tiered probing instead of just `sudo cp`: this host's runtime
-# user has NO passwordless sudo beyond `systemctl restart <service>`.
-# Production proved that twice — `sudo apt-get` (2026-08-01) and then
-# `sudo mkdir` (2026-08-02) both fell through to sudo's password lecture
-# and killed the deploy. So sudo is attempted only with `-n`
-# (non-interactive), which fails instantly on a TTY-less SSH session
-# instead of blocking on a prompt, and its stderr is suppressed because
-# the lecture is noise, not a diagnostic.
-#
-# `cp -a src/. dst/` (not rsync): rsync is not in first-time setup's
-# package list, is absent on this host, and cannot be installed without
-# the sudo grant that does not exist. Like rsync without --delete, this
-# does not remove files that disappeared from the source.
-_publish_static_dir() {
-    _psd_src="$1"
-    _psd_dst="$2"
-
-    # Tier 0 — source and destination are already the same directory
-    # (the operator symlinked the webroot into shared/, per
-    # DEPLOYMENT.md §9). `cp -a src/. dst/` would exit 1 with
-    # "are identical (not copied)" — not a failure, the content is
-    # already in place. Treat the symlinked state as the first-class
-    # supported state it is, not an error.
-    if [ -e "$_psd_src" ] && [ -e "$_psd_dst" ] && [ "$_psd_src" -ef "$_psd_dst" ]; then
-        return 0
-    fi
-
-    # Tier 1 — the destination is already ours (operator chowned the
-    # webroot, or symlinked it into shared/). No privilege needed.
-    # The cp exit status is propagated: a real copy failure must NOT be
-    # reported as "nginx root OK".
-    if [ -d "$_psd_dst" ] && [ -w "$_psd_dst" ]; then
-        cp -a "$_psd_src/." "$_psd_dst/" || return 1
-        return 0
-    fi
-
-    # Tier 2 — destination absent but its parent is ours: create it.
-    if [ ! -e "$_psd_dst" ] && [ -w "$(dirname "$_psd_dst")" ]; then
-        if ! mkdir -p "$_psd_dst" || ! cp -a "$_psd_src/." "$_psd_dst/"; then
-            return 1
-        fi
-        return 0
-    fi
-
-    # Tier 3 — needs root. Probe with the real command rather than a
-    # `sudo -n true` canary: a whitelist can grant cp/mkdir without
-    # granting `true`, and the canary would produce a false negative.
-    # mkdir is only attempted when the destination is actually absent —
-    # a failed publish must not leave a new root-owned empty webroot
-    # behind (the granted mkdir would otherwise succeed even though the
-    # ungranted cp fails, mutating production state on a failed step).
-    if [ -n "$SUDO_BIN" ]; then
-        if [ ! -e "$_psd_dst" ]; then
-            "$SUDO_BIN" -n mkdir -p "$_psd_dst" 2>/dev/null || return 1
-        fi
-        if "$SUDO_BIN" -n cp -a "$_psd_src/." "$_psd_dst/" 2>/dev/null; then
-            return 0
-        fi
-    fi
-
-    return 1
-}
-
 # _sync_managed_systemd_units — installs and enables the explicit allowlist
 # of background-job units in deploy/systemd/MANAGED_UNITS (RND-410-adjacent
 # fix for issue #46 bug 3: an avatar-sync timer sat in the repo, never
@@ -514,7 +439,7 @@ _publish_static_dir() {
 # manual/one-off units (e.g. wecom-thumbnail-backfill.service) that must
 # never be auto-enabled just because they exist on disk.
 #
-# Non-fatal by design, like step 9's static-site publish: this runs after
+# Non-fatal by design: this runs after
 # the backend is already restarted and health-gated, so a missing sudoers
 # grant here must WARN, never fail or roll back a deploy whose actual
 # application code is already live and healthy.
@@ -758,7 +683,7 @@ _rollback_and_restart_old() {
 }
 
 # ── 1. Pull latest code (clean-tree guarded) ───────────────────────────────
-echo "[1/10] Pulling latest code from $GIT_REMOTE/$GIT_BRANCH …"
+echo "[1/9] Pulling latest code from $GIT_REMOTE/$GIT_BRANCH …"
 
 if [ ! -d "$DEPLOY_DIR" ]; then
     echo "ERROR: Deploy directory $DEPLOY_DIR does not exist." >&2
@@ -871,7 +796,7 @@ echo ""
 cd backend
 
 # ── 2. Check media-transcoding host prerequisite (GH-133) ──────────────────
-echo "[2/10] Checking ffmpeg host prerequisite …"
+echo "[2/9] Checking ffmpeg host prerequisite …"
 if ! _check_ffmpeg; then
     echo "ERROR: ffmpeg is required on the production host but is not installed." >&2
     echo "  Install it using the host bootstrap/runbook (see docs/operations/deploy-sudoers.md" >&2
@@ -882,7 +807,7 @@ if ! _check_ffmpeg; then
 fi
 
 # ── 3. Install / update Python dependencies ────────────────────────────────
-echo "[3/10] Installing Python dependencies …"
+echo "[3/9] Installing Python dependencies …"
 if [ ! -d .venv ]; then
     echo "ERROR: Virtual environment not found at $PWD/.venv. Run first-time setup." >&2
     _restore_worktree_only
@@ -920,7 +845,7 @@ if ! _install_deps; then
 fi
 
 # ── 4. Compile-check Python code ───────────────────────────────────────────
-echo "[4/10] Checking Python code compilation …"
+echo "[4/9] Checking Python code compilation …"
 if ! "$PYTHON_BIN" -m compileall app scripts; then
     echo "ERROR: Compile check failed." >&2
     _restore_worktree_only
@@ -928,7 +853,7 @@ if ! "$PYTHON_BIN" -m compileall app scripts; then
 fi
 
 # ── 5. Alembic migration (P0-A) ─────────────────────────────────────────────
-echo "[5/10] Running Alembic migrations (alembic upgrade head) …"
+echo "[5/9] Running Alembic migrations (alembic upgrade head) …"
 if ! "$PYTHON_BIN" -m alembic upgrade head 2>&1 | _redact; then
     echo "ERROR: Alembic migration failed. Service was NOT restarted; the old process is still running the old code." >&2
     _restore_worktree_only
@@ -936,7 +861,7 @@ if ! "$PYTHON_BIN" -m alembic upgrade head 2>&1 | _redact; then
 fi
 
 # ── 5. Verify DB revision == repository head (P0-B) ─────────────────────────
-echo "[6/10] Verifying database revision matches repository head …"
+echo "[6/9] Verifying database revision matches repository head …"
 if ! "$PYTHON_BIN" scripts/verify_alembic_head.py 2>&1 | _redact; then
     echo "ERROR: Database revision does not match repository head. Service was NOT restarted." >&2
     _restore_worktree_only
@@ -944,7 +869,7 @@ if ! "$PYTHON_BIN" scripts/verify_alembic_head.py 2>&1 | _redact; then
 fi
 
 # ── 6. Restart systemd service ──────────────────────────────────────────────
-echo "[7/10] Restarting systemd service ($SERVICE) …"
+echo "[7/9] Restarting systemd service ($SERVICE) …"
 if ! _systemctl_restart "$SERVICE"; then
     echo "ERROR: systemctl restart failed." >&2
     _rollback_and_restart_old "systemctl restart failed"
@@ -957,7 +882,7 @@ if ! _systemctl_is_active "$SERVICE" >/dev/null 2>&1; then
 fi
 
 # ── 7. Readiness health gate (P0-C / P0-D) ──────────────────────────────────
-echo "[8/10] Readiness health gate …"
+echo "[8/9] Readiness health gate …"
 if ! _wait_for_internal_health "Internal"; then
     echo "ERROR: Internal readiness check failed after $HEALTH_RETRIES attempts." >&2
     _rollback_and_restart_old "internal readiness gate failed"
@@ -985,79 +910,14 @@ if ! _wait_for_health "Public" "$PUBLIC_HEALTH" "$HEALTH_RETRIES" "$HEALTH_RETRY
     exit 1
 fi
 
-# ── 8. Deploy static site + success ──────────────────────────────────────────
-# Runs only after the backend is confirmed healthy above, so a
-# successful static copy can never mask a backend deploy failure.
-echo "[9/10] Deploying company homepage static files …"
-STATIC_SRC="$DEPLOY_DIR/static_site/company_homepage"
-# STATIC_SITE_DIR_NAME — the directory name (under shared/www and nginx's
-# webroot) this deployment's static homepage is copied to. Set the real
-# value via backend/.env or the calling shell's environment.
-STATIC_SITE_DIR_NAME="${STATIC_SITE_DIR_NAME:-site}"
-# Both overridable so the bats suite can point them at a temp tree — this
-# step ran untested for a month (the fixture never created $STATIC_SRC, so
-# every test silently took the "source not found" branch below) and shipped
-# three separate production breakages in a row as a result.
-SHARED_DST="${SHARED_DST:-/srv/apps/wecom-archive-365/shared/www/$STATIC_SITE_DIR_NAME}"
-NGINX_DST="${NGINX_DST:-/var/www/$STATIC_SITE_DIR_NAME}"
-
-if [ -d "$STATIC_SRC" ]; then
-    # Ensure target directories exist
-    mkdir -p "$SHARED_DST"
-
-    # Copy the whole source directory (not just index.html/style.css) so
-    # assets referenced by the page — brand/, assets/, site.webmanifest,
-    # etc. — actually reach the served root. A prior version of this step
-    # copied only two files, which silently left every other referenced
-    # asset 404ing in production. See _publish_static_dir's header for
-    # why this is `cp -a` and not `rsync`.
-    cp -a "$STATIC_SRC/." "$SHARED_DST/"
-    # README.md documents the source tree for contributors and has no
-    # business being served. cp has no --exclude, so it is dropped after
-    # the copy — and dropped HERE, before the webroot copy below, so that
-    # copy needs no exclusion (and therefore no `sudo rm`) of its own.
-    rm -f "$SHARED_DST/README.md"
-    echo "  → shared OK ($SHARED_DST)"
-
-    # Then publish to the Nginx webroot. Deliberately NOT fatal: by this
-    # point the backend has already been restarted, health-gated and
-    # confirmed serving, so exiting here would report a failed deploy for
-    # code that is live — and would also skip _record_known_good below,
-    # leaving the NEXT deploy with no rollback target. A stale homepage is
-    # cosmetic and separately fixable; a missing rollback record is not.
-    # The warning is loud and names the one-time operator fix precisely,
-    # so this cannot decay into the silent no-op the docs warn about.
-    #
-    # RND-263 (2026-08-03): cp -a preserves the source tree's mode, and
-    # the source is checked out under the runtime user's umask (027 on
-    # this host), which turns the git-tracked 100644 files into 0640
-    # owned by the deploy user. Nginx's worker runs as `nginx` — NOT a
-    # member of the deploy user's group — so a 0640 webroot yields
-    # HTTP 403 ("stat() ... Permission denied") for the whole homepage.
-    # The publish step therefore normalises the webroot to world-readable
-    # (o+rX: files readable, dirs searchable) after copying, so the
-    # deployed site is actually servable by Nginx. chmod is folded into
-    # the success condition: if the copy worked but the chmod did not,
-    # reporting "nginx root OK" would be a lie (the site would 403).
-    if _publish_static_dir "$SHARED_DST" "$NGINX_DST" && chmod -R o+rX "$NGINX_DST"; then
-        echo "  → nginx root OK ($NGINX_DST)"
-    else
-        echo "  WARN: could not publish the homepage to $NGINX_DST — no plain write access there, and the sudoers whitelist does not cover this exact cp/mkdir invocation (see the VERIFIED-ON-PRODUCTION CAVEAT at the top of this script)." >&2
-        echo "  WARN: the backend deploy is UNAFFECTED and this deploy still counts as successful; the current homepage is staged at $SHARED_DST." >&2
-        echo "  WARN: one-time operator fix (pick one, needs root; see docs/DEPLOYMENT.md §9 for the full runbook):" >&2
-        echo "  WARN:   a) point the Nginx 'root' for this site at $SHARED_DST, or" >&2
-        echo "  WARN:   b) mv $NGINX_DST $NGINX_DST.bak.$(date +%Y%m%d) && ln -s $SHARED_DST $NGINX_DST, or" >&2
-        echo "  WARN:   c) chown -R $(id -un): $NGINX_DST" >&2
-    fi
-else
-    echo "  WARN: static site source not found at $STATIC_SRC — skipping"
-fi
+# GH-208: company website publishing is owned by crowntime-website.
+# This deploy must not copy, chmod, or otherwise touch its webroot.
 
 # ── 9. Sync managed systemd units ──────────────────────────────────────────
-# Same non-fatal philosophy as step 9 above: this runs after the backend is
+# This runs after the backend is
 # already restarted and health-gated, so a missing sudoers grant here must
 # never fail or roll back a deploy whose application code is already live.
-echo "[10/10] Syncing managed systemd units …"
+echo "[9/9] Syncing managed systemd units …"
 _sync_managed_systemd_units
 
 if ! _record_known_good "$CURRENT_SHA"; then

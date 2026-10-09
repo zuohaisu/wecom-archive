@@ -80,7 +80,7 @@ line_of() {
 # Scenario 2 — Migration Failure
 # ---------------------------------------------------------------------
 
-@test "scenario 2: migration failure stops the deploy before restart, static, or health check" {
+@test "scenario 2: migration failure stops the deploy before restart or health check" {
 	export MOCK_ALEMBIC_EXIT=1
 	run run_deploy
 	[ "$status" -ne 0 ]
@@ -698,147 +698,48 @@ EOF
 }
 
 # ---------------------------------------------------------------------
-# Step 9 — static homepage publication
-#
-# This step had ZERO coverage until now: the fixture never created
-# $STATIC_SRC, so every test above silently exercised its "static site
-# source not found — skipping" branch. Three production breakages shipped
-# through this blind spot in a row (rsync introduced but absent from the
-# host; a self-healing `sudo apt-get install rsync` that the host's
-# sudoers forbids; then `sudo mkdir` failing for that same reason).
+# GH-208 — product deployment must leave independent website files alone.
+# Replaces the retired static-copy tests after the approved website move.
 # ---------------------------------------------------------------------
 
-@test "step 9: publishes the whole homepage tree, including nested assets, and never serves README.md" {
-	seed_static_site
-	run run_deploy
-	[ "$status" -eq 0 ]
-	assert_output_contains "Deploy complete"
-	assert_output_contains "shared OK"
-	assert_output_contains "nginx root OK"
-
-	# Every asset reaches BOTH destinations -- not just index.html/style.css.
-	for f in index.html style.css site.webmanifest brand/icon.svg assets/app.js; do
-		[ -f "$SHARED_DST/$f" ]
-		[ -f "$NGINX_DST/$f" ]
-	done
-
-	# Contributor docs must never be published to a served directory.
-	[ ! -e "$SHARED_DST/README.md" ]
-	[ ! -e "$NGINX_DST/README.md" ]
+@test "GH-208: successful product deploy never overwrites independent website or verification files" {
+    seed_static_site
+    mkdir -p "$SHARED_DST" "$NGINX_DST"
+    printf 'independent website\n' > "$NGINX_DST/index.html"
+    printf 'synthetic verification\n' > "$NGINX_DST/WW_verify_test.txt"
+    printf 'independent staging\n' > "$SHARED_DST/index.html"
+    run run_deploy
+    [ "$status" -eq 0 ]
+    assert_output_contains "Deploy complete"
+    assert_output_not_contains "Deploying company homepage"
+    [ "$(cat "$NGINX_DST/index.html")" = 'independent website' ]
+    [ "$(cat "$NGINX_DST/WW_verify_test.txt")" = 'synthetic verification' ]
+    [ "$(cat "$SHARED_DST/index.html")" = 'independent staging' ]
+    [ ! -e "$NGINX_DST/assets" ]
+    [ ! -e "$SHARED_DST/assets" ]
 }
 
-@test "step 9: an unreachable Nginx webroot warns loudly but does NOT fail the deploy or skip the last-known-good record" {
-	# Regression test for the CD failures of 2026-08-01/02: the runtime user
-	# has no passwordless sudo beyond `systemctl restart`, so the webroot copy
-	# cannot succeed. That must not fail a deploy whose backend is already
-	# restarted, health-gated and live -- and must not skip _record_known_good,
-	# which would leave the NEXT deploy without a rollback target.
-	[ "$(id -u)" -ne 0 ] || skip "running as root: a permission-denied webroot is not reproducible"
-
-	local locked="$TEST_TMPDIR/locked"
-	mkdir -p "$locked"
-	chmod 000 "$locked"
-	export NGINX_DST="$locked/site"     # unwritable parent, and SUDO_BIN="" in this fixture
-
-	seed_static_site
-	run run_deploy
-
-	[ "$status" -eq 0 ]
-	assert_output_contains "Deploy complete"
-	assert_output_contains "could not publish the homepage"
-	assert_output_contains "backend deploy is UNAFFECTED"
-	assert_output_not_contains "nginx root OK"
-
-	# The shared staging copy still happened ...
-	[ -f "$SHARED_DST/index.html" ]
-	# ... and the rollback record was still written.
-	[ "$(known_good)" = "$NEW_SHA" ]
+@test "GH-208: deployment without a legacy website never creates website destinations" {
+    run run_deploy
+    [ "$status" -eq 0 ]
+    assert_output_contains "Deploy complete"
+    [ ! -e "$SHARED_DST" ]
+    [ ! -e "$NGINX_DST" ]
 }
 
-@test "step 9: publishes into an already-writable webroot without needing any privilege escalation" {
-	# Tier 1 of _publish_static_dir: an operator who chowned the webroot (or
-	# symlinked it into shared/) needs no privilege escalation whatsoever.
-	# SUDO_BIN is "" throughout this fixture, so tier 3 is unavailable and a
-	# pre-existing destination rules out tier 2 -- success here can only mean
-	# the plain-cp path handled it.
-	#
-	# (SUDO_BIN deliberately NOT sabotaged to prove that: it is global, so
-	# pointing it at a bogus binary would break step 7's service restart and
-	# fail this test for an unrelated reason.)
-	mkdir -p "$NGINX_DST"
-	seed_static_site
-	run run_deploy
-	[ "$status" -eq 0 ]
-	assert_output_contains "nginx root OK"
-	[ -f "$NGINX_DST/assets/app.js" ]
-}
-
-@test "step 9: symlinked webroot (DEPLOYMENT.md §9) publishes as success — cp identical is not an error" {
-	# Regression for the §9 one-time fix: once /var/www/<site> is a symlink
-	# into shared/www/<site>, source and destination are the SAME directory,
-	# and `cp -a src/. dst/` exits 1 with "are identical (not copied)".
-	# Before Tier 0 existed, that cp failure was swallowed by the
-	# unconditional `return 0` in tier 1, so every deploy after the symlink
-	# fix logged a cp error while still claiming "nginx root OK". The
-	# symlinked state is now a first-class supported state: publish reports
-	# success and the copy is simply not attempted (nothing to copy — the
-	# webroot IS the shared tree).
-	mkdir -p "$SHARED_DST"
-	ln -s "$SHARED_DST" "$NGINX_DST"
-	seed_static_site
-	run run_deploy
-	[ "$status" -eq 0 ]
-	assert_output_contains "Deploy complete"
-	assert_output_contains "nginx root OK"
-	# The cp identical error must never surface in the deploy log.
-	assert_output_not_contains "are identical"
-	# Content is served straight out of the shared tree through the symlink.
-	[ -f "$NGINX_DST/index.html" ]
-	[ -f "$NGINX_DST/assets/app.js" ]
-}
-
-@test "step 9: published webroot is world-readable for the nginx worker (regression RND-263)" {
-	# RND-263 (2026-08-03): the static source is checked out under the
-	# runtime user's umask (027 on prod), which turns git-tracked 100644
-	# files into 0640 owned by the deploy user. cp -a preserves that mode
-	# into the Nginx webroot; Nginx's worker runs as `nginx`, NOT in the
-	# deploy user's group, so a 0640 webroot makes the whole homepage
-	# HTTP 403. The publish step must normalise the webroot to o+rX.
-	mkdir -p "$NGINX_DST"
-	seed_static_site
-	# Simulate the umask-027 checkout: files land 0640, dirs 0750.
-	find "$DEPLOY_DIR/static_site/company_homepage" -type f -exec chmod 0640 {} +
-	find "$DEPLOY_DIR/static_site/company_homepage" -type d -exec chmod 0750 {} +
-	run run_deploy
-	[ "$status" -eq 0 ]
-	assert_output_contains "nginx root OK"
-	# Files must be world-readable (ls -ld column 8-10 = other perms).
-	[ "$(ls -ld "$NGINX_DST/index.html" | cut -c8-10)" = "r--" ]
-	[ "$(ls -ld "$NGINX_DST/assets/app.js" | cut -c8-10)" = "r--" ]
-	# Directories must be world-searchable so Nginx can traverse them.
-	[ "$(ls -ld "$NGINX_DST" | cut -c8-10)" = "r-x" ]
-	[ "$(ls -ld "$NGINX_DST/assets" | cut -c8-10)" = "r-x" ]
-}
-
-@test "step 9: a real copy failure in a writable webroot is reported as WARN, not nginx root OK" {
-	# Regression for tiers 1/2 returning 0 unconditionally: a genuine cp
-	# failure (here: a read-only file blocking an overwrite) must propagate
-	# as the WARN path, never as a false "nginx root OK". The destination
-	# directory itself is writable, so the old tier-1 `cp; return 0` would
-	# have swallowed this exact failure.
-	mkdir -p "$NGINX_DST"
-	printf 'locked\n' >"$NGINX_DST/index.html"
-	chmod 000 "$NGINX_DST/index.html"
-	seed_static_site
-	run run_deploy
-	[ "$status" -eq 0 ]
-	assert_output_contains "Deploy complete"
-	assert_output_contains "could not publish the homepage"
-	assert_output_not_contains "nginx root OK"
+@test "GH-208: failed migration leaves independent website unchanged" {
+    seed_static_site
+    mkdir -p "$NGINX_DST"
+    printf 'independent website\n' > "$NGINX_DST/index.html"
+    export MOCK_ALEMBIC_EXIT=1
+    run run_deploy
+    [ "$status" -ne 0 ]
+    [ "$(cat "$NGINX_DST/index.html")" = 'independent website' ]
+    [ ! -e "$NGINX_DST/assets" ]
 }
 
 # ---------------------------------------------------------------------
-# Step 10 — Managed systemd units (issue #46 bug 3 fix)
+# Step 9 — Managed systemd units (issue #46 bug 3 fix)
 #
 # A new background-job unit (deploy/systemd/wecom-external-contact-
 # reconcile.{service,timer}) sat in the repo, never installed on the host,
@@ -848,14 +749,14 @@ EOF
 # gap for any unit explicitly listed in deploy/systemd/MANAGED_UNITS.
 # ---------------------------------------------------------------------
 
-@test "step 10: no MANAGED_UNITS manifest — step is a clean no-op" {
+@test "step 9: no MANAGED_UNITS manifest — step is a clean no-op" {
 	run run_deploy
 	[ "$status" -eq 0 ]
 	assert_output_contains "Deploy complete"
 	assert_output_contains "no deploy/systemd/MANAGED_UNITS manifest"
 }
 
-@test "step 10: SUDO_BIN unset — skips without attempting to write SYSTEMD_UNIT_DIR" {
+@test "step 9: SUDO_BIN unset — skips without attempting to write SYSTEMD_UNIT_DIR" {
 	seed_managed_units
 	run run_deploy
 	[ "$status" -eq 0 ]
@@ -864,7 +765,7 @@ EOF
 	[ ! -e "$SYSTEMD_UNIT_DIR/demo-job.service" ]
 }
 
-@test "step 10: installs both units, reloads once, and enables --now only the .timer" {
+@test "step 9: installs both units, reloads once, and enables --now only the .timer" {
 	export SUDO_BIN="sudo" # resolved via the mocked PATH (test_helper/mock_sudo.sh)
 	seed_managed_units
 	run run_deploy
@@ -890,7 +791,7 @@ EOF
 	[ "$(grep -c '^systemctl daemon-reload$' "$CMD_LOG")" -eq 1 ]
 }
 
-@test "step 10: an already-installed, unchanged unit is left alone (no redundant cp/reload)" {
+@test "step 9: an already-installed, unchanged unit is left alone (no redundant cp/reload)" {
 	export SUDO_BIN="sudo"
 	seed_managed_units
 	cp "$DEPLOY_DIR/deploy/systemd/demo-job.service" "$SYSTEMD_UNIT_DIR/demo-job.service"
@@ -906,7 +807,7 @@ EOF
 	grep -q "systemctl enable --now demo-job.timer" "$CMD_LOG"
 }
 
-@test "step 10: a changed unit is re-copied and triggers exactly one daemon-reload" {
+@test "step 9: a changed unit is re-copied and triggers exactly one daemon-reload" {
 	export SUDO_BIN="sudo"
 	seed_managed_units
 	printf 'stale on disk\n' >"$SYSTEMD_UNIT_DIR/demo-job.service"
@@ -916,7 +817,7 @@ EOF
 	[ "$(cat "$SYSTEMD_UNIT_DIR/demo-job.service")" != "stale on disk" ]
 }
 
-@test "step 10: sudo denied (no NOPASSWD grant) WARNs per unit but never fails or rolls back the deploy" {
+@test "step 9: sudo denied (no NOPASSWD grant) WARNs per unit but never fails or rolls back the deploy" {
 	export SUDO_BIN="sudo"
 	export MOCK_SUDO_MODE=deny
 	seed_managed_units
@@ -931,7 +832,7 @@ EOF
 	[ "$(known_good)" = "$NEW_SHA" ]
 }
 
-@test "step 10: a manifest entry with no matching file on disk WARNs and does not abort the deploy" {
+@test "step 9: a manifest entry with no matching file on disk WARNs and does not abort the deploy" {
 	export SUDO_BIN="sudo"
 	seed_managed_units
 	rm "$DEPLOY_DIR/deploy/systemd/demo-job.timer"

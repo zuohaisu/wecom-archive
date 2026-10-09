@@ -1,5 +1,11 @@
 # AI 生成图片版权证据链 — 官网首屏主视觉（2026-08-04 建档）
 
+> Historical evidence: the `static_site/company_homepage/` paths below describe
+> the source at the time of capture. GH-208 retired that directory after the
+> website moved to the independent private `crowntime-website` repository.
+> Preserve this evidence record; the historical paths are not current deployment instructions.
+
+
 > 目的：证明 crowntime.cn 官网首屏（hero）主视觉图片为**本公司（深圳康冠时代科技有限公司）通过 AI 生成工具生成的原创内容**，生成过程可追溯、来源合法，不存在第三方版权争议；并记录本次合规整改（补充 AI 生成内容标识）。
 
 ---

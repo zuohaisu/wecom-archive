@@ -13,7 +13,6 @@ readonly NONPROD_DEPLOY_DIR="$NONPROD_ROOT/current"
 readonly NONPROD_ENV_FILE="/etc/wecom-archive-365/nonprod.env"
 readonly NONPROD_SERVICE="wecom-archive-365-nonprod.service"
 readonly NONPROD_STATE_DIR="$NONPROD_ROOT/shared/deploy_state"
-readonly NONPROD_SHARED_WEBROOT="$NONPROD_ROOT/shared/www/site"
 readonly NONPROD_INTERNAL_HEALTH="http://127.0.0.1:18035/health/ready"
 
 expected_sha="${EXPECTED_SHA:-}"
@@ -66,6 +65,4 @@ exec env -i \
     GIT_REMOTE="origin" \
     GIT_BRANCH="main" \
     INTERNAL_HEALTH="$NONPROD_INTERNAL_HEALTH" \
-    SHARED_DST="$NONPROD_SHARED_WEBROOT" \
-    NGINX_DST="$NONPROD_SHARED_WEBROOT" \
     bash "$SCRIPT_DIR/deploy_server.sh"
