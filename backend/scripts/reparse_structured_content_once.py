@@ -33,8 +33,7 @@ second, independent decrypt or parse implementation:
     run_decrypt_once uses for live rows)
   - app.services.decrypt_isolation (RND-231 subprocess isolation) via
     _decrypt_message's lib_path parameter — a SIGSEGV in WeCom SDK's
-    DecryptData (RND-208; confirmed msgtype-agnostic, see
-    docs/RND-208-decryptdata-sigsegv.md §5) is contained to one row and
+    DecryptData (RND-208; confirmed msgtype-agnostic) is contained to one row and
     counted, never aborts the batch.
   - app.structured_message_parser.parse_structured_content — the RND-243
     fix itself; this script changes none of its logic.

@@ -99,7 +99,7 @@ its host-specific resource names are not included in this snapshot.
 ## Company website boundary
 
 The company marketing website and synthetic product demo are maintained and
-published independently in `zuohaisu/crowntime-website` (a private repository).
+published independently in a separate private repository.
 They are not part of this product repository or its deployment pipeline.
 Product and non-production deployments must not write to the website webroot.
 

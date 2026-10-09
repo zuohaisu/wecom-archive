@@ -879,9 +879,9 @@ Keep this document honest if that boundary changes.
 
 ## 9. Company website deployment boundary (GH-208)
 
-Company marketing pages and their static demo now live in the private
-`zuohaisu/crowntime-website` repository and have an independent deployment
-identity, immutable releases and CI/CD. This product deploy does not copy
+Company marketing pages and their static demo now live in a separate private
+repository and have an independent deployment identity, immutable releases
+and CI/CD. This product deploy does not copy
 or change website files, including in non-production installations.
 
 The former static-copy runbooks are retired. Do not restore the old copying
