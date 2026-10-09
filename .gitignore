@@ -235,6 +235,10 @@ secrets*
 
 # Local AI-editor workspace
 .qoder/
+.claude/
+.agents/
+.trae/
+.slidep/
 
 # Firecrawl output cache
 .firecrawl/

@@ -24,8 +24,8 @@ different mechanism entirely, see
 | Certificate SAN | `crowntime.cn` (apex) + `*.crowntime.cn` (wildcard) |
 | Qiniu CDN bind (hard-fail if it fails) | `media.crowntime.cn` |
 | Qiniu origin bind (warn-only if it fails) | `media-origin.crowntime.cn` |
-| nginx vhosts actually served by this certificate | `crowntime.cn`, `www.crowntime.cn`, `qwhhcd.crowntime.cn`, `staging-archive.crowntime.cn` |
-| **NOT** served by this certificate | `archive.crowntime.cn` — currently listens on `:80` only. Adding HTTPS there is independent scope; this PR does not do it. |
+| nginx vhosts served by this certificate | Confirm against the operator-managed nginx configuration before renewal or rollout. |
+| Other archive vhosts | Verify their own TLS configuration separately; this wildcard workflow does not configure them. |
 
 ## Renewal mechanism
 

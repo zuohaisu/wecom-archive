@@ -248,6 +248,5 @@ absence is legible rather than an apparent oversight.
 `wecom-archive-365-nonprod.service` is real, versioned, and does appear
 in `deploy/systemd/` — but it is deployed exclusively by the separate,
 manually-dispatched `deploy-nonprod.yml` workflow guarded by the
-`non-production` GitHub Environment (see
-[nonproduction-deployment.md](nonproduction-deployment.md)), never by the
+`non-production` GitHub Environment, never by the
 production scheduled-workload sync this manifest governs.

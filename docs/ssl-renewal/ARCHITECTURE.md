@@ -348,7 +348,7 @@ day N: mismatch_days >= 限制 → die "manual investigation required"
 repo:
 ├── ssl-renew/{renew.sh,notify.sh,verify_https.sh,install.sh,lib/,examples/,tests/}
 ├── deploy/systemd/qiniu-ssl-renew@{.service,.timer}
-└── docs/ssl-renewal/{ARCHITECTURE,DEPLOYMENT_GUIDE,TROUBLESHOOTING,DISASTER_RECOVERY}.md
+└── docs/ssl-renewal/{ARCHITECTURE,DEPLOYMENT_GUIDE}.md
 
 operator (每域名一份, 互不冲突):
 ├── /etc/qiniu-ssl-renew/<domain>.env                 (600, 该域名的全部凭证/配置)
@@ -378,5 +378,4 @@ operator (每域名一份, 互不冲突):
 - [x] stdout / stderr / renew.sh 日志在成功、失败、异常、debug 模式下均不含 Secret
 - [x] 137 个测试全部通过 (108 bats + 29 pytest，见 `ssl-renew/tests/`, `make ssl-test`)
 
-以上均已在开发环境 (macOS + Linux Docker) 通过自动化测试验证；生产环境实际验证见
-[DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) 与 Online acceptance 阶段。
+以上均已在开发环境 (macOS + Linux Docker) 通过自动化测试验证；生产环境验收记录由运营方保管。
