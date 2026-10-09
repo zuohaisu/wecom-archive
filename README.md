@@ -44,10 +44,19 @@ FastAPI application and worker scripts ──► PostgreSQL
 ```
 
 The application code is under `backend/app/`; migrations and operational
-scripts are under `backend/alembic/` and `backend/scripts/`. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component and data-flow
-reference. See [contact-avatar privacy and update behavior](docs/contact-avatars.md)
+scripts are under `backend/alembic/` and `backend/scripts/`. See the
+[Wiki architecture overview](https://github.com/zuohaisu/wecom-archive/wiki/Architecture-Overview)
+for the component and data-flow reference. See
+[contact-avatar privacy and update behavior](https://github.com/zuohaisu/wecom-archive/wiki/Contact-Avatars)
 for the controlled profile-image contract.
+
+## Documentation
+
+The [GitHub Wiki](https://github.com/zuohaisu/wecom-archive/wiki) is the
+starting point for installation, configuration, usage, API and data-model
+references, and project history. New public guides are maintained there.
+README, contribution rules, architecture decision records, and documents read
+by the running application remain in this repository.
 
 ## Quick start
 
