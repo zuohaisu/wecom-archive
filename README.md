@@ -212,7 +212,13 @@ reverse-proxy configuration, and TLS certificates are operator-managed. See
 
 ## Releases
 
-- [v1.0.0 — the first complete product baseline](docs/releases/v1.0.0.md)
+- **[v1.1.0 — First public open-source release](https://github.com/zuohaisu/wecom-archive/releases/tag/v1.1.0)** (2026-10-09)
+  - Public release under AGPL-3.0, with complete self-hosted deployment support,
+    shared cloud/self-hosted source code, and public engineering documentation.
+
+- **[v1.0.0 — First complete product baseline](https://github.com/zuohaisu/wecom-archive/releases/tag/v1.0.0)** (product baseline: 2026-08-07; GitHub Release: 2026-10-09)
+  - First complete product baseline covering conversation archiving, review,
+    access control, audit, operations, and organization onboarding.
 
 ## FAQ
 
