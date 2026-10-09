@@ -1,6 +1,6 @@
 """RND-356 (T2) — build_index / roll_back_to against real Postgres.
 
-Gated on DATABASE_URL per docs/agent-test-database.md: JSONB and real
+Gated on DATABASE_URL per https://github.com/zuohaisu/wecom-archive/wiki/Agent-Test-Database: JSONB and real
 GIN/tsvector behavior don't exist on SQLite, so these must run against a
 real Postgres schema (migrated via `alembic upgrade head`), not a faked one.
 """

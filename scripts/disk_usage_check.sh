@@ -13,7 +13,7 @@
 #
 # Intended to run every 15-30 minutes via a systemd timer (see
 # deploy/systemd/wecom-disk-usage-check.{service,timer}; threshold design
-# in docs/operations/backup-and-recovery.md and the ops runbook).
+# in https://github.com/zuohaisu/wecom-archive/wiki/Backup-and-Recovery and the ops runbook).
 #
 # Exit codes:
 #   0  all checks passed (or degraded — see below)

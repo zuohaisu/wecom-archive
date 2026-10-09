@@ -23,7 +23,7 @@ breaking CD, ffmpeg availability, or systemd unit management.
 | Capability | Does repo CD need it? | Root required? | Target rule |
 |---|---|---|---|
 | App service restart (`systemctl restart wecom-archive-365.service`) | Yes — step 7 of `deploy_server.sh` | Yes | Exact grant: `deploy-user ALL=(root) NOPASSWD: /usr/bin/systemctl restart wecom-archive-365.service` |
-| nginx reload (`systemctl reload nginx`) | Yes — `ssl-renew/renew-wildcard.sh` (not `deploy_server.sh`) | Yes | Exact grant (owned by [wildcard-ssl-renewal.md](wildcard-ssl-renewal.md)) |
+| nginx reload (`systemctl reload nginx`) | Yes — `ssl-renew/renew-wildcard.sh` (not `deploy_server.sh`) | Yes | Exact grant (owned by [wildcard-ssl-renewal.md](https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal)) |
 | systemd unit copy/install (`cp .../deploy/systemd/*.service\|*.timer\|*.path /etc/systemd/system/`) | Yes — step 10, `_sync_managed_systemd_units` | Yes | Exact two-glob `cp` grants (see `deploy_server.sh` header) |
 | `systemctl daemon-reload` | Yes — step 10, only when a unit file actually changed | Yes | Exact grant |
 | Enable timers/paths (`systemctl enable --now wecom-*.timer` / `wecom-*.path`) | Yes — step 10 | Yes | `wecom-*` wildcard grant (see "systemd wildcard decision" below) |

@@ -17,7 +17,7 @@
 #   --dry-run / DRY_RUN=1        no network calls that could change state;
 #                               prints the plan and exits
 #
-# Architecture:  docs/ssl-renewal/ARCHITECTURE.md
+# Architecture:  https://github.com/zuohaisu/wecom-archive/wiki/TLS-Renewal-Architecture
 #
 # Requires:
 #   - acme.sh (installed in $HOME/.acme.sh/)

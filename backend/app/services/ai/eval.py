@@ -31,7 +31,7 @@ from app.services.ai.retriever import PostgresFtsRetriever, Retriever
 # HIT_RATE_THRESHOLD is deliberately NOT a round aspirational number — it
 # is set just above what the current pg_trgm word_similarity retriever
 # empirically achieves against the real v1 eval set (measured 0.36; see
-# docs/ai/eval-and-quality-gate.md "已知限制"). Character-trigram
+# https://github.com/zuohaisu/wecom-archive/wiki/AI-Quality-Gates "已知限制"). Character-trigram
 # similarity has no notion of synonymy: a colloquial paraphrase that
 # shares almost no character sequences with the source doc (e.g. "自己
 # 部署" vs "自托管部署") scores as low as a genuinely unrelated query,

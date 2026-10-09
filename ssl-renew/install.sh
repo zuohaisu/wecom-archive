@@ -138,7 +138,7 @@ fi
 if [ -x "$HOME/.acme.sh/acme.sh" ] || command -v acme.sh >/dev/null 2>&1; then
 	ok "acme.sh found"
 else
-	info "acme.sh not found — expected for a fresh host; see docs/ssl-renewal/DEPLOYMENT_GUIDE.md"
+	info "acme.sh not found — expected for a fresh host; see https://github.com/zuohaisu/wecom-archive/wiki/TLS-Renewal-Deployment-Guide"
 fi
 
 if [ -n "$IS_LINUX" ]; then

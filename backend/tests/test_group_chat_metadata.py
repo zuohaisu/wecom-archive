@@ -209,7 +209,7 @@ SENTINELS = (
 
 
 def assert_no_sentinels(obj, path: str = "$") -> None:
-    """Recursively assert docs/agent-data-minimization.md §5's sentinel set."""
+    """Recursively assert https://github.com/zuohaisu/wecom-archive/wiki/Agent-Data-Minimization §5's sentinel set."""
     if isinstance(obj, dict):
         for key, value in obj.items():
             assert not any(s in str(key) for s in SENTINELS), f"{path}.{key}"
@@ -369,7 +369,7 @@ def _load_group_metadata_cli():
 def test_group_metadata_managed_surfaces_recursively_exclude_sentinels(
     db: Session, monkeypatch, caplog, capsys
 ) -> None:
-    """Exercise RND-340 outputs against docs/agent-data-minimization.md §5.
+    """Exercise RND-340 outputs against https://github.com/zuohaisu/wecom-archive/wiki/Agent-Data-Minimization §5.
 
     The customer-group title and raw archive room correlation are explicit
     RND-340 persistence requirements, so this fixture uses safe ordinary

@@ -43,7 +43,7 @@ def tenant_and_user(db: Session):
 
 def test_collect_counts_unresolved_queries_and_feedback(db: Session, tenant_and_user) -> None:
     # A unique-per-run query text: this repo's shared disposable test DB
-    # (docs/agent-test-database.md) is legitimately reused across many
+    # (https://github.com/zuohaisu/wecom-archive/wiki/Agent-Test-Database) is legitimately reused across many
     # runs, so a fixed literal string would accumulate a growing count
     # across reruns instead of staying at exactly 2.
     unresolved_query = f"同一个未解决的问题-{uuid.uuid4().hex[:8]}"

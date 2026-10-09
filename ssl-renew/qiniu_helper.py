@@ -7,7 +7,7 @@ always signed the body regardless of Content-Type, when the real QBox
 scheme only signs the body for `application/x-www-form-urlencoded`
 requests) with direct calls into the official `qiniu` Python SDK
 (`qiniu.Auth`, `qiniu.DomainManager`). No signing logic is reimplemented
-here — see docs/ssl-renewal/ARCHITECTURE.md section 6.1.
+here — see https://github.com/zuohaisu/wecom-archive/wiki/TLS-Renewal-Architecture section 6.1.
 
 Commands (each prints one line of JSON to stdout and exits 0 on success,
 non-zero on failure — see `Result.exit_code`):

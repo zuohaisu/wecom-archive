@@ -5,7 +5,7 @@ RND-208 root-caused a small, reproducible set of historical WeCom archive
 payloads to SIGSEGV (exit code 139) inside libWeWorkFinanceSdkC.so's
 DecryptData — a defect internal to the vendored SDK binary, not something
 this codebase can fix or work around by avoiding some usage pattern (SDK
-cannot be replaced — see docs/ai/known-pitfalls.md #4). Historically that
+cannot be replaced — see https://github.com/zuohaisu/wecom-archive/wiki/Developer-Known-Pitfalls #4). Historically that
 crash took down the whole Python process running
 scripts/decrypt_wecom_messages_once.py or
 scripts/backfill_revoke_associations_once.py, aborting an entire batch

@@ -4,7 +4,7 @@ The manifest (`app/ai_kb/manifest.json`) is the *only* allowlist of documents
 the RAG pipeline (RND-356 / T2) is permitted to ingest. Nothing is ever
 ingested by scanning `docs/` or any other directory directly — a path only
 becomes eligible by having an approved, valid entry here. See
-`docs/ai/kb-governance.md` for the human-readable policy this schema
+`https://github.com/zuohaisu/wecom-archive/wiki/AI-Knowledge-Base-Governance` for the human-readable policy this schema
 encodes.
 
 Field semantics:

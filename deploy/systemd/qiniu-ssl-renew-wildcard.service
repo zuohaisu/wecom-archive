@@ -30,7 +30,7 @@ TimeoutStartSec=600
 # a separate hardening ticket if that is ever wanted. The one privilege
 # this unit actually exercises — `sudo systemctl reload nginx` — is
 # scoped by a narrow, pre-existing sudoers grant (see
-# docs/operations/wildcard-ssl-renewal.md).
+# https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal).
 UMask=0077
 PrivateTmp=yes
 ReadWritePaths=/home/wecomarchive/.acme.sh /var/log/qiniu-ssl-renew
