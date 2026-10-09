@@ -307,7 +307,7 @@ RND-390 才能请求生产 Go；只有生产启用和真实客户全链路通过
 
 - [ADR-0003：托管版产品策略](0003-product-strategy-hosted-only.md)
 - [ADR-0004：年度套餐、微信支付与自助接入门禁](0004-annual-plan-wechat-pay-gates.md)
-- [数据模型](../DATA_MODEL.md)
+- [数据模型](https://github.com/zuohaisu/wecom-archive/wiki/Data-Model)
 - [系统架构](../ARCHITECTURE.md)
 - [微信支付：Native 退款申请](https://pay.weixin.qq.com/doc/v3/merchant/4012791883)
 

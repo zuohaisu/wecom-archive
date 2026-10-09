@@ -11,7 +11,8 @@
    compatibility paths that must not be removed without retirement evidence.
 4. [`.env.example`](../../.env.example) and [`docs/DEPLOYMENT.md`](../DEPLOYMENT.md)
    — configuration and repo-owned/operator-managed deployment boundary.
-5. [`docs/DATA_MODEL.md`](../DATA_MODEL.md), [`docs/API.md`](../API.md), and
+5. [Data Model](https://github.com/zuohaisu/wecom-archive/wiki/Data-Model),
+   [API Reference](https://github.com/zuohaisu/wecom-archive/wiki/API-Reference), and
    the relevant code/tests — only for the domain being changed.
 
 GitHub Issues are the active work system. RND identifiers and Linear links in

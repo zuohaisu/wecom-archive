@@ -56,9 +56,7 @@ ssl-renew
 # Reference, public product, customer, and self-hosting docs are included.
 # Production operations runbooks, defect post-mortems, research notes,
 # internal process docs, and AI-collaboration docs stay private.
-docs/API.md
 docs/ARCHITECTURE.md
-docs/DATA_MODEL.md
 docs/DEPLOYMENT.md
 docs/OPERATIONS.md
 docs/adr
