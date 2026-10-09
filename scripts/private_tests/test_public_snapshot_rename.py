@@ -1,6 +1,8 @@
 """GH-155: exporter regression tests, intentionally absent from public snapshots."""
 
 from pathlib import Path
+import importlib.util
+import os
 import shutil
 import subprocess
 
@@ -9,6 +11,8 @@ import pytest
 
 EXPORTER = Path(__file__).resolve().parents[2] / "scripts/export_public_snapshot.sh"
 ALLOWLIST = EXPORTER.parent / "public_allowlist.txt"
+WIKI_PUBLISHER = EXPORTER.parent / "publish_public_wiki.py"
+WIKI_ALLOWLIST = EXPORTER.parent / "public_wiki_allowlist.txt"
 
 
 @pytest.fixture
@@ -209,3 +213,94 @@ def test_export_still_fails_closed_on_private_key_body(snapshot_repo):
     assert "real private key body" in result.stdout
     assert "Snapshot ready:" not in result.stdout
     assert exported == content
+
+
+def test_wiki_allowlist_excludes_runtime_and_private_material():
+    entries = {
+        line.strip()
+        for line in WIKI_ALLOWLIST.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    assert "README.md" in entries
+    assert "CONTRIBUTING.md" in entries
+    assert "docs/kb/customer/faq.md" in entries
+    assert not any(path.startswith(("docs/adr/", "docs/operations/", "docs/research/")) for path in entries)
+    assert all(path.endswith(".md") and (EXPORTER.parents[1] / path).is_file() for path in entries)
+
+
+def test_wiki_export_fails_closed_on_unreviewed_company_subdomain(snapshot_repo):
+    repo, output = snapshot_repo
+    (repo / "scripts/public_wiki_allowlist.txt").write_text("README.md\n")
+    (repo / "README.md").write_text("https://private-test.crowntime.cn/internal\n")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    result = subprocess.run(
+        ["bash", str(repo / "scripts" / EXPORTER.name), "--wiki", str(output)],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "unreviewed crowntime.cn subdomain" in result.stdout
+    assert "Snapshot ready:" not in result.stdout
+
+
+def test_wiki_render_preserves_existing_story_and_is_idempotent(tmp_path):
+    spec = importlib.util.spec_from_file_location("publish_public_wiki", WIKI_PUBLISHER)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    staged = tmp_path / "staged"
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    for path in WIKI_ALLOWLIST.read_text().splitlines():
+        if not path or path.startswith("#"):
+            continue
+        destination = staged / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(EXPORTER.parents[1] / path, destination)
+    home = "# Existing Home\n\n[产品演化史](Product-Evolution)\n"
+    story = "# Original story\n\nDo not replace me.\n"
+    (wiki / "Home.md").write_text(home)
+    (wiki / "Product-Evolution.md").write_text(story)
+    module.render(staged, wiki)
+    first = {path.name: path.read_bytes() for path in wiki.iterdir()}
+    module.render(staged, wiki)
+    assert first == {path.name: path.read_bytes() for path in wiki.iterdir()}
+    assert (wiki / "Product-Evolution.md").read_text() == story
+    assert (wiki / "Home.md").read_text().startswith(home)
+    assert "项目来时路" in (wiki / "_Sidebar.md").read_text()
+    assert "docker compose up -d --build" in (wiki / "Installation.md").read_text()
+    assert "docs/adr" in (wiki / "Architecture-Overview.md").read_text()
+    assert not (wiki / "ADR-0008.md").exists()
+
+
+def test_wiki_publish_to_local_remote_is_idempotent(tmp_path):
+    bare = tmp_path / "wiki.git"
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "init", "--bare", "-q", "--initial-branch=master", str(bare)], check=True)
+    subprocess.run(["git", "init", "-q", "--initial-branch=master", str(seed)], check=True)
+    (seed / "Home.md").write_text("# Existing Home\n\n[产品演化史](Product-Evolution)\n")
+    (seed / "Product-Evolution.md").write_text("# Story\n\nOriginal story text.\n")
+    subprocess.run(["git", "add", "Home.md", "Product-Evolution.md"], cwd=seed, check=True)
+    env = os.environ.copy()
+    env.update(
+        GIT_AUTHOR_NAME="Wiki Test",
+        GIT_AUTHOR_EMAIL="wiki-test@example.invalid",
+        GIT_COMMITTER_NAME="Wiki Test",
+        GIT_COMMITTER_EMAIL="wiki-test@example.invalid",
+    )
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=seed, env=env, check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=seed, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "master"], cwd=seed, check=True)
+
+    command = ["python3", str(WIKI_PUBLISHER), "--remote", str(bare)]
+    first = subprocess.run(command, text=True, capture_output=True, env=env)
+    second = subprocess.run(command, text=True, capture_output=True, env=env)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "already up to date" in second.stdout
+    count = subprocess.check_output(["git", "--git-dir", str(bare), "rev-list", "--count", "master"], text=True)
+    assert count.strip() == "2"
+    story = subprocess.check_output(["git", "--git-dir", str(bare), "show", "master:Product-Evolution.md"], text=True)
+    assert story == "# Story\n\nOriginal story text.\n"

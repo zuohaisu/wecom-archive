@@ -29,7 +29,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODE=snapshot
+if [[ "${1:-}" == "--wiki" ]]; then
+	MODE=wiki
+	shift
+fi
 ALLOWLIST="${REPO_ROOT}/scripts/public_allowlist.txt"
+[[ "${MODE}" == wiki ]] && ALLOWLIST="${REPO_ROOT}/scripts/public_wiki_allowlist.txt"
 OUT_DIR="${1:-${REPO_ROOT}/build/public-snapshot}"
 
 cd "${REPO_ROOT}"
@@ -59,12 +65,16 @@ fi
 #             context. Never infer a leak from the suffix alone.
 SANITIZERS=(
 	's|qwhhcd\.crowntime\.cn|archive.example.com|g'
-	's|zuohaisu/wecom-archive-365|your-org/wecom-archive|g'
-	's|zuohaisu/wecom-archive|your-org/wecom-archive|g'
-	's|zuohaisu|your-org|g'
 	's|/srv/apps/wecom-archive-365|/srv/apps/wecom-archive|g'
 	's|wecom-archive-365|wecom-archive|g'
 )
+if [[ "${MODE}" == snapshot ]]; then
+	SANITIZERS+=(
+	's|zuohaisu/wecom-archive-365|your-org/wecom-archive|g'
+	's|zuohaisu/wecom-archive|your-org/wecom-archive|g'
+	's|zuohaisu|your-org|g'
+	)
+fi
 
 # Patterns that must not survive into the snapshot. A hit here is a bug in
 # the allowlist or the sanitizer, not something to wave through. Public
@@ -74,10 +84,10 @@ declare -a GATE_PATTERNS=(
 	'qwhhcd\.crowntime\.cn'
 	'/srv/apps/wecom-archive-365'
 	'wecom-archive-365'
-	'zuohaisu'
 	'linear\.app'
 	'甄宇航'
 )
+[[ "${MODE}" == snapshot ]] && GATE_PATTERNS+=('zuohaisu')
 
 echo "==> Exporting public snapshot"
 echo "    source: ${REPO_ROOT}"
@@ -101,6 +111,10 @@ while IFS= read -r entry; do
 
 	matched=0
 	while IFS= read -r -d '' file; do
+		if [[ "${MODE}" == wiki && ( ! -f "${file}" || "${file}" != *.md ) ]]; then
+			echo "error: wiki allowlist entries must name individual tracked Markdown files: ${entry}" >&2
+			exit 1
+		fi
 		snapshot_path="${file//wecom-archive-365/wecom-archive}"
 		destination="${OUT_DIR}/${snapshot_path}"
 		if [[ -e "${destination}" ]]; then
@@ -117,6 +131,10 @@ while IFS= read -r entry; do
 	done < <(git ls-files -z -- "${entry}")
 
 	if [[ ${matched} -eq 0 ]]; then
+		if [[ "${MODE}" == wiki ]]; then
+			echo "error: wiki allowlist entry matched no tracked file: ${entry}" >&2
+			exit 1
+		fi
 		echo "    warning: allowlist entry matched no tracked file: ${entry}" >&2
 	fi
 done <"${ALLOWLIST}"
@@ -158,10 +176,39 @@ for pattern in "${GATE_PATTERNS[@]}"; do
 	if hits="$(grep -rIn --binary-files=without-match -E "${pattern}" "${OUT_DIR}" 2>/dev/null)"; then
 		echo ""
 		echo "    LEAK GATE FAILED — pattern: ${pattern}"
-		echo "${hits}" | sed "s|${OUT_DIR}/|      |" | head -20
+		if [[ "${MODE}" == wiki ]]; then
+			echo "${hits}" | cut -d: -f1 | sort -u | sed "s|${OUT_DIR}/|      |" | head -20
+		else
+			echo "${hits}" | sed "s|${OUT_DIR}/|      |" | head -20
+		fi
 		violations=$((violations + 1))
 	fi
 done
+
+# Public company endpoints remain valid. Unknown subdomains in a new wiki
+# source require review, because they may identify an operator-only host.
+if [[ "${MODE}" == wiki ]]; then
+	if ! python3 - "${OUT_DIR}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+allowed = {"archive.crowntime.cn", "mail.crowntime.cn", "www.crowntime.cn"}
+unknown = set()
+for path in Path(sys.argv[1]).rglob("*.md"):
+    text = path.read_text(encoding="utf-8")
+    unknown.update(
+        host for host in re.findall(r"\b(?:[a-zA-Z0-9-]+\.)+crowntime\.cn\b", text)
+        if host not in allowed
+    )
+if unknown:
+    print("    LEAK GATE FAILED — unreviewed crowntime.cn subdomain in wiki source")
+    sys.exit(1)
+PY
+	then
+		violations=$((violations + 1))
+	fi
+fi
 
 # Real private keys, as opposed to the many test fixtures that legitimately
 # mention one. A literal "BEGIN PRIVATE KEY" match is useless here: the suite

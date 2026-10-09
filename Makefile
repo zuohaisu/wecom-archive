@@ -12,10 +12,11 @@ SSL_PYTHON_FILES := $(SSL_DIR)/qiniu_helper.py $(SSL_DIR)/tests/test_qiniu_helpe
 	$(SSL_DIR)/tests/test_helper/mock_server.py $(SSL_DIR)/tests/test_helper/mock_qiniu_helper.py
 PYTHON ?= python3
 
-# All targets below are offline-only by design: they never contact DNSPod,
-# Let's Encrypt, or the real Qiniu API, and never touch production hosts.
+# All targets below except public-wiki are offline-only by design. The
+# public-wiki target publishes to the separate GitHub Wiki repository; none
+# of these targets touches production hosts.
 
-.PHONY: ssl-lint ssl-test ssl-dry-run ssl-verify-systemd
+.PHONY: ssl-lint ssl-test ssl-dry-run ssl-verify-systemd public-wiki
 
 # ---------------------------------------------------------------------------
 # Backend (backend/app, backend/scripts, backend/tests) — repo-level static
@@ -186,6 +187,11 @@ public-verify: public-snapshot
 			"from app.main import app; assert len(app.routes) > 0"
 	cd build/public-snapshot/backend && PATH="$(dir $(BACKEND_PY)):$$PATH" $(BACKEND_PY) -m pytest tests -q -p no:warnings -m 'not requires_internal_ops_docs'
 	@echo "public-verify: OK"
+
+## Publish the allowlisted public documentation subset to the separate Wiki.
+## Existing project-story pages are preserved. This pushes only the Wiki repo.
+public-wiki:
+	$(PYTHON) scripts/publish_public_wiki.py
 
 ## Shellcheck + shfmt over every ssl-renew script, plus a Python syntax
 ## check over qiniu_helper.py and its tests. Fails non-zero on any finding.

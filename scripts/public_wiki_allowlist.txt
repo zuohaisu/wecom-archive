@@ -1,0 +1,8 @@
+# Explicit, tracked Markdown sources for the public Wiki. No directories.
+# README and CONTRIBUTING remain in the source repository; Wiki mirrors them.
+README.md
+CONTRIBUTING.md
+docs/ARCHITECTURE.md
+docs/kb/customer/self-hosting-guide.md
+docs/kb/customer/configuration.md
+docs/kb/customer/faq.md
