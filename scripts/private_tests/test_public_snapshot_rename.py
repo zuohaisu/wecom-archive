@@ -154,7 +154,7 @@ def test_mail_domain_is_not_a_snapshot_path_allowlist_entry():
     assert all("mail.crowntime.cn" not in entry for entry in entries)
 
 
-def test_public_snapshot_includes_product_docs_site_and_generic_checks():
+def test_public_snapshot_includes_product_docs_and_generic_checks_without_company_site():
     entries = {
         line.split("#", 1)[0].strip()
         for line in ALLOWLIST.read_text().splitlines()
@@ -162,10 +162,8 @@ def test_public_snapshot_includes_product_docs_site_and_generic_checks():
     }
     assert "docs/kb/public" in entries
     assert "docs/kb/customer" in entries
-    assert "static_site/company_homepage/index.html" in entries
-    assert "static_site/company_homepage/pricing.html" in entries
-    assert "static_site/company_homepage/demo" in entries
-    assert "static_site/company_homepage/README.md" not in entries
+    # GH-208: website ownership moved to its independent private repository.
+    assert not any(entry.startswith("static_site/") for entry in entries)
     assert "docs/DEPLOYMENT.md" in entries
     assert "scripts/assert_scheduled_workloads.sh" in entries
     assert ".github/workflows/uptime-check.yml" in entries

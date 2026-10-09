@@ -60,7 +60,6 @@ Not versioned in this repository:
 | Main web service unit (`wecom-archive-365.service`) | Operator-managed |
 | Reverse proxy config (Nginx / equivalent) | Operator-managed |
 | TLS certificates | Operator-managed |
-| `STATIC_SITE_DIR_NAME` env var | Operator-set in `backend/.env`; it must match the static webroot configured in your reverse proxy, or step 8 below may sync to a directory the proxy never serves; see [static-site guidance](OPERATIONS.md#static-site) |
 | `qiniu-telegram-relay.service` | Deprecated stale server artifact, never versioned here; see the included [`WORKLOAD_MANIFEST`](../deploy/systemd/WORKLOAD_MANIFEST) |
 
 ---
@@ -452,7 +451,7 @@ flowchart TD
     K -->|exhausts retries| ROLLBACK_FULL["Rollback: restore LAST KNOWN-GOOD commit\n(persisted state, not just pre-pull HEAD),\nreinstall deps, restart, re-check health.\nOriginal deploy still exits non-zero."]
     K --> L["7b: public /health\n(retried)"]
     L -->|fails| PROXY_FAIL[["Deploy FAILS —\ninvestigate Nginx/DNS/TLS,\nNOT a code rollback"]]
-    L --> M["8: deploy static homepage\n(cp -a to $STATIC_SITE_DIR_NAME, default 'site'),\nrecord this commit as last-known-good"]
+    L --> M["Sync managed systemd units;\nrecord this commit as last-known-good"]
     M -->|persist fails| FAILPERSIST[["Deploy FAILS —\nservice IS healthy, but the\nrollback record could not be written"]]
     M --> N[["Deploy SUCCEEDS"]]
 
@@ -857,13 +856,8 @@ These are documentation truths, not hidden assumptions:
 - destructive migrations still require a manual runbook and operator
   approval — they are not, and must not become, something this script
   drives automatically
-- the static homepage sync (step 8) never fails the deploy if
-  `STATIC_SITE_DIR_NAME` doesn't match the Nginx `root` — the sync
-  reports a WARN (never a hard fail) when the webroot copy cannot be
-  performed, and the deploy still succeeds with the homepage staged at
-  `shared/www/$STATIC_SITE_DIR_NAME`. There is no automated check that
-  the two are consistent; confirm manually on the host if the live
-  homepage stops matching `main`
+- company website publishing is independently managed by the private
+  `crowntime-website` repository; this deployment does not touch its webroot
 - standard deployment's `systemctl enable --now` sudoers grant is
   documented as scoped to `wecom-*.timer`/`wecom-*.path` only —
   `qiniu-ssl-renew-wildcard.timer` (GH-104 Follow-up B) needs one
@@ -883,85 +877,15 @@ Keep this document honest if that boundary changes.
 
 ---
 
-## 9. Static Homepage Webroot — One-Time Fix (runbook)
+## 9. Company website deployment boundary (GH-208)
 
-**Symptom:** every deploy logs `WARN: could not publish the homepage to
-/var/www/crowntime`, and the live homepage stays on old content even
-though `shared/www/crowntime/` is fresh.
+Company marketing pages and their static demo now live in the private
+`zuohaisu/crowntime-website` repository and have an independent deployment
+identity, immutable releases and CI/CD. This product deploy does not copy
+or change website files, including in non-production installations.
 
-**Why:** the runtime user `wecomarchive` has no plain write access to
-`/var/www/crowntime` (root-owned), and the sudoers whitelist
-(`/etc/sudoers.d/wecomarchive`) matches `cp` only as an exactly-two-
-argument form — `sudo -n cp -a src/. dst/` does not match, so the
-webroot copy degrades to the WARN path by design.
-
-**One-time fix (as root, on the ECS host):**
-
-```bash
-# 1. Back up the current (old) webroot — it may contain hand-placed
-#    verification files that must be preserved (see step 3).
-mv /var/www/crowntime /var/www/crowntime.bak.$(date +%Y%m%d)
-
-# 2. Point the webroot at the deploy-managed tree. The deploy's step 9
-#    then sees source and destination as the same directory (Tier-0
-#    same-path check) and treats it as already-published — no sudo, and
-#    no `cp` error. (Before Tier-0 existed, `cp -a src/. dst/` on an
-#    identical pair exited 1 with "are identical (not copied)", and the
-#    old code swallowed that as a false "nginx root OK".)
-ln -s /srv/apps/wecom-archive-365/shared/www/crowntime /var/www/crowntime
-
-# 3. Re-home any files that lived ONLY in the old webroot (e.g. Tencent
-#    domain-verification tokens like WW_verify_*.txt).
-cp -a /var/www/crowntime.bak.*/WW_verify_*.txt \
-      /srv/apps/wecom-archive-365/shared/www/crowntime/ 2>/dev/null || true
-
-# 4. Verify nginx can serve through the symlink (SELinux/nginx user must
-#    be able to traverse /srv/apps — usually fine since the archive app
-#    is already served from there; if not, adjust the nginx user or ACL).
-curl -sI https://crowntime.cn/ | head -3
-```
-
-**After the fix:** the next deploy's step 9 logs `nginx root OK` instead
-of the WARN, and the live homepage matches `main` again. The symlink
-survives deploys (step 9's Tier-0 same-path check short-circuits and
-writes nothing — it cannot remove the symlink, and nothing else does).
-
-**If you ever need to undo:** remove the symlink and restore the backup
-(`mv /var/www/crowntime.bak.* /var/www/crowntime`).
-
----
-
-### §9.1 Deployed webroot is 0640 → homepage HTTP 403 (RND-263, 2026-08-03)
-
-**Symptom:** the deploy's step 9 logs `nginx root OK`, `shared/www/...`
-is fresh, but `https://crowntime.cn/` returns **403** with nginx error
-log entries like:
-
-```
-[crit] stat() "/var/www/crowntime/index.html" failed (13: Permission denied)
-```
-
-**Why:** the webroot copy (`cp -a`) preserves the source tree's mode.
-The static source is checked out under the runtime user's umask — 027 on
-this host — which turns git-tracked `100644` files into `0640` owned by
-`wecomarchive`. Nginx's worker runs as user `nginx`, which is **not** a
-member of `wecomarchive`'s group, so a 0640 webroot cannot be read at
-all → 403 for the entire homepage, not just one asset. This is
-orthogonal to §9 above: §9 is the *webroot not writable* WARN path;
-§9.1 is the *copy succeeded but the result is not servable* case.
-
-**Fix (shipped in the deploy script, RND-263):** step 9 now runs
-`chmod -R o+rX "$NGINX_DST"` after a successful `_publish_static_dir`,
-so the deployed webroot is world-readable (files) and world-searchable
-(directories). The chmod is part of the success condition — a copy that
-cannot be made servable is reported as WARN, never as `nginx root OK`.
-
-**Emergency one-off (no deploy available):** on the host, as root,
-
-```bash
-chmod -R o+rX /var/www/crowntime
-```
-
-**After the fix:** a fresh deploy leaves the webroot at `0644/0755`
-servable by Nginx; the next deploy re-applies the chmod, so it cannot
-regress from a future `cp -a`.
+The former static-copy runbooks are retired. Do not restore the old copying
+step or point a company website at the product deployment's shared tree.
+Operator-managed WeCom verification files remain outside website releases;
+preserve their bytes and public URLs. Existing TLS renewal is retained as
+shared infrastructure, separately from either application's release.

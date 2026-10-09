@@ -52,7 +52,7 @@ EOF
 	cp "$TEST_HELPER_DIR/mock_curl.sh" "$MOCK_BIN_DIR/curl"
 	cp "$TEST_HELPER_DIR/mock_flock.sh" "$MOCK_BIN_DIR/flock"
 	cp "$TEST_HELPER_DIR/mock_mv.sh" "$MOCK_BIN_DIR/mock_mv" # NOT wired as MV_BIN by default -- see mv-failure regression test
-	cp "$TEST_HELPER_DIR/mock_sudo.sh" "$MOCK_BIN_DIR/sudo" # NOT wired as SUDO_BIN by default (stays "") -- see step 10 tests
+	cp "$TEST_HELPER_DIR/mock_sudo.sh" "$MOCK_BIN_DIR/sudo" # NOT wired as SUDO_BIN by default (stays "") -- see step 9 tests
 	chmod +x "$MOCK_BIN_DIR"/*
 	ORIGINAL_PATH="$PATH"
 	PATH="$MOCK_BIN_DIR:$PATH"
@@ -111,7 +111,7 @@ EOF
 	# and three consecutive production breakages shipped through a green suite.
 	export SHARED_DST="$TEST_TMPDIR/shared_www"
 	export NGINX_DST="$TEST_TMPDIR/nginx_root"
-	# Step 10 (managed systemd units) target — never a real /etc/systemd/system.
+	# Step 9 (managed systemd units) target — never a real /etc/systemd/system.
 	export SYSTEMD_UNIT_DIR="$TEST_TMPDIR/systemd_units"
 	mkdir -p "$SYSTEMD_UNIT_DIR"
 	export INTERNAL_HEALTH="http://mock-host/internal-health"
@@ -149,11 +149,8 @@ deploy_common_teardown() {
 	[ -n "${TEST_TMPDIR:-}" ] && rm -rf "$TEST_TMPDIR"
 }
 
-# seed_static_site — create a realistic static_site/company_homepage tree
-# under $DEPLOY_DIR so step 9 actually runs. Includes a nested asset dir
-# (the whole point of the cp -a rewrite: an earlier version copied only
-# index.html + style.css and left every other asset 404ing) and a README.md
-# (which must never reach a served directory).
+# seed_static_site — synthetic legacy source used to prove a product
+# deployment cannot publish an old site even if files remain on disk.
 seed_static_site() {
 	local src="$DEPLOY_DIR/static_site/company_homepage"
 	mkdir -p "$src/brand" "$src/assets"
@@ -224,7 +221,7 @@ seed_known_good() {
 # seed_managed_units — create deploy/systemd/MANAGED_UNITS plus a fake
 # <name>.service/.timer pair under $DEPLOY_DIR, mirroring the real
 # wecom-external-contact-reconcile.{service,timer} shape closely enough for
-# step 10's install/enable logic to exercise both file kinds.
+# step 9's install/enable logic to exercise both file kinds.
 seed_managed_units() {
 	local dir="$DEPLOY_DIR/deploy/systemd"
 	mkdir -p "$dir"
