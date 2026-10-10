@@ -50,8 +50,9 @@ what remains unverified.
 
 Read the
 [Wiki architecture overview](https://github.com/zuohaisu/wecom-archive/wiki/Architecture-Overview)
-and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing application
-boundaries. The intended dependency direction is composition root → routers →
+and
+[architecture reference](https://github.com/zuohaisu/wecom-archive/wiki/Architecture-Reference)
+before changing application boundaries. The intended dependency direction is composition root → routers →
 services/domain → database. Keep business routes, direct SQL, and inline
 HTML/CSS/JavaScript out of the composition root. Simple cohesive CRUD may live
 in a router; put multi-step domain workflows in services. Services must not
@@ -60,9 +61,10 @@ tenant isolation, authorization, auditability, and fail-closed behavior.
 
 A change to module ownership, dependency direction, trust boundaries, or
 persistence strategy needs an Architecture Decision Record under
-[`docs/adr/`](docs/adr/), using
-[`docs/adr/0000-template.md`](docs/adr/0000-template.md). Agree on the decision
-before implementing the architectural change.
+[`docs/adr/`](docs/adr/), using the Wiki's
+[ADR template](https://github.com/zuohaisu/wecom-archive/wiki/ADR-0000-Template)
+and a synchronized repository copy. Agree on the decision before implementing
+the architectural change.
 
 ## Issues, commits, and pull requests
 
