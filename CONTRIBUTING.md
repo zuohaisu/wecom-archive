@@ -51,7 +51,7 @@ what remains unverified.
 Read the
 [Wiki architecture overview](https://github.com/zuohaisu/wecom-archive/wiki/Architecture-Overview)
 and
-[architecture reference](https://github.com/zuohaisu/wecom-archive/wiki/Architecture-Reference)
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 before changing application boundaries. The intended dependency direction is composition root → routers →
 services/domain → database. Keep business routes, direct SQL, and inline
 HTML/CSS/JavaScript out of the composition root. Simple cohesive CRUD may live
