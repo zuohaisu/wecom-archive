@@ -53,10 +53,10 @@ for the controlled profile-image contract.
 ## Documentation
 
 The [GitHub Wiki](https://github.com/zuohaisu/wecom-archive/wiki) is the
-starting point for installation, configuration, usage, API and data-model
-references, and project history. New public guides are maintained there.
-README, contribution rules, architecture decision records, and documents read
-by the running application remain in this repository.
+complete documentation collection and editorial source of truth for
+installation, configuration, usage, API and data-model references, engineering
+decisions, and project history. Documents required by GitHub, contributors, or
+the running application also remain in this repository as embedded copies.
 
 ## Quick start
 
