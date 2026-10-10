@@ -1,7 +1,7 @@
 """RND-356 (T2) — PostgresFtsRetriever access-level isolation and ranking.
 
 Gated on DATABASE_URL: exercises the real to_tsvector/GIN full-text
-behavior, which SQLite cannot provide (see docs/agent-test-database.md).
+behavior, which SQLite cannot provide (see https://github.com/zuohaisu/wecom-archive/wiki/Agent-Test-Database).
 """
 
 from __future__ import annotations

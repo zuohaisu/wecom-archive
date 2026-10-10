@@ -65,7 +65,7 @@ EOF
 
 # ── GH-104 Follow-up B: captured wildcard *.crowntime.cn units ──────────
 # These lock the production-proven cadence/relationship this capture must
-# never silently drift from (see docs/operations/wildcard-ssl-renewal.md).
+# never silently drift from (see https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal).
 
 @test "shipped wildcard .service and .timer pass the static structural check" {
     run "$CHECKER" "$WILDCARD_SERVICE" "$WILDCARD_TIMER"

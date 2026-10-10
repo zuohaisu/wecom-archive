@@ -2,7 +2,7 @@
 RND-224 — architecture boundary guardrails.
 
 Purpose (see docs/adr/0002-module-boundaries-and-composition-root.md and
-DEV_AGENT_RULES.md > Architecture Boundaries): prevent business logic from
+AGENTS.md > Architecture Boundaries): prevent business logic from
 flowing back into `app/main.py` or into a "service→router" reverse
 dependency, which is exactly how this codebase used to accumulate an
 oversized, all-in-one router/main before the RND-212 refactor chain split
@@ -14,7 +14,7 @@ grimp, or pytest-arch. All checkers are plain functions that take a path or
 source string, so the "real repo" tests and the synthetic self-proving
 tests below call the exact same code.
 
-What this file does NOT enforce (see DEV_AGENT_RULES.md for the full
+What this file does NOT enforce (see AGENTS.md for the full
 rationale): no file/function/route line-count thresholds, no requirement
 that every router endpoint be backed by a service — simple CRUD directly in
 a router is allowed. This file only enforces *dependency direction* and

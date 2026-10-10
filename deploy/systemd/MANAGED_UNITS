@@ -91,7 +91,7 @@ wecom-disk-usage-check.timer
 
 # GH-104 Follow-up B: wildcard *.crowntime.cn TLS renewal, captured from
 # the already-proven production implementation (see
-# docs/operations/wildcard-ssl-renewal.md). This is the first non-wecom-*
+# https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal). This is the first non-wecom-*
 # entry in this file — _sync_managed_systemd_units in deploy_server.sh has
 # no wecom-* restriction of its own, but production's documented sudoers
 # grant for `systemctl enable --now` IS literally scoped to

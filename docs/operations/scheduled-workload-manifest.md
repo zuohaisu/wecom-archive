@@ -42,7 +42,7 @@ manifest wins and this document is stale — file a fix.
 | Backup | Required | timer, daily 03:17 | Yes (newly) | Already running on production; was "required but unmanaged" — GH-104 closes that drift only. Cadence/retention/encryption unchanged; #105 owns off-host/offsite DR. |
 | Disk/resource usage check | Required | timer, every 15 min | Yes (newly) | Same "required but unmanaged" drift as backup. Cadence unchanged. |
 | Job-failure alert (`@` template) | Static helper | `OnFailure=` on demand | Installed, never enabled | GH-107; systemd instantiates it, it is never `enable`d/`start`ed by name. |
-| Production wildcard SSL renewal | Required | timer | Yes | Captured from production (GH-104 Follow-up B) — see [wildcard-ssl-renewal.md](wildcard-ssl-renewal.md). |
+| Production wildcard SSL renewal | Required | timer | Yes | Captured from production (GH-104 Follow-up B) — see [wildcard-ssl-renewal.md](https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal). |
 | Qiniu Kodo per-domain SSL template | Template | timer (per instance) | No | Not currently instantiated on production; kept for a future single-domain Qiniu CDN cert. Distinct from, not superseded by, the wildcard flow. |
 | Internal reachability check | Deferred | timer, daily 04:30 | No | Manual/deferred per PM decision; internal reachability RECONCILIATION, a different responsibility from the external uptime workflow (paused separately — see below). |
 | Message purge (recycle bin) | Deferred, **destructive** | timer, daily 02:45 | No | Retention-policy activation not yet approved. |
@@ -131,7 +131,7 @@ them (enforced by `scripts/assert_scheduled_workloads.sh` and the GH-104
 test suite) regardless of any future manifest edit. A post-deploy
 assertion that finds either enabled in production must **FAIL**, not
 warn — and their absence must never be treated as a deployment or
-assertion failure. See `docs/operations/message-deletion.md` for the
+assertion failure. See [Message Deletion](https://github.com/zuohaisu/wecom-archive/wiki/Message-Deletion) for the
 retention-policy approval this classification is gated on.
 
 `wecom-ai-public-retention-sweep` is deferred for the same
@@ -171,7 +171,7 @@ nginx through a narrowly-scoped sudoers grant. Full behavior contract
 path — CDN bind, origin bind, and nginx deployment alike — a hard,
 uninformative stop rather than the graceful degradation it was designed
 for), environment variables, sudoers dependency, and manual verification
-commands are in [wildcard-ssl-renewal.md](wildcard-ssl-renewal.md) — this
+commands are in [wildcard-ssl-renewal.md](https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal) — this
 section stays a summary.
 
 This is conceptually **different** from `deploy/systemd/qiniu-ssl-renew@.service`
@@ -182,7 +182,7 @@ Kodo CDN custom domain** and binds the cert through Qiniu's own HTTPS API
 label by design). Follow-up B captured the real, already-proven
 production script rather than repurposing this template — see
 the production-parity `ssl-renew/renew-wildcard.sh` and
-[the wildcard renewal behavior contract](wildcard-ssl-renewal.md).
+[the wildcard renewal behavior contract](https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal).
 
 `WORKLOAD_MANIFEST` now carries this as `repo_status=present`,
 `auto_install=true` for both units, `auto_enable=true` for the timer
@@ -211,7 +211,7 @@ row, not deleted: the 2026-08-28 baseline found no active
 confirmed why — `media-origin.crowntime.cn` (the domain this template was
 originally built for) is now bound to the wildcard certificate by
 `ssl-renew/renew-wildcard.sh` itself (see
-[wildcard-ssl-renewal.md](wildcard-ssl-renewal.md)), so no per-domain
+[wildcard-ssl-renewal.md](https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal)), so no per-domain
 instance of this template is currently needed. The template remains a
 valid, tested mechanism for a future single-domain Qiniu CDN certificate
 outside the wildcard's coverage. Deleting it would be an irreversible,

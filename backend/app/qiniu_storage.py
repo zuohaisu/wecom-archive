@@ -38,7 +38,7 @@ raised here are the shared app.media_storage classification
 / QiniuConfigurationError) so callers can distinguish "confirmed missing"
 from "provider unavailable" instead of every failure collapsing into a
 404-shaped "missing" (a confirmed post-ship QA finding — see
-docs/research/rnd_174_qiniu_kodo_provider.md).
+https://github.com/zuohaisu/wecom-archive/wiki/Research-Qiniu-Kodo-Provider).
 """
 
 from __future__ import annotations

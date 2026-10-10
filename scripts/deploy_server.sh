@@ -55,7 +55,7 @@
 #   (not wecom-*). This script's own sync logic has no prefix restriction,
 #   but the `enable --now` grant above is a literal `wecom-*` glob and does
 #   NOT cover it. That needs one additional, EXACT (never a `qiniu-*`
-#   glob — see docs/operations/wildcard-ssl-renewal.md for why) grant:
+#   glob — see https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal for why) grant:
 #       wecomarchive ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now qiniu-ssl-renew-wildcard.timer
 #   Until that grant exists, this one unit degrades to the same WARN every
 #   other missing-sudoers unit gets — it does not block or roll back the

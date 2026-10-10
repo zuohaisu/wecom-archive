@@ -478,7 +478,7 @@ def test_qr_callback_creates_tenant_bound_session_only_for_pre_authorized_user(
 
 
 # ---------------------------------------------------------------------------
-# AC-9 data minimization — docs/agent-data-minimization.md §5's required
+# AC-9 data minimization — https://github.com/zuohaisu/wecom-archive/wiki/Agent-Data-Minimization §5's required
 # sentinel battery, applied recursively rather than the two ad hoc substring
 # checks this file started with (QA-003: that was INSUFFICIENT_TEST_COVERAGE
 # — a real leak of an untested field, or one that only appears at a nested
@@ -531,7 +531,7 @@ def test_qr_callback_response_headers_and_logs_carry_no_sentinel_leakage(
     who they are is the endpoint's purpose, and that response shape predates
     RND-321) — a `SENTINEL_RAW_MSGID`-shaped value there is expected
     present, not a leak of the "raw msgid in archived message metadata"
-    class docs/agent-data-minimization.md actually targets.
+    class https://github.com/zuohaisu/wecom-archive/wiki/Agent-Data-Minimization actually targets.
     """
     _set_wecom_env(monkeypatch)
     _seed_config(db_engine, corp_id="corp-qr")
@@ -594,14 +594,14 @@ def _breakout_script(html: str) -> str:
 
 
 def test_qr_breakout_script_dom_console_and_storage_carry_no_sentinel_leakage() -> None:
-    """docs/agent-data-minimization.md §5's frontend requirement: sentinels
+    """https://github.com/zuohaisu/wecom-archive/wiki/Agent-Data-Minimization §5's frontend requirement: sentinels
     placed in a mocked response, asserted absent from
     document.body.innerHTML-equivalent, any attribute value, console
     output, and browser storage — run against the REAL breakout script
     (extracted from _break_out_of_qr_frame's actual output) under Node,
     the same technique test_i18n_foundation.py already uses for this
     repo's other server-rendered inline scripts (no template engine, no
-    Jinja — see DEV_AGENT_RULES.md).
+    Jinja — see AGENTS.md).
 
     The earlier sentinel test only checked the raw HTTP response text; this
     is what QA-003 round 2 correctly flagged as missing — the DOM/console/

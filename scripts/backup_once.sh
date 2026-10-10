@@ -6,13 +6,13 @@
 # BACKUP_DIR — no plaintext dump or archive is ever persisted.
 #
 # Scope note: media backed by Qiniu Kodo (the current write backend — see
-# docs/ops/media_storage_ops.md) already lives in Qiniu's own durable
+# https://github.com/zuohaisu/wecom-archive/wiki/Media-Storage-Operations) already lives in Qiniu's own durable
 # object storage and is intentionally NOT re-backed-up here. This script
 # only covers the historical `local` storage_backend media directory
 # (STORAGE_LOCAL_PATH), which is the one copy that exists nowhere else.
 #
 # A single local backup directory is NOT a complete disaster-recovery
-# plan — see the DR design notes in docs/operations/backup-and-recovery.md
+# plan — see the DR design notes in https://github.com/zuohaisu/wecom-archive/wiki/Backup-and-Recovery
 # and the ops runbook ("Backup scope and what this does NOT cover").
 #
 # ── Required env ────────────────────────────────────────────────────────

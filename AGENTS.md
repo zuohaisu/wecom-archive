@@ -57,7 +57,7 @@ Rules:
 ### Documentation and project knowledge
 
 - The [GitHub Wiki](https://github.com/zuohaisu/wecom-archive/wiki) is the primary home for new public user and developer documentation. Read its Home and sidebar before adding or revising a guide; edit the relevant Wiki page directly and maintain its navigation and links. A Wiki-only edit does not require a repository PR.
-- Keep README, CONTRIBUTING, AGENTS, ADRs, and files needed by code, the container image, the AI knowledge-base manifest, or versioned operations in this repository. Changes to these files follow the normal ticket, branch, PR, and CI workflow. Do not remove an embedded document until its runtime and deployment consumers have been updated and validated.
+- Keep README, CONTRIBUTING, AGENTS, current ADRs, and files needed by code, the container image, the AI knowledge-base manifest, or versioned operations in this repository. Superseded historical ADRs without repository consumers may move to the Wiki with their status and provenance intact. Changes to repository files follow the normal ticket, branch, PR, and CI workflow. Do not remove an embedded document until its runtime and deployment consumers have been updated and validated.
 - Review every new public Wiki page for secrets, customer data, internal hostnames and paths, and private operations material before publishing. Preserve historical Wiki pages and their provenance. When a code or policy change also changes a public guide, update the Wiki in the same task; do not create a second general-purpose docs tree in the repository.
 
 ### Claiming a ticket

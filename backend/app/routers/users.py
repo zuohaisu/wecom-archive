@@ -361,7 +361,7 @@ def admin_reset_password(
 def _access_request_dto(db: Session, tenant_id: str, request: AdminAccessRequest) -> dict[str, Any]:
     """Never includes `subject` (the raw WeCom UserId) — reviewers need the
     display name and email hint to make a decision, not the raw identity
-    value itself (docs/agent-data-minimization.md: identity fields don't
+    value itself (https://github.com/zuohaisu/wecom-archive/wiki/Agent-Data-Minimization: identity fields don't
     belong on a response surface that doesn't need them to function).
     """
     suspected_match = None

@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
-# Keep this catalogue aligned with docs/product-analytics-events-v1.md.  It is
+# Keep this catalogue aligned with https://github.com/zuohaisu/wecom-archive/wiki/Product-Analytics-Events.  It is
 # intentionally closed: accepting a free-form event name would turn this
 # endpoint into an unreviewed telemetry sink.
 LOGIN_SUCCEEDED = "product.auth.login_succeeded.v1"

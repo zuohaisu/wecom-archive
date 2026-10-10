@@ -10,7 +10,7 @@
 # always signed the body regardless of Content-Type, when QBox only signs
 # the body for `application/x-www-form-urlencoded` requests — never for the
 # `application/json` bodies this module actually sends). See
-# docs/ssl-renewal/ARCHITECTURE.md section 6.1 and
+# https://github.com/zuohaisu/wecom-archive/wiki/TLS-Renewal-Architecture section 6.1 and
 # tests/test_qiniu_helper.py (golden parity tests against the official SDK).
 #
 # Secrets never touch argv: AK/SK flow to the helper via the already-exported

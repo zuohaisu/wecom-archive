@@ -93,7 +93,7 @@ pyproject.toml
 # ── Historical OSS planning notes ───────────────────────────────────
 # Uncomment to include. Currently excluded, with the reasoning:
 #
-# docs/CONVERSATION_REVIEW_CONSOLE_PRD.md
+# https://github.com/zuohaisu/wecom-archive/wiki/Conversation-Review-Console-PRD
 #   Useful for contributors, but needs a read-through first to confirm it
 #   carries no commercial roadmap.
 #

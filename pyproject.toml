@@ -26,7 +26,7 @@ known-first-party = ["app"]
 # noise dominated by one well-understood false-positive category into a
 # signal that still flags real issues (unused imports/variables) anywhere,
 # including in backend/tests/ itself. No test file's actual code changed
-# to produce this — see docs/ops/media_storage_ops.md and the RND-187
+# to produce this — see https://github.com/zuohaisu/wecom-archive/wiki/Media-Storage-Operations and the RND-187
 # fix-round notes for context.
 "backend/tests/*.py" = ["F811"]
 

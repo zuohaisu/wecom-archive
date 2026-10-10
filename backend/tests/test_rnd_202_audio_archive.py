@@ -13,7 +13,7 @@ self-inflicted-signature "recording" byte string (not a real WeCom
 enterprise call recording). It does NOT and CANNOT prove Production
 Verified status — that requires a real enterprise-tier WeCom corp with
 call-archive permission and a real recorded call, which this environment
-does not have. See docs/rnd-202-audio-archive-verification.md for the
+does not have. See https://github.com/zuohaisu/wecom-archive/wiki/Audio-Archive-Verification for the
 real-environment verification steps and this limitation's full write-up.
 
 Run (from backend/):
