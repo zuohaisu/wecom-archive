@@ -219,6 +219,35 @@ repository contains worker units and deployment guidance; the web-service unit,
 reverse-proxy configuration, and TLS certificates are operator-managed. See
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full deployment procedure.
 
+## Community / 社区
+
+**English:** GitHub is the single primary code repository for this project.
+The [Gitee repository](https://gitee.com/zuohaisu/wecom-archive) is a one-way
+mirror of GitHub for access from mainland China and carries no independent
+development; please file issues and pull requests on GitHub. The self-hosted
+edition runs independently and does not require a Crowntime cloud
+subscription.
+
+**中文：** GitHub 是本项目的唯一代码主仓库。
+[Gitee 仓库](https://gitee.com/zuohaisu/wecom-archive)是 GitHub 的单向同步
+镜像，仅便于国内访问，不在镜像上进行独立开发；Issue 与 Pull Request 请统一
+提交至 GitHub。自部署版本可独立运行，不需要康冠时代云服务或任何付费订阅。
+
+- [GitHub Releases](https://github.com/zuohaisu/wecom-archive/releases) —
+  release notes and version history. / 发布说明与版本历史。
+- [GitHub Discussions ·
+  Announcements](https://github.com/zuohaisu/wecom-archive/discussions/categories/announcements) —
+  official release announcements
+  ([中文](https://github.com/zuohaisu/wecom-archive/discussions/227) /
+  [English](https://github.com/zuohaisu/wecom-archive/discussions/228)). /
+  官方发布公告。
+- [GitHub Wiki](https://github.com/zuohaisu/wecom-archive/wiki) — complete
+  documentation. / 完整文档。
+- [Gitee mirror / Gitee 镜像](https://gitee.com/zuohaisu/wecom-archive) — one-way
+  mirror of GitHub. / GitHub 单向同步镜像。
+- [Official website / 官方网站](https://www.crowntime.cn/) — Crowntime and the
+  optional managed cloud edition. / 康冠时代与可选的云托管服务。
+
 ## Releases
 
 - **[v1.1.0 — First public open-source release](https://github.com/zuohaisu/wecom-archive/releases/tag/v1.1.0)** (2026-10-09)
