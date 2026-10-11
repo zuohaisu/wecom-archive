@@ -319,8 +319,3 @@ the value you change, then restart the web service and any affected workers.
 After first-run setup, use the authenticated Settings page for subsequent
 changes; use the UI restart indication rather than guessing which processes
 must be restarted.
-
-
-
-
-END
