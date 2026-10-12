@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import os
+from itertools import count
 from unittest.mock import patch
 
 from sqlalchemy import create_engine, event, text
@@ -118,6 +119,7 @@ CREATE TABLE group_chat_metadata (
 
 _TENANT_A = "tenant-a"
 _TENANT_B = "tenant-b"
+_MESSAGE_IDS = count(1)
 
 
 def _make_session() -> Session:
@@ -146,7 +148,9 @@ def _insert_message(db: Session, **kwargs):
         tenant_id=_TENANT_A,
     )
     defaults.update(kwargs)
-    defaults.setdefault("msgid", f"msg-{defaults['seq']}-{id(defaults)}")
+    # Temporary dict addresses can be reused after each call; they are not IDs.
+    if "msgid" not in defaults:
+        defaults["msgid"] = f"msg-{defaults['seq']}-{next(_MESSAGE_IDS)}"
     msg = ArchiveMessage(**defaults)
     db.add(msg)
     db.flush()
