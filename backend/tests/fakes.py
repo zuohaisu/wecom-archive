@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import base64
 import json
+from itertools import count
 from typing import Optional
 
 import pytest
@@ -55,6 +56,7 @@ from app.db.models import (
 
 _TENANT_A = "tenant-a"
 _TENANT_B = "tenant-b"
+_MESSAGE_IDS = count(1)
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +541,9 @@ def insert_archive_message(db: Session, **kwargs) -> ArchiveMessage:
         tenant_id=_TENANT_A,
     )
     defaults.update(kwargs)
-    defaults.setdefault("msgid", f"msg-{defaults['seq']}-{id(defaults)}")
+    # Temporary dict addresses can be reused after each call; they are not IDs.
+    if "msgid" not in defaults:
+        defaults["msgid"] = f"msg-{defaults['seq']}-{next(_MESSAGE_IDS)}"
     msg = ArchiveMessage(**defaults)
     db.add(msg)
     db.commit()

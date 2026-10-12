@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
+from zipfile import ZipFile
 
+import openpyxl.packaging.core as excel_properties
+import openpyxl.writer.excel as excel_writer
 from openpyxl import load_workbook
 
 from app.message_type_registry import describe_message_type
@@ -170,7 +174,16 @@ def test_export_never_projects_decrypted_payload_or_encrypted_envelope() -> None
     assert b"must not export" not in pdf
 
 
-def test_media_export_is_metadata_only_and_does_not_scale_with_binary_payload() -> None:
+def test_media_export_is_metadata_only_and_does_not_scale_with_binary_payload(monkeypatch) -> None:
+    # Created/modified timestamps change core.xml's compressed length across
+    # seconds. Hold that unrelated input fixed when comparing media sizes.
+    fixed_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    fixed_clock = SimpleNamespace(
+        datetime=SimpleNamespace(now=lambda tz: fixed_time.astimezone(tz)),
+        timezone=timezone,
+    )
+    monkeypatch.setattr(excel_properties, "datetime", fixed_clock)
+    monkeypatch.setattr(excel_writer, "datetime", fixed_clock)
     message = _message(
         1,
         "tenant-a",
@@ -187,6 +200,16 @@ def test_media_export_is_metadata_only_and_does_not_scale_with_binary_payload() 
     assert projected["content"] == "[file: fixed-contract.pdf, 42 bytes]"
     assert len(large) == len(small)
     assert b"x" * 100 not in large
+    with ZipFile(BytesIO(small)) as first, ZipFile(BytesIO(large)) as second:
+        assert first.namelist() == second.namelist()
+        for name in first.namelist():
+            assert first.read(name) == second.read(name), name
+            assert b"x" * 100 not in second.read(name)
+            assert b"y" * 100 not in second.read(name)
+    workbook = load_workbook(BytesIO(large), read_only=True)
+    assert workbook.properties.created == fixed_time.replace(tzinfo=None)
+    assert workbook.properties.modified == fixed_time.replace(tzinfo=None)
+    workbook.close()
 
 
 def test_tenant_isolation_excludes_other_tenant_message_and_name() -> None:

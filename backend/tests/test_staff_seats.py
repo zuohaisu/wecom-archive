@@ -51,6 +51,7 @@ Run (from backend/):
 
 from __future__ import annotations
 
+from itertools import count
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -197,6 +198,7 @@ CREATE TABLE group_chat_metadata (
 
 _TENANT_A = "tenant-a"
 _TENANT_B = "tenant-b"
+_MESSAGE_IDS = count(1)
 
 
 def _make_session() -> Session:
@@ -230,11 +232,31 @@ def _insert_message(db: Session, **kwargs) -> ArchiveMessage:
         tenant_id=_TENANT_A,
     )
     defaults.update(kwargs)
-    defaults.setdefault("msgid", f"msg-{defaults['seq']}-{id(defaults)}")
+    # Temporary dict addresses can be reused after each call; they are not IDs.
+    if "msgid" not in defaults:
+        defaults["msgid"] = f"msg-{defaults['seq']}-{next(_MESSAGE_IDS)}"
     msg = ArchiveMessage(**defaults)
     db.add(msg)
     db.flush()
     return msg
+
+
+def test_insert_message_default_msgids_survive_reused_object_addresses(
+    db: Session, monkeypatch
+) -> None:
+    # Force the old id(defaults) scheme to collide regardless of allocator timing.
+    monkeypatch.setitem(globals(), "id", lambda _: 42)
+    messages = [_insert_message(db, seq=1) for _ in range(20)]
+    assert len({message.id for message in messages}) == 20
+    assert len({message.msgid for message in messages}) == 20
+
+
+def test_insert_message_preserves_explicit_msgids(db: Session) -> None:
+    # Cross-tenant fixtures intentionally reuse an upstream message ID.
+    first = _insert_message(db, msgid="shared-msgid", tenant_id=_TENANT_A)
+    second = _insert_message(db, msgid="shared-msgid", tenant_id=_TENANT_B)
+    assert first.msgid == second.msgid == "shared-msgid"
+    assert first.id != second.id
 
 
 def _insert_recipient(db: Session, message_id: int, userid: str, **kwargs) -> ArchiveMessageRecipient:
