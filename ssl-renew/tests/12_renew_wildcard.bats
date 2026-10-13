@@ -72,7 +72,10 @@ EOF
 }
 
 # use_bind_failure_helper <domain> <message> succeeds for upload and every
-# other bind, but returns a synthetic error for the selected domain.
+# other bind/verify, but returns a synthetic bind error for the selected
+# domain. MOCK_FAIL_VERIFY_DOMAIN (optional) additionally fails `verify`
+# for that domain (HTTP 612-style), modelling a source domain the CDN API
+# cannot see at all.
 use_bind_failure_helper() {
     export MOCK_FAIL_BIND_DOMAIN="$1"
     export MOCK_FAIL_BIND_MESSAGE="$2"
@@ -83,6 +86,10 @@ import sys
 
 args = sys.argv[1:]
 command = args[0] if args else ""
+
+if os.environ.get("MOCK_QINIU_LOG"):
+    with open(os.environ["MOCK_QINIU_LOG"], "a") as f:
+        f.write(" ".join(args) + "\n")
 
 
 def value(flag):
@@ -97,6 +104,12 @@ if command == "bind":
         print(json.dumps({"error": os.environ["MOCK_FAIL_BIND_MESSAGE"]}))
         sys.exit(1)
     print(json.dumps({}))
+    sys.exit(0)
+if command == "verify":
+    if value("--domain") == os.environ.get("MOCK_FAIL_VERIFY_DOMAIN"):
+        print(json.dumps({"error": os.environ["MOCK_FAIL_BIND_MESSAGE"]}))
+        sys.exit(1)
+    print(json.dumps({"ok": True, "certId": value("--expected-cert-id"), "matches": True}))
     sys.exit(0)
 print(json.dumps({"error": "unexpected command"}))
 sys.exit(1)
@@ -117,6 +130,25 @@ esac
 exec "$REAL_CP" "$@"
 EOF
     chmod +x "$MOCK_BIN_DIR/cp"
+}
+
+# ── GH-232 helpers: deployed-state files + console-binding marker ───────
+
+# write_deployed_state <certid> records fp+certid files matching the cert
+# currently in $HOME/.acme.sh/$REAL_DOMAIN (i.e. run fake_acme_sh first).
+write_deployed_state() {
+    local certid="$1" fp
+    fp=$(sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}')
+    echo "$fp" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
+    echo "$certid" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid"
+}
+
+# write_origin_console_marker records the current cert's fingerprint in
+# .origin_console_fp, simulating an operator who has console-bound the
+# current cert to the origin domain per the GH-232 runbook.
+write_origin_console_marker() {
+    sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}' \
+        >"$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp"
 }
 
 # ── Canonical reporting and alert integration ───────────────────────────
@@ -182,8 +214,8 @@ EOF
     fake_sudo 0
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
-    local_fp=$(sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}')
-    echo "$local_fp" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
+    write_deployed_state "wildcard-certid"
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
     : >"$TEST_TMPDIR/acme_invocations.log"
 
     run "$WILDCARD"
@@ -205,38 +237,126 @@ EOF
     grep -q 'sudo -n /usr/bin/systemctl reload nginx' "$TEST_TMPDIR/sudo_invocations.log"
 }
 
-@test "acme exit 2 with a matching fingerprint is a successful no-op" {
+@test "acme exit 2 with a matching fingerprint is a successful no-op after re-verification" {
     fake_acme_sh 2
     fake_sudo 0
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
-    local_fp=$(sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}')
-    echo "$local_fp" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
+    write_deployed_state "wildcard-certid"
     : >"$TEST_TMPDIR/acme_invocations.log"
 
     use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
     run "$WILDCARD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"already deployed"* ]]
-    [ ! -f "$TEST_TMPDIR/helper.log" ]
+    [[ "$output" == *"cert already deployed — nothing to do"* ]]
+    # GH-232: the early-exit path now re-verifies BOTH live Qiniu bindings
+    # (CDN + origin) against the recorded certID instead of blindly
+    # trusting the fingerprint file.
+    [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 2 ]
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-@test "matching fingerprint remains a successful no-op" {
+@test "matching fingerprint remains a successful no-op after re-verification" {
     fake_acme_sh 0
     fake_sudo 0
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
-    local_fp=$(sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}')
-    echo "$local_fp" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
+    write_deployed_state "wildcard-certid"
     : >"$TEST_TMPDIR/acme_invocations.log"
 
     use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
     run "$WILDCARD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"already deployed"* ]]
-    [ ! -f "$TEST_TMPDIR/helper.log" ]
+    [[ "$output" == *"cert already deployed — nothing to do"* ]]
+    [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 2 ]
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+# ── GH-232: early-exit re-verification failure branches self-heal ───────
+
+@test "fingerprint match with a CDN certID drift triggers full redeployment" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_CERT_ID="wildcard-certid"
+    export MOCK_QINIU_VERIFY_MISMATCH_DOMAIN="$CDN_DOMAIN"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"CDN binding verify failed"* ]]
+    [[ "$output" == *"continuing with full deployment"* ]]
+    [[ "$output" == *"bound to $CDN_DOMAIN (CDN)"* ]]
+    [[ "$output" == *"bound to $ORIGIN_DOMAIN (origin)"* ]]
+    grep -q '^upload ' "$TEST_TMPDIR/helper.log"
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
+}
+
+@test "fingerprint match without a recorded certID triggers full redeployment" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    # Legacy state: fp written by an older script version, no certID file.
+    sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}' >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid" ]
+
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_CERT_ID="wildcard-certid"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no recorded certID"* ]]
+    [[ "$output" == *"continuing with full deployment"* ]]
+    grep -q '^upload ' "$TEST_TMPDIR/helper.log"
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
+}
+
+@test "fingerprint match with an unverifiable origin binding and no console marker redeploys" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp" ]
+
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_CERT_ID="wildcard-certid"
+    export MOCK_QINIU_VERIFY_MISMATCH_DOMAIN="$ORIGIN_DOMAIN"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"origin binding verify failed (no matching console marker)"* ]]
+    [[ "$output" == *"continuing with full deployment"* ]]
+    grep -q '^upload ' "$TEST_TMPDIR/helper.log"
+}
+
+@test "fingerprint match with a matching console marker skips the origin API verify" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+    # The origin verify would 612 if it were attempted — the matching
+    # marker must excuse it and keep the run a verified no-op.
+    export MOCK_QINIU_VERIFY_MISMATCH_DOMAIN="$ORIGIN_DOMAIN"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"origin console-binding marker matches"* ]]
+    [[ "$output" == *"cert already deployed — nothing to do"* ]]
+    # Only the CDN verify ran.
+    [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 1 ]
+    grep -q "^verify --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log"
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
 }
 
 # ── Hard failures ───────────────────────────────────────────────────────
@@ -308,21 +428,92 @@ EOF
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
 }
 
-# ── Approved warning-only paths ─────────────────────────────────────────
+# ── Hard failure: origin bind (GH-232 fail-closed + console marker) ─────
 
-@test "origin bind failure warns, continues to nginx deployment, and exits success" {
+@test "origin bind failure without a console marker dies with runbook guidance and records nothing" {
     fake_acme_sh 0
     fake_sudo 0
-    use_bind_failure_helper "$ORIGIN_DOMAIN" "origin bind rejected"
+    use_bind_failure_helper "$ORIGIN_DOMAIN" 'HTTP 612: {"code":612,"error":"no such domain"}'
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp" ]
+
+    run "$WILDCARD"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[ERROR] stage=qiniu_bind_origin domain=crowntime.cn"* ]]
+    [[ "$output" == *"certID=wildcard-certid is NOT bound"* ]]
+    [[ "$output" == *"612"* ]]
+    [[ "$output" == *"docs/operations/qiniu-origin-domain-https-runbook.md"* ]]
+    [[ "$output" == *".origin_console_fp"* ]]
+    [[ "$output" != *"bound to $ORIGIN_DOMAIN (origin)"* ]]
+    [[ "$output" != *"command not found"* ]]
+    # An origin hard failure records nothing and never reaches nginx.
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid" ]
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+@test "a stale console marker does not excuse an origin bind failure for a new cert" {
+    fake_acme_sh 0
+    fake_sudo 0
+    use_bind_failure_helper "$ORIGIN_DOMAIN" 'HTTP 612: {"code":612,"error":"no such domain"}'
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    echo "stale-fingerprint-from-a-previous-cert" >"$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp"
+
+    run "$WILDCARD"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[ERROR] stage=qiniu_bind_origin domain=crowntime.cn"* ]]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+}
+
+@test "a matching console marker excuses the expected origin 612 and completes the deployment" {
+    fake_acme_sh 0
+    fake_sudo 0
+    # Operator has already console-bound the CURRENT cert (the 612 response
+    # is the expected API limitation, not drift).
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    use_bind_failure_helper "$ORIGIN_DOMAIN" 'HTTP 612: {"code":612,"error":"no such domain"}'
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_origin_console_marker
+    : >"$TEST_TMPDIR/acme_invocations.log"
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"[WARN] stage=qiniu_bind_origin domain=crowntime.cn message=Origin bind failed (may need Qiniu Console config): origin bind rejected"* ]]
-    [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
-    [ -f "$NGINX_CERT_DIR/privkey.pem" ]
+    [[ "$output" == *"[WARN] stage=qiniu_bind_origin domain=crowntime.cn"* ]]
+    [[ "$output" == *".origin_console_fp matches the current cert"* ]]
     [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
+    [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
     grep -q 'sudo -n /usr/bin/systemctl reload nginx' "$TEST_TMPDIR/sudo_invocations.log"
 }
+
+@test "runs converge after the console bind: alert, marker, then a verified no-op" {
+    fake_acme_sh 0
+    fake_sudo 0
+    use_bind_failure_helper "$ORIGIN_DOMAIN" 'HTTP 612: {"code":612,"error":"no such domain"}'
+
+    # Run 1: no marker — hard failure, nothing recorded, alert fires.
+    run "$WILDCARD"
+    [ "$status" -eq 1 ]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+
+    # Operator console-binds the current cert and records the marker.
+    write_origin_console_marker
+
+    # Run 2: full redeploy, origin 612 excused by the marker, state recorded.
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
+
+    # Run 3: fp match + CDN verify + matching marker — a verified no-op.
+    export MOCK_QINIU_LOG="$TEST_TMPDIR/helper.log"
+    export MOCK_FAIL_VERIFY_DOMAIN="$ORIGIN_DOMAIN"
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"cert already deployed — nothing to do"* ]]
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+}
+
+# ── Approved warning-only paths ─────────────────────────────────────────
 
 @test "nginx certificate copy failure warns and preserves final success" {
     fake_acme_sh 0
@@ -372,6 +563,7 @@ EOF
     [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
     [ -f "$NGINX_CERT_DIR/privkey.pem" ]
     [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
     grep -q 'sudo -n /usr/bin/systemctl reload nginx' "$TEST_TMPDIR/sudo_invocations.log"
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.tls_verified" ]
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.tls_mismatch_days" ]

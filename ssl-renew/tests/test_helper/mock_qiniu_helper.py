@@ -16,6 +16,7 @@ Controlled via env vars:
     MOCK_QINIU_ACTUAL_CERT_ID  certId to return for `verify` (default: same as expected)
     MOCK_QINIU_ERROR      error message override
     MOCK_QINIU_LOG        if set, the full argv is appended here (one line per call)
+    MOCK_QINIU_VERIFY_MISMATCH_DOMAIN  if set, `verify` for this domain reports a stale certId
 """
 import json
 import os
@@ -83,6 +84,9 @@ def main():
     if command == "verify":
         expected = get_opt("--expected-cert-id")
         actual = os.environ.get("MOCK_QINIU_ACTUAL_CERT_ID", expected)
+        mismatch_domain = os.environ.get("MOCK_QINIU_VERIFY_MISMATCH_DOMAIN")
+        if mismatch_domain and get_opt("--domain") == mismatch_domain:
+            actual = "stale-certid"
         emit({"ok": True, "certId": actual, "matches": actual == expected})
         return EXIT_OK
 
