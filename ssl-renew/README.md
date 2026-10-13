@@ -11,7 +11,7 @@
 | 文件 | 用途 |
 |------|------|
 | `renew.sh` | 主脚本: 续期 + 部署 + 验证编排 (单域名, per-domain Qiniu CDN 证书绑定) |
-| `renew-wildcard.sh` | 通配符证书续期示例 (GH-104 Follow-up B): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。与 `renew.sh` 语义不同；改用于其他环境前请阅读 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling) 并替换域名、provider 与凭据 |
+| `renew-wildcard.sh` | 通配符证书续期示例 (GH-104 Follow-up B): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。与 `renew.sh` 语义不同；改用于其他环境前请阅读 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling) 并替换域名、provider 与凭据。GH-232 起：早退前会对 CDN 绑定（API verify）与 origin 实际服役证书（live TLS 指纹）做校验；origin 为对象存储源站域名，七牛 httpsconf API 不支持（HTTP 612），绑定失败即 fail-closed 告警，需按 [控制台 runbook](../docs/operations/qiniu-origin-domain-https-runbook.md) 手动绑定 |
 | `notify.sh` | 通用 Webhook 告警 (支持任意接受 JSON POST 的端点) |
 | `verify_https.sh` | 独立 HTTPS/TLS 验证 (可单独运行) |
 | `install.sh` | 幂等安装 / 预检脚本 |
@@ -21,7 +21,7 @@
 | `requirements.txt` / `requirements-dev.txt` | `qiniu_helper.py` 的 Python 依赖 |
 | `examples/domain.env.example` | 每域名 systemd `EnvironmentFile` 配置模板 (per-domain 模板用) |
 | `examples/wildcard-domain.env.example` | 通配符 `EnvironmentFile` 配置模板 (`renew-wildcard.sh` 用，仅列变量名，不含真实值) |
-| `tests/` | bats + pytest 测试套件 (156 个测试) + mock 基础设施 |
+| `tests/` | bats + pytest 测试套件 (166 个测试） + mock 基础设施 |
 | `Dockerfile` | Linux + systemd 工具验证环境 (macOS 无 systemd 时使用) |
 | `../deploy/systemd/qiniu-ssl-renew@.service` | systemd service 模板 (per-domain instance) |
 | `../deploy/systemd/qiniu-ssl-renew@.timer` | systemd timer 模板 |
