@@ -533,3 +533,180 @@ def test_upload_missing_cert_file_is_usage_error():
         ["upload", "--domain", "d.test", "--cert-file", "/no/such/file.cer", "--key-file", "/no/such/file.key"]
     )
     assert result.returncode == qiniu_helper.EXIT_USAGE_ERROR
+
+
+# ===============================================================
+# 6. `query` — read-only binding probe (GH-231)
+# ===============================================================
+
+# Fixed offline fixtures: two self-signed certificates. The `query` chain
+# reads /domain/<d>/httpsconf then /sslcert/<certId>, so the mock must route
+# by path — a tiny in-process server keyed on path prefix.
+FIXTURE_LEAF_PEM = '-----BEGIN CERTIFICATE-----\nMIICrjCCAZYCCQCnlz5KYhzCbzANBgkqhkiG9w0BAQsFADAZMRcwFQYDVQQDDA4q\nLmV4YW1wbGUudGVzdDAeFw0yNjEwMTMwNjI5MTBaFw0zNjEwMTAwNjI5MTBaMBkx\nFzAVBgNVBAMMDiouZXhhbXBsZS50ZXN0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A\nMIIBCgKCAQEAt/zq8EWv5FikymMcZj1IDdYKSGrRpC4szd2YQzGPbde3DMeNU1Hd\nTgog7lfaYCObgZIydRJavALLQTZ/rK1DNqcVrgENCBz+l5JTJebpdzdOjaOM5Utm\nk5TB5L6G+MtwcpT5r7N+KHvONyTHaK3Hy8vtt1t02EFF/DVEzWBXLkr2V4I/II/u\nR4tXn/RtB9lV+UdAlFynX0r6HzwkVa+yU4k13uF8u8YgslK2GT2TaY7Iilbm7pJl\nSnxKRAt8NYbmubMN6tmhiYhpHxEI8QG5LiGZmLPS1cty8WyypS0uhgwLQwvnPwVP\nwN3fbo3hqY+NjIZAsoT07BeafWKQKx9+HwIDAQABMA0GCSqGSIb3DQEBCwUAA4IB\nAQBjNVRA57CZeUm0LRUB0hyv9RaMb7XutxgjAe5/6AbJufcr/FNokMmxPN1An+jk\nppMJrQxo2WLLOyz9R+3lKW4eFkDatrp5j39z5YTb5j7NwoR1fsQzqUrz7ws6HaEX\nxjfUUVNqQ4zjkc+r6D/2xbqBCndHqk+/lquQcY+zgmozhRPlfw7UNqYFnGklsz6P\nptrKkaMoD80OWyQuOOzdFqdHmshGzaUmgF2jIl2YcckobpUZ+6mcWe9LFmZFSYEV\nrlnaZUYzMzS/hKUfuMqEvpbh8o9jymF2Z1mKzMHBmXo8Rs1DlexkrQpyeWDZT4/x\npNpRpoBW4N6zEIavPlcO6Jar\n-----END CERTIFICATE-----\n'
+FIXTURE_SECOND_PEM = '-----BEGIN CERTIFICATE-----\nMIICuDCCAaACCQCg6yUR7d/GsjANBgkqhkiG9w0BAQsFADAeMRwwGgYDVQQDDBNz\nZWNvbmQuZXhhbXBsZS50ZXN0MB4XDTI2MTAxMzA2MjkxMFoXDTM2MTAxMDA2Mjkx\nMFowHjEcMBoGA1UEAwwTc2Vjb25kLmV4YW1wbGUudGVzdDCCASIwDQYJKoZIhvcN\nAQEBBQADggEPADCCAQoCggEBAKI0nhf3DzNVbHSvzNC0bAZFUKgKCtRbJ6dEZPK1\nzehpZseQMhmbpx/iQY2BHEHhgp4oaAZuzImklf5Sm+3v17ZqfKGI4ghQRuv6BbgA\nxrRbOPtsTUWuTDkmzNWjc8/lN1aQLIL7w1dP+L7dyNRL8+YHWB+UXZ+jBkGt2DiJ\ncF+looHvmR/xvWOz30NXwe648ChqPAZTYWCh+Z78tIl4D9vnlE0E8eBgyeGOH3Li\nutwdqYu1VL61fVLac4dHvpvCjvl0JKbZTSFmCxbM+nvK3iWXqFG7vhcfYl5a6chL\nC38BD/4f99fzOuqPNyl+9Z9v4C/qup9ljJJhM4MMXh0qM/ECAwEAATANBgkqhkiG\n9w0BAQsFAAOCAQEAkj/a8OuGIwzFnAbwA5KdmktoOQGTiE7uPHFv581mfG8kY7n8\npmtx4XZztUxgZm6SZHWajAYHsH/rOR2uj+HmRm5gySOu5v4YvHKaPYZHpvvIZuhS\n8DMQ5QUTq4IpeUtLWYp6Mg+q3aC4yYCdGJdMa0qDtD/BzeK9eWtjTD9Y346w6T+v\nO/6t+/s5r3Z5yhs8iwlBzusJw3j34Uztk4dXCoQLuLqwrSR+LUPy+Z8f7HQuzC1J\nFQR/1T2e5UQ5MUtsypyMJEMREHzK4Ada6sAxQr/NxNwH2e+GETOwplWiotMw+iu0\nTHldIMdF23InhFsd7zHeAVMa29K0FNFTDMez7Q==\n-----END CERTIFICATE-----\n'
+FIXTURE_LEAF_FP = 'b0e2454d162d0b4b13d262eca53aa6d8f88bdc8774222b1d43fa88e1997ec517'
+FIXTURE_SECOND_FP = '39b1a796b1bec1494dc867e520170e611dc70a6cb79572195a43e49f8d1b03df'
+FIXTURE_NOT_BEFORE = 1791872400
+FIXTURE_NOT_AFTER = 1799648400
+
+
+class RoutingQiniuServer:
+    """Serves a fixed (status, body) per path prefix on 127.0.0.1."""
+
+    def __init__(self, routes):
+        import http.server
+        import threading
+
+        routes = dict(routes)
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                for prefix, (status, body) in routes.items():
+                    if self.path.startswith(prefix):
+                        payload = body.encode("utf-8")
+                        self.send_response(status)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(payload)))
+                        self.end_headers()
+                        self.wfile.write(payload)
+                        return
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, fmt, *args):
+                pass
+
+        self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def host(self) -> str:
+        return f"http://127.0.0.1:{self._httpd.server_port}"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._httpd.shutdown()
+        self._httpd.server_close()
+
+
+def _query_routes(httpsconf_body, sslcert_status=200, sslcert_body=""):
+    return {
+        "/domain/": (200, httpsconf_body),
+        "/sslcert/": (sslcert_status, sslcert_body),
+    }
+
+
+def test_query_returns_bound_cert_details():
+    chain = FIXTURE_LEAF_PEM + FIXTURE_SECOND_PEM
+    detail = json.dumps({
+        "code": 200, "error": "",
+        "cert": {
+            "name": "wildcard", "common_name": "*.example.test",
+            "not_before": FIXTURE_NOT_BEFORE, "not_after": FIXTURE_NOT_AFTER,
+            "create_time": 1780000000,
+            "ca": chain, "pri": "SECRET-PRIVATE-KEY-BODY",
+        },
+    })
+    with RoutingQiniuServer(_query_routes('{"certId":"cert-abc-123"}', sslcert_body=detail)) as server:
+        result = run_helper(["query", "--domain", "origin.example.test"], env_extra={"QINIU_API_HOST": server.host})
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["certId"] == "cert-abc-123"
+    # The fingerprint is the LEAF of the stored chain, hashed as DER — the
+    # exact counterpart of `openssl x509 -outform DER | sha256sum`.
+    assert payload["certFingerprint"] == FIXTURE_LEAF_FP
+    assert payload["certFingerprint"] != FIXTURE_SECOND_FP
+    assert payload["notBefore"] == FIXTURE_NOT_BEFORE
+    assert payload["notAfter"] == FIXTURE_NOT_AFTER
+    assert payload["commonName"] == "*.example.test"
+    assert payload["certDetailMissing"] is False
+
+
+def test_query_tolerates_flat_cert_detail_body():
+    detail = json.dumps({
+        "code": 200, "error": "",
+        "name": "wildcard", "common_name": "*.example.test",
+        "not_before": FIXTURE_NOT_BEFORE, "not_after": FIXTURE_NOT_AFTER,
+        "ca": FIXTURE_LEAF_PEM,
+    })
+    with RoutingQiniuServer(_query_routes('{"certId":"cert-abc-123"}', sslcert_body=detail)) as server:
+        result = run_helper(["query", "--domain", "origin.example.test"], env_extra={"QINIU_API_HOST": server.host})
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["certFingerprint"] == FIXTURE_LEAF_FP
+    assert payload["notAfter"] == FIXTURE_NOT_AFTER
+
+
+def test_query_without_binding_reports_null_certid():
+    with RoutingQiniuServer(_query_routes("{}")) as server:
+        result = run_helper(["query", "--domain", "origin.example.test"], env_extra={"QINIU_API_HOST": server.host})
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["certId"] is None
+    assert payload["certFingerprint"] is None
+    assert payload["certDetailMissing"] is False
+
+
+def test_query_bound_cert_deleted_reports_detail_missing():
+    with RoutingQiniuServer(_query_routes('{"certId":"gone"}', sslcert_status=404, sslcert_body='{"error":"no such cert"}')) as server:
+        result = run_helper(["query", "--domain", "origin.example.test"], env_extra={"QINIU_API_HOST": server.host})
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["certId"] == "gone"
+    assert payload["certFingerprint"] is None
+    assert payload["notAfter"] is None
+    assert payload["certDetailMissing"] is True
+
+
+def test_query_auth_failure_maps_to_auth_exit_code():
+    with RoutingQiniuServer({"/domain/": (401, '{"error":"denied"}')}) as server:
+        result = run_helper(["query", "--domain", "origin.example.test"], env_extra={"QINIU_API_HOST": server.host})
+    assert result.returncode == qiniu_helper.EXIT_AUTH_FAILURE
+    payload = json.loads(result.stdout)
+    assert payload["http_status"] == 401
+    assert "AK/SK" in payload["error"]
+
+
+def test_query_server_error_maps_to_generic_failure():
+    with RoutingQiniuServer({"/domain/": (503, '{"error":"unavailable"}')}) as server:
+        result = run_helper(["query", "--domain", "origin.example.test"], env_extra={"QINIU_API_HOST": server.host})
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert payload["http_status"] == 503
+
+
+def test_query_never_emits_private_key_or_cert_material():
+    chain = FIXTURE_LEAF_PEM + FIXTURE_SECOND_PEM
+    detail = json.dumps({
+        "code": 200, "cert": {
+            "common_name": "*.example.test", "not_before": FIXTURE_NOT_BEFORE,
+            "not_after": FIXTURE_NOT_AFTER, "ca": chain,
+            "pri": "-----BEGIN PRIVATE KEY-----SUPERSECRETKEYBODY-----END PRIVATE KEY-----",
+        },
+    })
+    with RoutingQiniuServer(_query_routes('{"certId":"cert-abc-123"}', sslcert_body=detail)) as server:
+        result = run_helper(["query", "--domain", "origin.example.test"], env_extra={"QINIU_API_HOST": server.host})
+    assert result.returncode == 0
+    assert "SUPERSECRETKEYBODY" not in result.stdout
+    assert "PRIVATE KEY" not in result.stdout
+    assert "BEGIN CERTIFICATE" not in result.stdout
+    # The fingerprint digest itself is the only cert-derived output.
+    assert FIXTURE_LEAF_FP in result.stdout
+
+
+def test_leaf_cert_sha256_picks_leaf_from_chain():
+    chain = FIXTURE_LEAF_PEM + FIXTURE_SECOND_PEM
+    assert qiniu_helper.leaf_cert_sha256(chain) == FIXTURE_LEAF_FP
+    assert qiniu_helper.leaf_cert_sha256(FIXTURE_SECOND_PEM) == FIXTURE_SECOND_FP
+    assert qiniu_helper.leaf_cert_sha256("") is None
+    assert qiniu_helper.leaf_cert_sha256(None) is None
+    assert qiniu_helper.leaf_cert_sha256("-----BEGIN CERTIFICATE-----garbage") is None

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #=============================================================================
-# lib/qiniu.sh — Qiniu SSL certificate upload / bind / verify.
+# lib/qiniu.sh — Qiniu SSL certificate upload / bind / verify / query.
 #
 # All request signing and HTTP transport is delegated to qiniu_helper.py,
 # which uses the OFFICIAL `qiniu` Python SDK (qiniu.Auth / qiniu.DomainManager)
@@ -152,4 +152,40 @@ verify_certID_on_domain() {
 	fi
 	echo "API certID=$actual confirmed" >&2
 	return 0
+}
+
+# ── Query which certificate a domain is actually bound to (GH-231). ─────
+# READ-ONLY (GET /domain/<d>/httpsconf + GET /sslcert/<certId>) and
+# therefore deliberately NOT short-circuited by dry-run mode: a dry-run
+# reconciliation plan must reflect the bindings that really exist. Only
+# request signatures touch the network — this function never changes
+# anything, in any mode.
+#
+# On success prints one pipe-separated line on stdout:
+#   certId|certFingerprint|notAfter|certDetailMissing
+# where certId/certFingerprint/notAfter may be empty (absent binding or
+# unresolvable bound cert) and certDetailMissing is "1" or "". The raw
+# helper JSON — which is the only place certificate material could appear —
+# never reaches stdout of this function.
+# Returns 1 only when the query itself failed (transport/API error); the
+# caller decides whether that is fatal. Requires jq.
+query_domain_cert_binding() {
+	local domain="$1"
+
+	local helper_output helper_status
+	helper_output=$(_qiniu_helper_run query \
+		--domain "$domain" --timeout "$QINIU_HELPER_TIMEOUT")
+	helper_status=$?
+
+	if [ "$helper_status" -ne 0 ]; then
+		_qiniu_helper_error_message "$helper_output" "$helper_status" >&2
+		return 1
+	fi
+
+	printf '%s' "$helper_output" | jq -r '[
+		(.certId // ""),
+		(.certFingerprint // ""),
+		((.notAfter // "") | tostring),
+		(if .certDetailMissing == true then "1" else "" end)
+	] | join("|")'
 }

@@ -15,6 +15,7 @@ non-zero on failure — see `Result.exit_code`):
     qiniu_helper.py upload --domain <domain> --cert-file <path> --key-file <path> [--timeout N]
     qiniu_helper.py bind   --domain <domain> --cert-id <id>                       [--timeout N]
     qiniu_helper.py verify --domain <domain> --expected-cert-id <id>              [--timeout N]
+    qiniu_helper.py query  --domain <domain>                                      [--timeout N]
 
 Credentials come ONLY from the environment (QINIU_ACCESS_KEY/QINIU_SECRET_KEY,
 falling back to SAVED_QINIU_AK/SAVED_QINIU_SK) — never from argv. Certificate
@@ -27,9 +28,11 @@ Authorization header, or private key / certificate material. See
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import warnings
@@ -88,6 +91,34 @@ def redact(text: Optional[str]) -> str:
 def emit(result: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(result, separators=(",", ":")) + "\n")
     sys.stdout.flush()
+
+
+_LEAF_CERT_PEM_RE = re.compile(
+    r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", re.DOTALL
+)
+
+
+def leaf_cert_sha256(pem_text: Optional[str]) -> Optional[str]:
+    """SHA-256 fingerprint (hex) of the FIRST (leaf) certificate in a PEM
+    chain, or None when no parsable certificate block is present.
+
+    This is the comparable counterpart of the local-side fingerprint that
+    renew-wildcard.sh computes as
+    `openssl x509 -in fullchain.cer -outform DER | sha256sum` — both hash the
+    DER encoding of the leaf certificate, so equality means "the same
+    certificate". Only the hex digest ever leaves this function: the PEM/DER
+    bytes themselves are never printed or logged.
+    """
+    if not pem_text:
+        return None
+    match = _LEAF_CERT_PEM_RE.search(pem_text)
+    if not match:
+        return None
+    try:
+        der = ssl.PEM_cert_to_DER_cert(match.group(0))
+    except Exception:
+        return None
+    return hashlib.sha256(der).hexdigest()
 
 
 def load_credentials() -> tuple[str, str]:
@@ -257,50 +288,111 @@ def cmd_bind(args: argparse.Namespace) -> dict[str, Any]:
     return {"ok": True}
 
 
-def cmd_verify(args: argparse.Namespace) -> dict[str, Any]:
+def _signed_qbox_get(path: str, timeout: int, stage: str) -> dict[str, Any]:
+    """Read-only signed GET of {_api_host()}<path>, shared by the `verify`
+    and `query` commands. The official SDK does not wrap these endpoints, so
+    signing uses the official `qiniu.Auth.token_of_request()` (GET has no
+    body) and transport is plain `requests`. Raises HelperError on any
+    transport, protocol, or auth failure; returns the parsed JSON body."""
     ak, sk = load_credentials()
-    _apply_timeout(args.timeout)
+    _apply_timeout(timeout)
     auth = Auth(ak, sk)
 
-    url = f"{_api_host()}/domain/{args.domain}/httpsconf"
+    url = f"{_api_host()}{path}"
     token = auth.token_of_request(url)  # official signer, GET has no body
 
     if requests is None:
-        raise HelperError("verify", "the 'requests' package is not installed", exit_code=EXIT_MISSING_DEPENDENCY)
+        raise HelperError(stage, "the 'requests' package is not installed", exit_code=EXIT_MISSING_DEPENDENCY)
 
     try:
         resp = requests.get(
             url,
             headers={"Authorization": f"QBox {token}"},
-            timeout=args.timeout,
+            timeout=timeout,
         )
     except requests.exceptions.Timeout as exc:
-        raise HelperError("verify", "request timed out") from exc
+        raise HelperError(stage, "request timed out") from exc
     except requests.exceptions.RequestException as exc:
-        raise HelperError("verify", f"request failed: {redact(str(exc))}") from exc
+        raise HelperError(stage, f"request failed: {redact(str(exc))}") from exc
 
     if resp.status_code in (401, 403):
         raise HelperError(
-            "verify",
-            f"Qiniu verify rejected — HTTP {resp.status_code} (check AK/SK and permissions)",
+            stage,
+            f"Qiniu {stage} rejected — HTTP {resp.status_code} (check AK/SK and permissions)",
             exit_code=EXIT_AUTH_FAILURE,
             http_status=resp.status_code,
         )
     if resp.status_code == 429:
-        raise HelperError("verify", "Qiniu verify rate-limited — HTTP 429", http_status=429)
+        raise HelperError(stage, f"Qiniu {stage} rate-limited — HTTP 429", http_status=429)
     if resp.status_code >= 500:
-        raise HelperError("verify", f"Qiniu verify server error — HTTP {resp.status_code}", http_status=resp.status_code)
+        raise HelperError(stage, f"Qiniu {stage} server error — HTTP {resp.status_code}", http_status=resp.status_code)
     if resp.status_code != 200:
-        raise HelperError("verify", f"Qiniu verify failed — HTTP {resp.status_code}", http_status=resp.status_code)
+        raise HelperError(stage, f"Qiniu {stage} failed — HTTP {resp.status_code}", http_status=resp.status_code)
 
     try:
-        data = resp.json()
+        return resp.json()
     except ValueError as exc:
-        raise HelperError("verify", "invalid JSON in Qiniu response") from exc
+        raise HelperError(stage, "invalid JSON in Qiniu response") from exc
+
+
+def cmd_verify(args: argparse.Namespace) -> dict[str, Any]:
+    data = _signed_qbox_get(f"/domain/{args.domain}/httpsconf", args.timeout, "verify")
 
     actual = data.get("certId") if isinstance(data, dict) else None
     matches = actual == args.expected_cert_id
     return {"ok": True, "certId": actual, "matches": matches}
+
+
+def cmd_query(args: argparse.Namespace) -> dict[str, Any]:
+    """Read-only binding probe (GH-231): which certificate is actually bound
+    to <domain>, and — if the cert still resolves in the account's cert
+    store — its validity window and leaf SHA-256 fingerprint.
+
+    Two signed GETs: /domain/<domain>/httpsconf (the binding) then
+    /sslcert/<certId> (the bound cert's details). The detail response
+    contains the full chain AND the private key (`ca` / `pri` fields); those
+    are parsed and immediately discarded — only certId, validity timestamps,
+    commonName, and the fingerprint hex digest are ever emitted.
+
+    An absent binding (httpsconf with no certId) is ok:true with certId:null
+    — deciding what an absent binding means is the caller's job. A bound
+    certId that no longer resolves (detail GET 404) is likewise ok:true with
+    certDetailMissing:true rather than an error: it is a decision-relevant
+    answer ("the binding points at a deleted certificate"), not a transport
+    failure."""
+    result: dict[str, Any] = {
+        "ok": True,
+        "domain": args.domain,
+        "certId": None,
+        "certFingerprint": None,
+        "notBefore": None,
+        "notAfter": None,
+        "commonName": None,
+        "certDetailMissing": False,
+    }
+
+    data = _signed_qbox_get(f"/domain/{args.domain}/httpsconf", args.timeout, "query")
+    cert_id = data.get("certId") if isinstance(data, dict) else None
+    if not cert_id:
+        return result
+    result["certId"] = cert_id
+
+    try:
+        detail = _signed_qbox_get(f"/sslcert/{cert_id}", args.timeout, "query")
+    except HelperError as exc:
+        if exc.http_status == 404:
+            result["certDetailMissing"] = True
+            return result
+        raise
+
+    # Documented shape is {"code":200, "cert":{...}}; tolerate a flat body.
+    cert = detail.get("cert") if isinstance(detail, dict) and isinstance(detail.get("cert"), dict) else detail
+    if isinstance(cert, dict):
+        result["notBefore"] = cert.get("not_before", cert.get("notBefore"))
+        result["notAfter"] = cert.get("not_after", cert.get("notAfter"))
+        result["commonName"] = cert.get("common_name", cert.get("commonName"))
+        result["certFingerprint"] = leaf_cert_sha256(cert.get("ca"))
+    return result
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -325,6 +417,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_verify.add_argument("--expected-cert-id", required=True)
     p_verify.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     p_verify.set_defaults(func=cmd_verify)
+
+    p_query = sub.add_parser("query")
+    p_query.add_argument("--domain", required=True)
+    p_query.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    p_query.set_defaults(func=cmd_query)
 
     try:
         args = parser.parse_args(argv)

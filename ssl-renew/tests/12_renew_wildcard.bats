@@ -314,6 +314,8 @@ EOF
     fake_acme_sh 0
     fake_sudo 0
     use_bind_failure_helper "$ORIGIN_DOMAIN" "origin bind rejected"
+    # GH-231: the origin bind step is opt-in via ORIGIN_DOMAIN.
+    export ORIGIN_DOMAIN
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
@@ -361,6 +363,8 @@ EOF
     fake_sudo 0
     use_mock_qiniu_helper success
     export MOCK_QINIU_CERT_ID="wildcard-certid"
+    # GH-231: the origin bind step is opt-in via ORIGIN_DOMAIN.
+    export ORIGIN_DOMAIN
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     touch "$HOME/.acme.sh/$REAL_DOMAIN/.tls_verified"
     echo 3 >"$HOME/.acme.sh/$REAL_DOMAIN/.tls_mismatch_days"

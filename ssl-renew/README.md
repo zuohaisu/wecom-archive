@@ -11,17 +11,17 @@
 | 文件 | 用途 |
 |------|------|
 | `renew.sh` | 主脚本: 续期 + 部署 + 验证编排 (单域名, per-domain Qiniu CDN 证书绑定) |
-| `renew-wildcard.sh` | 通配符证书续期示例 (GH-104 Follow-up B): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。与 `renew.sh` 语义不同；改用于其他环境前请阅读 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling) 并替换域名、provider 与凭据 |
+| `renew-wildcard.sh` | 通配符证书续期示例 (GH-104 Follow-up B): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。GH-231 起在"指纹未变化"的日常运行中还会对账 Qiniu 实际绑定 (origin 绑定由 `ORIGIN_DOMAIN` 配置开启)。与 `renew.sh` 语义不同；改用于其他环境前请阅读 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling) 并替换域名、provider 与凭据 |
 | `notify.sh` | 通用 Webhook 告警 (支持任意接受 JSON POST 的端点) |
 | `verify_https.sh` | 独立 HTTPS/TLS 验证 (可单独运行) |
 | `install.sh` | 幂等安装 / 预检脚本 |
 | `lib/common.sh` | 日志、secret 脱敏、域名校验、配置加载、超时包装 (`renew.sh` 与 `renew-wildcard.sh` 共用) |
 | `lib/qiniu.sh` | 调用 `qiniu_helper.py` 的薄 shell 封装 (dry-run 感知，`renew.sh` 与 `renew-wildcard.sh` 共用) |
-| `qiniu_helper.py` | Qiniu upload/bind/verify — 官方 `qiniu` Python SDK 签名，见下方"Qiniu 签名与 Secret 运行时安全" |
+| `qiniu_helper.py` | Qiniu upload/bind/verify/query — 官方 `qiniu` Python SDK 签名，见下方"Qiniu 签名与 Secret 运行时安全" |
 | `requirements.txt` / `requirements-dev.txt` | `qiniu_helper.py` 的 Python 依赖 |
 | `examples/domain.env.example` | 每域名 systemd `EnvironmentFile` 配置模板 (per-domain 模板用) |
 | `examples/wildcard-domain.env.example` | 通配符 `EnvironmentFile` 配置模板 (`renew-wildcard.sh` 用，仅列变量名，不含真实值) |
-| `tests/` | bats + pytest 测试套件 (156 个测试) + mock 基础设施 |
+| `tests/` | bats + pytest 测试套件 (182 个测试) + mock 基础设施 |
 | `Dockerfile` | Linux + systemd 工具验证环境 (macOS 无 systemd 时使用) |
 | `../deploy/systemd/qiniu-ssl-renew@.service` | systemd service 模板 (per-domain instance) |
 | `../deploy/systemd/qiniu-ssl-renew@.timer` | systemd timer 模板 |
@@ -57,6 +57,35 @@ dry-run 保证:
 - 不修改任何本地状态文件 (`.deployed_fp` / `.tls_verified` / `.tls_mismatch_days`)
 - 输出清楚说明"将要执行什么"（`[DRY-RUN]` 前缀），且不包含任何 secret
 - 有专门的自动化测试 (`tests/02_dry_run.bats`)
+
+## Qiniu 绑定对账 — origin/CDN binding reconciliation (GH-231)
+
+`renew-wildcard.sh` 原来只比较本地 `.deployed_fp` 指纹就判定"已部署，无事可做"，
+从不查询七牛实际给域名绑的是哪张证书 —— 2026-09 的续期只更新了 CDN 域名绑定，
+origin 域名 `media-origin.crowntime.cn` 静默保留着 7 月的旧证书。GH-231 修复:
+
+- **触发时机**: 每次"指纹未变化"的运行 (acme.sh 跳过、本地无新证书) 在退出前
+  对账七牛实际绑定；全新部署路径本来就会重新绑定，无需对账。
+- **开关**: `ORIGIN_DOMAIN` (如 `media-origin.crowntime.cn`)。**未设置 ⇒ 完全跳过
+  对账与 origin 绑定** —— 不发起任何新的 API 调用，行为与 GH-231 之前完全一致。
+  设置后对账 CDN + origin 两个域名。`QINIU_BUCKET` 仅作为日志诊断上下文，不参与
+  任何 API 请求。
+- **判定规则** (逐域名): 绑定缺失 (httpsconf 无 certId)、绑定的 certID 在证书库中
+  已不存在 (GET /sslcert 404)、绑定证书的 leaf 指纹 ≠ 最新本地证书的 leaf 指纹
+  (DER SHA-256, 与 `openssl x509 -outform DER | sha256sum` 对应)，或绑定证书将在
+  `ORIGIN_CERT_MIN_VALID_DAYS` (默认 14) 天内到期 ⇒ 触发对账: 重新上传一次当前
+  证书，只对判定为 stale 的域名重新绑定 (健康的绑定不动)。日志输出截断指纹与
+  certID 前缀，绝不输出完整证书材料。
+- **模式契约**: dry-run 只发起只读查询 (GET)，写步骤全部走 lib/qiniu.sh 的
+  dry-run 保护 —— 零外部写，计划以 `[DRY-RUN]` 前缀打印；staging 完全跳过对账
+  (staging 证书不部署)；只有 production 真正重传/重绑。
+- **失败语义**: 对账查询失败只 WARN 不 FAIL (续期本身已成功，次日重试；监控读
+  失败不应触发 OnFailure 告警)；对账中的 bind 失败同样只 WARN，健康域名的对账
+  继续。
+- 查询能力: `qiniu_helper.py query --domain <domain>` (官方 `Auth.token_of_request()`
+  签名 + `requests.get`，`GET /domain/<d>/httpsconf` → `GET /sslcert/<certId>`)，
+  返回 certId、notBefore/notAfter、commonName 与 leaf 指纹 —— `pri`/`ca` 等证书
+  内容解析后立即丢弃，永不输出。
 
 ## 依赖
 
@@ -145,7 +174,7 @@ systemctl enable --now qiniu-ssl-renew@api.example.com.timer
 ## 本地测试 (不需要真实 secrets)
 
 ```bash
-# 1. 完整自动化测试套件 (126 个 bats + 29 个 pytest = 156 个测试，全部 mock/本地服务，
+# 1. 完整自动化测试套件 (145 个 bats + 37 个 pytest = 182 个测试，全部 mock/本地服务，
 #    不访问任何真实外部服务)
 make ssl-test
 
