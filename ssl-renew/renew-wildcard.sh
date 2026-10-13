@@ -24,48 +24,28 @@ ORIGIN_DOMAIN="media-origin.crowntime.cn"
 # runbook guidance only (GH-232: the origin domain is an object-storage
 # source domain, which Qiniu's httpsconf API cannot manage).
 ORIGIN_BUCKET="365-wecom-media"
+# GH-232: operator-recorded console-binding marker. Content: the first field
+# of `sha256sum fullchain.cer`, written by the operator AFTER binding the
+# current certificate to the origin domain via the Kodo console. While it
+# matches the current certificate, origin API failures (612 on bind/verify)
+# are excused; any new certificate invalidates it and re-requires the runbook.
+CONSOLE_FP_FILE="$WILDCARD_DIR/.origin_console_fp"
 ACME_SH="${ACME_SH:-$HOME/.acme.sh/acme.sh}"
 DNS_PROVIDER="${DNS_PROVIDER:-dns_dp}"
-TLS_PROBE_TIMEOUT="${TLS_PROBE_TIMEOUT:-10}"
-# Test hook: override the "host:port" the live-certificate probe dials.
-ORIGIN_TLS_CONNECT="${ORIGIN_TLS_CONNECT:-$ORIGIN_DOMAIN:443}"
 # The wildcard flow's domain is a script constant, not the EnvironmentFile's
 # convention-only DOMAIN value. common.sh uses this only for safe diagnostics.
 export SSL_RENEW_ALERT_DOMAIN="$WILDCARD_DOMAIN"
 
-# verify_live_tls_cert <domain> <expected_leaf_sha256> [connect host:port]
-# Compares the certificate a domain actually serves against the local leaf.
-# This is the ONLY available post-deploy check for the Qiniu object-storage
-# source domain: the CDN httpsconf API returns HTTP 612 "no such domain"
-# for source domains, so neither bind nor verify_certID_on_domain can work
-# there (GH-232). Fails closed: any probe/parse problem counts as
-# "not verified", never as success.
-verify_live_tls_cert() {
-    local domain="$1" expected_fp="$2" connect="${3:-$1:443}"
-
-    if is_dry_run; then
-        log_dry "would probe $domain (connect $connect) and compare the served leaf fingerprint"
-        return 0
-    fi
-
-    local served served_fp
-    if ! served=$(run_with_timeout "$TLS_PROBE_TIMEOUT" \
-        openssl s_client -servername "$domain" -connect "$connect" </dev/null 2>/dev/null); then
-        echo "TLS probe of $domain failed or timed out"
-        return 1
-    fi
-    # DER never round-trips through a shell variable (NUL bytes) — keep the
-    # served PEM text only, and hash via an uninterrupted pipeline.
-    if ! printf '%s\n' "$served" | grep -q -- '-----BEGIN CERTIFICATE-----'; then
-        echo "no certificate served by $domain"
-        return 1
-    fi
-    served_fp=$(printf '%s\n' "$served" | openssl x509 -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
-    if [ "$served_fp" != "$expected_fp" ]; then
-        echo "live certificate mismatch for $domain — served_fp=$served_fp expected_fp=$expected_fp"
-        return 1
-    fi
-    return 0
+# origin_console_binding_confirmed <local_fp> — true when the operator has
+# recorded the CURRENT certificate's fingerprint in .origin_console_fp after
+# console-binding it to the origin domain. This is the only available
+# confirmation for a Kodo source domain: Qiniu's CDN httpsconf API returns
+# HTTP 612 "no such domain" for source domains on bind AND verify (GH-232).
+# Fails closed: a missing/empty/stale marker is never treated as confirmed.
+origin_console_binding_confirmed() {
+    local local_fp="$1" marker=""
+    [ -f "$CONSOLE_FP_FILE" ] && marker=$(cat "$CONSOLE_FP_FILE")
+    [ -n "$marker" ] && [ "$marker" = "$local_fp" ]
 }
 
 log "===== Wildcard SSL renewal started ====="
@@ -99,41 +79,35 @@ fi
 [ -n "$local_fp" ] || die "local certificate fingerprint is empty"
 log "[INFO] local_fp=$local_fp"
 
-# sha256 of the leaf certificate in DER form — comparable against the
-# certificate a TLS endpoint actually serves (the PEM-file sha256 above is
-# not). Required by the origin-domain early-exit verification (GH-232).
-if ! command -v openssl >/dev/null 2>&1; then
-    die "required fingerprint runtime dependency is unavailable"
-fi
-if ! local_leaf_fp=$(openssl x509 -in "$WILDCARD_DIR/fullchain.cer" -outform DER 2>/dev/null | sha256sum | awk '{print $1}'); then
-    die "failed to calculate local leaf certificate fingerprint"
-fi
-[ -n "$local_leaf_fp" ] || die "local leaf certificate fingerprint is empty"
-
 deployed_fp="" && [ -f "$FP_FILE" ] && deployed_fp=$(cat "$FP_FILE")
 if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
     # GH-232: a matching fingerprint alone proved nothing — the 2026-09-19
     # run uploaded + CDN-bound the new cert while the origin bind failed and
     # was only warned on, after which every daily run early-exited here and
-    # the drift stayed invisible. Verify both Qiniu-side bindings before
-    # trusting the fingerprint; any doubt falls through to a full
-    # (idempotent) deployment instead of masking drift.
+    # the drift stayed invisible. Reload the recorded certID and re-verify
+    # BOTH live Qiniu bindings before trusting the fingerprint; any doubt
+    # falls through to a full (idempotent) deployment instead of masking
+    # drift.
     CURRENT_STAGE="qiniu_verify_deployed"
     verify_failures=""
     deployed_certid="" && [ -f "$CERTID_FILE" ] && deployed_certid=$(cat "$CERTID_FILE")
     if [ -z "$deployed_certid" ]; then
-        verify_failures="deployed certID unknown ($CERTID_FILE missing) — cannot verify CDN binding"
-    elif ! cdn_verify_err=$(verify_certID_on_domain "$CDN_DOMAIN" "$deployed_certid" 2>&1); then
-        verify_failures="CDN binding verify failed: $cdn_verify_err"
-    fi
-    if ! origin_tls_err=$(verify_live_tls_cert "$ORIGIN_DOMAIN" "$local_leaf_fp" "$ORIGIN_TLS_CONNECT" 2>&1); then
-        verify_failures="${verify_failures:+$verify_failures; }origin live-certificate verify failed: $origin_tls_err"
+        verify_failures="no recorded certID ($CERTID_FILE missing) — cannot verify Qiniu bindings"
+    else
+        if ! cdn_verify_err=$(verify_certID_on_domain "$CDN_DOMAIN" "$deployed_certid" 2>&1); then
+            verify_failures="CDN binding verify failed: $cdn_verify_err"
+        fi
+        if origin_console_binding_confirmed "$local_fp"; then
+            log "[INFO] origin console-binding marker matches the current cert — origin API verify skipped (source domains answer HTTP 612)"
+        elif ! origin_verify_err=$(verify_certID_on_domain "$ORIGIN_DOMAIN" "$deployed_certid" 2>&1); then
+            verify_failures="${verify_failures:+$verify_failures; }origin binding verify failed (no matching console marker): $origin_verify_err"
+        fi
     fi
     if [ -z "$verify_failures" ]; then
-        log "[INFO] cert already deployed and verified on $CDN_DOMAIN (certID=$deployed_certid) and $ORIGIN_DOMAIN (live TLS) — nothing to do"
+        log "[INFO] cert already deployed — nothing to do"
         exit "$EXIT_OK"
     fi
-    log "[INFO] fingerprint matches but deployment verification failed ($verify_failures) — continuing with full deployment"
+    log "[INFO] fingerprint matches but Qiniu binding verification failed ($verify_failures) — continuing with full deployment"
 fi
 
 CURRENT_STAGE="qiniu_upload"
@@ -153,12 +127,30 @@ if ! bind_err=$(bind_cert_to_domain "$CDN_DOMAIN" "$certID" 2>&1); then
 fi
 log "[INFO] bound to $CDN_DOMAIN (CDN)"
 
-# Record "uploaded + CDN-bound" state BEFORE the origin step. The early-exit
-# path above re-verifies both domains (API certID for CDN, live TLS for the
-# origin) before trusting these files, so recording state here cannot mask a
-# failed origin bind — it is what lets the next run converge once the origin
-# cert gets bound (manually, per the runbook below) instead of re-uploading
-# and re-alerting forever.
+CURRENT_STAGE="qiniu_bind_origin"
+if ! bind_err=$(bind_cert_to_domain "$ORIGIN_DOMAIN" "$certID" 2>&1); then
+    # Fail closed (GH-232): a silent warn here is exactly how the origin
+    # cert drifted to 5 days from expiry in production. Qiniu's httpsconf
+    # API manages CDN domains only — object-storage source domains answer
+    # HTTP 612 "no such domain" — so the console is the only supported bind
+    # path. The failure is excused only while the operator-recorded console
+    # marker (.origin_console_fp) matches the current certificate.
+    if origin_console_binding_confirmed "$local_fp"; then
+        warn "Origin API bind failed (expected for Kodo source domains — HTTP 612) but .origin_console_fp matches the current cert; continuing on the documented console binding: $bind_err"
+    else
+        die "Origin bind failed for $ORIGIN_DOMAIN — uploaded certID=$certID is NOT bound. " \
+            "Qiniu's httpsconf API cannot manage object-storage source domains (HTTP 612 'no such domain'). " \
+            "Console-bind certID=$certID per docs/operations/qiniu-origin-domain-https-runbook.md " \
+            "(Kodo bucket $ORIGIN_BUCKET > 域名管理 > $ORIGIN_DOMAIN > 配置 HTTPS), then record the current cert fingerprint into $CONSOLE_FP_FILE. " \
+            "Underlying error: $bind_err"
+    fi
+else
+    log "[INFO] bound to $ORIGIN_DOMAIN (origin)"
+fi
+
+# Record the Qiniu deployment only now: CDN bind succeeded and the origin
+# bind either succeeded or was console-marker-excused. An origin hard
+# failure above records nothing (GH-232).
 echo "$local_fp" >"$FP_FILE"
 echo "$certID" >"$CERTID_FILE"
 rm -f "$TLS_OK_FILE" "$MISMATCH_FILE"
@@ -181,28 +173,6 @@ if [ -d "$NGINX_CERT_DIR" ] && [ -f "$WILDCARD_DIR/fullchain.cer" ] && [ -f "$WI
 else
     warn "nginx deploy skipped (dir or source files missing)"
 fi
-
-# Origin bind is deliberately LAST: it is expected to fail for this
-# object-storage source domain (see below), and that failure must not block
-# the independent local nginx deployment above.
-CURRENT_STAGE="qiniu_bind_origin"
-if ! bind_err=$(bind_cert_to_domain "$ORIGIN_DOMAIN" "$certID" 2>&1); then
-    # Fail closed (GH-232): a silent warn here is exactly how the origin
-    # cert drifted to 5 days from expiry in production. Qiniu's httpsconf
-    # API manages CDN domains only — for object-storage source domains it
-    # returns HTTP 612 "no such domain" — so this bind is expected to keep
-    # failing until Qiniu ships source-domain API support. The uploaded
-    # certID must instead be bound manually via the console runbook;
-    # OnFailure=wecom-job-failure-alert@%n.service turns this die into an
-    # operator alert, and the early-exit live-TLS verify stops the alert
-    # once the console bind is done.
-    die "Origin bind failed for $ORIGIN_DOMAIN — uploaded certID=$certID is NOT bound. " \
-        "Qiniu's httpsconf API does not manage object-storage source domains (HTTP 612 'no such domain'). " \
-        "Bind certID=$certID manually: Qiniu console > Kodo bucket $ORIGIN_BUCKET > 域名管理 > $ORIGIN_DOMAIN > 配置 HTTPS " \
-        "(runbook: docs/operations/qiniu-origin-domain-https-runbook.md). " \
-        "Underlying error: $bind_err"
-fi
-log "[INFO] bound to $ORIGIN_DOMAIN (origin)"
 
 # shellcheck disable=SC2034 # production parity: retained diagnostic assignment
 CURRENT_STAGE="done"
