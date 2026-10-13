@@ -288,10 +288,27 @@ def cmd_verify(args: argparse.Namespace) -> dict[str, Any]:
         )
     if resp.status_code == 429:
         raise HelperError("verify", "Qiniu verify rate-limited — HTTP 429", http_status=429)
-    if resp.status_code >= 500:
-        raise HelperError("verify", f"Qiniu verify server error — HTTP {resp.status_code}", http_status=resp.status_code)
     if resp.status_code != 200:
-        raise HelperError("verify", f"Qiniu verify failed — HTTP {resp.status_code}", http_status=resp.status_code)
+        # Any other non-200 — genuine 5xx outages AND Qiniu business-status
+        # codes such as HTTP 612 "no such domain" (Kodo source domains are
+        # invisible to the CDN-domain API, GH-232). Include a redacted body
+        # snippet and the Qiniu business code so operators can distinguish
+        # a console-managed origin domain from a plain outage — mirrors the
+        # classification cmd_bind already reports.
+        snippet = redact(resp.text)[:300]
+        qiniu_code = None
+        try:
+            body = resp.json()
+            if isinstance(body, dict):
+                qiniu_code = body.get("code") or body.get("error")
+        except ValueError:
+            pass
+        raise HelperError(
+            "verify",
+            f"Qiniu verify failed — HTTP {resp.status_code}: {snippet}",
+            http_status=resp.status_code,
+            qiniu_code=qiniu_code,
+        )
 
     try:
         data = resp.json()

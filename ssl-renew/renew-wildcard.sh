@@ -21,6 +21,36 @@ CDN_DOMAIN="media.crowntime.cn"
 ORIGIN_DOMAIN="media-origin.crowntime.cn"
 ACME_SH="${ACME_SH:-$HOME/.acme.sh/acme.sh}"
 DNS_PROVIDER="${DNS_PROVIDER:-dns_dp}"
+
+# State files that make the idempotency check verifiable against Qiniu
+# itself (GH-232): the fingerprint alone cannot prove both domains still
+# bind the certificate — the 2026-09-19 production incident showed a bind
+# failure being recorded as deployed. CERTID_FILE remembers which uploaded
+# Qiniu certificate the fingerprint corresponds to so a matching run can
+# re-verify the live bindings via lib/qiniu.sh::verify_certID_on_domain.
+CERTID_FILE="$WILDCARD_DIR/.deployed_certid"
+# Qiniu's CDN-domain HTTPS API cannot manage Kodo source domains at all —
+# they answer HTTP 612 "no such domain" (media-origin.crowntime.cn is one,
+# CNAME → iovip-z2.qiniuio.com). They are console-managed only. After an
+# operator binds the current wildcard certificate to the origin domain in
+# the Qiniu Console, they record the certificate fingerprint here so this
+# script can distinguish a confirmed console binding from the
+# silent-swallow bug. The marker is fingerprint-bound: any new certificate
+# invalidates it and re-requires the console runbook.
+ORIGIN_CONSOLE_FP_FILE="$WILDCARD_DIR/.origin_console_fp"
+
+# Matches the Qiniu CDN-API signature for "domain is not in the CDN domain
+# list" — Kodo source domains always answer this way (GH-232).
+_qiniu_origin_api_invisible() {
+    case "$1" in
+        *"HTTP 612"* | *"no such domain"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Console runbook for the one binding this flow cannot automate. Referenced
+# by every origin-bind/verify failure so the journald log is actionable.
+_ORIGIN_CONSOLE_RUNBOOK="Qiniu Kodo source domains are console-managed only. Runbook: Qiniu Console → 对象存储 Kodo → 空间管理 → 空间 365-wecom-media → 域名管理 → 自定义源站域名 → $ORIGIN_DOMAIN → 配置 HTTPS → 更换证书 (select the just-uploaded *.crowntime.cn certificate), confirm with: openssl s_client -connect $ORIGIN_DOMAIN:443 -servername $ORIGIN_DOMAIN, then record the fingerprint: sha256sum $WILDCARD_DIR/fullchain.cer | cut -d' ' -f1 > $ORIGIN_CONSOLE_FP_FILE"
 # The wildcard flow's domain is a script constant, not the EnvironmentFile's
 # convention-only DOMAIN value. common.sh uses this only for safe diagnostics.
 export SSL_RENEW_ALERT_DOMAIN="$WILDCARD_DOMAIN"
@@ -58,8 +88,37 @@ log "[INFO] local_fp=$local_fp"
 
 deployed_fp="" && [ -f "$FP_FILE" ] && deployed_fp=$(cat "$FP_FILE")
 if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
-    log "[INFO] cert already deployed — nothing to do"
-    exit "$EXIT_OK"
+    # Fingerprint match is NOT sufficient proof of a healthy deployment —
+    # verify the live Qiniu bindings before declaring "nothing to do"
+    # (GH-232: a silent origin-bind failure was masked here for weeks).
+    CURRENT_STAGE="qiniu_verify"
+    if ! command -v "$QINIU_HELPER_PYTHON" >/dev/null 2>&1 \
+       || [ ! -f "$QINIU_HELPER_SCRIPT" ] \
+       || ! command -v jq >/dev/null 2>&1; then
+        die "required Qiniu helper runtime dependency is unavailable"
+    fi
+
+    deployed_certid="" && [ -f "$CERTID_FILE" ] && deployed_certid=$(cat "$CERTID_FILE")
+    if [ -z "$deployed_certid" ]; then
+        # Legacy state from before GH-232 recorded no certID — re-deploy so
+        # the Qiniu bindings get verified and the state file is written.
+        log "[INFO] cert fingerprint matches but no recorded certID — re-deploying to verify Qiniu bindings"
+    elif ! verify_err=$(verify_certID_on_domain "$CDN_DOMAIN" "$deployed_certid" 2>&1); then
+        log "[INFO] $CDN_DOMAIN no longer binds certID=$deployed_certid ($verify_err) — re-deploying"
+    elif ! verify_err=$(verify_certID_on_domain "$ORIGIN_DOMAIN" "$deployed_certid" 2>&1); then
+        if _qiniu_origin_api_invisible "$verify_err"; then
+            if [ -f "$ORIGIN_CONSOLE_FP_FILE" ] && [ "$(cat "$ORIGIN_CONSOLE_FP_FILE")" = "$local_fp" ]; then
+                log "[INFO] $ORIGIN_DOMAIN is not visible to the Qiniu CDN API (HTTP 612); console binding confirmed via $ORIGIN_CONSOLE_FP_FILE"
+                log "[INFO] cert already deployed — nothing to do"
+                exit "$EXIT_OK"
+            fi
+            die "$ORIGIN_DOMAIN is not manageable via the Qiniu CDN API and no console binding is recorded. $_ORIGIN_CONSOLE_RUNBOOK"
+        fi
+        log "[INFO] $ORIGIN_DOMAIN no longer binds certID=$deployed_certid ($verify_err) — re-deploying"
+    else
+        log "[INFO] cert already deployed — nothing to do"
+        exit "$EXIT_OK"
+    fi
 fi
 
 CURRENT_STAGE="qiniu_upload"
@@ -81,12 +140,17 @@ log "[INFO] bound to $CDN_DOMAIN (CDN)"
 
 CURRENT_STAGE="qiniu_bind_origin"
 if ! bind_err=$(bind_cert_to_domain "$ORIGIN_DOMAIN" "$certID" 2>&1); then
-    warn "Origin bind failed (may need Qiniu Console config): $bind_err"
+    if [ -f "$ORIGIN_CONSOLE_FP_FILE" ] && [ "$(cat "$ORIGIN_CONSOLE_FP_FILE")" = "$local_fp" ]; then
+        log "[INFO] origin bind via API failed ($bind_err); console binding recorded in $ORIGIN_CONSOLE_FP_FILE — continuing"
+    else
+        die "Origin bind failed: $bind_err. $_ORIGIN_CONSOLE_RUNBOOK"
+    fi
 else
     log "[INFO] bound to $ORIGIN_DOMAIN (origin)"
 fi
 
 echo "$local_fp" >"$FP_FILE"
+echo "$certID" >"$CERTID_FILE"
 rm -f "$TLS_OK_FILE" "$MISMATCH_FILE"
 
 CURRENT_STAGE="nginx_deploy"

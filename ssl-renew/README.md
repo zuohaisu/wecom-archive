@@ -142,10 +142,43 @@ systemctl enable --now qiniu-ssl-renew@api.example.com.timer
 不通过 `qiniu-ssl-renew@<domain>` 模板实例化。它是特定部署示例，不应原样用于其他域名；见
 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling)。
 
+### 通配符 flow：源站域名 (origin) 的 API 限制与控制台 runbook (GH-232)
+
+`renew-wildcard.sh` 会给两个域名绑定证书：`media.crowntime.cn`（CDN 加速域名）和
+`media-origin.crowntime.cn`（对象存储源站域名，`backend/.env` 的 `QINIU_DOMAIN` 用它下发媒体）。
+七牛的 CDN 域名管理 API（`PUT /domain/<Name>/httpsconf`，即 SDK 的
+`DomainManager.put_httpsconf`）**只能管理 CDN 加速域名**；对象存储源站域名不在该 API 的域名列表里，
+对任何 bind/verify 请求都返回 HTTP 612 `{"code":612,"error":"no such domain"}`（源站域名由
+Kodo 控制台单独管理，见七牛文档「设置自定义源站域名 → 开启HTTPS访问」）。
+
+因此本 flow 对源站域名是 **fail closed**：
+
+- 完整部署路径上 origin bind 失败会 `die`（不再像 GH-232 之前那样只 WARN 还照常记录
+  `.deployed_fp`），systemd `OnFailure=wecom-job-failure-alert@%n.service` 会真正告警。
+- 指纹匹配的早退路径不再直接 `exit 0`：脚本会用 `.deployed_certid` 里记录的 certID 对
+  CDN 和 origin 各做一次 `verify_certID_on_domain`。CDN 失配或 origin 被七牛侧换绑都会
+  触发完整重部署自愈。状态文件：`.deployed_fp`（证书指纹）、`.deployed_certid`
+  （对应已上传的七牛 certID）、`.origin_console_fp`（见下）。
+
+**控制台 runbook（origin bind 报错时必须人工执行一次）**：
+
+1. 脚本日志取刚上传的 `certID=...`（`journalctl -u qiniu-ssl-renew-wildcard.service`）。
+2. 七牛控制台 → 对象存储 Kodo → 空间管理 → 空间 `365-wecom-media` → 域名管理 →
+   自定义源站域名 → `media-origin.crowntime.cn` → 配置 HTTPS → 更换证书 → 选择上一步
+   上传的 `*.crowntime.cn` 证书。
+3. 验证：`openssl s_client -connect media-origin.crowntime.cn:443 -servername media-origin.crowntime.cn`
+   显示的证书应为刚上传的那张。
+4. 记录指纹标记（告诉脚本"origin 已在控制台绑好"）：
+   `sha256sum ~/.acme.sh/crowntime.cn/fullchain.cer | cut -d' ' -f1 > ~/.acme.sh/crowntime.cn/.origin_console_fp`
+
+`.origin_console_fp` 按指纹绑定：之后任何新证书（续期）都会使标记失效、重新要求上述
+runbook，防止"控制台绑过一次就永久静默"复发 GH-232。在标记写好之前，每日 timer 会在
+origin bind/verify 处 fail closed 并告警——这是预期行为，不是误报。
+
 ## 本地测试 (不需要真实 secrets)
 
 ```bash
-# 1. 完整自动化测试套件 (126 个 bats + 29 个 pytest = 156 个测试，全部 mock/本地服务，
+# 1. 完整自动化测试套件 (138 个 bats + 30 个 pytest = 168 个测试，全部 mock/本地服务，
 #    不访问任何真实外部服务)
 make ssl-test
 

@@ -380,6 +380,25 @@ def test_verify_certid_match_and_mismatch():
     assert json.loads(mismatch.stdout)["matches"] is False
 
 
+def test_verify_non_200_includes_body_snippet_and_qiniu_code():
+    """GH-232: Qiniu answers HTTP 612 'no such domain' for Kodo source
+    domains (they are invisible to the CDN-domain API). The verify error
+    must carry the body snippet and business code so operators can tell a
+    console-managed origin domain apart from a plain outage — matching the
+    classification cmd_bind already reports."""
+    with MockQiniuServer(status=612, body='{"code":612,"error":"no such domain"}') as server:
+        result = run_helper(
+            ["verify", "--domain", "d.test", "--expected-cert-id", "x"],
+            env_extra={"QINIU_API_HOST": server.host},
+        )
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert payload["http_status"] == 612
+    assert payload["qiniu_code"] == 612
+    assert "612" in payload["error"]
+    assert "no such domain" in payload["error"]
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # 4. Runtime secret safety
 # ═════════════════════════════════════════════════════════════════════════
