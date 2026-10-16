@@ -111,6 +111,13 @@ if command == "verify":
         sys.exit(1)
     print(json.dumps({"ok": True, "certId": value("--expected-cert-id"), "matches": True}))
     sys.exit(0)
+if command == "tls-verify":
+    if os.environ.get("MOCK_QINIU_TLS_ERROR"):
+        print(json.dumps({"ok": False, "stage": "tls_verify", "error": os.environ["MOCK_QINIU_TLS_ERROR"]}))
+        sys.exit(1)
+    matches = os.environ.get("MOCK_QINIU_TLS_MATCH", "true") == "true"
+    print(json.dumps({"ok": True, "matches": matches, "local_sha256": "a" * 64, "remote_sha256": "a" * 64 if matches else "b" * 64}))
+    sys.exit(0)
 print(json.dumps({"error": "unexpected command"}))
 sys.exit(1)
 PYEOF
@@ -274,6 +281,72 @@ write_origin_console_marker() {
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
+# ── GH-235: CDN live TLS evidence gates idempotent exit ─────────────────
+
+@test "CDN API HTTP 404 plus matching live TLS leaf is a no-op with no upload or bind" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_HTTP_ERROR_COMMAND=verify
+    export MOCK_QINIU_TLS_MATCH=true
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"HTTP 404"* ]]
+    [[ "$output" == *"live CDN TLS leaf matches"* ]]
+    [[ "$output" == *"cert already deployed — nothing to do"* ]]
+    grep -q "^verify --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log"
+    [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 1 ]
+    grep -q "^tls-verify --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log"
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ ! -f "$NGINX_CERT_DIR/privkey.pem" ]
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+@test "live CDN TLS leaf mismatch triggers the intended deployment recovery" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_HTTP_ERROR_COMMAND=verify
+    export MOCK_QINIU_TLS_MATCH=false
+    export MOCK_QINIU_CERT_ID="repaired-certid"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"live CDN TLS leaf does not match"* ]]
+    [[ "$output" == *"continuing with full deployment"* ]]
+    grep -q '^upload ' "$TEST_TMPDIR/helper.log"
+    grep -q "^bind --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log"
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "repaired-certid" ]
+}
+
+@test "live CDN TLS probe failure alerts and does not assume success or rebind" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_TLS_ERROR="TLS connection timed out"
+
+    run "$WILDCARD"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[ERROR] stage=qiniu_live_tls_verify"* ]]
+    [[ "$output" == *"TLS connection timed out"* ]]
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
 # ── GH-232: early-exit re-verification failure branches self-heal ───────
 
 @test "fingerprint match with a CDN certID drift triggers full redeployment" {
@@ -289,7 +362,7 @@ write_origin_console_marker() {
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CDN binding verify failed"* ]]
+    [[ "$output" == *"CDN API reports a certID mismatch"* ]]
     [[ "$output" == *"continuing with full deployment"* ]]
     [[ "$output" == *"bound to $CDN_DOMAIN (CDN)"* ]]
     [[ "$output" == *"bound to $ORIGIN_DOMAIN (origin)"* ]]

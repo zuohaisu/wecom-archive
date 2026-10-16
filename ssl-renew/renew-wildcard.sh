@@ -81,22 +81,38 @@ log "[INFO] local_fp=$local_fp"
 
 deployed_fp="" && [ -f "$FP_FILE" ] && deployed_fp=$(cat "$FP_FILE")
 if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
-    # GH-232: a matching fingerprint alone proved nothing — the 2026-09-19
-    # run uploaded + CDN-bound the new cert while the origin bind failed and
-    # was only warned on, after which every daily run early-exited here and
-    # the drift stayed invisible. Reload the recorded certID and re-verify
-    # BOTH live Qiniu bindings before trusting the fingerprint; any doubt
-    # falls through to a full (idempotent) deployment instead of masking
-    # drift.
     CURRENT_STAGE="qiniu_verify_deployed"
     verify_failures=""
     deployed_certid="" && [ -f "$CERTID_FILE" ] && deployed_certid=$(cat "$CERTID_FILE")
     if [ -z "$deployed_certid" ]; then
         verify_failures="no recorded certID ($CERTID_FILE missing) — cannot verify Qiniu bindings"
     else
-        if ! cdn_verify_err=$(verify_certID_on_domain "$CDN_DOMAIN" "$deployed_certid" 2>&1); then
-            verify_failures="CDN binding verify failed: $cdn_verify_err"
+        cdn_verify_err=""
+        if cdn_verify_err=$(verify_certID_on_domain "$CDN_DOMAIN" "$deployed_certid" 2>&1); then
+            cdn_verify_status=0
+        else
+            cdn_verify_status=$?
         fi
+        case "$cdn_verify_status" in
+            0) ;;
+            1) verify_failures="CDN API reports a certID mismatch: $cdn_verify_err" ;;
+            2) log "[INFO] Qiniu CDN verify API returned HTTP 404; requiring independent live TLS evidence" ;;
+            *) die "CDN binding API verification failed; refusing to rebind without confirmed live certificate drift: $cdn_verify_err" ;;
+        esac
+
+        CURRENT_STAGE="qiniu_live_tls_verify"
+        live_tls_err=""
+        if live_tls_err=$(verify_live_tls_cert "$CDN_DOMAIN" "$WILDCARD_DIR/fullchain.cer" 2>&1); then
+            log "[INFO] live CDN TLS leaf matches the current local certificate"
+        else
+            live_tls_status=$?
+            case "$live_tls_status" in
+                1) verify_failures="${verify_failures:+$verify_failures; }live CDN TLS leaf does not match the current certificate: $live_tls_err" ;;
+                *) die "live CDN TLS verification failed or returned invalid evidence; refusing to assume the binding is correct or to rebind: $live_tls_err" ;;
+            esac
+        fi
+
+        CURRENT_STAGE="qiniu_verify_deployed"
         if origin_console_binding_confirmed "$local_fp"; then
             log "[INFO] origin console-binding marker matches the current cert — origin API verify skipped (source domains answer HTTP 612)"
         elif ! origin_verify_err=$(verify_certID_on_domain "$ORIGIN_DOMAIN" "$deployed_certid" 2>&1); then
@@ -107,7 +123,7 @@ if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
         log "[INFO] cert already deployed — nothing to do"
         exit "$EXIT_OK"
     fi
-    log "[INFO] fingerprint matches but Qiniu binding verification failed ($verify_failures) — continuing with full deployment"
+    log "[INFO] fingerprint matches but live binding verification failed ($verify_failures) — continuing with full deployment"
 fi
 
 CURRENT_STAGE="qiniu_upload"

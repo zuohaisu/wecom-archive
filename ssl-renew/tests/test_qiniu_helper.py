@@ -23,11 +23,14 @@ Run: python3 -m pytest ssl-renew/tests/test_qiniu_helper.py -v
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
+import ssl
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from unittest import mock
@@ -90,6 +93,90 @@ class MockQiniuServer:
     @property
     def host(self) -> str:
         return f"http://127.0.0.1:{self.port}"
+
+
+class LocalTLSServer:
+    """A real local SNI/TLS endpoint for certificate-probe integration tests."""
+
+    def __init__(self, cert_file: Path, key_file: Path):
+        self.cert_file = cert_file
+        self.key_file = key_file
+        self.listener = socket.socket()
+        self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen()
+        self.listener.settimeout(0.1)
+        self.port = self.listener.getsockname()[1]
+        self.server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self.server_context.load_cert_chain(str(cert_file), str(key_file))
+        self.server_names: list[str | None] = []
+        self.server_context.set_servername_callback(
+            lambda _sock, name, _context: self.server_names.append(name)
+        )
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+
+    def _serve(self):
+        while not self.stopped.is_set():
+            try:
+                connection, _address = self.listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            try:
+                tls_connection = self.server_context.wrap_socket(connection, server_side=True)
+                tls_connection.close()
+            except (OSError, ssl.SSLError):
+                connection.close()
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, *_exc):
+        self.stopped.set()
+        self.listener.close()
+        self.thread.join(timeout=2)
+
+
+def _create_tls_certificate(tmp_path: Path, name: str) -> tuple[Path, Path]:
+    cert_file = tmp_path / f"{name}.pem"
+    key_file = tmp_path / f"{name}.key"
+    subprocess.run(
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(key_file), "-out", str(cert_file), "-days", "2",
+            "-subj", "/CN=media.crowntime.cn",
+            "-addext", "subjectAltName=DNS:media.crowntime.cn",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return cert_file, key_file
+
+
+def _run_tls_probe_against_local_server(monkeypatch, capsys, cert_file: Path,
+                                        server: LocalTLSServer, trust_cert: Path | None):
+    real_create_connection = socket.create_connection
+
+    def connect_local(_address, timeout=None):
+        return real_create_connection(("127.0.0.1", server.port), timeout=timeout)
+
+    if trust_cert is None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.check_hostname = True
+    else:
+        context = ssl.create_default_context(cafile=str(trust_cert))
+    monkeypatch.setattr(socket, "create_connection", connect_local)
+    monkeypatch.setattr(ssl, "create_default_context", lambda: context)
+    status = qiniu_helper.main(
+        ["tls-verify", "--domain", "media.crowntime.cn",
+         "--cert-file", str(cert_file), "--timeout", "2"]
+    )
+    return status, capsys.readouterr()
 
 
 def run_helper(args: list[str], env_extra: dict | None = None) -> subprocess.CompletedProcess:
@@ -182,6 +269,58 @@ def test_parity_form_body_special_chars_changes_signature(auth):
     token_a = auth.token_of_request("http://api.qiniu.com/sslcert", "a=1", "application/x-www-form-urlencoded")
     token_b = auth.token_of_request("http://api.qiniu.com/sslcert", "a=2", "application/x-www-form-urlencoded")
     assert token_a != token_b
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 1b. Live CDN TLS verification — exercise real local SNI/TLS endpoints.
+# ═════════════════════════════════════════════════════════════════════════
+
+def test_tls_verify_matches_leaf_certificate_from_live_sni_endpoint(tmp_path, monkeypatch, capsys):
+    cert_file, key_file = _create_tls_certificate(tmp_path, "matching")
+    with LocalTLSServer(cert_file, key_file) as server:
+        status, captured = _run_tls_probe_against_local_server(
+            monkeypatch, capsys, cert_file, server, cert_file
+        )
+
+    assert status == 0
+    payload = json.loads(captured.out)
+    expected_hash = hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert_file.read_text())).hexdigest()
+    assert payload["ok"] is True
+    assert payload["matches"] is True
+    assert payload["local_sha256"] == expected_hash
+    assert payload["remote_sha256"] == expected_hash
+    assert server.server_names == ["media.crowntime.cn"]
+
+
+def test_tls_verify_detects_a_different_live_leaf_certificate(tmp_path, monkeypatch, capsys):
+    local_cert, _local_key = _create_tls_certificate(tmp_path, "local")
+    remote_cert, remote_key = _create_tls_certificate(tmp_path, "remote")
+    with LocalTLSServer(remote_cert, remote_key) as server:
+        status, captured = _run_tls_probe_against_local_server(
+            monkeypatch, capsys, local_cert, server, remote_cert
+        )
+
+    assert status == 0
+    payload = json.loads(captured.out)
+    assert payload["ok"] is True
+    assert payload["matches"] is False
+    assert payload["local_sha256"] != payload["remote_sha256"]
+    assert server.server_names == ["media.crowntime.cn"]
+
+
+def test_tls_verify_rejects_an_untrusted_live_certificate(tmp_path, monkeypatch, capsys):
+    cert_file, key_file = _create_tls_certificate(tmp_path, "untrusted")
+    with LocalTLSServer(cert_file, key_file) as server:
+        status, captured = _run_tls_probe_against_local_server(
+            monkeypatch, capsys, cert_file, server, None
+        )
+
+    assert status != 0
+    payload = json.loads(captured.out)
+    assert payload["ok"] is False
+    assert payload["stage"] == "tls_verify"
+    assert "TLS probe failed" in payload["error"]
+    assert server.server_names == ["media.crowntime.cn"]
 
 
 # ═════════════════════════════════════════════════════════════════════════

@@ -12,6 +12,7 @@ tests) and the real-helper-against-a-local-server integration tests.
 Controlled via env vars:
     MOCK_QINIU_MODE       success | http_error | network_error (default: success)
     MOCK_QINIU_STATUS     HTTP status to report for http_error mode (default: 500)
+    MOCK_QINIU_HTTP_ERROR_COMMAND  optional command name to scope http_error mode
     MOCK_QINIU_CERT_ID    certID to return for `upload` success (default: mock-certid)
     MOCK_QINIU_ACTUAL_CERT_ID  certId to return for `verify` (default: same as expected)
     MOCK_QINIU_ERROR      error message override
@@ -52,12 +53,24 @@ def main():
     mode = os.environ.get("MOCK_QINIU_MODE", "success")
     status = int(os.environ.get("MOCK_QINIU_STATUS", "500"))
     error_override = os.environ.get("MOCK_QINIU_ERROR")
+    http_error_command = os.environ.get("MOCK_QINIU_HTTP_ERROR_COMMAND")
+
+    if command == "tls-verify":
+        tls_error = os.environ.get("MOCK_QINIU_TLS_ERROR")
+        if tls_error:
+            emit({"ok": False, "stage": "tls_verify", "error": tls_error})
+            return EXIT_GENERIC_FAILURE
+        matches = os.environ.get("MOCK_QINIU_TLS_MATCH", "true") == "true"
+        emit({"ok": True, "matches": matches,
+              "local_sha256": "a" * 64,
+              "remote_sha256": "a" * 64 if matches else "b" * 64})
+        return EXIT_OK
 
     if mode == "network_error":
         emit({"ok": False, "stage": command, "error": error_override or f"Qiniu {command} request failed (network error / timeout): mock"})
         return EXIT_GENERIC_FAILURE
 
-    if mode == "http_error":
+    if mode == "http_error" and (not http_error_command or command == http_error_command):
         auth_related = status in (401, 403)
         msg = error_override or f"Qiniu {command} rejected — HTTP {status} (check AK/SK and permissions): mock" \
             if auth_related else (error_override or f"Qiniu {command} failed — HTTP {status}: mock")

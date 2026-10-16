@@ -85,8 +85,24 @@ teardown() { common_teardown; }
 @test "verify_certID_on_domain treats HTTP 401/403 as auth failure, not a mismatch" {
     use_mock_qiniu_helper http_error 403
     run verify_certID_on_domain media.example.com certid-123
-    [ "$status" -eq 1 ]
+    [ "$status" -eq 3 ]
     [[ "$output" == *"HTTP 403"* ]]
+    [[ "$output" != *"mismatch"* ]]
+}
+
+@test "verify_certID_on_domain identifies HTTP 404 as an unavailable API verifier" {
+    use_mock_qiniu_helper http_error 404
+    run verify_certID_on_domain media.example.com certid-123
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"HTTP 404"* ]]
+    [[ "$output" != *"mismatch"* ]]
+}
+
+@test "verify_certID_on_domain classifies other API failures separately from a certID mismatch" {
+    use_mock_qiniu_helper http_error 503
+    run verify_certID_on_domain media.example.com certid-123
+    [ "$status" -eq 3 ]
+    [[ "$output" == *"HTTP 503"* ]]
     [[ "$output" != *"mismatch"* ]]
 }
 

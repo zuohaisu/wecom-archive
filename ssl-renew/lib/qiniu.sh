@@ -125,6 +125,11 @@ bind_cert_to_domain() {
 }
 
 # ── Verify the certID currently bound to a domain matches expected. ─────
+_qiniu_helper_http_status() {
+	local helper_output="$1"
+	printf '%s' "$helper_output" | jq -r '.http_status // empty' 2>/dev/null
+}
+
 verify_certID_on_domain() {
 	local domain="$1" expected="$2"
 
@@ -140,16 +145,61 @@ verify_certID_on_domain() {
 
 	if [ "$helper_status" -ne 0 ]; then
 		_qiniu_helper_error_message "$helper_output" "$helper_status" >&2
-		return 1
+		if [ "$(_qiniu_helper_http_status "$helper_output")" = "404" ]; then
+			return 2
+		fi
+		return 3
 	fi
 
 	local matches actual
 	matches=$(printf '%s' "$helper_output" | jq -r '.matches // false' 2>/dev/null)
 	actual=$(printf '%s' "$helper_output" | jq -r '.certId // empty' 2>/dev/null)
 	if [ "$matches" != "true" ]; then
-		echo "certID mismatch — expected=$expected, actual=$actual" >&2
-		return 1
+		if [ "$matches" = "false" ] && [ -n "$actual" ]; then
+			echo "certID mismatch — expected=$expected, actual=$actual" >&2
+			return 1
+		fi
+		echo "Qiniu verify returned an invalid response — cannot confirm the bound certID" >&2
+		return 3
 	fi
 	echo "API certID=$actual confirmed" >&2
 	return 0
+}
+
+# ── Verify the live SNI TLS leaf against the local fullchain leaf. ───────
+# The helper computes both hashes from leaf-certificate DER; this must not
+# be compared to renew-wildcard.sh's fullchain-file fingerprint.
+verify_live_tls_cert() {
+	local domain="$1" cert_file="$2"
+	local helper_output helper_status ok matches local_sha256 remote_sha256
+
+	helper_output=$(_qiniu_helper_run tls-verify \
+		--domain "$domain" --cert-file "$cert_file" \
+		--timeout "$QINIU_HELPER_TIMEOUT")
+	helper_status=$?
+	if [ "$helper_status" -ne 0 ]; then
+		_qiniu_helper_error_message "$helper_output" "$helper_status" >&2
+		return 2
+	fi
+
+	ok=$(printf '%s' "$helper_output" | jq -r '.ok == true' 2>/dev/null)
+	matches=$(printf '%s' "$helper_output" | jq -r 'if .matches == true then "true" elif .matches == false then "false" else empty end' 2>/dev/null)
+	local_sha256=$(printf '%s' "$helper_output" | jq -r '.local_sha256 // empty' 2>/dev/null)
+	remote_sha256=$(printf '%s' "$helper_output" | jq -r '.remote_sha256 // empty' 2>/dev/null)
+	if [ "$ok" != "true" ] || [ "${#local_sha256}" -ne 64 ] ||
+		[ "${#remote_sha256}" -ne 64 ] ||
+		[[ "$local_sha256$remote_sha256" == *[!0-9a-f]* ]]; then
+		echo "TLS probe returned an invalid leaf-certificate fingerprint result" >&2
+		return 2
+	fi
+
+	if [ "$matches" = "true" ] && [ "$local_sha256" = "$remote_sha256" ]; then
+		return 0
+	fi
+	if [ "$matches" = "false" ] && [ "$local_sha256" != "$remote_sha256" ]; then
+		echo "live TLS leaf does not match local leaf (local_sha256=$local_sha256, live_sha256=$remote_sha256)" >&2
+		return 1
+	fi
+	echo "TLS probe returned inconsistent leaf-certificate fingerprints" >&2
+	return 2
 }
