@@ -244,6 +244,32 @@ def _classify_response_error(stage: str, ret: Optional[dict], info: Any) -> Help
     )
 
 
+def _response_snippet(resp: Any, limit: int = 300) -> str:
+    """Redacted, length-capped body snippet — safe to interpolate into a message."""
+    try:
+        return redact(resp.text)[:limit]
+    except Exception:  # pragma: no cover - requests always exposes .text
+        return ""
+
+
+def _response_qiniu_code(resp: Any) -> Optional[int]:
+    """The response body's business code, normalized — never raw response text."""
+    try:
+        body = resp.json()
+    except Exception:
+        return None
+    if not isinstance(body, dict):
+        return None
+    # `code` is the real business code; the `error` fallback only surfaces an
+    # int-like code — a text value is dropped by normalize_qiniu_code()
+    # instead of reaching the output unredacted (GH-237). This mirrors
+    # _classify_response_error, which reads the SDK's parsed `ret` instead.
+    value = body.get("code")
+    if value is None:
+        value = body.get("error")
+    return normalize_qiniu_code(value)
+
+
 def cmd_upload(args: argparse.Namespace) -> dict[str, Any]:
     if not os.path.isfile(args.cert_file):
         raise HelperError("upload", f"fullchain.cer not found: {args.cert_file}", exit_code=EXIT_USAGE_ERROR)
@@ -325,10 +351,31 @@ def cmd_verify(args: argparse.Namespace) -> dict[str, Any]:
         )
     if resp.status_code == 429:
         raise HelperError("verify", "Qiniu verify rate-limited — HTTP 429", http_status=429)
+
+    # Diagnostics for the failure branches below. Qiniu answers non-200 with a
+    # JSON body as well, and its business codes are numeric: an origin (Kodo
+    # source) domain reports HTTP 612 "no such domain" (GH-232), which is
+    # numerically >= 500 and therefore lands in the server-error branch below,
+    # indistinguishable from a real outage if the status is all we print. So
+    # both branches carry the body: redacted and length-capped snippet in the
+    # message, business code through normalize_qiniu_code() — a secret-shaped
+    # `error` string in the body can never reach the output (GH-237).
+    snippet = _response_snippet(resp)
+    diagnostics = f": {snippet}" if snippet else ""
     if resp.status_code >= 500:
-        raise HelperError("verify", f"Qiniu verify server error — HTTP {resp.status_code}", http_status=resp.status_code)
+        raise HelperError(
+            "verify",
+            f"Qiniu verify server error — HTTP {resp.status_code}{diagnostics}",
+            http_status=resp.status_code,
+            qiniu_code=_response_qiniu_code(resp),
+        )
     if resp.status_code != 200:
-        raise HelperError("verify", f"Qiniu verify failed — HTTP {resp.status_code}", http_status=resp.status_code)
+        raise HelperError(
+            "verify",
+            f"Qiniu verify failed — HTTP {resp.status_code}{diagnostics}",
+            http_status=resp.status_code,
+            qiniu_code=_response_qiniu_code(resp),
+        )
 
     try:
         data = resp.json()

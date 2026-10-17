@@ -95,6 +95,10 @@ macOS: `brew install shellcheck shfmt bats-core coreutils`。
   只接受**归一化的业务码**（整数，或可转成整数的数字串），其余响应文本一律丢弃 —— 该字段不经过
   `error` 的脱敏路径，因此不允许携带原始响应文本（GH-237）。响应里任何 secret 形态的文本都不会
   出现在 stdout / stderr 中。
+- `verify` 的失败输出遵守同一边界，并额外带上诊断信息：非 200（含七牛**业务**状态码 —— 源站域名的
+  HTTP 612 `no such domain` 数值上 ≥ 500，会落进 server error 分支，GH-232）在 `error` 末尾附加
+  经 `redact()` 且限长 300 字符的响应片段，业务码进 `qiniu_code`，让运维能区分「源站域名对 CDN API
+  不可见」与「七牛接口故障」；401/403/429 保持原有提示不变。
 - 验证：`tests/test_qiniu_helper.py`（进程内 stdout/stderr 断言，含 `qiniu_code` 脱敏回归用例）+
   `tests/11_qiniu_helper_argv_safety.bats`（真实子进程 + `ps` 采样的操作系统级验证，覆盖成功/
   失败/异常/debug 模式）。
