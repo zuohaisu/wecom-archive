@@ -306,6 +306,91 @@ def test_bind_failure_business_error_code():
     assert payload["qiniu_code"] == 6100
 
 
+def test_bind_business_error_code_survives_as_int_when_sent_as_string():
+    with MockQiniuServer(body='{"code":"6100","error":"domain not bound"}') as server:
+        result = run_helper(
+            ["bind", "--domain", "d.test", "--cert-id", "x"],
+            env_extra={"QINIU_API_HOST": server.host},
+        )
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert payload["qiniu_code"] == 6100
+
+
+# ── GH-237: qiniu_code must never carry unredacted response text ────────
+LEAK_MARKER = "SYNTHETIC_LEAK_VALUE"
+
+
+def test_upload_never_emits_unredacted_response_text(tmp_path):
+    """A secret-shaped `error` string in the body must not reach stdout."""
+    cert_file = tmp_path / "fullchain.cer"
+    key_file = tmp_path / "domain.key"
+    cert_file.write_text("CERT")
+    key_file.write_text("KEY")
+    body = json.dumps({"error": f"QINIU_SECRET_KEY={LEAK_MARKER}"})
+    with MockQiniuServer(body=body) as server:
+        result = run_helper(
+            ["upload", "--domain", "d.test", "--cert-file", str(cert_file), "--key-file", str(key_file)],
+            env_extra={"QINIU_API_HOST": server.host},
+        )
+    assert result.returncode != 0
+    assert LEAK_MARKER not in result.stdout
+    assert LEAK_MARKER not in result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert "[REDACTED]" in payload["error"]
+    assert "qiniu_code" not in payload
+
+
+def test_bind_never_emits_unredacted_response_text_for_a_falsy_code():
+    body = json.dumps({"code": 0, "error": f"QINIU_SECRET_KEY={LEAK_MARKER}"})
+    with MockQiniuServer(body=body) as server:
+        result = run_helper(
+            ["bind", "--domain", "d.test", "--cert-id", "x"],
+            env_extra={"QINIU_API_HOST": server.host},
+        )
+    assert result.returncode != 0
+    assert LEAK_MARKER not in result.stdout
+    payload = json.loads(result.stdout)
+    # `code: 0` is a real (falsy) business code: it is reported as the
+    # normalized integer, never as the response's `error` text.
+    assert payload["qiniu_code"] == 0
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (6100, 6100),
+        ("6100", 6100),
+        (" 6100 ", 6100),
+        (0, 0),
+        (None, None),
+        (True, None),
+        (False, None),
+        ("bad cert", None),
+        (f"QINIU_SECRET_KEY={LEAK_MARKER}", None),
+        ("Authorization: QBox fake-token", None),
+        ("6" * 13, None),
+    ],
+)
+def test_normalize_qiniu_code(value, expected):
+    assert qiniu_helper.normalize_qiniu_code(value) == expected
+
+
+def test_helper_error_as_dict_drops_a_secret_shaped_qiniu_code():
+    err = qiniu_helper.HelperError(
+        "bind", "Qiniu bind failed", qiniu_code=f"QINIU_SECRET_KEY={LEAK_MARKER}"
+    )
+    payload = err.as_dict()
+    assert "qiniu_code" not in payload
+    assert LEAK_MARKER not in json.dumps(payload)
+
+
+def test_helper_error_as_dict_keeps_an_integer_business_code():
+    err = qiniu_helper.HelperError("bind", "Qiniu bind failed", qiniu_code=6100)
+    assert err.as_dict()["qiniu_code"] == 6100
+
+
 @pytest.mark.parametrize("status", [401, 403])
 def test_verify_auth_failure(status):
     with MockQiniuServer(status=status, body='{"error":"denied"}') as server:
