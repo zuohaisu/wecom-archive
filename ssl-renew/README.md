@@ -11,7 +11,7 @@
 | 文件 | 用途 |
 |------|------|
 | `renew.sh` | 主脚本: 续期 + 部署 + 验证编排 (单域名, per-domain Qiniu CDN 证书绑定) |
-| `renew-wildcard.sh` | 通配符证书续期示例 (GH-104 Follow-up B): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。与 `renew.sh` 语义不同；改用于其他环境前请阅读 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling) 并替换域名、provider 与凭据。GH-232 起：早退前会按 `.deployed_certid` 对 CDN 与 origin 两个绑定做 API verify；origin 为对象存储源站域名，七牛 httpsconf API 不支持（HTTP 612），无匹配 `.origin_console_fp` 控制台标记时绑定失败即 fail-closed 告警，需按 [控制台 runbook](../docs/operations/qiniu-origin-domain-https-runbook.md) 手动绑定并记录标记 |
+| `renew-wildcard.sh` | 通配符证书续期示例 (GH-104 Follow-up B): acme.sh DNS-01 → Qiniu CDN/origin 双绑定 → nginx 证书部署+reload。与 `renew.sh` 语义不同；改用于其他环境前请阅读 [TLS 指南](../docs/OPERATIONS.md#tls-and-provider-specific-tooling) 并替换域名、provider 与凭据。GH-232 起：早退前会按 `.deployed_certid` 对 CDN 与 origin 两个绑定做 API verify；origin 为对象存储源站域名，七牛 httpsconf API 不支持（HTTP 612），无匹配 `.origin_console_fp` 控制台标记时绑定失败即 fail-closed 告警，需按 [控制台 runbook](../docs/operations/qiniu-origin-domain-https-runbook.md) 手动绑定并记录标记。GH-235 起：CDN verify 接口返回 HTTP 404（该接口在本环境不可用）**不再当作绑定漂移**，改用独立活体 TLS 叶证书证据判定 —— 与本地叶证书一致则幂等 no-op（不上传、不绑定、不动 nginx），不一致才进入自愈部署；探测失败、响应无法解析或其他 API 错误一律 fail-closed 告警且不写任何状态 |
 | `notify.sh` | 通用 Webhook 告警 (支持任意接受 JSON POST 的端点) |
 | `verify_https.sh` | 独立 HTTPS/TLS 验证 (可单独运行) |
 | `install.sh` | 幂等安装 / 预检脚本 |
@@ -57,6 +57,12 @@ dry-run 保证:
 - 不修改任何本地状态文件 (`.deployed_fp` / `.tls_verified` / `.tls_mismatch_days`)
 - 输出清楚说明"将要执行什么"（`[DRY-RUN]` 前缀），且不包含任何 secret
 - 有专门的自动化测试 (`tests/02_dry_run.bats`)
+
+`renew-wildcard.sh` 同样遵守上述 dry-run 契约（GH-235 起，测试见 `tests/12_renew_wildcard.bats`）：
+`DRY_RUN=1` 时不调用 `acme.sh`、不调用任何 `qiniu_helper.py` 子命令（包括只读的活体 TLS 探测）、
+不写 `.deployed_fp` / `.deployed_certid` / `.origin_console_fp`、不复制 nginx 证书、不 reload ——
+只打印计划并退出 0。注意该脚本目前**不读取** `ACME_STAGING` / `--staging`（staging 模式仅
+`renew.sh` 支持）；这是既有行为，不在本流程范围内。
 
 ## 依赖
 

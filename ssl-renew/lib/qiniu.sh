@@ -20,10 +20,25 @@
 # (only the *paths* appear in argv, never the file contents or the derived
 # Authorization header). See ssl-renew/README.md "Runtime Secret Safety".
 #
-# All state-changing functions here are DRY_RUN-aware: when is_dry_run
-# returns true, the Python helper is never invoked and no network call is
-# made; a fake but shaped response is returned so the caller's pipeline
-# (which expects e.g. a certID string) keeps working for planning/logging.
+# Every function here — including the read-only verifiers — is DRY_RUN-aware:
+# when is_dry_run returns true, the Python helper is never invoked and no
+# network call (write or read-only probe) is made; a fake but shaped response
+# is returned so the caller's pipeline (which expects e.g. a certID string)
+# keeps working for planning/logging.
+#
+# The verification functions report WHY they failed through their exit
+# status instead of a plain boolean, so a caller can tell "the API proved
+# drift" apart from "the API could not answer" (GH-235):
+#
+#   verify_certID_on_domain  0 confirmed equal | 1 confirmed mismatch |
+#                            2 API unavailable (HTTP 404) | 3 other failure
+#                            or unverifiable response
+#   verify_live_tls_cert     0 live leaf matches | 1 live leaf differs |
+#                            2 probe failed or returned invalid evidence
+#
+# Only the "confirmed mismatch" status is evidence of drift. Every other
+# non-zero status means the binding state is UNKNOWN and must fail closed
+# (stop, alert) rather than be treated as drift and rewritten.
 #
 # Requires lib/common.sh to already be sourced (log, filter_secrets,
 # is_dry_run, and canonical warn/die reporting).
@@ -125,6 +140,13 @@ bind_cert_to_domain() {
 }
 
 # ── Verify the certID currently bound to a domain matches expected. ─────
+# Exit status contract (see the file header):
+#   0 = the API confirms the expected certID is bound
+#   1 = the API confirms a DIFFERENT certID is bound (real drift)
+#   2 = the verification API is unavailable for this domain (HTTP 404 —
+#       the production CDN-domain behaviour behind GH-235)
+#   3 = any other API failure, or a response that cannot be interpreted
+# Callers must never treat 2/3 as proof of drift.
 _qiniu_helper_http_status() {
 	local helper_output="$1"
 	printf '%s' "$helper_output" | jq -r '.http_status // empty' 2>/dev/null
@@ -167,11 +189,26 @@ verify_certID_on_domain() {
 }
 
 # ── Verify the live SNI TLS leaf against the local fullchain leaf. ───────
-# The helper computes both hashes from leaf-certificate DER; this must not
-# be compared to renew-wildcard.sh's fullchain-file fingerprint.
+# Read-only independent evidence for when the Qiniu binding API cannot
+# answer (GH-235): connects to <domain>:443 with SNI, validates the chain
+# and hostname, and compares the served leaf certificate against the first
+# certificate in <cert_file> by DER SHA-256. Needs no Qiniu credentials and
+# returns the same status contract as the helper:
+#   0 = the served leaf IS the local leaf
+#   1 = the served leaf is a DIFFERENT certificate (real drift)
+#   2 = the probe failed, or the helper returned an uninterpretable result
+# The helper computes both hashes from leaf-certificate DER; this is
+# deliberately NOT comparable to renew-wildcard.sh's fullchain-file
+# fingerprint.
 verify_live_tls_cert() {
 	local domain="$1" cert_file="$2"
 	local helper_output helper_status ok matches local_sha256 remote_sha256
+
+	if is_dry_run; then
+		log_dry "would run: $QINIU_HELPER_PYTHON $QINIU_HELPER_SCRIPT tls-verify --domain $domain --cert-file $cert_file --timeout $QINIU_HELPER_TIMEOUT" >&2
+		log_dry "  (read-only SNI probe — leaf-certificate DER comparison, no credentials, no writes; assumed matching for planning only)" >&2
+		return 0
+	fi
 
 	helper_output=$(_qiniu_helper_run tls-verify \
 		--domain "$domain" --cert-file "$cert_file" \

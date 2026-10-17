@@ -113,3 +113,50 @@ teardown() { common_teardown; }
     [ "$status" -eq 0 ]
     [ ! -f "$TEST_TMPDIR/helper.log" ]
 }
+
+# ── verify_live_tls_cert (GH-235 independent evidence) ──────────────────
+@test "verify_live_tls_cert confirms a matching live leaf" {
+    use_mock_qiniu_helper success 200 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_TLS_MATCH=true
+    run verify_live_tls_cert media.example.com "$TEST_TMPDIR/fullchain.cer"
+    [ "$status" -eq 0 ]
+    grep -q -- "tls-verify --domain media.example.com" "$TEST_TMPDIR/helper.log"
+}
+
+@test "verify_live_tls_cert reports a live leaf mismatch as its own status" {
+    use_mock_qiniu_helper success 200 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_TLS_MATCH=false
+    run verify_live_tls_cert media.example.com "$TEST_TMPDIR/fullchain.cer"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not match"* ]]
+}
+
+@test "verify_live_tls_cert reports a probe failure as unverifiable, not a mismatch" {
+    use_mock_qiniu_helper success 200 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_TLS_ERROR="TLS probe failed for media.example.com: connection timed out"
+    run verify_live_tls_cert media.example.com "$TEST_TMPDIR/fullchain.cer"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"connection timed out"* ]]
+    [[ "$output" != *"does not match"* ]]
+}
+
+@test "verify_live_tls_cert rejects a malformed helper fingerprint result" {
+    cat >"$TEST_TMPDIR/garbage-helper.py" <<'PYEOF'
+import json
+print(json.dumps({"ok": True, "matches": True, "local_sha256": "zz", "remote_sha256": "zz"}))
+PYEOF
+    export QINIU_HELPER_PYTHON="python3"
+    export QINIU_HELPER_SCRIPT="$TEST_TMPDIR/garbage-helper.py"
+    run verify_live_tls_cert media.example.com "$TEST_TMPDIR/fullchain.cer"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"invalid leaf-certificate fingerprint"* ]]
+}
+
+@test "verify_live_tls_cert in dry-run mode never invokes the helper" {
+    export DRY_RUN=1
+    use_mock_qiniu_helper success 200 "$TEST_TMPDIR/helper.log"
+    run verify_live_tls_cert media.example.com "$TEST_TMPDIR/fullchain.cer"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[DRY-RUN]"* ]]
+    [ ! -f "$TEST_TMPDIR/helper.log" ]
+}
