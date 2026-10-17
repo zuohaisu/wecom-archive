@@ -91,7 +91,15 @@ macOS: `brew install shellcheck shfmt bats-core coreutils`。
 - 证书/私钥只通过 `--cert-file`/`--key-file` 传**文件路径**，内容在子进程内部读取，argv 里从不
   包含证书或私钥的实际内容。
 - Authorization header 由官方 SDK 内部构造，直接设在 HTTP 请求上，不经过 shell、不写日志。
-- 验证：`tests/test_qiniu_helper.py`（进程内 stdout/stderr 断言）+
+- 结构化输出（stdout JSON）的每个字段都经过脱敏边界：`error` 始终走 `redact()`；`qiniu_code`
+  只接受**归一化的业务码**（整数，或可转成整数的数字串），其余响应文本一律丢弃 —— 该字段不经过
+  `error` 的脱敏路径，因此不允许携带原始响应文本（GH-237）。响应里任何 secret 形态的文本都不会
+  出现在 stdout / stderr 中。
+- `verify` 的失败输出遵守同一边界，并额外带上诊断信息：非 200（含七牛**业务**状态码 —— 源站域名的
+  HTTP 612 `no such domain` 数值上 ≥ 500，会落进 server error 分支，GH-232）在 `error` 末尾附加
+  经 `redact()` 且限长 300 字符的响应片段，业务码进 `qiniu_code`，让运维能区分「源站域名对 CDN API
+  不可见」与「七牛接口故障」；401/403/429 保持原有提示不变。
+- 验证：`tests/test_qiniu_helper.py`（进程内 stdout/stderr 断言，含 `qiniu_code` 脱敏回归用例）+
   `tests/11_qiniu_helper_argv_safety.bats`（真实子进程 + `ps` 采样的操作系统级验证，覆盖成功/
   失败/异常/debug 模式）。
 
