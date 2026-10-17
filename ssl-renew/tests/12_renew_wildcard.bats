@@ -111,6 +111,13 @@ if command == "verify":
         sys.exit(1)
     print(json.dumps({"ok": True, "certId": value("--expected-cert-id"), "matches": True}))
     sys.exit(0)
+if command == "tls-verify":
+    if os.environ.get("MOCK_QINIU_TLS_ERROR"):
+        print(json.dumps({"ok": False, "stage": "tls_verify", "error": os.environ["MOCK_QINIU_TLS_ERROR"]}))
+        sys.exit(1)
+    matches = os.environ.get("MOCK_QINIU_TLS_MATCH", "true") == "true"
+    print(json.dumps({"ok": True, "matches": matches, "local_sha256": "a" * 64, "remote_sha256": "a" * 64 if matches else "b" * 64}))
+    sys.exit(0)
 print(json.dumps({"error": "unexpected command"}))
 sys.exit(1)
 PYEOF
@@ -270,7 +277,179 @@ write_origin_console_marker() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"cert already deployed — nothing to do"* ]]
     [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 2 ]
+    # GH-235: the live TLS probe is only evidence for an API that cannot
+    # answer (HTTP 404) — an API-confirmed binding needs no probe.
+    ! grep -q '^tls-verify ' "$TEST_TMPDIR/helper.log"
     ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+# ── GH-235: CDN live TLS evidence gates idempotent exit ─────────────────
+
+@test "CDN API HTTP 404 plus matching live TLS leaf is a no-op with no upload or bind" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_HTTP_ERROR_COMMAND=verify
+    export MOCK_QINIU_TLS_MATCH=true
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"HTTP 404"* ]]
+    [[ "$output" == *"live CDN TLS leaf matches"* ]]
+    [[ "$output" == *"cert already deployed — nothing to do"* ]]
+    grep -q "^verify --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log"
+    [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 1 ]
+    grep -q "^tls-verify --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log"
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ ! -f "$NGINX_CERT_DIR/privkey.pem" ]
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+@test "live CDN TLS leaf mismatch triggers the intended deployment recovery" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_HTTP_ERROR_COMMAND=verify
+    export MOCK_QINIU_TLS_MATCH=false
+    export MOCK_QINIU_CERT_ID="repaired-certid"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"live CDN TLS leaf does not match"* ]]
+    [[ "$output" == *"continuing with full deployment"* ]]
+    grep -q '^upload ' "$TEST_TMPDIR/helper.log"
+    grep -q "^bind --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log"
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "repaired-certid" ]
+}
+
+@test "live CDN TLS probe failure alerts and does not assume success or rebind" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_TLS_ERROR="TLS connection timed out"
+
+    run "$WILDCARD"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[ERROR] stage=qiniu_live_tls_verify"* ]]
+    [[ "$output" == *"TLS connection timed out"* ]]
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+# GH-235 fail-closed: an API failure that is NOT a confirmed mismatch and NOT
+# the known 404 limitation leaves the binding state unknown. The run must
+# stop visibly without writing anything — never rebind, never probe-and-guess.
+@test "CDN verify API outage fails closed without upload, bind, or nginx writes" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper http_error 503 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_HTTP_ERROR_COMMAND=verify
+
+    run "$WILDCARD"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[ERROR] stage=qiniu_verify_deployed"* ]]
+    [[ "$output" == *"refusing to rebind without confirmed live certificate drift"* ]]
+    [[ "$output" == *"HTTP 503"* ]]
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    # 503 is not the known 404 limitation — do not fall back to the probe.
+    ! grep -q '^tls-verify ' "$TEST_TMPDIR/helper.log"
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+@test "CDN verify API network failure fails closed without any write" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper network_error 500 "$TEST_TMPDIR/helper.log"
+
+    run "$WILDCARD"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[ERROR] stage=qiniu_verify_deployed"* ]]
+    # The run stops at the CDN verify: no probe fallback, no upload, no bind.
+    [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 1 ]
+    ! grep -q '^tls-verify \|^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+# GH-235 follow-up regression: DRY_RUN previously simulated the Qiniu API but
+# still ran the live TLS probe for real, and a probe mismatch pushed a
+# simulated run into the real deployment path (state files, nginx copy,
+# reload). Dry-run must contact nothing and write nothing.
+@test "dry-run keeps the deployed no-op free of network calls and local writes" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+    use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_HTTP_ERROR_COMMAND=verify
+    # Would report drift if the probe were allowed to run for real.
+    export MOCK_QINIU_TLS_MATCH=false
+    export DRY_RUN=1
+    rm -f "$TEST_TMPDIR/acme_invocations.log"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[DRY-RUN]"* ]]
+    [[ "$output" == *"cert already deployed — nothing to do"* ]]
+    # No Qiniu helper (not even the read-only probe) and no acme.sh call.
+    [ ! -f "$TEST_TMPDIR/helper.log" ]
+    [ ! -f "$TEST_TMPDIR/acme_invocations.log" ]
+    # Deployment state and nginx untouched.
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
+    [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ ! -f "$NGINX_CERT_DIR/privkey.pem" ]
+    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
+}
+
+@test "dry-run plans a full deployment without any real write" {
+    fake_acme_sh 0
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+    export DRY_RUN=1
+    rm -f "$TEST_TMPDIR/acme_invocations.log"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"would run:"*upload* ]]
+    [[ "$output" == *"would record the current fingerprint"* ]]
+    [[ "$output" == *"would copy"* ]]
+    # Whatever a real run would have done, nothing was contacted or written.
+    [ ! -f "$TEST_TMPDIR/acme_invocations.log" ]
+    [ ! -f "$TEST_TMPDIR/helper.log" ]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid" ]
+    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ ! -f "$NGINX_CERT_DIR/privkey.pem" ]
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
@@ -289,7 +468,7 @@ write_origin_console_marker() {
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"CDN binding verify failed"* ]]
+    [[ "$output" == *"CDN API reports a certID mismatch"* ]]
     [[ "$output" == *"continuing with full deployment"* ]]
     [[ "$output" == *"bound to $CDN_DOMAIN (CDN)"* ]]
     [[ "$output" == *"bound to $ORIGIN_DOMAIN (origin)"* ]]

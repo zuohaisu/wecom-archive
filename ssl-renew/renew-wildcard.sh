@@ -58,15 +58,24 @@ if ! command -v sed >/dev/null 2>&1; then
 fi
 
 CURRENT_STAGE="acme_renew"
-log "[INFO] Running acme.sh --renew for $WILDCARD_DOMAIN (*.crowntime.cn)"
-set +e
-"$ACME_SH" --renew --dns "$DNS_PROVIDER" -d "$WILDCARD_DOMAIN" -d "*.crowntime.cn" 2>&1 | filter_secrets
-acme_exit=${PIPESTATUS[0]}
-set -e
-if [ "$acme_exit" -eq 0 ]; then log "[INFO] acme.sh --renew completed"
-elif [ "$acme_exit" -eq 2 ]; then log "[INFO] acme.sh --renew skipped (not due yet)"
-else die "acme.sh --renew failed (exit=$acme_exit)"
+if is_dry_run; then
+    # DRY_RUN must not mix simulation with real execution (GH-235 follow-up):
+    # acme.sh performs real DNS-01 mayhem and can really renew a certificate,
+    # so in dry-run the plan is printed and acme.sh is never started.
+    log_dry "would run: $ACME_SH --renew --dns $DNS_PROVIDER -d $WILDCARD_DOMAIN -d *.crowntime.cn"
+    log_dry "  (acme.sh, DNSPod, and the ACME CA are never contacted in dry-run)"
+else
+    log "[INFO] Running acme.sh --renew for $WILDCARD_DOMAIN (*.crowntime.cn)"
+    set +e
+    "$ACME_SH" --renew --dns "$DNS_PROVIDER" -d "$WILDCARD_DOMAIN" -d "*.crowntime.cn" 2>&1 | filter_secrets
+    acme_exit=${PIPESTATUS[0]}
+    if [ "$acme_exit" -eq 0 ]; then log "[INFO] acme.sh --renew completed"
+    elif [ "$acme_exit" -eq 2 ]; then log "[INFO] acme.sh --renew skipped (not due yet)"
+    else die "acme.sh --renew failed (exit=$acme_exit)"
+    fi
 fi
+# Production parity: errexit is enabled from here on in BOTH modes.
+set -e
 
 CURRENT_STAGE="local_fingerprint"
 [ -f "$WILDCARD_DIR/fullchain.cer" ] || die "fullchain.cer not found: $WILDCARD_DIR/fullchain.cer"
@@ -81,22 +90,48 @@ log "[INFO] local_fp=$local_fp"
 
 deployed_fp="" && [ -f "$FP_FILE" ] && deployed_fp=$(cat "$FP_FILE")
 if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
-    # GH-232: a matching fingerprint alone proved nothing — the 2026-09-19
-    # run uploaded + CDN-bound the new cert while the origin bind failed and
-    # was only warned on, after which every daily run early-exited here and
-    # the drift stayed invisible. Reload the recorded certID and re-verify
-    # BOTH live Qiniu bindings before trusting the fingerprint; any doubt
-    # falls through to a full (idempotent) deployment instead of masking
-    # drift.
     CURRENT_STAGE="qiniu_verify_deployed"
     verify_failures=""
+    if is_dry_run; then
+        log_dry "would verify the CDN binding via the Qiniu API and, if that API is unavailable (HTTP 404), via an independent live TLS leaf comparison" >&2
+    fi
     deployed_certid="" && [ -f "$CERTID_FILE" ] && deployed_certid=$(cat "$CERTID_FILE")
     if [ -z "$deployed_certid" ]; then
         verify_failures="no recorded certID ($CERTID_FILE missing) — cannot verify Qiniu bindings"
     else
-        if ! cdn_verify_err=$(verify_certID_on_domain "$CDN_DOMAIN" "$deployed_certid" 2>&1); then
-            verify_failures="CDN binding verify failed: $cdn_verify_err"
+        cdn_verify_err=""
+        if cdn_verify_err=$(verify_certID_on_domain "$CDN_DOMAIN" "$deployed_certid" 2>&1); then
+            cdn_verify_status=0
+        else
+            cdn_verify_status=$?
         fi
+        case "$cdn_verify_status" in
+        0) ;;
+        1) verify_failures="CDN API reports a certID mismatch: $cdn_verify_err" ;;
+        2)
+            # GH-235: this API answers HTTP 404 for the CDN domain in
+            # production, so it can never prove the binding either way. That
+            # is an UNKNOWN state, not drift — falling through to a full
+            # redeploy here is what rebound the same certificate every day.
+            # Require independent evidence of what the domain actually serves
+            # before either exiting or rewriting the binding.
+            log "[INFO] Qiniu CDN verify API returned HTTP 404 (binding not confirmable via API) — requiring independent live TLS evidence"
+            CURRENT_STAGE="qiniu_live_tls_verify"
+            live_tls_err=""
+            if live_tls_err=$(verify_live_tls_cert "$CDN_DOMAIN" "$WILDCARD_DIR/fullchain.cer" 2>&1); then
+                log "[INFO] live CDN TLS leaf matches the current local certificate — binding treated as confirmed"
+            else
+                live_tls_status=$?
+                case "$live_tls_status" in
+                1) verify_failures="live CDN TLS leaf does not match the current certificate: $live_tls_err" ;;
+                *) die "live CDN TLS verification failed or returned invalid evidence; refusing to assume the binding is correct or to rebind: $live_tls_err" ;;
+                esac
+            fi
+            CURRENT_STAGE="qiniu_verify_deployed"
+            ;;
+        *) die "CDN binding API verification failed; refusing to rebind without confirmed live certificate drift: $cdn_verify_err" ;;
+        esac
+
         if origin_console_binding_confirmed "$local_fp"; then
             log "[INFO] origin console-binding marker matches the current cert — origin API verify skipped (source domains answer HTTP 612)"
         elif ! origin_verify_err=$(verify_certID_on_domain "$ORIGIN_DOMAIN" "$deployed_certid" 2>&1); then
@@ -107,7 +142,7 @@ if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
         log "[INFO] cert already deployed — nothing to do"
         exit "$EXIT_OK"
     fi
-    log "[INFO] fingerprint matches but Qiniu binding verification failed ($verify_failures) — continuing with full deployment"
+    log "[INFO] fingerprint matches but live binding verification failed ($verify_failures) — continuing with full deployment"
 fi
 
 CURRENT_STAGE="qiniu_upload"
@@ -151,14 +186,23 @@ fi
 # Record the Qiniu deployment only now: CDN bind succeeded and the origin
 # bind either succeeded or was console-marker-excused. An origin hard
 # failure above records nothing (GH-232).
-echo "$local_fp" >"$FP_FILE"
-echo "$certID" >"$CERTID_FILE"
-rm -f "$TLS_OK_FILE" "$MISMATCH_FILE"
+if is_dry_run; then
+    # Dry-run must never write deployment state (GH-235 follow-up): a
+    # simulated upload returns the placeholder certID, and recording that
+    # would corrupt the very state the next real run verifies against.
+    log_dry "would record the current fingerprint and the uploaded certID in $FP_FILE and $CERTID_FILE, then clear the TLS state markers"
+else
+    echo "$local_fp" >"$FP_FILE"
+    echo "$certID" >"$CERTID_FILE"
+    rm -f "$TLS_OK_FILE" "$MISMATCH_FILE"
+fi
 
 CURRENT_STAGE="nginx_deploy"
 # Deploy the same wildcard cert to the local nginx (RND-261 wildcard consolidation).
 NGINX_CERT_DIR="${NGINX_CERT_DIR:-/srv/apps/wecom-archive-365/shared/certs/wildcard.crowntime.cn}"
-if [ -d "$NGINX_CERT_DIR" ] && [ -f "$WILDCARD_DIR/fullchain.cer" ] && [ -f "$WILDCARD_DIR/crowntime.cn.key" ]; then
+if is_dry_run; then
+    log_dry "would copy $WILDCARD_DIR/fullchain.cer -> $NGINX_CERT_DIR/fullchain.pem and $WILDCARD_DIR/crowntime.cn.key -> $NGINX_CERT_DIR/privkey.pem, then reload nginx"
+elif [ -d "$NGINX_CERT_DIR" ] && [ -f "$WILDCARD_DIR/fullchain.cer" ] && [ -f "$WILDCARD_DIR/crowntime.cn.key" ]; then
     if cp -f "$WILDCARD_DIR/fullchain.cer" "$NGINX_CERT_DIR/fullchain.pem" \
        && cp -f "$WILDCARD_DIR/crowntime.cn.key" "$NGINX_CERT_DIR/privkey.pem"; then
         chmod 640 "$NGINX_CERT_DIR/fullchain.pem" "$NGINX_CERT_DIR/privkey.pem" 2>/dev/null || true

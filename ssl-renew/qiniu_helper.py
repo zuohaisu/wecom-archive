@@ -15,6 +15,10 @@ non-zero on failure — see `Result.exit_code`):
     qiniu_helper.py upload --domain <domain> --cert-file <path> --key-file <path> [--timeout N]
     qiniu_helper.py bind   --domain <domain> --cert-id <id>                       [--timeout N]
     qiniu_helper.py verify --domain <domain> --expected-cert-id <id>              [--timeout N]
+    qiniu_helper.py tls-verify --domain <domain> --cert-file <path>               [--timeout N]
+
+`tls-verify` is read-only and requires no Qiniu credentials: it validates the
+SNI endpoint's TLS chain/hostname, then compares remote and local leaf DER SHA-256.
 
 Credentials come ONLY from the environment (QINIU_ACCESS_KEY/QINIU_SECRET_KEY,
 falling back to SAVED_QINIU_AK/SAVED_QINIU_SK) — never from argv. Certificate
@@ -29,9 +33,12 @@ the "Runtime Secret Safety" section of README.md.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import socket
+import ssl
 import sys
 import time
 import warnings
@@ -387,6 +394,60 @@ def cmd_verify(args: argparse.Namespace) -> dict[str, Any]:
     return {"ok": True, "certId": actual, "matches": matches}
 
 
+def _read_leaf_certificate_der(cert_file: str) -> bytes:
+    try:
+        with open(cert_file, "r", encoding="utf-8") as f:
+            pem = f.read()
+    except OSError as exc:
+        raise HelperError("tls_verify", f"could not read local certificate file: {type(exc).__name__}",
+                          exit_code=EXIT_USAGE_ERROR) from exc
+
+    match = re.search(
+        r"-----BEGIN CERTIFICATE-----\s+.*?-----END CERTIFICATE-----",
+        pem,
+        re.DOTALL,
+    )
+    if match is None:
+        raise HelperError("tls_verify", "local certificate file has no PEM certificate",
+                          exit_code=EXIT_USAGE_ERROR)
+    try:
+        return ssl.PEM_cert_to_DER_cert(match.group(0))
+    except (ValueError, ssl.SSLError) as exc:
+        raise HelperError("tls_verify", "local leaf certificate is invalid",
+                          exit_code=EXIT_USAGE_ERROR) from exc
+
+
+def cmd_tls_verify(args: argparse.Namespace) -> dict[str, Any]:
+    """Compare the local PEM leaf to a validated SNI TLS endpoint leaf."""
+    if args.timeout <= 0:
+        raise HelperError("tls_verify", "timeout must be greater than zero",
+                          exit_code=EXIT_USAGE_ERROR)
+
+    local_der = _read_leaf_certificate_der(args.cert_file)
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((args.domain, 443), timeout=args.timeout) as connection:
+            with context.wrap_socket(connection, server_hostname=args.domain) as tls_connection:
+                remote_der = tls_connection.getpeercert(binary_form=True)
+    except (OSError, ssl.SSLError, ValueError) as exc:
+        raise HelperError(
+            "tls_verify",
+            f"TLS probe failed for {args.domain}: {type(exc).__name__}: {redact(str(exc))}",
+        ) from exc
+
+    if not remote_der:
+        raise HelperError("tls_verify", f"TLS probe returned no leaf certificate for {args.domain}")
+
+    local_sha256 = hashlib.sha256(local_der).hexdigest()
+    remote_sha256 = hashlib.sha256(remote_der).hexdigest()
+    return {
+        "ok": True,
+        "local_sha256": local_sha256,
+        "remote_sha256": remote_sha256,
+        "matches": local_sha256 == remote_sha256,
+    }
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="qiniu_helper.py")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -409,6 +470,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_verify.add_argument("--expected-cert-id", required=True)
     p_verify.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     p_verify.set_defaults(func=cmd_verify)
+
+    p_tls_verify = sub.add_parser("tls-verify")
+    p_tls_verify.add_argument("--domain", required=True)
+    p_tls_verify.add_argument("--cert-file", required=True)
+    p_tls_verify.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    p_tls_verify.set_defaults(func=cmd_tls_verify)
 
     try:
         args = parser.parse_args(argv)
