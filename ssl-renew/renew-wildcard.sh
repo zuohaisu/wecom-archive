@@ -30,6 +30,9 @@ ORIGIN_BUCKET="365-wecom-media"
 # matches the current certificate, origin API failures (612 on bind/verify)
 # are excused; any new certificate invalidates it and re-requires the runbook.
 CONSOLE_FP_FILE="$WILDCARD_DIR/.origin_console_fp"
+# Local nginx certificate directory (RND-261 wildcard consolidation). Deployed
+# independently of the Qiniu path — see deploy_cert_to_nginx (GH-239).
+NGINX_CERT_DIR="${NGINX_CERT_DIR:-/srv/apps/wecom-archive-365/shared/certs/wildcard.crowntime.cn}"
 ACME_SH="${ACME_SH:-$HOME/.acme.sh/acme.sh}"
 DNS_PROVIDER="${DNS_PROVIDER:-dns_dp}"
 # The wildcard flow's domain is a script constant, not the EnvironmentFile's
@@ -46,6 +49,69 @@ origin_console_binding_confirmed() {
     local local_fp="$1" marker=""
     [ -f "$CONSOLE_FP_FILE" ] && marker=$(cat "$CONSOLE_FP_FILE")
     [ -n "$marker" ] && [ "$marker" = "$local_fp" ]
+}
+
+# leaf_cert_sha256 <pem-file> — DER SHA-256 of the FIRST (leaf) certificate in
+# a PEM bundle. Deliberately not a whole-file hash: fullchain.cer and nginx's
+# fullchain.pem may carry different chain members while serving the same leaf.
+leaf_cert_sha256() {
+    local pem_file="$1"
+    openssl x509 -in "$pem_file" -outform DER 2>/dev/null | sha256sum | awk '{print $1}' || true
+}
+
+# deploy_cert_to_nginx — copy the current wildcard cert into the local nginx
+# cert directory and reload nginx, but only when nginx does not already serve
+# that leaf certificate.
+#
+# GH-239: this is a purely local operation with its own fingerprint, so it is
+# invoked before the Qiniu early-exit and before the Qiniu origin gate. It must
+# never be gated on a provider precondition: doing so left nginx serving the
+# previous certificate for a week while every run retried the CDN write.
+# Warn-only by contract — a copy or reload failure never aborts the run.
+deploy_cert_to_nginx() {
+    local source_chain="$WILDCARD_DIR/fullchain.cer"
+    local source_key="$WILDCARD_DIR/$WILDCARD_DOMAIN.key"
+    local target_chain="$NGINX_CERT_DIR/fullchain.pem"
+    local target_key="$NGINX_CERT_DIR/privkey.pem"
+    local source_leaf target_leaf
+
+    CURRENT_STAGE="nginx_deploy"
+
+    if is_dry_run; then
+        log_dry "would compare the nginx leaf certificate in $target_chain against $source_chain; would copy $source_chain -> $target_chain and $source_key -> $target_key, then reload nginx, only when the leaves differ"
+        return 0
+    fi
+
+    if [ ! -d "$NGINX_CERT_DIR" ] || [ ! -f "$source_key" ]; then
+        warn "nginx deploy skipped (dir or source files missing)"
+        return 0
+    fi
+
+    # A missing target file (or key) is not a comparison — it is a deploy.
+    if [ -f "$target_chain" ] && [ -f "$target_key" ]; then
+        if ! command -v openssl >/dev/null 2>&1; then
+            warn "nginx deploy skipped (openssl unavailable — cannot compare the served leaf certificate)"
+            return 0
+        fi
+        source_leaf=$(leaf_cert_sha256 "$source_chain")
+        target_leaf=$(leaf_cert_sha256 "$target_chain")
+        if [ -n "$source_leaf" ] && [ "$source_leaf" = "$target_leaf" ]; then
+            log "[INFO] nginx already serves the current certificate — no copy or reload"
+            return 0
+        fi
+    fi
+
+    if cp -f "$source_chain" "$target_chain" \
+       && cp -f "$source_key" "$target_key"; then
+        chmod 640 "$target_chain" "$target_key" 2>/dev/null || true
+        if sudo -n /usr/bin/systemctl reload nginx 2>/dev/null; then
+            log "[INFO] nginx cert deployed + reloaded"
+        else
+            warn "nginx reload failed (sudo) — cert files updated, manual reload needed"
+        fi
+    else
+        warn "nginx cert copy failed — files NOT updated"
+    fi
 }
 
 log "===== Wildcard SSL renewal started ====="
@@ -87,6 +153,11 @@ if ! local_fp=$(sha256sum "$WILDCARD_DIR/fullchain.cer" | awk '{print $1}'); the
 fi
 [ -n "$local_fp" ] || die "local certificate fingerprint is empty"
 log "[INFO] local_fp=$local_fp"
+
+# GH-239: deploy the local nginx copy FIRST — before the Qiniu early-exit, so
+# a converged Qiniu binding can never skip it, and before the Qiniu origin
+# gate, so an unrelated provider precondition can never starve it.
+deploy_cert_to_nginx
 
 deployed_fp="" && [ -f "$FP_FILE" ] && deployed_fp=$(cat "$FP_FILE")
 if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
@@ -145,12 +216,31 @@ if [ "$local_fp" = "$deployed_fp" ] && [ -n "$deployed_fp" ]; then
     log "[INFO] fingerprint matches but live binding verification failed ($verify_failures) — continuing with full deployment"
 fi
 
+# GH-239: the operator-recorded origin console marker is a PRECONDITION of the
+# deployment path, not a step inside it. Qiniu's httpsconf API cannot bind a
+# Kodo object-storage source domain (HTTP 612 "no such domain"), so the origin
+# step can only pass when an operator has console-bound the CURRENT certificate
+# and recorded its fingerprint. Checking it after the upload + CDN bind left a
+# partial deployment with NO recorded state, which re-uploaded and re-bound the
+# same certificate on every following run (one provider notification per day
+# for a week). Check it before the first Qiniu write instead: no upload, no
+# bind, no notification.
 CURRENT_STAGE="qiniu_upload"
 if ! command -v "$QINIU_HELPER_PYTHON" >/dev/null 2>&1 \
    || [ ! -f "$QINIU_HELPER_SCRIPT" ] \
    || ! command -v jq >/dev/null 2>&1; then
     die "required Qiniu helper runtime dependency is unavailable"
 fi
+
+CURRENT_STAGE="origin_console_preflight"
+if ! origin_console_binding_confirmed "$local_fp"; then
+    die "Origin console-binding preflight failed: local certificate fingerprint $local_fp is not recorded in $CONSOLE_FP_FILE, and Qiniu's httpsconf API cannot bind a Kodo object-storage source domain (HTTP 612 'no such domain'). " \
+        "Console-bind this certificate to $ORIGIN_DOMAIN per docs/operations/qiniu-origin-domain-https-runbook.md " \
+        "(Kodo bucket $ORIGIN_BUCKET > 域名管理 > $ORIGIN_DOMAIN > 配置 HTTPS), then record fingerprint $local_fp in $CONSOLE_FP_FILE and re-run. " \
+        "Nothing was uploaded and no CDN binding was changed."
+fi
+
+CURRENT_STAGE="qiniu_upload"
 upload_output=$(deploy_to_qiniu "$WILDCARD_DOMAIN" "$WILDCARD_DIR" 2>&1) && upload_status=$? || upload_status=$?
 if [ "$upload_status" -ne 0 ]; then die "$upload_output"; fi
 certID="$upload_output"
@@ -197,26 +287,9 @@ else
     rm -f "$TLS_OK_FILE" "$MISMATCH_FILE"
 fi
 
-CURRENT_STAGE="nginx_deploy"
-# Deploy the same wildcard cert to the local nginx (RND-261 wildcard consolidation).
-NGINX_CERT_DIR="${NGINX_CERT_DIR:-/srv/apps/wecom-archive-365/shared/certs/wildcard.crowntime.cn}"
-if is_dry_run; then
-    log_dry "would copy $WILDCARD_DIR/fullchain.cer -> $NGINX_CERT_DIR/fullchain.pem and $WILDCARD_DIR/crowntime.cn.key -> $NGINX_CERT_DIR/privkey.pem, then reload nginx"
-elif [ -d "$NGINX_CERT_DIR" ] && [ -f "$WILDCARD_DIR/fullchain.cer" ] && [ -f "$WILDCARD_DIR/crowntime.cn.key" ]; then
-    if cp -f "$WILDCARD_DIR/fullchain.cer" "$NGINX_CERT_DIR/fullchain.pem" \
-       && cp -f "$WILDCARD_DIR/crowntime.cn.key" "$NGINX_CERT_DIR/privkey.pem"; then
-        chmod 640 "$NGINX_CERT_DIR/fullchain.pem" "$NGINX_CERT_DIR/privkey.pem" 2>/dev/null || true
-        if sudo -n /usr/bin/systemctl reload nginx 2>/dev/null; then
-            log "[INFO] nginx cert deployed + reloaded"
-        else
-            warn "nginx reload failed (sudo) — cert files updated, manual reload needed"
-        fi
-    else
-        warn "nginx cert copy failed — files NOT updated"
-    fi
-else
-    warn "nginx deploy skipped (dir or source files missing)"
-fi
+# The local nginx copy is deployed earlier (deploy_cert_to_nginx, GH-239) so a
+# failing Qiniu gate can never starve it; there is deliberately no second copy
+# or reload here.
 
 # shellcheck disable=SC2034 # production parity: retained diagnostic assignment
 CURRENT_STAGE="done"
