@@ -17,6 +17,19 @@ from app.db.models import ExternalContactRefreshTask
 from app.services.external_contact_sync import refresh_external_contact
 
 _MAX_RETRY_DELAY = timedelta(hours=24)
+# 5 * 2**29 minutes already exceeds timedelta's range, so the exponent MUST be
+# clamped before the timedelta is built: the previous expression raised
+# OverflowError for any task whose attempt_count reached ~30, and that
+# exception aborted the whole tenant batch on every run (GH-243). 2**16
+# minutes is far beyond _MAX_RETRY_DELAY, so the cap is reached well before
+# this bound.
+_MAX_BACKOFF_EXPONENT = 16
+# Hard retry budget: a task that has failed this many times is not going to
+# converge by waiting longer (a deleted/never-resolvable external contact
+# stays unresolvable). Dead-lettering it keeps one such row from pinning the
+# tenant's backlog forever. At the 24h cap this is several months of retries.
+_MAX_ATTEMPTS = 100
+_TERMINAL_STATE = "dead"
 
 
 @dataclass
@@ -37,8 +50,9 @@ def _as_utc(value: datetime) -> datetime:
 
 def _retry_at(attempt_count: int, now: datetime) -> datetime:
     """Return bounded backoff without retaining raw upstream error details."""
-    delay = timedelta(minutes=5 * (2 ** max(0, attempt_count - 1)))
-    return now + min(delay, _MAX_RETRY_DELAY)
+    exponent = min(max(0, attempt_count - 1), _MAX_BACKOFF_EXPONENT)
+    delay = min(timedelta(minutes=5 * (2 ** exponent)), _MAX_RETRY_DELAY)
+    return now + delay
 
 
 def run_external_contact_refresh_queue(
@@ -108,9 +122,17 @@ def run_external_contact_refresh_queue(
             session.delete(task)
             summary.refreshed += 1
         else:
-            task.state = "pending"
             task.last_error_class = "unavailable"
-            task.next_attempt_at = _retry_at(task.attempt_count, observed_at)
+            if task.attempt_count >= _MAX_ATTEMPTS:
+                # Give up instead of retrying forever (GH-243): the terminal
+                # state keeps this row out of the ready queue, so a single
+                # unresolvable external userid cannot pin the tenant's batch
+                # or grow the attempt counter without bound.
+                task.state = _TERMINAL_STATE
+                task.next_attempt_at = observed_at
+            else:
+                task.state = "pending"
+                task.next_attempt_at = _retry_at(task.attempt_count, observed_at)
             summary.unavailable += 1
         session.commit()
 
