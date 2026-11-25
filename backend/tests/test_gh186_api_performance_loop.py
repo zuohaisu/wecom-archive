@@ -39,6 +39,17 @@ from app.services.api_performance_store import FLUSH_APPLIED
 UTC = timezone.utc
 
 
+# The collector drops flush deltas whose bucket falls outside the configured
+# retention window (default API_PERF_RETENTION_HOURS=720, i.e. 30 days). A
+# fixture built on an ABSOLUTE date therefore expires: observations recorded at
+# 2026-10-08 aged out on 2026-11-07 and three tests in this file started
+# failing on a calendar boundary rather than on a behaviour change. Derive the
+# fixture clock from the real clock instead, comfortably inside the window.
+def _recent_utc() -> datetime:
+    return datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=5)
+
+
+
 @compiles(JSONB, "sqlite")
 def _compile_jsonb_for_sqlite(_type, _compiler, **_kw):
     return "JSON"
@@ -92,7 +103,7 @@ def test_loop_flushes_collector_to_database(db_factory, fast_loop_config):
     flush step; snapshots advance so the next cycle writes only deltas."""
     collector = ApiPerformanceCollector(instance_id="loop-test")
     runtime = ApiPerformanceRuntime(collector, fast_loop_config)
-    now = datetime(2026, 10, 8, 10, 30, tzinfo=UTC)
+    now = _recent_utc()
     for index in range(3):
         collector.record(_slow_obs("/api/x", now + timedelta(seconds=index)))
 
@@ -326,7 +337,7 @@ def test_loop_lifecycle_start_stop_and_backoff(db_factory, fast_loop_config, mon
         alert_email="",
     )
     collector = ApiPerformanceCollector(instance_id="lifecycle")
-    collector.record(_slow_obs("/api/x", datetime(2026, 10, 8, 10, 30, tzinfo=UTC)))
+    collector.record(_slow_obs("/api/x", _recent_utc()))
     runtime = ApiPerformanceRuntime(collector, config)
 
     attempts = []
@@ -393,7 +404,7 @@ def test_loop_lifecycle_start_stop_and_backoff(db_factory, fast_loop_config, mon
 def test_shutdown_joins_the_owned_flush_instead_of_submitting_a_duplicate(db_factory, fast_loop_config):
     collector = ApiPerformanceCollector(instance_id="shutdown-owned-flush")
     runtime = ApiPerformanceRuntime(collector, fast_loop_config)
-    collector.record(_slow_obs("/api/x", datetime(2026, 10, 8, 10, 30, tzinfo=UTC)))
+    collector.record(_slow_obs("/api/x", _recent_utc()))
 
     started = threading.Event()
     guard = threading.Lock()
@@ -447,7 +458,7 @@ def test_flush_runs_off_the_event_loop(db_factory, fast_loop_config):
     a 30ms wait_for deadline (QA finding 1 reproduction)."""
     collector = ApiPerformanceCollector(instance_id="offloop")
     runtime = ApiPerformanceRuntime(collector, fast_loop_config)
-    collector.record(_slow_obs("/api/x", datetime(2026, 10, 8, 10, 30, tzinfo=UTC)))
+    collector.record(_slow_obs("/api/x", _recent_utc()))
 
     class SlowFactory:
         def __call__(self):
