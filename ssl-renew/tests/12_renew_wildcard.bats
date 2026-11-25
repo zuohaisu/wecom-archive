@@ -33,6 +33,13 @@ setup() {
 }
 teardown() { common_teardown; }
 
+# bats 1.x does not abort a test body when a `[[ ]]` assertion is false (its
+# exit status is swallowed by the errexit context), so every `[[ ]]` failure in
+# this suite is currently advisory. Route assertions that MUST fail the run
+# through a simple command instead.
+assert_output_contains() { printf '%s\n' "$output" | grep -Fq -- "$1"; }
+assert_output_lacks() { ! printf '%s\n' "$output" | grep -Fq -- "$1"; }
+
 # fake_acme_sh <exit_code> writes a synthetic wildcard certificate/key pair.
 # Exit 2 intentionally still leaves the existing pair in place, as acme.sh
 # does on a not-due run.
@@ -150,12 +157,41 @@ write_deployed_state() {
     echo "$certid" >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid"
 }
 
-# write_origin_console_marker records the current cert's fingerprint in
-# .origin_console_fp, simulating an operator who has console-bound the
-# current cert to the origin domain per the GH-232 runbook.
+# write_origin_console_marker [certfile] records the fingerprint of the
+# certificate the next run will deploy in .origin_console_fp, simulating an
+# operator who has console-bound the current cert to the origin domain per the
+# GH-232 runbook. Defaults to the acme.sh copy when it already exists, else the
+# generated $TEST_TMPDIR/fullchain.cer — the script fingerprints exactly those
+# bytes, so both give the fingerprint the run itself will compute.
 write_origin_console_marker() {
-    sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}' \
-        >"$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp"
+    local certfile="${1:-}"
+    if [ -z "$certfile" ]; then
+        certfile="$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer"
+        [ -f "$certfile" ] || certfile="$TEST_TMPDIR/fullchain.cer"
+    fi
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    sha256sum "$certfile" | awk '{print $1}' >"$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp"
+}
+
+# seed_nginx_cert [certfile] [keyfile] makes the nginx cert dir already serve
+# the given leaf (default: the cert the next run will install — the acme.sh
+# copy when present, else the generated $TEST_TMPDIR pair), i.e. the converged
+# state deploy_cert_to_nginx must recognise and leave untouched. Uses $REAL_CP
+# so a test's mocked `cp` cannot intercept the fixture.
+seed_nginx_cert() {
+    local certfile="${1:-$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer}"
+    local keyfile="${2:-$HOME/.acme.sh/$REAL_DOMAIN/$REAL_DOMAIN.key}"
+    [ -f "$certfile" ] || certfile="$TEST_TMPDIR/fullchain.cer"
+    [ -f "$keyfile" ] || keyfile="$TEST_TMPDIR/privkey.key"
+    mkdir -p "$NGINX_CERT_DIR"
+    "$REAL_CP" "$certfile" "$NGINX_CERT_DIR/fullchain.pem"
+    "$REAL_CP" "$keyfile" "$NGINX_CERT_DIR/privkey.pem"
+}
+
+# nginx_leaf_sha256 <pem> — DER SHA-256 of the leaf certificate in a PEM file;
+# the only comparable value between fullchain.cer and nginx's fullchain.pem.
+nginx_leaf_sha256() {
+    openssl x509 -in "$1" -outform DER 2>/dev/null | sha256sum | awk '{print $1}'
 }
 
 # ── Canonical reporting and alert integration ───────────────────────────
@@ -236,6 +272,8 @@ write_origin_console_marker() {
     fake_sudo 0
     use_mock_qiniu_helper success
     export MOCK_QINIU_CERT_ID="wildcard-certid"
+    # GH-239: a deployment needs the operator's origin console marker up front.
+    write_origin_console_marker
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
@@ -250,6 +288,8 @@ write_origin_console_marker() {
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
     write_deployed_state "wildcard-certid"
+    # GH-239: a truly converged host also has nginx serving this leaf.
+    seed_nginx_cert
     : >"$TEST_TMPDIR/acme_invocations.log"
 
     use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
@@ -270,6 +310,7 @@ write_origin_console_marker() {
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
     write_deployed_state "wildcard-certid"
+    seed_nginx_cert
     : >"$TEST_TMPDIR/acme_invocations.log"
 
     use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
@@ -281,6 +322,10 @@ write_origin_console_marker() {
     # answer (HTTP 404) — an API-confirmed binding needs no probe.
     ! grep -q '^tls-verify ' "$TEST_TMPDIR/helper.log"
     ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    # GH-239 regression: a fully converged run must not copy or reload nginx.
+    assert_output_contains "nginx already serves the current certificate — no copy or reload"
+    [ "$(nginx_leaf_sha256 "$NGINX_CERT_DIR/fullchain.pem")" = "$(nginx_leaf_sha256 "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer")" ]
+    # No reload at all: nginx already served this leaf.
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
@@ -293,6 +338,7 @@ write_origin_console_marker() {
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
     write_deployed_state "wildcard-certid"
     write_origin_console_marker
+    seed_nginx_cert
     use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
     export MOCK_QINIU_HTTP_ERROR_COMMAND=verify
     export MOCK_QINIU_TLS_MATCH=true
@@ -306,8 +352,10 @@ write_origin_console_marker() {
     [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 1 ]
     grep -q "^tls-verify --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log"
     ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
-    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
-    [ ! -f "$NGINX_CERT_DIR/privkey.pem" ]
+    # GH-239: nginx already serves this leaf, so nothing is copied or reloaded.
+    assert_output_contains "nginx already serves the current certificate — no copy or reload"
+    [ -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    [ -f "$NGINX_CERT_DIR/privkey.pem" ]
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
@@ -339,6 +387,7 @@ write_origin_console_marker() {
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
     write_deployed_state "wildcard-certid"
     write_origin_console_marker
+    seed_nginx_cert
     use_mock_qiniu_helper http_error 404 "$TEST_TMPDIR/helper.log"
     export MOCK_QINIU_TLS_ERROR="TLS connection timed out"
 
@@ -360,6 +409,7 @@ write_origin_console_marker() {
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
     write_deployed_state "wildcard-certid"
     write_origin_console_marker
+    seed_nginx_cert
     use_mock_qiniu_helper http_error 503 "$TEST_TMPDIR/helper.log"
     export MOCK_QINIU_HTTP_ERROR_COMMAND=verify
 
@@ -372,7 +422,8 @@ write_origin_console_marker() {
     # 503 is not the known 404 limitation — do not fall back to the probe.
     ! grep -q '^tls-verify ' "$TEST_TMPDIR/helper.log"
     [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
-    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    # GH-239: nginx already served this leaf, so the failure path reloaded nothing.
+    assert_output_contains "nginx already serves the current certificate"
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
@@ -383,6 +434,7 @@ write_origin_console_marker() {
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
     write_deployed_state "wildcard-certid"
     write_origin_console_marker
+    seed_nginx_cert
     use_mock_qiniu_helper network_error 500 "$TEST_TMPDIR/helper.log"
 
     run "$WILDCARD"
@@ -392,7 +444,7 @@ write_origin_console_marker() {
     [ "$(grep -c '^verify ' "$TEST_TMPDIR/helper.log")" -eq 1 ]
     ! grep -q '^tls-verify \|^upload \|^bind ' "$TEST_TMPDIR/helper.log"
     [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
-    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
+    assert_output_contains "nginx already serves the current certificate"
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
@@ -434,6 +486,7 @@ write_origin_console_marker() {
     fake_sudo 0
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_origin_console_marker
     use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
     export DRY_RUN=1
     rm -f "$TEST_TMPDIR/acme_invocations.log"
@@ -461,6 +514,7 @@ write_origin_console_marker() {
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     "$HOME/.acme.sh/acme.sh" >/dev/null || true
     write_deployed_state "wildcard-certid"
+    write_origin_console_marker
 
     use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
     export MOCK_QINIU_CERT_ID="wildcard-certid"
@@ -484,6 +538,7 @@ write_origin_console_marker() {
     # Legacy state: fp written by an older script version, no certID file.
     sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}' >"$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp"
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid" ]
+    write_origin_console_marker
 
     use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
     export MOCK_QINIU_CERT_ID="wildcard-certid"
@@ -496,7 +551,10 @@ write_origin_console_marker() {
     [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
 }
 
-@test "fingerprint match with an unverifiable origin binding and no console marker redeploys" {
+# GH-239 gate-first: this path used to upload + bind the CDN domain and only
+# then fail on the origin step, leaving no recorded state and repeating the
+# same provider write every day. The origin marker is now a precondition.
+@test "fingerprint match with an unverifiable origin binding and no console marker fails closed before any write" {
     fake_acme_sh 2
     fake_sudo 0
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
@@ -509,10 +567,12 @@ write_origin_console_marker() {
     export MOCK_QINIU_VERIFY_MISMATCH_DOMAIN="$ORIGIN_DOMAIN"
 
     run "$WILDCARD"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"origin binding verify failed (no matching console marker)"* ]]
-    [[ "$output" == *"continuing with full deployment"* ]]
-    grep -q '^upload ' "$TEST_TMPDIR/helper.log"
+    [ "$status" -eq 1 ]
+    assert_output_contains "origin binding verify failed (no matching console marker)"
+    assert_output_contains "continuing with full deployment"
+    assert_output_contains "[ERROR] stage=origin_console_preflight domain=crowntime.cn"
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
 }
 
 @test "fingerprint match with a matching console marker skips the origin API verify" {
@@ -566,8 +626,10 @@ write_origin_console_marker() {
 @test "Qiniu upload failure exits non-zero and filters secret-shaped helper output" {
     fake_acme_sh 0
     fake_sudo 0
+    seed_nginx_cert
     use_mock_qiniu_helper http_error 401
     export MOCK_QINIU_ERROR='Qiniu upload rejected: QINIU_SECRET_KEY=wildcard-secret-fixture ALERT_WEBHOOK_URL=https://user:webhook-secret@example.test/hook'
+    write_origin_console_marker
 
     run "$WILDCARD"
     [ "$status" -eq 1 ]
@@ -581,17 +643,18 @@ write_origin_console_marker() {
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-@test "CDN bind failure exits non-zero without recording fingerprint or deploying nginx" {
+@test "CDN bind failure exits non-zero without recording fingerprint or reloading nginx" {
     fake_acme_sh 0
     fake_sudo 0
+    seed_nginx_cert
     use_bind_failure_helper "$CDN_DOMAIN" "CDN bind rejected"
+    write_origin_console_marker
 
     run "$WILDCARD"
     [ "$status" -eq 1 ]
     [[ "$output" == *"[ERROR] stage=qiniu_bind_cdn domain=crowntime.cn message=CDN bind failed: CDN bind rejected"* ]]
     [[ "$output" != *"command not found"* ]]
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
-    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
     [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
@@ -607,40 +670,47 @@ write_origin_console_marker() {
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
 }
 
-# ── Hard failure: origin bind (GH-232 fail-closed + console marker) ─────
+# ── Hard failure: origin console preflight (GH-232 marker, GH-239 ordering) ──
 
-@test "origin bind failure without a console marker dies with runbook guidance and records nothing" {
+@test "a missing origin console marker fails closed before any Qiniu write" {
     fake_acme_sh 0
     fake_sudo 0
     use_bind_failure_helper "$ORIGIN_DOMAIN" 'HTTP 612: {"code":612,"error":"no such domain"}'
+    # Would record every helper call if the gate were not first.
+    export MOCK_QINIU_LOG="$TEST_TMPDIR/helper.log"
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp" ]
+
+    local_fp=$(sha256sum "$TEST_TMPDIR/fullchain.cer" | awk '{print $1}')
 
     run "$WILDCARD"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"[ERROR] stage=qiniu_bind_origin domain=crowntime.cn"* ]]
-    [[ "$output" == *"certID=wildcard-certid is NOT bound"* ]]
-    [[ "$output" == *"612"* ]]
-    [[ "$output" == *"docs/operations/qiniu-origin-domain-https-runbook.md"* ]]
-    [[ "$output" == *".origin_console_fp"* ]]
-    [[ "$output" != *"bound to $ORIGIN_DOMAIN (origin)"* ]]
-    [[ "$output" != *"command not found"* ]]
-    # An origin hard failure records nothing and never reaches nginx.
+    [ "$(printf '%s\n' "$output" | grep -c '\[ERROR\] stage=origin_console_preflight domain=crowntime.cn')" -eq 1 ]
+    assert_output_contains "Origin console-binding preflight failed"
+    assert_output_contains "$local_fp"
+    assert_output_contains "docs/operations/qiniu-origin-domain-https-runbook.md"
+    assert_output_contains ".origin_console_fp"
+    # GH-239: the gate runs BEFORE the first provider write — zero helper
+    # invocations of any kind, and therefore no upload, bind, or notification.
+    [ ! -f "$TEST_TMPDIR/helper.log" ]
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid" ]
-    [ ! -f "$NGINX_CERT_DIR/fullchain.pem" ]
-    [ ! -f "$TEST_TMPDIR/sudo_invocations.log" ]
 }
 
-@test "a stale console marker does not excuse an origin bind failure for a new cert" {
+@test "a stale console marker does not excuse the origin gate for a new cert" {
     fake_acme_sh 0
     fake_sudo 0
     use_bind_failure_helper "$ORIGIN_DOMAIN" 'HTTP 612: {"code":612,"error":"no such domain"}'
+    export MOCK_QINIU_LOG="$TEST_TMPDIR/helper.log"
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     echo "stale-fingerprint-from-a-previous-cert" >"$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp"
 
+    local_fp=$(sha256sum "$TEST_TMPDIR/fullchain.cer" | awk '{print $1}')
+
     run "$WILDCARD"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"[ERROR] stage=qiniu_bind_origin domain=crowntime.cn"* ]]
+    assert_output_contains "[ERROR] stage=origin_console_preflight domain=crowntime.cn"
+    assert_output_contains "$local_fp"
+    [ ! -f "$TEST_TMPDIR/helper.log" ]
     [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
 }
 
@@ -700,6 +770,7 @@ write_origin_console_marker() {
     fake_nginx_copy_failure
     use_mock_qiniu_helper success
     export MOCK_QINIU_CERT_ID="wildcard-certid"
+    write_origin_console_marker
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
@@ -714,6 +785,7 @@ write_origin_console_marker() {
     fake_sudo 1
     use_mock_qiniu_helper success
     export MOCK_QINIU_CERT_ID="wildcard-certid"
+    write_origin_console_marker
 
     run "$WILDCARD"
     [ "$status" -eq 0 ]
@@ -731,6 +803,7 @@ write_origin_console_marker() {
     fake_sudo 0
     use_mock_qiniu_helper success
     export MOCK_QINIU_CERT_ID="wildcard-certid"
+    write_origin_console_marker
     mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
     touch "$HOME/.acme.sh/$REAL_DOMAIN/.tls_verified"
     echo 3 >"$HOME/.acme.sh/$REAL_DOMAIN/.tls_mismatch_days"
@@ -749,4 +822,71 @@ write_origin_console_marker() {
 
     perm=$(stat -c '%a' "$NGINX_CERT_DIR/privkey.pem" 2>/dev/null || stat -f '%Lp' "$NGINX_CERT_DIR/privkey.pem")
     [ "$perm" = "640" ]
+}
+
+# ── GH-239: origin gate ordering + independent nginx deployment ─────────
+
+@test "a matching origin console marker allows exactly one upload and one CDN bind" {
+    fake_acme_sh 0
+    fake_sudo 0
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+    export MOCK_QINIU_CERT_ID="gh239-certid"
+    write_origin_console_marker
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '^upload ' "$TEST_TMPDIR/helper.log")" -eq 1 ]
+    [ "$(grep -c "^bind --domain $CDN_DOMAIN " "$TEST_TMPDIR/helper.log")" -eq 1 ]
+    [ -f "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp" ]
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "gh239-certid" ]
+    # The recorded fingerprint is the one the next run compares against, so a
+    # successful deployment converges instead of repeating tomorrow.
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_fp")" = "$(sha256sum "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer" | awk '{print $1}')" ]
+}
+
+@test "nginx deploys independently while the Qiniu side is already converged" {
+    fake_acme_sh 2
+    fake_sudo 0
+    mkdir -p "$HOME/.acme.sh/$REAL_DOMAIN"
+    "$HOME/.acme.sh/acme.sh" >/dev/null || true
+    write_deployed_state "wildcard-certid"
+    write_origin_console_marker
+
+    # nginx still serves the PREVIOUS certificate: a different leaf with the
+    # same chain shape, exactly the post-renewal state the incident left behind.
+    gen_cert "$REAL_DOMAIN" "$TEST_TMPDIR/old-fullchain.pem" "$TEST_TMPDIR/old-privkey.pem"
+    seed_nginx_cert "$TEST_TMPDIR/old-fullchain.pem" "$TEST_TMPDIR/old-privkey.pem"
+    [ "$(nginx_leaf_sha256 "$NGINX_CERT_DIR/fullchain.pem")" != "$(nginx_leaf_sha256 "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer")" ]
+
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+
+    run "$WILDCARD"
+    [ "$status" -eq 0 ]
+    # Qiniu is converged: no upload and no bind.
+    ! grep -q '^upload \|^bind ' "$TEST_TMPDIR/helper.log"
+    # The local deploy is independent: nginx gets the current leaf anyway.
+    assert_output_contains "nginx cert deployed + reloaded"
+    [ "$(nginx_leaf_sha256 "$NGINX_CERT_DIR/fullchain.pem")" = "$(nginx_leaf_sha256 "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer")" ]
+    cmp -s "$HOME/.acme.sh/$REAL_DOMAIN/$REAL_DOMAIN.key" "$NGINX_CERT_DIR/privkey.pem"
+    grep -q 'sudo -n /usr/bin/systemctl reload nginx' "$TEST_TMPDIR/sudo_invocations.log"
+    # A local copy never fabricates a Qiniu deployment record.
+    [ "$(cat "$HOME/.acme.sh/$REAL_DOMAIN/.deployed_certid")" = "wildcard-certid" ]
+}
+
+@test "nginx is still deployed when the origin console gate blocks the Qiniu writes" {
+    fake_acme_sh 0
+    fake_sudo 0
+    use_mock_qiniu_helper success "" "$TEST_TMPDIR/helper.log"
+    [ ! -f "$HOME/.acme.sh/$REAL_DOMAIN/.origin_console_fp" ]
+
+    run "$WILDCARD"
+    [ "$status" -eq 1 ]
+    assert_output_contains "[ERROR] stage=origin_console_preflight"
+    # GH-239 defect 2: a failing provider gate must not starve the local nginx
+    # deploy — otherwise nginx keeps serving the pre-renewal certificate.
+    assert_output_contains "nginx cert deployed + reloaded"
+    [ "$(nginx_leaf_sha256 "$NGINX_CERT_DIR/fullchain.pem")" = "$(nginx_leaf_sha256 "$HOME/.acme.sh/$REAL_DOMAIN/fullchain.cer")" ]
+    grep -q 'sudo -n /usr/bin/systemctl reload nginx' "$TEST_TMPDIR/sudo_invocations.log"
+    # GH-239 defect 1: still zero provider writes on the blocked path.
+    [ ! -f "$TEST_TMPDIR/helper.log" ]
 }
