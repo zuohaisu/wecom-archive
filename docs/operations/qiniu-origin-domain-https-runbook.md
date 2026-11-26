@@ -1,13 +1,19 @@
-# Qiniu Origin (Source) Domain HTTPS Certificate Runbook — GH-232
+# Qiniu Origin (Source) Domain HTTPS Certificate Runbook
 
-**Scope:** `media-origin.crowntime.cn` — the custom **source domain** （源站域名）
-bound to object-storage bucket `365-wecom-media`, CNAME → `iovip-z2.qiniuio.com`.
-Backend media signing (`backend/.env` → `QINIU_DOMAIN=https://media-origin.crowntime.cn`)
-serves user-facing media over this domain, so an expired certificate here breaks
-HTTPS media access for the 365 frontend.
+**Scope:** the two Kodo object-storage **source domains** (源站域名) that Qiniu's
+CDN HTTPS API cannot manage:
+
+| Domain | Bucket | CNAME | Consumed by |
+|---|---|---|---|
+| `media-origin.crowntime.cn` | `365-wecom-media` | `iovip-z2.qiniuio.com` | `backend/.env` → `QINIU_DOMAIN`; user-facing media for the 365 frontend |
+| `pdf-vault-files.crowntime.cn` | `pdf-vault-prod` | `iovip-z0.qiniuio.com` | `/srv/apps/pdf-vault/shared/runtime.env` → `PDFVAULT_QINIU_DOWNLOAD_DOMAIN` |
+
+Both serve user traffic, so an expired certificate here breaks HTTPS media /
+PDF downloads. Neither is covered by the CDN `httpsconf` API; both are bound in
+the console only.
 
 Behavior contract: [Wildcard SSL Renewal](https://github.com/zuohaisu/wecom-archive/wiki/Wildcard-SSL-Renewal)
-(Wiki), GH-232 section.
+(Wiki), GH-232 / GH-239 sections.
 
 ## Why this runbook exists (the API limitation)
 
@@ -32,78 +38,136 @@ This is confirmed by:
   hook uses the CDN httpsconf API; object-storage source-station domains are
   not covered by that API."
 
-Because binding is manual, `ssl-renew/renew-wildcard.sh` **fails closed** when
-the origin bind fails without a valid console marker (it `die`s, so
-`OnFailure=wecom-job-failure-alert@%n.service` pages), and the daily timer
-keeps alerting until the operator completes this runbook and records the
-marker. That repeat alert is the intended visible failure, not a false alarm.
+Because binding is manual, `ssl-renew/renew-wildcard.sh` **fails closed**: it
+`die`s (so `OnFailure=wecom-job-failure-alert@%n.service` pages) until the
+operator has console-bound the current certificate and recorded the marker
+below. That alert is the intended visible failure, not a false alarm.
+
+## What GH-239 changed (read this before following any older copy)
+
+| | Before GH-239 | Now |
+|---|---|---|
+| Order of operations | upload → bind CDN → origin 612 → die **without recording state** → the identical upload + CDN bind repeated on every later run (one Qiniu "certificate changed" email per day) | the origin marker is checked **before the first Qiniu write**; a missing/stale marker exits at `stage=origin_console_preflight` with **zero** upload/bind |
+| Where the certID comes from | read `uploaded — certID=<id>` from the journal (the script had already uploaded) | **nowhere** — the API upload deliberately has not run yet; the operator uploads the certificate in the console first (step 2) |
+| nginx | `nginx_deploy` sat after the origin gate, so nginx kept serving the previous certificate until someone copied files by hand | `deploy_cert_to_nginx` runs independently (own leaf comparison) before the Qiniu early-exit — nginx no longer waits on this runbook |
+
+This runbook is now **console-first, script-second**. Do not look for an
+uploaded certID in the journal; there is none.
 
 ## When to run this
 
-- Every time `qiniu-ssl-renew-wildcard.service` alerts with
-  `stage=qiniu_bind_origin` (each successful acme.sh renewal produces a new
-  cert that must be bound to the origin domain manually), and
-- Immediately, for the 2026-10-19 expiry of cert `6a5ef31fcb904e2c369b43fd`
-  if the cert currently served is still the old one.
+- When `qiniu-ssl-renew-wildcard.service` fails with
+  `stage=origin_console_preflight` — once per acme.sh renewal, because every new
+  certificate invalidates the fingerprint-bound marker.
+- For `pdf-vault-files.crowntime.cn`: there is no timer and no marker. Check it
+  during any certificate audit, and rebind whenever its live `notAfter` is
+  within ~30 days (see the dedicated section below).
 
-## Procedure (Qiniu console + host marker)
+## Procedure (media-origin.crowntime.cn)
 
-1. Get the certID to bind from the alert / journal:
+### 1. Read the current fingerprint from the alert
 
-   ```bash
-   journalctl -u qiniu-ssl-renew-wildcard.service -n 50 --no-pager
-   # look for: uploaded — certID=<id>   and   stage=qiniu_bind_origin ... certID=<id> is NOT bound
-   ```
+```bash
+journalctl -u qiniu-ssl-renew-wildcard.service -n 50 --no-pager | grep -A2 origin_console_preflight
 
-   The latest uploaded certID is also recorded on the host at
-   `~/.acme.sh/crowntime.cn/.deployed_certid`.
+sha256sum ~/.acme.sh/crowntime.cn/fullchain.cer      # the value the message quotes
+openssl x509 -in ~/.acme.sh/crowntime.cn/fullchain.cer -noout -subject -dates
+```
 
-2. Console path: **对象存储 Kodo → 空间管理 → `365-wecom-media` → 域名管理 →
-   自定义源站域名 `media-origin.crowntime.cn` → 配置 HTTPS**.
-   - 开启 HTTPS 访问 （访问控制 http/https → 切换/开启）.
-   - 在 **更换证书** 列表中选择与上面 certID 对应的证书（证书已由其上传流程托管到
-     SSL 证书服务，名称形如 `crowntime.cn-<unix-ts>`）。
+### 2. Upload the renewed certificate in the Qiniu console
 
-3. Verify the origin actually serves the new certificate:
+**证书管理 / SSL 证书服务 → 上传证书**: paste the certificate bundle
+(`~/.acme.sh/crowntime.cn/fullchain.cer`) and its private key
+(`~/.acme.sh/crowntime.cn/crowntime.cn.key`), named recognizably, e.g.
+`crowntime.cn-<unix-ts>`. This step exists because the API upload has not run.
 
-   ```bash
-   openssl s_client -connect media-origin.crowntime.cn:443 -servername media-origin.crowntime.cn </dev/null 2>/dev/null \
-     | openssl x509 -noout -dates -fingerprint -sha256
-   ```
+> The private key must be read from the host file. Never paste it into chat,
+> tickets, logs, or a shell command line (argv is visible in `ps`).
 
-   - `notBefore` must be later than the renewal date, and
-   - the SHA256 fingerprint must match the local leaf fingerprint:
-     `openssl x509 -in ~/.acme.sh/crowntime.cn/fullchain.cer -outform DER | sha256sum`.
+### 3. Bind it in the Kodo console
 
-4. Record the console-binding marker (fingerprint of the **current** local
-   certificate — the first field of `sha256sum fullchain.cer`):
+**对象存储 → 空间 `365-wecom-media` → 域名管理 → `media-origin.crowntime.cn` →
+配置 HTTPS → 开启 HTTPS → 更换证书 →** select the certificate uploaded in step 2.
 
-   ```bash
-   sha256sum ~/.acme.sh/crowntime.cn/fullchain.cer | awk '{print $1}' \
-     > ~/.acme.sh/crowntime.cn/.origin_console_fp
-   ```
+### 4. Verify the live edge, per resolved IP
 
-   The marker is fingerprint-bound: every new certificate invalidates it and
-   re-requires this runbook. While it matches, the expected origin API 612
-   (on both bind and early-exit verify) is excused and the run continues.
+The origin resolves to a pool of edge IPs; a single probe is not proof.
 
-5. Re-run the renewal service — it must now be a verified no-op (or complete
-   cleanly if state was never recorded):
+```bash
+EXPECT=$(openssl x509 -in ~/.acme.sh/crowntime.cn/fullchain.cer -outform DER | sha256sum | cut -d' ' -f1)
+for ip in $(getent ahosts media-origin.crowntime.cn | awk '{print $1}' | sort -u); do
+  got=$(echo | openssl s_client -connect "$ip:443" -servername media-origin.crowntime.cn 2>/dev/null \
+        | openssl x509 -outform DER 2>/dev/null | sha256sum | cut -d' ' -f1)
+  [ "$got" = "$EXPECT" ] && echo "OK   $ip" || echo "FAIL $ip ${got:0:12}"
+done
+curl -sS -o /dev/null -w 'http=%{http_code} tls_verify=%{ssl_verify_result}\n' https://media-origin.crowntime.cn/
+```
 
-   ```bash
-   sudo systemctl start qiniu-ssl-renew-wildcard.service
-   journalctl -u qiniu-ssl-renew-wildcard.service -n 20 --no-pager
-   # expect: cert already deployed — nothing to do
-   #         (preceded by: origin console-binding marker matches the current cert — ...)
-   ```
+Every IP must match and `tls_verify` must be `0`. An `http=401` is the
+object-authorization response, not a TLS failure.
 
-   If it instead dies at `qiniu_bind_origin` again, the marker does not match
-   the current certificate — recheck steps 3/4.
+### 5. Record the console-binding marker
+
+```bash
+sha256sum ~/.acme.sh/crowntime.cn/fullchain.cer | awk '{print $1}' \
+  > ~/.acme.sh/crowntime.cn/.origin_console_fp
+```
+
+The marker is the **fullchain file** hash (exactly what the script compares),
+not the leaf DER hash used in step 4. Every new certificate invalidates it.
+
+### 6. Re-run the service once to complete the deployment
+
+This run performs exactly one API upload and one CDN bind (the console already
+binds the same certificate content, so the live leaf does not change), excuses
+the expected origin 612, and records `.deployed_fp` / `.deployed_certid`.
+
+```bash
+sudo systemctl start qiniu-ssl-renew-wildcard.service
+systemctl show qiniu-ssl-renew-wildcard.service -p Result -p ExecMainStatus
+awk '/Wildcard SSL renewal started/{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' \
+  /var/log/qiniu-ssl-renew/renew.log | tail -15
+# expect: uploaded — certID=…  / bound to media.crowntime.cn (CDN)
+#         origin … excused by the matching marker
+#         [OK] wildcard deployment complete
+```
+
+### 7. Require a pure no-op on the next run
+
+```bash
+sudo systemctl start qiniu-ssl-renew-wildcard.service
+# expect: nginx already serves the current certificate — no copy or reload
+#         live CDN TLS leaf matches the current local certificate
+#         origin console-binding marker matches the current cert
+#         cert already deployed — nothing to do
+```
+
+If step 6 or 7 dies at `origin_console_preflight` again, the marker does not
+match the current certificate — recheck step 5 (fullchain hash, not leaf hash).
+
+## pdf-vault-files.crowntime.cn (bucket `pdf-vault-prod`)
+
+Same console-only limitation, but **nothing in `ssl-renew/` manages it**: no
+timer, no acme.sh entry, no marker. It is rebound by hand and therefore rides an
+expiring certificate until someone notices — the 2026-11-25 audit found it still
+serving a certificate that expired on 2026-12-17.
+
+- Certificate source: the shared wildcard `~/.acme.sh/crowntime.cn/`
+  (covers `*.crowntime.cn`). Do **not** issue a separate certificate for it.
+- Procedure: steps 2–4 above with bucket `pdf-vault-prod` and domain
+  `pdf-vault-files.crowntime.cn`, then verify the PDFVault download path
+  end-to-end against `PDFVAULT_QINIU_DOWNLOAD_DOMAIN`.
+- No marker and no service restart — there is no automation to unblock.
+- Detection hint: this binding is only visible indirectly in the Qiniu
+  certificate list, as `400911 证书已绑定存储域名 空间名:pdf-vault-prod` when
+  deleting the certificate. If a certificate refuses to delete, something is
+  still bound to it — find the domain before retrying.
 
 ## If Qiniu ships a source-domain HTTPS API later
 
-Replace the origin branch of `renew-wildcard.sh`: bind via the new API, keep
-the fail-closed `die` on failure, drop the `.origin_console_fp` marker, and
+Replace the origin branch of `renew-wildcard.sh`: bind via the new API, keep the
+fail-closed `die` on failure, keep a **preflight** that runs before any write
+(otherwise the GH-239 loop returns), drop the `.origin_console_fp` marker, and
 let the early-exit origin check use the API verify unconditionally. The bats
-suite (`ssl-renew/tests/12_renew_wildcard.bats`, GH-232 cases) and the Wiki
-behavior contract must be updated in the same ticket.
+suite (`ssl-renew/tests/12_renew_wildcard.bats`, GH-232 + GH-239 cases) and the
+Wiki behavior contract must be updated in the same ticket.
